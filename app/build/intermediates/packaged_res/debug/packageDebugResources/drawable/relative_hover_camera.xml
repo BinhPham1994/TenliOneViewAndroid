@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools" tools:ignore="StateListReachable">
+    <item android:state_pressed="true">
+        <shape>
+            <stroke android:width="1dp" android:color="@color/empty_background" />
+            <gradient android:angle="-90" android:endColor="@color/gray_light_hover" android:startColor="@color/gray_light_hover" />
+        </shape>
+    </item>
+</selector>
