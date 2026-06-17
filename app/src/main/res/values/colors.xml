@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="main_color">#4AA541</color>
+    <color name="main_color_hover">#994AA641</color>
+
+    <color name="text_color">#141415</color>
+    <color name="text_color_hint">#818181</color>
+    <color name="relative_background_hover">#90f2f2f7</color>
+    <color name="text_color_deactivate">#8bcb84</color>
+
+    <color name="view_background">#F5F5F5</color>
+    <color name="empty_background">#00ffffff</color>
+
+    <color name="red">#E02B00</color>
+    <color name="red_color_hover">#99E02B00</color>
+    <color name="green">#4AA541</color>
+    <color name="white">#ffffff</color>
+    <color name="black">#000000</color>
+    <color name="dark">#2f3032</color>
+    <color name="gray">#818181</color>
+    <color name="gray_hover">#99818181</color>
+    <color name="gray_light">#D9D9D9</color>
+    <color name="gray_light_hover">#99D9D9D9</color>
+    <color name="orange">#FD6A02</color>
+    <color name="line_color">#e7e7e7</color>
+
+    <color name="pond_color">#1e81b0</color>
+    <color name="crop_color">#76b5c5</color>
+
+    <color name="icon_color">#3A3A3C</color>
+    <color name="ios_background">#f2f2f7</color>
+    <color name="image_background">#f2f1f6</color>
+    <color name="blue_color">#0071E3</color>
+
+</resources>

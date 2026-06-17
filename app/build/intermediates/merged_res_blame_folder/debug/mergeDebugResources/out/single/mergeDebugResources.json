@@ -1,0 +1,610 @@
+[
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fall_person.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fall_person.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxxhdpi_app_icon_notify.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxxhdpi/app_icon_notify.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_infor_user_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/infor_user_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_video_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/video_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_sound_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/sound_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_image_shadow.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/image_shadow.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_alarm_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_alarm_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_image.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/image.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_hide_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/hide_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_successful.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/successful.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xhdpi_miss_call.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xhdpi/miss_call.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_ai_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/ai_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_google.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/google.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_show_pass.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/show_pass.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_three.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/three.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxxhdpi_app_icon.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxxhdpi/app_icon.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_tick.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/tick.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_edit_ai_active.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/edit_ai_active.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fish_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fish_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_toggle_me.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/toggle_me.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_unchecked.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/unchecked.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_reset_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/reset_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_smoke_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/smoke_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_setting_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_setting_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_avatar_default.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/avatar_default.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-mdpi_app_icon_notify.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-mdpi/app_icon_notify.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_disconnect.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_disconnect.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_smoke_ai_monitor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/smoke_ai_monitor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-hdpi_miss_call.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-hdpi/miss_call.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-hdpi_app_icon_notify.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-hdpi/app_icon_notify.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fish_event_group.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fish_event_group.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_sound_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/sound_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/layout_view_exo_texture.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/layout/view_exo_texture.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_notify.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/notify.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_script_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/script_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxxhdpi_miss_call.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxxhdpi/miss_call.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fish_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fish_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_setting.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/setting.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_two_select.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/two_select.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_setting_sensor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/setting_sensor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fire_event_group.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fire_event_group.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fall_person_monitor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fall_person_monitor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_vietnam_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/vietnam_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_kingdom.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/kingdom.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_manager.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_manager.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_edit_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/edit_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_image_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/image_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_language_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/language_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_date.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/date.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/xml_network_security_config.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/xml/network_security_config.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_vietnam.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/vietnam.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_notify_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/notify_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_storage.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/storage.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fish_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fish_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/xml_data_extraction_rules.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/xml/data_extraction_rules.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_in_pond_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_in_pond_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_group_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/group_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/xml_file_paths.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/xml/file_paths.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_video.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/video.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_relative_hover_camera.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/relative_hover_camera.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_untick.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/untick.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_img_tuya_3gang.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/img_tuya_3gang.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_smoke_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/smoke_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_ios.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/ios.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_in_pond.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_in_pond.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_scan_lan.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/scan_lan.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_sound_alarm_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/sound_alarm_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_image_default.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/image_default.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_store_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/store_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_direct_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/direct_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_logo_app.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/logo_app.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_introduce_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/introduce_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_message_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/message_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_toggle_me_on.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/toggle_me_on.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxhdpi_app_icon_notify.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxhdpi/app_icon_notify.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_save_black.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/save_black.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_icon_green.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_icon_green.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_dot.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/dot.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-mdpi_miss_call.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-mdpi/miss_call.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_update_ota.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/update_ota.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_on.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_on.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_power_icon_monitor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/power_icon_monitor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_no_internet.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/no_internet.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_two.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/two.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_username.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/username.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-mdpi_app_icon.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-mdpi/app_icon.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_android.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/android.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_iot.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/iot.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_home.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/home.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xhdpi_app_icon.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xhdpi/app_icon.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_group_default.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/group_default.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_notify_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/notify_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_data_empty.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/data_empty.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_filter.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/filter.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xhdpi_app_icon_notify.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xhdpi/app_icon_notify.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_alarm.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/alarm.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_three_ok.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/three_ok.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxhdpi_miss_call.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxhdpi/miss_call.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_splash_icon_wrapper.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/splash_icon_wrapper.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_camera_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/camera_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_three_select.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/three_select.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-xxhdpi_app_icon.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-xxhdpi/app_icon.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_time_icon_red.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/time_icon_red.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_new_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/new_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/xml_backup_rules.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/xml/backup_rules.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_connected.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_connected.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_member.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/member.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_delete.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/delete.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_new_device_login.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/new_device_login.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_one_select.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/one_select.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_setting_ai_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/setting_ai_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_new_device.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/new_device.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_two_ok.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/two_ok.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_iot_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/iot_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_sound.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/sound.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/mipmap-hdpi_app_icon.png.flat",
+        "source": "com.tenli.aiot.app-main-97:/mipmap-hdpi/app_icon.png"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/xml_locales_config.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/xml/locales_config.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_one_ok.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/one_ok.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_error.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/error.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_face_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/face_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_password.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/password.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_refresh.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/refresh.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_unknown.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/unknown.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_logout_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/logout_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_login.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_login.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_near_pond.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_near_pond.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_restart_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/restart_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_general_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/general_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_hide_pass.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/hide_pass.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_toggle_me_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/toggle_me_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_sensor_power_off.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/sensor_power_off.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_power_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/power_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_fish.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_fish.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_power.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/power.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_device_icon_event.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/device_icon_event.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_ai_monitor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_ai_monitor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_full_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/full_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_fish_ai_monitor.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/fish_ai_monitor.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_group_create.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/group_create.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_script.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/script.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_kingdom_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/kingdom_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_event_group.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_event_group.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_untick_channel.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/untick_channel.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_image_shadow_bottom.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/image_shadow_bottom.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_face_ai.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/face_ai.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_person_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/person_icon.xml"
+    },
+    {
+        "merged": "com.tenli.aiot.app-debug-95:/drawable_video_icon.xml.flat",
+        "source": "com.tenli.aiot.app-main-97:/drawable/video_icon.xml"
+    }
+]
