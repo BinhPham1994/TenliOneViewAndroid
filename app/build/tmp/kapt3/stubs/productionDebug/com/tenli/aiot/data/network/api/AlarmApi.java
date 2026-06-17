@@ -1,0 +1,66 @@
+package com.tenli.aiot.data.network.api;
+
+@kotlin.Metadata(mv = {1, 9, 0}, k = 1, xi = 48, d1 = {"\u0000F\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0010\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u000e\n\u0002\b\u0002\n\u0002\u0018\u0002\n\u0002\b\u0004\bf\u0018\u00002\u00020\u0001J$\u0010\u0002\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\u00050\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ$\u0010\t\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\n0\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ$\u0010\u000b\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\u00050\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ\u001a\u0010\f\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\r0\u00040\u0003H\u00a7@\u00a2\u0006\u0002\u0010\u000eJ$\u0010\u000f\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\u00100\u00040\u00032\b\b\u0001\u0010\u0011\u001a\u00020\u0012H\u00a7@\u00a2\u0006\u0002\u0010\u0013J$\u0010\u0014\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\u00150\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ$\u0010\u0016\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\n0\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ$\u0010\u0017\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\n0\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\bJ$\u0010\u0018\u001a\u000e\u0012\n\u0012\b\u0012\u0004\u0012\u00020\n0\u00040\u00032\b\b\u0001\u0010\u0006\u001a\u00020\u0007H\u00a7@\u00a2\u0006\u0002\u0010\b\u00a8\u0006\u0019"}, d2 = {"Lcom/tenli/aiot/data/network/api/AlarmApi;", "", "createScript", "Lretrofit2/Response;", "Lcom/tenli/aiot/model/network/BaseResponse;", "Lcom/tenli/aiot/model/network/AddScriptResponse;", "raw", "Lcom/google/gson/JsonObject;", "(Lcom/google/gson/JsonObject;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;", "deleteScript", "", "editScript", "getNotifySetting", "Lcom/tenli/aiot/model/network/NotificationSettingResponse;", "(Lkotlin/coroutines/Continuation;)Ljava/lang/Object;", "getNotifySettingEventGroup", "Lcom/tenli/aiot/model/network/EventTypeGroupDetail;", "id", "", "(Ljava/lang/String;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;", "updateEventType", "Lcom/tenli/aiot/model/network/UpdateNotificationResponse;", "updateNotifySetting", "updateNotifySettingEventGroup", "updateUserNotifySetting", "app_productionDebug"})
+public abstract interface AlarmApi {
+    
+    @retrofit2.http.GET(value = "user/get-notification-setting")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object getNotifySetting(@org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<com.tenli.aiot.model.network.NotificationSettingResponse>>> $completion);
+    
+    @retrofit2.http.POST(value = "user/update-notification-setting")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object updateNotifySetting(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<kotlin.Unit>>> $completion);
+    
+    @retrofit2.http.POST(value = "user/update-notification-setting/user")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object updateUserNotifySetting(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<kotlin.Unit>>> $completion);
+    
+    @retrofit2.http.POST(value = "user/update-notification-setting/event-type-group")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object updateNotifySettingEventGroup(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<kotlin.Unit>>> $completion);
+    
+    @retrofit2.http.GET(value = "user/get-notification-setting/event-type-group/{id}")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object getNotifySettingEventGroup(@retrofit2.http.Path(value = "id")
+    @org.jetbrains.annotations.NotNull()
+    java.lang.String id, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<com.tenli.aiot.model.network.EventTypeGroupDetail>>> $completion);
+    
+    @retrofit2.http.POST(value = "user/update-notification-setting/event-type-group/add-custom-script")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object createScript(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<com.tenli.aiot.model.network.AddScriptResponse>>> $completion);
+    
+    @retrofit2.http.PUT(value = "user/update-notification-setting/event-type-group/update-custom-script")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object editScript(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<com.tenli.aiot.model.network.AddScriptResponse>>> $completion);
+    
+    @retrofit2.http.HTTP(method = "DELETE", path = "user/update-notification-setting/event-type-group/remove-custom-script", hasBody = true)
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object deleteScript(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<kotlin.Unit>>> $completion);
+    
+    @retrofit2.http.POST(value = "user/update-notification-setting/event-type")
+    @org.jetbrains.annotations.Nullable()
+    public abstract java.lang.Object updateEventType(@retrofit2.http.Body()
+    @org.jetbrains.annotations.NotNull()
+    com.google.gson.JsonObject raw, @org.jetbrains.annotations.NotNull()
+    kotlin.coroutines.Continuation<? super retrofit2.Response<com.tenli.aiot.model.network.BaseResponse<com.tenli.aiot.model.network.UpdateNotificationResponse>>> $completion);
+}
