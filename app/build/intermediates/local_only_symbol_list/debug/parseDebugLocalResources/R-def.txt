@@ -434,6 +434,8 @@ string lbl_device_information
 string lbl_device_management
 string lbl_receive_full_notifications
 string lbl_settings
+string login_domain_hint
+string login_domain_label
 string login_email_hint
 string login_email_label
 string login_forgot_password

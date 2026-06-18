@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="main_color">#4AA541</color>
-    <color name="main_color_hover">#994AA641</color>
+    <color name="main_color">#FF751F</color>
+    <color name="main_color_hover">#99FF751F</color>
 
     <color name="text_color">#141415</color>
     <color name="text_color_hint">#818181</color>

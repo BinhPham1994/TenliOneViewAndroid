@@ -14,8 +14,8 @@
     <color name="image_background">#f2f1f6</color>
     <color name="ios_background">#f2f2f7</color>
     <color name="line_color">#e7e7e7</color>
-    <color name="main_color">#4AA541</color>
-    <color name="main_color_hover">#994AA641</color>
+    <color name="main_color">#FF751F</color>
+    <color name="main_color_hover">#99FF751F</color>
     <color name="orange">#FD6A02</color>
     <color name="pond_color">#1e81b0</color>
     <color name="red">#E02B00</color>
@@ -83,7 +83,7 @@
     <string name="alarm_new_command">Lệnh mới %1$d</string>
     <string name="alarm_section_off">Kịch bản Tắt cảnh báo</string>
     <string name="alarm_section_on">Kịch bản Bật cảnh báo</string>
-    <string name="app_name">Tenli AIoT</string>
+    <string name="app_name">Tenli OneView</string>
     <string name="cam_btn_add">Thêm</string>
     <string name="cam_btn_save">Lưu</string>
     <string name="cam_decode_auto">Tự động</string>
@@ -298,6 +298,8 @@
     <string name="lbl_device_management">Quản lý thiết bị</string>
     <string name="lbl_receive_full_notifications">Nhận đầy đủ thông báo</string>
     <string name="lbl_settings">Cài đặt</string>
+    <string name="login_domain_hint">Nhập domain dự án</string>
+    <string name="login_domain_label">Domain dự án</string>
     <string name="login_email_hint">Nhập email của bạn</string>
     <string name="login_email_label">Email</string>
     <string name="login_forgot_password">Quên mật khẩu?</string>

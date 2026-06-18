@@ -57,7 +57,7 @@
     <string name="alarm_new_command">New Command %1$d</string>
     <string name="alarm_section_off">Disarming Scenario</string>
     <string name="alarm_section_on">Arming Scenario</string>
-    <string name="app_name">Tenli AIoT</string>
+    <string name="app_name">Tenli OneView</string>
     <string name="cam_btn_add">Add</string>
     <string name="cam_btn_save">Save</string>
     <string name="cam_decode_auto">Automatic</string>
@@ -264,6 +264,8 @@
     <string name="lbl_device_management">Device Management</string>
     <string name="lbl_receive_full_notifications">Receive full notifications</string>
     <string name="lbl_settings">Settings</string>
+    <string name="login_domain_hint">Enter project domain</string>
+    <string name="login_domain_label">Project Domain</string>
     <string name="login_email_hint">Enter your email</string>
     <string name="login_email_label">Email</string>
     <string name="login_forgot_password">Forgot password?</string>
@@ -273,7 +275,7 @@
     <string name="login_password_hint">Enter your password</string>
     <string name="login_password_label">Password</string>
     <string name="login_register_action">Sign Up</string>
-    <string name="login_title">Log In</string>
+    <string name="login_title">Login</string>
     <string name="main_press_again_to_exit">Press back again to exit</string>
     <string name="manual_add_btn_continue">Continue</string>
     <string name="manual_add_error_key">Security code required. Please enter the correct code.</string>

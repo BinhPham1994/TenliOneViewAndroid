@@ -51,13 +51,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialException
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.tenli.oneview.R
 import com.tenli.oneview.main.LoginActivity
 import com.tenli.oneview.ui.theme.spacing
@@ -69,9 +63,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     viewModel: LoginViewModel = viewModel(factory = LoginViewModel.Factory),
-    onLoginSuccess: () -> Unit,
-    onNavigateToRegister: () -> Unit,
-    onNavigateToForgot: () -> Unit
+    onLoginSuccess: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -105,37 +97,12 @@ fun LoginScreen(
     LoginContent(
         uiState = uiState,
         snackbarHostState = snackbarHostState,
+        onDomainChange = { viewModel.onDomainChanged(it) },
         onEmailChange = { viewModel.onEmailChanged(it) },
         onPasswordChange = { viewModel.onPasswordChanged(it) },
         onTogglePassword = { viewModel.toggleShowPassword() },
         onLoginClick = { viewModel.login() },
-        onToggleLanguage = onToggleLanguage,
-        onNavigateToRegister = onNavigateToRegister,
-        onNavigateToForgot = onNavigateToForgot,
-        onGoogleLoginClick = {
-            scope.launch {
-                try {
-                    val credentialManager = CredentialManager.create(context)
-                    val googleIdOption = GetGoogleIdOption.Builder()
-                        .setFilterByAuthorizedAccounts(false)
-                        .setServerClientId("139855279628-ec70h3thpk1u9p49u76bf9st2p26ghgb.apps.googleusercontent.com")
-                        .build()
-
-                    val request = GetCredentialRequest.Builder()
-                        .addCredentialOption(googleIdOption)
-                        .build()
-
-                    val result = credentialManager.getCredential(context, request)
-                    val credential = result.credential
-
-                    if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                        viewModel.loginWithGoogle(googleIdTokenCredential.idToken)
-                    }
-                } catch (_: GetCredentialException) {
-                }
-            }
-        }
+        onToggleLanguage = onToggleLanguage
     )
 }
 
@@ -143,24 +110,21 @@ fun LoginScreen(
 fun LoginContent(
     uiState: LoginUiState,
     snackbarHostState: SnackbarHostState,
+    onDomainChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onTogglePassword: () -> Unit,
     onLoginClick: () -> Unit,
-    onGoogleLoginClick: () -> Unit,
-    onToggleLanguage: () -> Unit,
-    onNavigateToRegister: () -> Unit,
-    onNavigateToForgot: () -> Unit,
+    onToggleLanguage: () -> Unit
 ) {
 
+    val domainLabel = stringResource(id = R.string.login_domain_label)
+    val domainHint = stringResource(id = R.string.login_domain_hint)
     val emailLabel = stringResource(id = R.string.login_email_label)
     val emailHint = stringResource(id = R.string.login_email_hint)
     val passwordLabel = stringResource(id = R.string.login_password_label)
     val passwordHint = stringResource(id = R.string.login_password_hint)
-    val forgotPasswordText = stringResource(id = R.string.login_forgot_password)
     val loginButtonText = stringResource(id = R.string.login_title)
-    val noAccountText = stringResource(id = R.string.login_no_account)
-    val registerActionText = stringResource(id = R.string.login_register_action)
 
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -223,6 +187,25 @@ fun LoginContent(
 
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
+                        text = domainLabel,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(modifier = Modifier.height(5.dp))
+                    LoginInputField(
+                        value = uiState.domain,
+                        onValueChange = onDomainChange,
+                        hint = domainHint,
+                        onClear = { onDomainChange("") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
+                        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
                         text = emailLabel,
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onBackground
@@ -246,14 +229,6 @@ fun LoginContent(
                             text = passwordLabel,
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = forgotPasswordText,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(MaterialTheme.spacing.extraSmall))
-                                .bounceClick { onNavigateToForgot() }
                         )
                     }
                     Spacer(modifier = Modifier.height(5.dp))
@@ -307,39 +282,6 @@ fun LoginContent(
                     }
                 }
 
-                OrDivider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    SocialCircleButton(icon = R.drawable.google) {
-                        focusManager.clearFocus()
-                        onGoogleLoginClick()
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = MaterialTheme.spacing.large),
-                horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = noAccountText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    text = registerActionText,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(MaterialTheme.spacing.extraSmall))
-                        .bounceClick {
-                            focusManager.clearFocus()
-                            onNavigateToRegister()
-                        }
-                )
             }
         }
     }

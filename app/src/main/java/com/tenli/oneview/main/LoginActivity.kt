@@ -53,12 +53,6 @@ class LoginActivity : ComponentActivity() {
                                     val intent = Intent(this@LoginActivity, MainActivity::class.java)
                                     startActivity(intent)
                                     finish()
-                                },
-                                onNavigateToRegister = {
-                                    navController.navigate("register")
-                                },
-                                onNavigateToForgot = {
-                                    navController.navigate("forgot_pass")
                                 }
                             )
                         }

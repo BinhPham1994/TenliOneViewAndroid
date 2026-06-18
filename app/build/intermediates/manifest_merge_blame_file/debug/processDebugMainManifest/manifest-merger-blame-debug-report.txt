@@ -136,7 +136,7 @@
 67-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:12:9-54
 68        android:icon="@mipmap/app_icon"
 68-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:13:9-40
-69        android:label="Tenli"
+69        android:label="Tenli Vision"
 69-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:14:9-35
 70        android:localeConfig="@xml/locales_config"
 70-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:15:9-51

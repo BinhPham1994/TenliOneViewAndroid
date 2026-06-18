@@ -1,8 +1,10 @@
 <resources>
-    <string name="app_name">Tenli AIoT</string>
+    <string name="app_name">Tenli OneView</string>
 
-    <string name="login_title">Log In</string>
+    <string name="login_title">Login</string>
     <string name="login_lang_code">EN</string>
+    <string name="login_domain_label">Project Domain</string>
+    <string name="login_domain_hint">Enter project domain</string>
     <string name="login_email_label">Email</string>
     <string name="login_email_hint">Enter your email</string>
     <string name="login_password_label">Password</string>

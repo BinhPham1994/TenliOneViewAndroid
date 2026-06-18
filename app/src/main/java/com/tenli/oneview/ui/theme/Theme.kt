@@ -8,13 +8,13 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
 
 private val LightColorScheme = lightColorScheme(
-    primary = GreenPrimary,
-    onPrimary = GreenOnPrimary,
-    primaryContainer = GreenContainer,
-    onPrimaryContainer = Color(0xFF002105),
+    primary = BrandPrimary,
+    onPrimary = BrandOnPrimary,
+    primaryContainer = BrandContainer,
+    onPrimaryContainer = Color(0xFF331400),
 
-    secondary = GreenPrimary,
-    tertiary = GreenPrimary.copy(alpha = 0.7f),
+    secondary = BrandPrimary,
+    tertiary = BrandPrimary.copy(alpha = 0.7f),
     surfaceTint = Color.Transparent,
 
     background = IoSBackgroundLight,

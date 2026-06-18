@@ -51,12 +51,16 @@ class LoginViewModel(
         }
     }
 
+    fun onDomainChanged(domain: String) {
+        _uiState.update { it.copy(domain = domain, isLoginActive = domain.isNotEmpty() && it.email.isNotEmpty() && it.password.isNotEmpty()) }
+    }
+
     fun onEmailChanged(email: String) {
-        _uiState.update { it.copy(email = email, isLoginActive = email.isNotEmpty() && it.password.isNotEmpty()) }
+        _uiState.update { it.copy(email = email, isLoginActive = it.domain.isNotEmpty() && email.isNotEmpty() && it.password.isNotEmpty()) }
     }
 
     fun onPasswordChanged(pass: String) {
-        _uiState.update { it.copy(password = pass, isLoginActive = pass.isNotEmpty() && it.email.isNotEmpty()) }
+        _uiState.update { it.copy(password = pass, isLoginActive = pass.isNotEmpty() && it.email.isNotEmpty() && it.domain.isNotEmpty()) }
     }
 
     fun toggleShowPassword() {
@@ -96,33 +100,7 @@ class LoginViewModel(
         }
     }
 
-    fun loginWithGoogle(firebaseIdToken: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
-
-            val loginRequest = createLoginRequest(googleIdToken = firebaseIdToken)
-
-            try {
-                val result = authRepository.login(loginRequest)
-                if (result.isSuccess) {
-                    val loginData = result.getOrNull()
-                    if (loginData != null) {
-                        handleLoginSuccess(loginData)
-                        _event.emit(LoginEvent.LoginSuccess)
-                    } else {
-                        _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
-                    }
-                } else {
-                    val exception = result.exceptionOrNull()
-                    _event.emit(LoginEvent.ShowError(exception?.message ?: "Đăng nhập Google thất bại"))
-                }
-            } catch (e: Exception) {
-                _event.emit(LoginEvent.ShowError("Lỗi kết nối: ${e.message}"))
-            } finally {
-                _uiState.update { it.copy(isLoading = false) }
-            }
-        }
-    }
+    // Removed Google login logic
 
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState = _uiState.asStateFlow()
@@ -145,8 +123,7 @@ class LoginViewModel(
         }
     }
 
-    @SuppressLint("HardwareIds")
-    private suspend fun createLoginRequest(googleIdToken: String = ""): LoginRequest {
+    private suspend fun createLoginRequest(): LoginRequest {
         if (notifyToken.isEmpty()) {
             try {
                 notifyToken = FirebaseMessaging.getInstance().token.await()
@@ -161,9 +138,9 @@ class LoginViewModel(
         ) ?: "unknown_device"
 
         return LoginRequest(
-            email = if (googleIdToken.isEmpty()) _uiState.value.email else "",
-            password = if (googleIdToken.isEmpty()) _uiState.value.password else "",
-            googleIdToken = googleIdToken,
+            email = _uiState.value.email,
+            password = _uiState.value.password,
+            googleIdToken = "",
 
             notifyConfig = LoginNotifyConfig(token = notifyToken),
             device = LoginDeviceConfig(

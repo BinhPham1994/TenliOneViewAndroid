@@ -24,7 +24,7 @@ android {
         versionName "3.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
-        manifestPlaceholders = [appName: "Tenli",
+        manifestPlaceholders = [appName: "Tenli Vision",
                                 appIcon: "@drawable/logo_app"]
         buildConfigField "String", "DOMAIN_CLOUD", "\"https://app.tenli.ai/api/v1/\""
         buildConfigField "String", "CLIENT_ID", "\"ysJhBedR7PDrVRpE\""

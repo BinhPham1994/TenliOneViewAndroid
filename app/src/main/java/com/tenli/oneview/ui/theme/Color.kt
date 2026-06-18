@@ -2,9 +2,9 @@ package com.tenli.oneview.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val GreenPrimary = Color(0xFF4AA541)       // Thương hiệu Tenli
-val GreenOnPrimary = Color(0xFFFFFFFF)     // Chữ trên nền xanh
-val GreenContainer = Color(0xFFD1E8CF)    // Nền nhẹ cho Badge hoặc Nút phụ
+val BrandPrimary = Color(0xFFFF751F)       // Thương hiệu Tenli
+val BrandOnPrimary = Color(0xFFFFFFFF)     // Chữ trên nền chính
+val BrandContainer = Color(0xFFFFDBCF)    // Nền nhẹ cho Badge hoặc Nút phụ
 
 // Không dùng xám xanh F2F2F7 nữa, dùng màu trắng sứ pha xanh lá cực nhẹ
 val BackgroundLight = Color(0xFFEDF2EC)   // Nền hệ thống (Android M3 Surface)
