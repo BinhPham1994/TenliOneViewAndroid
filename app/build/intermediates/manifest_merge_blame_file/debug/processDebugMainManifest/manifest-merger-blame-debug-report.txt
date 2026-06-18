@@ -9,380 +9,380 @@
 9        android:targetSdkVersion="35" />
 10
 11    <uses-feature
-11-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:5:5-7:36
+11-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:5:5-7:36
 12        android:name="android.hardware.telephony"
-12-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:6:9-50
+12-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:6:9-50
 13        android:required="false" />
-13-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:7:9-33
+13-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:7:9-33
 14
 15    <uses-permission android:name="android.permission.INTERNET" />
-15-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:108:5-110:40
-15-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:109:9-51
+15-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:108:5-110:40
+15-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:109:9-51
 16    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-16-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:5-79
-16-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:22-76
+16-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:5-79
+16-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:22-76
 17    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-17-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:5-76
-17-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:22-73
+17-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:5-76
+17-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:22-73
 18    <uses-permission android:name="android.permission.CALL_PHONE" />
-18-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:5-69
-18-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:22-66
+18-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:5-69
+18-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:22-66
 19    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
-19-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:5-86
-19-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:22-83
+19-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:5-86
+19-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:22-83
 20    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-20-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:5-77
-20-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:22-74
+20-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:5-77
+20-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:22-74
 21    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-21-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:5-78
-21-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:22-75
+21-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:5-78
+21-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:22-75
 22    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-22-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:120:5-122:49
-22-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:121:9-65
+22-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:120:5-122:49
+22-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:121:9-65
 23    <uses-permission android:name="android.permission.VIBRATE" />
-23-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:5-66
-23-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:22-63
+23-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:5-66
+23-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:22-63
 24    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-24-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:124:5-126:51
-24-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:125:9-61
+24-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:124:5-126:51
+24-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:125:9-61
 25    <uses-permission android:name="android.permission.WAKE_LOCK" />
-25-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:5-68
-25-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:22-65
+25-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:5-68
+25-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:22-65
 26    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-26-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:5-95
-26-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:22-92
+26-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:5-95
+26-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:22-92
 27    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-27-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:5-81
-27-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:22-78
+27-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:5-81
+27-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:22-78
 28    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
-28-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:5-94
-28-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:22-91
+28-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:5-94
+28-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:22-91
 29    <uses-permission
-29-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:131:5-133:38
+29-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:131:5-133:38
 30        android:name="android.permission.READ_EXTERNAL_STORAGE"
-30-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:132:9-64
+30-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:132:9-64
 31        android:maxSdkVersion="32" />
-31-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:133:9-35
+31-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:133:9-35
 32
 33    <queries>
-33-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:9:5-20:15
+33-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:9:5-20:15
 34        <intent>
-34-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:10:9-16:18
+34-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:10:9-16:18
 35            <action android:name="android.intent.action.GET_CONTENT" />
-35-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:11:13-72
-35-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:11:21-69
+35-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:11:13-72
+35-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:11:21-69
 36
 37            <category android:name="android.intent.category.OPENABLE" />
-37-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:13:13-73
-37-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:13:23-70
+37-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:13:13-73
+37-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:13:23-70
 38
 39            <data android:mimeType="*/*" />
-39-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
-39-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:19-41
+39-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
+39-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:19-41
 40        </intent>
 41        <intent>
-41-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:17:9-19:18
+41-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:17:9-19:18
 42            <action android:name="android.media.action.IMAGE_CAPTURE" />
-42-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:18:13-73
-42-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:18:21-70
+42-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:18:13-73
+42-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:18:21-70
 43        </intent>
 44    </queries>
 45
 46    <uses-permission android:name="android.permission.USE_BIOMETRIC" /> <!-- suppress DeprecatedClassUsageInspection -->
-46-->[androidx.biometric:biometric:1.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:24:5-72
-46-->[androidx.biometric:biometric:1.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:24:22-69
+46-->[androidx.biometric:biometric:1.1.0] /home/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:24:5-72
+46-->[androidx.biometric:biometric:1.1.0] /home/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:24:22-69
 47    <uses-permission android:name="android.permission.USE_FINGERPRINT" /> <!-- Required by older versions of Google Play services to create IID tokens -->
-47-->[androidx.biometric:biometric:1.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:27:5-74
-47-->[androidx.biometric:biometric:1.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:27:22-71
+47-->[androidx.biometric:biometric:1.1.0] /home/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:27:5-74
+47-->[androidx.biometric:biometric:1.1.0] /home/vung/.gradle/caches/8.14.4/transforms/0c3108af7c3e7b16c36d7d52a245227d/transformed/biometric-1.1.0/AndroidManifest.xml:27:22-71
 48    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
-48-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:26:5-82
-48-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:26:22-79
+48-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:26:5-82
+48-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:26:22-79
 49    <uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE" />
-49-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:26:5-110
-49-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:26:22-107
+49-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:26:5-110
+49-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:26:22-107
 50    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_ATTRIBUTION" />
-50-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:26:5-88
-50-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:26:22-85
+50-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:26:5-88
+50-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:26:22-85
 51    <uses-permission android:name="android.permission.ACCESS_ADSERVICES_AD_ID" />
-51-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:27:5-82
-51-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:27:22-79
+51-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:27:5-82
+51-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:27:22-79
 52    <uses-permission android:name="com.google.android.providers.gsf.permission.READ_GSERVICES" />
-52-->[com.google.android.recaptcha:recaptcha:18.6.1] /Users/vung/.gradle/caches/8.14.4/transforms/dfae485e08ab82efe27f9f627e22705f/transformed/jetified-recaptcha-18.6.1/AndroidManifest.xml:9:5-98
-52-->[com.google.android.recaptcha:recaptcha:18.6.1] /Users/vung/.gradle/caches/8.14.4/transforms/dfae485e08ab82efe27f9f627e22705f/transformed/jetified-recaptcha-18.6.1/AndroidManifest.xml:9:22-95
+52-->[com.google.android.recaptcha:recaptcha:18.6.1] /home/vung/.gradle/caches/8.14.4/transforms/dfae485e08ab82efe27f9f627e22705f/transformed/jetified-recaptcha-18.6.1/AndroidManifest.xml:9:5-98
+52-->[com.google.android.recaptcha:recaptcha:18.6.1] /home/vung/.gradle/caches/8.14.4/transforms/dfae485e08ab82efe27f9f627e22705f/transformed/jetified-recaptcha-18.6.1/AndroidManifest.xml:9:22-95
 53
 54    <permission
-54-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:22:5-24:47
+54-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:22:5-24:47
 55        android:name="com.tenli.aiot.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-55-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:23:9-81
+55-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:23:9-81
 56        android:protectionLevel="signature" />
-56-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:24:9-44
+56-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:24:9-44
 57
 58    <uses-permission android:name="com.tenli.aiot.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
-58-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:26:5-97
-58-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:26:22-94
+58-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:26:5-97
+58-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:26:22-94
 59
 60    <application
 61        android:name="com.tenli.oneview.TenliApp"
-61-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:9:9-33
+61-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:9:9-33
 62        android:allowBackup="false"
-62-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:10:9-36
+62-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:10:9-36
 63        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-63-->[androidx.core:core:1.16.0] /Users/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:28:18-86
+63-->[androidx.core:core:1.16.0] /home/vung/.gradle/caches/8.14.4/transforms/9370e2c99744891781d0925e77dec3e0/transformed/core-1.16.0/AndroidManifest.xml:28:18-86
 64        android:dataExtractionRules="@xml/data_extraction_rules"
-64-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:11:9-65
+64-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:11:9-65
 65        android:debuggable="true"
 66        android:extractNativeLibs="false"
 67        android:fullBackupContent="@xml/backup_rules"
-67-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:12:9-54
+67-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:12:9-54
 68        android:icon="@mipmap/app_icon"
-68-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:13:9-40
+68-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:13:9-40
 69        android:label="Tenli"
-69-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:14:9-35
+69-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:14:9-35
 70        android:localeConfig="@xml/locales_config"
-70-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:15:9-51
+70-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:15:9-51
 71        android:networkSecurityConfig="@xml/network_security_config"
-71-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:16:9-69
+71-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:16:9-69
 72        android:requestLegacyExternalStorage="true"
-72-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:17:9-52
+72-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:17:9-52
 73        android:roundIcon="@drawable/logo_app"
-73-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:18:9-39
+73-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:18:9-39
 74        android:supportsRtl="true"
-74-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:19:9-35
+74-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:19:9-35
 75        android:testOnly="true"
 76        android:theme="@style/AppTheme"
-76-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:20:9-40
+76-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:20:9-40
 77        android:usesCleartextTraffic="true" >
-77-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:21:9-44
+77-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:21:9-44
 78        <activity
-78-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:23:9-31:20
+78-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:23:9-31:20
 79            android:name="com.tenli.oneview.SplashActivity"
-79-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:24:13-43
+79-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:24:13-43
 80            android:exported="true"
-80-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:25:13-36
+80-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:25:13-36
 81            android:theme="@style/Theme.App.Starting" >
-81-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:26:13-54
+81-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:26:13-54
 82            <intent-filter>
-82-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:27:13-30:29
+82-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:27:13-30:29
 83                <action android:name="android.intent.action.MAIN" />
-83-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:17-69
-83-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:25-66
+83-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:17-69
+83-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:25-66
 84
 85                <category android:name="android.intent.category.LAUNCHER" />
-85-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:17-77
-85-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:27-74
+85-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:17-77
+85-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:27-74
 86            </intent-filter>
 87        </activity>
 88        <activity
-88-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:33:9-37:71
+88-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:33:9-37:71
 89            android:name="com.tenli.oneview.main.MainActivity"
-89-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:34:13-63
+89-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:34:13-63
 90            android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-90-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:35:13-113
+90-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:35:13-113
 91            android:screenOrientation="portrait" />
-91-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:36:13-49
+91-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:36:13-49
 92        <activity
-92-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:38:9-41:71
+92-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:38:9-41:71
 93            android:name="com.tenli.oneview.main.LoginActivity"
-93-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:39:13-64
+93-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:39:13-64
 94            android:screenOrientation="portrait" />
-94-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:40:13-49
+94-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:40:13-49
 95        <activity
-95-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:42:9-44:59
+95-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:42:9-44:59
 96            android:name="com.canhub.cropper.CropImageActivity"
-96-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:43:13-64
+96-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:43:13-64
 97            android:exported="true"
-97-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:35:13-36
+97-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:35:13-36
 98            android:theme="@style/Base.Theme.AppCompat" />
-98-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:44:13-56
+98-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:44:13-56
 99        <activity
-99-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:45:9-55:71
+99-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:45:9-55:71
 100            android:name="com.tenli.oneview.firebase.CallComingActivity"
-100-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:46:13-56
+100-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:46:13-56
 101            android:excludeFromRecents="true"
-101-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:47:13-46
+101-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:47:13-46
 102            android:exported="false"
-102-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:48:13-37
+102-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:48:13-37
 103            android:launchMode="singleInstance"
-103-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:49:13-48
+103-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:49:13-48
 104            android:screenOrientation="portrait"
-104-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:50:13-49
+104-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:50:13-49
 105            android:showOnLockScreen="true"
-105-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:51:13-44
+105-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:51:13-44
 106            android:showWhenLocked="true"
-106-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:52:13-42
+106-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:52:13-42
 107            android:theme="@style/Theme.TenliAIoT.FullScreenCall"
-107-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:53:13-66
+107-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:53:13-66
 108            android:turnScreenOn="true" />
-108-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:54:13-40
+108-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:54:13-40
 109
 110        <service
-110-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:57:9-63:19
+110-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:57:9-63:19
 111            android:name="com.tenli.oneview.firebase.EventMessagingService"
-111-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:58:13-59
+111-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:58:13-59
 112            android:exported="false" >
-112-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:59:13-37
+112-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:59:13-37
 113            <intent-filter>
-113-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:13-62:29
+113-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:13-62:29
 114                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-114-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:17-78
-114-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:25-75
+114-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:17-78
+114-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:25-75
 115            </intent-filter>
 116        </service>
 117
 118        <receiver
-118-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:65:9-76:20
+118-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:65:9-76:20
 119            android:name="com.tenli.oneview.service.BootReceiver"
-119-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:66:13-49
+119-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:66:13-49
 120            android:enabled="true"
-120-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:67:13-35
+120-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:67:13-35
 121            android:exported="true"
-121-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:68:13-36
+121-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:68:13-36
 122            android:permission="android.permission.RECEIVE_BOOT_COMPLETED" >
-122-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:69:13-75
+122-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:69:13-75
 123            <intent-filter android:priority="999" >
-123-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:13-75:29
-123-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:28-50
+123-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:13-75:29
+123-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:28-50
 124                <action android:name="android.intent.action.BOOT_COMPLETED" />
-124-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:17-79
-124-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:25-76
+124-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:17-79
+124-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:25-76
 125                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-125-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:17-82
-125-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:25-79
+125-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:17-82
+125-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:25-79
 126
 127                <category android:name="android.intent.category.DEFAULT" />
-127-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
-127-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
+127-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
+127-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
 128            </intent-filter>
 129        </receiver>
 130
 131        <service
-131-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:78:9-81:58
+131-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:78:9-81:58
 132            android:name="com.tenli.oneview.service.KeepAliveService"
-132-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:79:13-53
+132-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:79:13-53
 133            android:foregroundServiceType="remoteMessaging" />
-133-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:80:13-60
+133-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:80:13-60
 134        <service
-134-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:83:9-90:19
+134-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:83:9-90:19
 135            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
-135-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:84:13-82
+135-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:84:13-82
 136            android:enabled="false"
-136-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:85:13-36
+136-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:85:13-36
 137            android:exported="false" >
-137-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:86:13-37
+137-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:86:13-37
 138            <meta-data
-138-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:87:13-89:40
+138-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:87:13-89:40
 139                android:name="autoStoreLocales"
-139-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:88:17-48
+139-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:88:17-48
 140                android:value="true" />
-140-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:89:17-37
+140-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:89:17-37
 141        </service>
 142
 143        <meta-data
-143-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:92:9-94:58
+143-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:92:9-94:58
 144            android:name="com.google.firebase.messaging.default_notification_icon"
-144-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:93:13-83
+144-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:93:13-83
 145            android:resource="@mipmap/app_icon_notify" />
-145-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:94:13-55
+145-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:94:13-55
 146
 147        <provider
 148            android:name="androidx.core.content.FileProvider"
-148-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:97:13-62
+148-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:97:13-62
 149            android:authorities="com.tenli.aiot.provider"
-149-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:98:13-60
+149-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:98:13-60
 150            android:exported="false"
-150-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:99:13-37
+150-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:99:13-37
 151            android:grantUriPermissions="true" >
-151-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:100:13-47
+151-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:100:13-47
 152            <meta-data
-152-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:101:13-103:54
+152-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:101:13-103:54
 153                android:name="android.support.FILE_PROVIDER_PATHS"
-153-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:102:17-67
+153-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:102:17-67
 154                android:resource="@xml/file_paths" />
-154-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:17-51
+154-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:17-51
 155        </provider>
 156        <provider
-156-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:23:9-31:20
+156-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:23:9-31:20
 157            android:name="com.canhub.cropper.CropFileProvider"
-157-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:24:13-63
+157-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:24:13-63
 158            android:authorities="com.tenli.aiot.cropper.fileprovider"
-158-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:25:13-72
+158-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:25:13-72
 159            android:exported="false"
-159-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:26:13-37
+159-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:26:13-37
 160            android:grantUriPermissions="true" >
-160-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:27:13-47
+160-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:27:13-47
 161            <meta-data
-161-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:101:13-103:54
+161-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:101:13-103:54
 162                android:name="android.support.FILE_PROVIDER_PATHS"
-162-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:102:17-67
+162-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:102:17-67
 163                android:resource="@xml/library_file_paths" />
-163-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:17-51
+163-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:17-51
 164        </provider>
 165
 166        <activity
-166-->[androidx.compose.ui:ui-tooling-android:1.10.5] /Users/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:23:9-25:39
+166-->[androidx.compose.ui:ui-tooling-android:1.10.5] /home/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:23:9-25:39
 167            android:name="androidx.compose.ui.tooling.PreviewActivity"
-167-->[androidx.compose.ui:ui-tooling-android:1.10.5] /Users/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:24:13-71
+167-->[androidx.compose.ui:ui-tooling-android:1.10.5] /home/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:24:13-71
 168            android:exported="true" />
-168-->[androidx.compose.ui:ui-tooling-android:1.10.5] /Users/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:25:13-36
+168-->[androidx.compose.ui:ui-tooling-android:1.10.5] /home/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:25:13-36
 169        <activity
-169-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:29:9-46:20
+169-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:29:9-46:20
 170            android:name="com.google.firebase.auth.internal.GenericIdpActivity"
-170-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:30:13-80
+170-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:30:13-80
 171            android:excludeFromRecents="true"
-171-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:31:13-46
+171-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:31:13-46
 172            android:exported="true"
-172-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:32:13-36
+172-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:32:13-36
 173            android:launchMode="singleTask"
-173-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:33:13-44
+173-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:33:13-44
 174            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
-174-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:34:13-72
+174-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:34:13-72
 175            <intent-filter>
-175-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:35:13-45:29
+175-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:35:13-45:29
 176                <action android:name="android.intent.action.VIEW" />
-176-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:17-69
-176-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:25-66
+176-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:17-69
+176-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:25-66
 177
 178                <category android:name="android.intent.category.DEFAULT" />
-178-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
-178-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
+178-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
+178-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
 179                <category android:name="android.intent.category.BROWSABLE" />
-179-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:17-78
-179-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:27-75
+179-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:17-78
+179-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:27-75
 180
 181                <data
-181-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
+181-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
 182                    android:host="firebase.auth"
 183                    android:path="/"
 184                    android:scheme="genericidp" />
 185            </intent-filter>
 186        </activity>
 187        <activity
-187-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:47:9-64:20
+187-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:47:9-64:20
 188            android:name="com.google.firebase.auth.internal.RecaptchaActivity"
-188-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:48:13-79
+188-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:48:13-79
 189            android:excludeFromRecents="true"
-189-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:49:13-46
+189-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:49:13-46
 190            android:exported="true"
-190-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:50:13-36
+190-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:50:13-36
 191            android:launchMode="singleTask"
-191-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:51:13-44
+191-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:51:13-44
 192            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
-192-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:52:13-72
+192-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:52:13-72
 193            <intent-filter>
-193-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:53:13-63:29
+193-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:53:13-63:29
 194                <action android:name="android.intent.action.VIEW" />
-194-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:17-69
-194-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:25-66
+194-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:17-69
+194-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:36:25-66
 195
 196                <category android:name="android.intent.category.DEFAULT" />
-196-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
-196-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
+196-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
+196-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
 197                <category android:name="android.intent.category.BROWSABLE" />
-197-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:17-78
-197-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:27-75
+197-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:17-78
+197-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:39:27-75
 198
 199                <data
-199-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
+199-->[com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:15:13-44
 200                    android:host="firebase.auth"
 201                    android:path="/"
 202                    android:scheme="recaptcha" />
@@ -390,475 +390,475 @@
 204        </activity>
 205
 206        <service
-206-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:66:9-72:19
+206-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:66:9-72:19
 207            android:name="com.google.firebase.components.ComponentDiscoveryService"
-207-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:67:13-84
+207-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:67:13-84
 208            android:directBootAware="true"
-208-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:32:13-43
+208-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:32:13-43
 209            android:exported="false" >
-209-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:68:13-37
+209-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:68:13-37
 210            <meta-data
-210-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:69:13-71:85
+210-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:69:13-71:85
 211                android:name="com.google.firebase.components:com.google.firebase.auth.FirebaseAuthRegistrar"
-211-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:70:17-109
+211-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:70:17-109
 212                android:value="com.google.firebase.components.ComponentRegistrar" />
-212-->[com.google.firebase:firebase-auth:24.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:71:17-82
+212-->[com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:71:17-82
 213            <meta-data
-213-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:57:13-59:85
+213-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:57:13-59:85
 214                android:name="com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingKtxRegistrar"
-214-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:58:17-122
+214-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:58:17-122
 215                android:value="com.google.firebase.components.ComponentRegistrar" />
-215-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:59:17-82
+215-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:59:17-82
 216            <meta-data
-216-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:60:13-62:85
+216-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:60:13-62:85
 217                android:name="com.google.firebase.components:com.google.firebase.messaging.FirebaseMessagingRegistrar"
-217-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:61:17-119
+217-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:61:17-119
 218                android:value="com.google.firebase.components.ComponentRegistrar" />
-218-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:62:17-82
+218-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:62:17-82
 219            <meta-data
-219-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:33:13-35:85
+219-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:33:13-35:85
 220                android:name="com.google.firebase.components:com.google.firebase.analytics.connector.internal.AnalyticsConnectorRegistrar"
-220-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:34:17-139
+220-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:34:17-139
 221                android:value="com.google.firebase.components.ComponentRegistrar" />
-221-->[com.google.android.gms:play-services-measurement-api:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:35:17-82
+221-->[com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:35:17-82
 222            <meta-data
-222-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:15:13-17:85
+222-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:15:13-17:85
 223                android:name="com.google.firebase.components:com.google.firebase.crashlytics.FirebaseCrashlyticsKtxRegistrar"
-223-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:16:17-126
+223-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:16:17-126
 224                android:value="com.google.firebase.components.ComponentRegistrar" />
-224-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:17:17-82
+224-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:17:17-82
 225            <meta-data
-225-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:18:13-20:85
+225-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:18:13-20:85
 226                android:name="com.google.firebase.components:com.google.firebase.crashlytics.CrashlyticsRegistrar"
-226-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:19:17-115
+226-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:19:17-115
 227                android:value="com.google.firebase.components.ComponentRegistrar" />
-227-->[com.google.firebase:firebase-crashlytics:20.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:20:17-82
+227-->[com.google.firebase:firebase-crashlytics:20.0.4] /home/vung/.gradle/caches/8.14.4/transforms/414b9ade9787c33f4e68e246ca24725e/transformed/jetified-firebase-crashlytics-20.0.4/AndroidManifest.xml:20:17-82
 228            <meta-data
-228-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:29:13-31:85
+228-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:29:13-31:85
 229                android:name="com.google.firebase.components:com.google.firebase.sessions.FirebaseSessionsRegistrar"
-229-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:30:17-117
+229-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:30:17-117
 230                android:value="com.google.firebase.components.ComponentRegistrar" />
-230-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:31:17-82
+230-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:31:17-82
 231            <meta-data
-231-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:15:13-17:85
+231-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:15:13-17:85
 232                android:name="com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsKtxRegistrar"
-232-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:16:17-130
+232-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:16:17-130
 233                android:value="com.google.firebase.components.ComponentRegistrar" />
-233-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:17:17-82
+233-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:17:17-82
 234            <meta-data
-234-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:18:13-20:85
+234-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:18:13-20:85
 235                android:name="com.google.firebase.components:com.google.firebase.installations.FirebaseInstallationsRegistrar"
-235-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:19:17-127
+235-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:19:17-127
 236                android:value="com.google.firebase.components.ComponentRegistrar" />
-236-->[com.google.firebase:firebase-installations:19.1.0] /Users/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:20:17-82
+236-->[com.google.firebase:firebase-installations:19.1.0] /home/vung/.gradle/caches/8.14.4/transforms/4e48852bd783cd67afe31167d4596491/transformed/jetified-firebase-installations-19.1.0/AndroidManifest.xml:20:17-82
 237            <meta-data
-237-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:35:13-37:85
+237-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:35:13-37:85
 238                android:name="com.google.firebase.components:com.google.firebase.FirebaseCommonKtxRegistrar"
-238-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:36:17-109
+238-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:36:17-109
 239                android:value="com.google.firebase.components.ComponentRegistrar" />
-239-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:37:17-82
+239-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:37:17-82
 240            <meta-data
-240-->[com.google.firebase:firebase-datatransport:19.0.0] /Users/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:25:13-27:85
+240-->[com.google.firebase:firebase-datatransport:19.0.0] /home/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:25:13-27:85
 241                android:name="com.google.firebase.components:com.google.firebase.datatransport.TransportRegistrar"
-241-->[com.google.firebase:firebase-datatransport:19.0.0] /Users/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:26:17-115
+241-->[com.google.firebase:firebase-datatransport:19.0.0] /home/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:26:17-115
 242                android:value="com.google.firebase.components.ComponentRegistrar" />
-242-->[com.google.firebase:firebase-datatransport:19.0.0] /Users/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:27:17-82
+242-->[com.google.firebase:firebase-datatransport:19.0.0] /home/vung/.gradle/caches/8.14.4/transforms/9b363b7b7f577520c4a0f8cabb6ae575/transformed/jetified-firebase-datatransport-19.0.0/AndroidManifest.xml:27:17-82
 243        </service>
 244        <service
-244-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:24:9-32:19
+244-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:24:9-32:19
 245            android:name="androidx.credentials.playservices.CredentialProviderMetadataHolder"
-245-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:25:13-94
+245-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:25:13-94
 246            android:enabled="true"
-246-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:26:13-35
+246-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:26:13-35
 247            android:exported="false" >
-247-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:27:13-37
+247-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:27:13-37
 248            <meta-data
-248-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:29:13-31:104
+248-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:29:13-31:104
 249                android:name="androidx.credentials.CREDENTIAL_PROVIDER_KEY"
-249-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:30:17-76
+249-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:30:17-76
 250                android:value="androidx.credentials.playservices.CredentialProviderPlayServicesImpl" />
-250-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:31:17-101
+250-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:31:17-101
 251        </service>
 252
 253        <activity
-253-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:34:9-41:20
+253-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:34:9-41:20
 254            android:name="androidx.credentials.playservices.controllers.identityauth.HiddenActivity"
-254-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:35:13-101
+254-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:35:13-101
 255            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-255-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:36:13-87
+255-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:36:13-87
 256            android:enabled="true"
-256-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:37:13-35
+256-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:37:13-35
 257            android:exported="false"
-257-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:38:13-37
+257-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:38:13-37
 258            android:fitsSystemWindows="true"
-258-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:39:13-45
+258-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:39:13-45
 259            android:theme="@style/Theme.Hidden" >
-259-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:40:13-48
+259-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:40:13-48
 260        </activity>
 261        <activity
-261-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:42:9-49:20
+261-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:42:9-49:20
 262            android:name="androidx.credentials.playservices.controllers.identitycredentials.IdentityCredentialApiHiddenActivity"
-262-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:43:13-129
+262-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:43:13-129
 263            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-263-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:44:13-87
+263-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:44:13-87
 264            android:enabled="true"
-264-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:45:13-35
+264-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:45:13-35
 265            android:exported="false"
-265-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:46:13-37
+265-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:46:13-37
 266            android:fitsSystemWindows="true"
-266-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:47:13-45
+266-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:47:13-45
 267            android:theme="@style/Theme.Hidden" >
-267-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /Users/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:48:13-48
+267-->[androidx.credentials:credentials-play-services-auth:1.6.0-beta01] /home/vung/.gradle/caches/8.14.4/transforms/712f047bba2bb1a6f10b786004830e19/transformed/jetified-credentials-play-services-auth-1.6.0-beta01/AndroidManifest.xml:48:13-48
 268        </activity>
 269        <activity
-269-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:23:9-27:75
+269-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:23:9-27:75
 270            android:name="com.google.android.gms.auth.api.signin.internal.SignInHubActivity"
-270-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:24:13-93
+270-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:24:13-93
 271            android:excludeFromRecents="true"
-271-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:25:13-46
+271-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:25:13-46
 272            android:exported="false"
-272-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:26:13-37
+272-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:26:13-37
 273            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-273-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:27:13-72
+273-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:27:13-72
 274        <!--
 275            Service handling Google Sign-In user revocation. For apps that do not integrate with
 276            Google Sign-In, this service will never be started.
 277        -->
 278        <service
-278-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:33:9-37:51
+278-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:33:9-37:51
 279            android:name="com.google.android.gms.auth.api.signin.RevocationBoundService"
-279-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:34:13-89
+279-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:34:13-89
 280            android:exported="true"
-280-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:35:13-36
+280-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:35:13-36
 281            android:permission="com.google.android.gms.auth.api.signin.permission.REVOCATION_NOTIFICATION"
-281-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:36:13-107
+281-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:36:13-107
 282            android:visibleToInstantApps="true" />
-282-->[com.google.android.gms:play-services-auth:21.5.1] /Users/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:37:13-48
+282-->[com.google.android.gms:play-services-auth:21.5.1] /home/vung/.gradle/caches/8.14.4/transforms/ff6e155f22a5a3c408a6e0f47b62005c/transformed/jetified-play-services-auth-21.5.1/AndroidManifest.xml:37:13-48
 283
 284        <receiver
-284-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:29:9-40:20
+284-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:29:9-40:20
 285            android:name="com.google.firebase.iid.FirebaseInstanceIdReceiver"
-285-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:30:13-78
+285-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:30:13-78
 286            android:exported="true"
-286-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:31:13-36
+286-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:31:13-36
 287            android:permission="com.google.android.c2dm.permission.SEND" >
-287-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:32:13-73
+287-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:32:13-73
 288            <intent-filter>
-288-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:33:13-35:29
+288-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:33:13-35:29
 289                <action android:name="com.google.android.c2dm.intent.RECEIVE" />
-289-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:34:17-81
-289-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:34:25-78
+289-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:34:17-81
+289-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:34:25-78
 290            </intent-filter>
 291
 292            <meta-data
-292-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:37:13-39:40
+292-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:37:13-39:40
 293                android:name="com.google.android.gms.cloudmessaging.FINISHED_AFTER_HANDLED"
-293-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:38:17-92
+293-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:38:17-92
 294                android:value="true" />
-294-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:39:17-37
+294-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:39:17-37
 295        </receiver>
 296        <!--
 297             FirebaseMessagingService performs security checks at runtime,
 298             but set to not exported to explicitly avoid allowing another app to call it.
 299        -->
 300        <service
-300-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:46:9-53:19
+300-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:46:9-53:19
 301            android:name="com.google.firebase.messaging.FirebaseMessagingService"
-301-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:47:13-82
+301-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:47:13-82
 302            android:directBootAware="true"
-302-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:48:13-43
+302-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:48:13-43
 303            android:exported="false" >
-303-->[com.google.firebase:firebase-messaging:25.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:49:13-37
+303-->[com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:49:13-37
 304            <intent-filter android:priority="-500" >
-304-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:13-62:29
+304-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:13-62:29
 305                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-305-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:17-78
-305-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:25-75
+305-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:17-78
+305-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:25-75
 306            </intent-filter>
 307        </service>
 308
 309        <receiver
-309-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:29:9-33:20
+309-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:29:9-33:20
 310            android:name="com.google.android.gms.measurement.AppMeasurementReceiver"
-310-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:30:13-85
+310-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:30:13-85
 311            android:enabled="true"
-311-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:31:13-35
+311-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:31:13-35
 312            android:exported="false" >
-312-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:32:13-37
+312-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:32:13-37
 313        </receiver>
 314
 315        <service
-315-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:35:9-38:40
+315-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:35:9-38:40
 316            android:name="com.google.android.gms.measurement.AppMeasurementService"
-316-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:36:13-84
+316-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:36:13-84
 317            android:enabled="true"
-317-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:37:13-35
+317-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:37:13-35
 318            android:exported="false" />
-318-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:38:13-37
+318-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:38:13-37
 319        <service
-319-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:39:9-43:72
+319-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:39:9-43:72
 320            android:name="com.google.android.gms.measurement.AppMeasurementJobService"
-320-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:40:13-87
+320-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:40:13-87
 321            android:enabled="true"
-321-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:41:13-35
+321-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:41:13-35
 322            android:exported="false"
-322-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:42:13-37
+322-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:42:13-37
 323            android:permission="android.permission.BIND_JOB_SERVICE" />
-323-->[com.google.android.gms:play-services-measurement:23.2.0] /Users/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:43:13-69
+323-->[com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:43:13-69
 324
 325        <activity
-325-->[com.google.android.gms:play-services-base:18.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:9-173
+325-->[com.google.android.gms:play-services-base:18.5.0] /home/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:9-173
 326            android:name="com.google.android.gms.common.api.GoogleApiActivity"
-326-->[com.google.android.gms:play-services-base:18.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:19-85
+326-->[com.google.android.gms:play-services-base:18.5.0] /home/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:19-85
 327            android:exported="false"
-327-->[com.google.android.gms:play-services-base:18.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:146-170
+327-->[com.google.android.gms:play-services-base:18.5.0] /home/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:146-170
 328            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-328-->[com.google.android.gms:play-services-base:18.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:86-145
+328-->[com.google.android.gms:play-services-base:18.5.0] /home/vung/.gradle/caches/8.14.4/transforms/cc08a0ec0f29ec5bce5a86236d4f508b/transformed/jetified-play-services-base-18.5.0/AndroidManifest.xml:5:86-145
 329
 330        <service
-330-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:22:9-25:40
+330-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:22:9-25:40
 331            android:name="com.google.firebase.sessions.SessionLifecycleService"
-331-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:23:13-80
+331-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:23:13-80
 332            android:enabled="false"
-332-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:24:13-36
+332-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:24:13-36
 333            android:exported="false" />
-333-->[com.google.firebase:firebase-sessions:3.0.4] /Users/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:25:13-37
+333-->[com.google.firebase:firebase-sessions:3.0.4] /home/vung/.gradle/caches/8.14.4/transforms/4a92d820607c08a1bb127621e4655f9b/transformed/jetified-firebase-sessions-3.0.4/AndroidManifest.xml:25:13-37
 334
 335        <provider
-335-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:23:9-28:39
+335-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:23:9-28:39
 336            android:name="com.google.firebase.provider.FirebaseInitProvider"
-336-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:24:13-77
+336-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:24:13-77
 337            android:authorities="com.tenli.aiot.firebaseinitprovider"
-337-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:25:13-72
+337-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:25:13-72
 338            android:directBootAware="true"
-338-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:26:13-43
+338-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:26:13-43
 339            android:exported="false"
-339-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:27:13-37
+339-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:27:13-37
 340            android:initOrder="100" />
-340-->[com.google.firebase:firebase-common:22.0.1] /Users/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:28:13-36
+340-->[com.google.firebase:firebase-common:22.0.1] /home/vung/.gradle/caches/8.14.4/transforms/21850a26c378acfde43c59df9f0e1a53/transformed/jetified-firebase-common-22.0.1/AndroidManifest.xml:28:13-36
 341        <provider
-341-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:29:9-37:20
+341-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:29:9-37:20
 342            android:name="androidx.startup.InitializationProvider"
-342-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:30:13-67
+342-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:30:13-67
 343            android:authorities="com.tenli.aiot.androidx-startup"
-343-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:31:13-68
+343-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:31:13-68
 344            android:exported="false" >
-344-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:32:13-37
+344-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:32:13-37
 345            <meta-data
-345-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:34:13-36:52
+345-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:34:13-36:52
 346                android:name="androidx.work.WorkManagerInitializer"
-346-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:35:17-68
+346-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:35:17-68
 347                android:value="androidx.startup" />
-347-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:36:17-49
+347-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:36:17-49
 348            <meta-data
-348-->[androidx.emoji2:emoji2:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:29:13-31:52
+348-->[androidx.emoji2:emoji2:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:29:13-31:52
 349                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-349-->[androidx.emoji2:emoji2:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:30:17-75
+349-->[androidx.emoji2:emoji2:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:30:17-75
 350                android:value="androidx.startup" />
-350-->[androidx.emoji2:emoji2:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:31:17-49
+350-->[androidx.emoji2:emoji2:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/1d28f3d14f3bf5ba2f32f30fe9cb5f63/transformed/jetified-emoji2-1.4.0/AndroidManifest.xml:31:17-49
 351            <meta-data
-351-->[androidx.lifecycle:lifecycle-process:2.10.0] /Users/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:29:13-31:52
+351-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:29:13-31:52
 352                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-352-->[androidx.lifecycle:lifecycle-process:2.10.0] /Users/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:30:17-78
+352-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:30:17-78
 353                android:value="androidx.startup" />
-353-->[androidx.lifecycle:lifecycle-process:2.10.0] /Users/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:31:17-49
+353-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/vung/.gradle/caches/8.14.4/transforms/c437f074a417106001e8ff3049aa2410/transformed/jetified-lifecycle-process-2.10.0/AndroidManifest.xml:31:17-49
 354            <meta-data
-354-->[com.squareup.okhttp3:okhttp-android:5.3.2] /Users/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:16:13-18:52
+354-->[com.squareup.okhttp3:okhttp-android:5.3.2] /home/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:16:13-18:52
 355                android:name="okhttp3.internal.platform.PlatformInitializer"
-355-->[com.squareup.okhttp3:okhttp-android:5.3.2] /Users/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:17:17-77
+355-->[com.squareup.okhttp3:okhttp-android:5.3.2] /home/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:17:17-77
 356                android:value="androidx.startup" />
-356-->[com.squareup.okhttp3:okhttp-android:5.3.2] /Users/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:18:17-49
+356-->[com.squareup.okhttp3:okhttp-android:5.3.2] /home/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:18:17-49
 357            <meta-data
-357-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:29:13-31:52
+357-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:29:13-31:52
 358                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
-358-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:30:17-85
+358-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:30:17-85
 359                android:value="androidx.startup" />
-359-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:31:17-49
+359-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:31:17-49
 360        </provider>
 361
 362        <service
-362-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:39:9-45:35
+362-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:39:9-45:35
 363            android:name="androidx.work.impl.background.systemjob.SystemJobService"
-363-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:40:13-84
+363-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:40:13-84
 364            android:directBootAware="false"
-364-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:41:13-44
+364-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:41:13-44
 365            android:enabled="@bool/enable_system_job_service_default"
-365-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:42:13-70
+365-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:42:13-70
 366            android:exported="true"
-366-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:43:13-36
+366-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:43:13-36
 367            android:permission="android.permission.BIND_JOB_SERVICE" />
-367-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:44:13-69
+367-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:44:13-69
 368        <service
-368-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:46:9-52:35
+368-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:46:9-52:35
 369            android:name="androidx.work.impl.foreground.SystemForegroundService"
-369-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:47:13-81
+369-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:47:13-81
 370            android:directBootAware="false"
-370-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:48:13-44
+370-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:48:13-44
 371            android:enabled="@bool/enable_system_foreground_service_default"
-371-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:49:13-77
+371-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:49:13-77
 372            android:exported="false" />
-372-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:50:13-37
+372-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:50:13-37
 373
 374        <receiver
-374-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:54:9-59:35
+374-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:54:9-59:35
 375            android:name="androidx.work.impl.utils.ForceStopRunnable$BroadcastReceiver"
-375-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:55:13-88
+375-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:55:13-88
 376            android:directBootAware="false"
-376-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:56:13-44
+376-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:56:13-44
 377            android:enabled="true"
-377-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:57:13-35
+377-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:57:13-35
 378            android:exported="false" />
-378-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:58:13-37
+378-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:58:13-37
 379        <receiver
-379-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:60:9-69:20
+379-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:60:9-69:20
 380            android:name="androidx.work.impl.background.systemalarm.RescheduleReceiver"
-380-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:61:13-88
+380-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:61:13-88
 381            android:directBootAware="false"
-381-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:62:13-44
+381-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:62:13-44
 382            android:enabled="false"
-382-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:63:13-36
+382-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:63:13-36
 383            android:exported="false" >
-383-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:64:13-37
+383-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:64:13-37
 384            <intent-filter>
-384-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:66:13-68:29
+384-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:66:13-68:29
 385                <action android:name="android.intent.action.BOOT_COMPLETED" />
-385-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:17-79
-385-->/Users/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:25-76
+385-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:17-79
+385-->/home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:25-76
 386            </intent-filter>
 387        </receiver>
 388        <receiver
-388-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:70:9-80:20
+388-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:70:9-80:20
 389            android:name="androidx.work.impl.diagnostics.DiagnosticsReceiver"
-389-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:71:13-78
+389-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:71:13-78
 390            android:directBootAware="false"
-390-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:72:13-44
+390-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:72:13-44
 391            android:enabled="true"
-391-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:73:13-35
+391-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:73:13-35
 392            android:exported="true"
-392-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:74:13-36
+392-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:74:13-36
 393            android:permission="android.permission.DUMP" >
-393-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:75:13-57
+393-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:75:13-57
 394            <intent-filter>
-394-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:77:13-79:29
+394-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:77:13-79:29
 395                <action android:name="androidx.work.diagnostics.REQUEST_DIAGNOSTICS" />
-395-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:78:17-88
-395-->[androidx.work:work-runtime:2.11.2] /Users/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:78:25-85
+395-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:78:17-88
+395-->[androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:78:25-85
 396            </intent-filter>
 397        </receiver>
 398
 399        <service
-399-->[androidx.room:room-runtime-android:2.8.4] /Users/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:24:9-28:63
+399-->[androidx.room:room-runtime-android:2.8.4] /home/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:24:9-28:63
 400            android:name="androidx.room.MultiInstanceInvalidationService"
-400-->[androidx.room:room-runtime-android:2.8.4] /Users/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:25:13-74
+400-->[androidx.room:room-runtime-android:2.8.4] /home/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:25:13-74
 401            android:directBootAware="true"
-401-->[androidx.room:room-runtime-android:2.8.4] /Users/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:26:13-43
+401-->[androidx.room:room-runtime-android:2.8.4] /home/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:26:13-43
 402            android:exported="false" />
-402-->[androidx.room:room-runtime-android:2.8.4] /Users/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:27:13-37
+402-->[androidx.room:room-runtime-android:2.8.4] /home/vung/.gradle/caches/8.14.4/transforms/ac43e8d1010a7ca04cb69b4ea40317a8/transformed/jetified-room-runtime/AndroidManifest.xml:27:13-37
 403
 404        <uses-library
-404-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:23:9-25:40
+404-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:23:9-25:40
 405            android:name="androidx.window.extensions"
-405-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:24:13-54
+405-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:24:13-54
 406            android:required="false" />
-406-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:25:13-37
+406-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:25:13-37
 407        <uses-library
-407-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:26:9-28:40
+407-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:26:9-28:40
 408            android:name="androidx.window.sidecar"
-408-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:27:13-51
+408-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:27:13-51
 409            android:required="false" />
-409-->[androidx.window:window:1.5.0] /Users/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:28:13-37
+409-->[androidx.window:window:1.5.0] /home/vung/.gradle/caches/8.14.4/transforms/9adea3b99a7eca0d1619b235b86d2861/transformed/jetified-window-1.5.0/AndroidManifest.xml:28:13-37
 410        <uses-library
-410-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /Users/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:23:9-25:40
+410-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /home/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:23:9-25:40
 411            android:name="android.ext.adservices"
-411-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /Users/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:24:13-50
+411-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /home/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:24:13-50
 412            android:required="false" />
-412-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /Users/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:25:13-37
+412-->[androidx.privacysandbox.ads:ads-adservices:1.1.0-beta11] /home/vung/.gradle/caches/8.14.4/transforms/4b0b3a352d83d39c4b97c93b9cc162c4/transformed/jetified-ads-adservices-1.1.0-beta11/AndroidManifest.xml:25:13-37
 413
 414        <meta-data
-414-->[com.google.android.gms:play-services-basement:18.9.0] /Users/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:21:9-23:69
+414-->[com.google.android.gms:play-services-basement:18.9.0] /home/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:21:9-23:69
 415            android:name="com.google.android.gms.version"
-415-->[com.google.android.gms:play-services-basement:18.9.0] /Users/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:22:13-58
+415-->[com.google.android.gms:play-services-basement:18.9.0] /home/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:22:13-58
 416            android:value="@integer/google_play_services_version" />
-416-->[com.google.android.gms:play-services-basement:18.9.0] /Users/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:23:13-66
+416-->[com.google.android.gms:play-services-basement:18.9.0] /home/vung/.gradle/caches/8.14.4/transforms/dc1c44066106efb0e4f69bdf7fc34789/transformed/jetified-play-services-basement-18.9.0/AndroidManifest.xml:23:13-66
 417
 418        <service
-418-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:26:9-32:19
+418-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:26:9-32:19
 419            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
-419-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:27:13-103
+419-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:27:13-103
 420            android:exported="false" >
-420-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:28:13-37
+420-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:28:13-37
 421            <meta-data
-421-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:29:13-31:39
+421-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:29:13-31:39
 422                android:name="backend:com.google.android.datatransport.cct.CctBackendFactory"
-422-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:30:17-94
+422-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:30:17-94
 423                android:value="cct" />
-423-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:31:17-36
+423-->[com.google.android.datatransport:transport-backend-cct:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/43c970d171661422f30a0394ebdbc19b/transformed/jetified-transport-backend-cct-3.3.0/AndroidManifest.xml:31:17-36
 424        </service>
 425
 426        <receiver
-426-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:34:9-52:20
+426-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:34:9-52:20
 427            android:name="androidx.profileinstaller.ProfileInstallReceiver"
-427-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:35:13-76
+427-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:35:13-76
 428            android:directBootAware="false"
-428-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:36:13-44
+428-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:36:13-44
 429            android:enabled="true"
-429-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:37:13-35
+429-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:37:13-35
 430            android:exported="true"
-430-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:38:13-36
+430-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:38:13-36
 431            android:permission="android.permission.DUMP" >
-431-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:39:13-57
+431-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:39:13-57
 432            <intent-filter>
-432-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:40:13-42:29
+432-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:40:13-42:29
 433                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
-433-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:41:17-91
-433-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:41:25-88
+433-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:41:17-91
+433-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:41:25-88
 434            </intent-filter>
 435            <intent-filter>
-435-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:43:13-45:29
+435-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:43:13-45:29
 436                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
-436-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:44:17-85
-436-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:44:25-82
+436-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:44:17-85
+436-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:44:25-82
 437            </intent-filter>
 438            <intent-filter>
-438-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:46:13-48:29
+438-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:46:13-48:29
 439                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
-439-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:47:17-88
-439-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:47:25-85
+439-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:47:17-88
+439-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:47:25-85
 440            </intent-filter>
 441            <intent-filter>
-441-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:49:13-51:29
+441-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:49:13-51:29
 442                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
-442-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:50:17-95
-442-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:50:25-92
+442-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:50:17-95
+442-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/vung/.gradle/caches/8.14.4/transforms/df6a65768672f3bde190ba321e707c6c/transformed/jetified-profileinstaller-1.4.0/AndroidManifest.xml:50:25-92
 443            </intent-filter>
 444        </receiver>
 445
 446        <service
-446-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:24:9-28:19
+446-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:24:9-28:19
 447            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.JobInfoSchedulerService"
-447-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:25:13-117
+447-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:25:13-117
 448            android:exported="false"
-448-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:26:13-37
+448-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:26:13-37
 449            android:permission="android.permission.BIND_JOB_SERVICE" >
-449-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:27:13-69
+449-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:27:13-69
 450        </service>
 451
 452        <receiver
-452-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:30:9-32:40
+452-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:30:9-32:40
 453            android:name="com.google.android.datatransport.runtime.scheduling.jobscheduling.AlarmManagerSchedulerBroadcastReceiver"
-453-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:31:13-132
+453-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:31:13-132
 454            android:exported="false" /> <!-- The activities will be merged into the manifest of the hosting app. -->
-454-->[com.google.android.datatransport:transport-runtime:3.3.0] /Users/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:32:13-37
+454-->[com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:32:13-37
 455        <activity
-455-->[com.google.android.play:core-common:2.0.3] /Users/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:14:9-18:65
+455-->[com.google.android.play:core-common:2.0.3] /home/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:14:9-18:65
 456            android:name="com.google.android.play.core.common.PlayCoreDialogWrapperActivity"
-456-->[com.google.android.play:core-common:2.0.3] /Users/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:15:13-93
+456-->[com.google.android.play:core-common:2.0.3] /home/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:15:13-93
 457            android:exported="false"
-457-->[com.google.android.play:core-common:2.0.3] /Users/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:16:13-37
+457-->[com.google.android.play:core-common:2.0.3] /home/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:16:13-37
 458            android:stateNotNeeded="true"
-458-->[com.google.android.play:core-common:2.0.3] /Users/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:17:13-42
+458-->[com.google.android.play:core-common:2.0.3] /home/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:17:13-42
 459            android:theme="@style/Theme.PlayCore.Transparent" />
-459-->[com.google.android.play:core-common:2.0.3] /Users/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:18:13-62
+459-->[com.google.android.play:core-common:2.0.3] /home/vung/.gradle/caches/8.14.4/transforms/60e46a8e46ac3b51471187ce3f0674a2/transformed/jetified-core-common-2.0.3/AndroidManifest.xml:18:13-62
 460    </application>
 461
 462</manifest>

@@ -4,7 +4,7 @@
             "outputFile": "com.tenli.oneview.app-mergeDebugResources-93:/values-ru-rRU/values-ru-rRU.xml",
             "map": [
                 {
-                    "source": "/Users/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/res/values-ru-rRU/values-ru-rRU.xml",
+                    "source": "/home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/res/values-ru-rRU/values-ru-rRU.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,7,8",
                         "startColumns": "4,4,4,4,4,4,4",

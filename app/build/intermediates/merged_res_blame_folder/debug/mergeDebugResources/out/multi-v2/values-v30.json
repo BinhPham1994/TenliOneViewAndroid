@@ -4,7 +4,17 @@
             "outputFile": "com.tenli.oneview.app-mergeDebugResources-93:/values-v30/values-v30.xml",
             "map": [
                 {
-                    "source": "/Users/vung/.gradle/caches/8.14.4/transforms/2b8dd9d3e4eeb0331a5622fb006e6157/transformed/jetified-core-splashscreen-1.2.0/res/values-v30/values-v30.xml",
+                    "source": "/home/vung/.gradle/caches/8.14.4/transforms/44e372dc0570208c52c438b7206285c2/transformed/jetified-material3/res/values-v30/values-v30.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "72",
+                        "endOffsets": "123"
+                    }
+                },
+                {
+                    "source": "/home/vung/.gradle/caches/8.14.4/transforms/2b8dd9d3e4eeb0331a5622fb006e6157/transformed/jetified-core-splashscreen-1.2.0/res/values-v30/values-v30.xml",
                     "from": {
                         "startLines": "2",
                         "startColumns": "4",
@@ -20,16 +30,6 @@
                         "endLines": "8",
                         "endColumns": "12",
                         "endOffsets": "506"
-                    }
-                },
-                {
-                    "source": "/Users/vung/.gradle/caches/8.14.4/transforms/44e372dc0570208c52c438b7206285c2/transformed/jetified-material3/res/values-v30/values-v30.xml",
-                    "from": {
-                        "startLines": "2",
-                        "startColumns": "4",
-                        "startOffsets": "55",
-                        "endColumns": "72",
-                        "endOffsets": "123"
                     }
                 }
             ]
