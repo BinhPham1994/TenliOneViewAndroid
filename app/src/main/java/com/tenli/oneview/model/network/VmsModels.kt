@@ -17,6 +17,12 @@ data class AuthTokenModel(
     val isAdmin: Boolean
 )
 
+data class AuthTokenRequest(
+    val name: String = "Auth Token",
+    val username: String,
+    val password: String
+)
+
 data class UserGroupModel(
     val id: Int,
     val name: String
@@ -225,4 +231,32 @@ data class CellData(
     val cameraId: String? = null,
     val merge: MergeInfo? = null,
     val isBlinking: Boolean? = null
+)
+
+// ==================== Auth ====================
+
+data class LogInModel(
+    val username: String,
+    val password: String
+)
+
+data class LogOutModel(
+    val token: String
+)
+
+data class TokenModel(
+    val userId: Int,
+    val isAdmin: Boolean,
+    val token: String
+)
+
+data class ChangePasswordModel(
+    val userId: Int,
+    val oldPassword: String,
+    val newPassword: String
+)
+
+data class ResetPasswordModel(
+    val userId: Int,
+    val password: String
 )

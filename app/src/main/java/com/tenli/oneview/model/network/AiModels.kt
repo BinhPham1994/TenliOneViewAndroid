@@ -1,5 +1,7 @@
 package com.tenli.oneview.model.network
 
+// ==================== Monitor ====================
+
 data class Monitor(
     val id: Int,
     val name: String,
@@ -34,6 +36,8 @@ data class MonitorStateEntry(
     val isLoaded: Boolean
 )
 
+// ==================== Camera Monitor ====================
+
 data class CameraVMS(
     val vmsId: Int,
     val cameraId: Int
@@ -58,6 +62,8 @@ data class CameraMonitorEntry(
     val isLoaded: Boolean
 )
 
+// ==================== Profile Group ====================
+
 data class ProfileGroupEntry(
     val items: List<ProfileGroup>,
     val isLoaded: Boolean
@@ -70,12 +76,14 @@ data class ProfileGroup(
     val type: String,
     val info: String,
     val parentUUID: String,
-    val data: ProfileGroupData
+    var data: ProfileGroupData?
 )
 
 data class ProfileGroupData(
     val color: String
 )
+
+// ==================== Profile ====================
 
 data class ProfileEntry(
     val items: List<Profile>,
