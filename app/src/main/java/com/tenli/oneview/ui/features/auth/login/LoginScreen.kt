@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -45,6 +46,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.ui.focus.FocusDirection
@@ -154,6 +158,7 @@ fun LoginContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .pointerInput(Unit) {
                     detectTapGestures(onTap = { focusManager.clearFocus() })
                 }
@@ -161,7 +166,7 @@ fun LoginContent(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = MaterialTheme.spacing.large)
+                    .padding(horizontal = 30.dp)
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -200,18 +205,19 @@ fun LoginContent(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = buildAnnotatedString {
-                        withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) {
-                            append("AI VISION\n")
-                        }
-                        withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.onBackground)) {
-                            append("CHO KỶ NGUYÊN SỐ")
-                        }
-                    },
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
+                    text = "Tenli Vision",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.sp
                     ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Hệ thống giám sát, vận hành thông minh",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(40.dp))
@@ -221,6 +227,7 @@ fun LoginContent(
                         value = uiState.domain,
                         onValueChange = onDomainChange,
                         label = domainHint,
+                        leadingIcon = Icons.Outlined.Public,
                         onClear = { onDomainChange("") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
@@ -234,6 +241,7 @@ fun LoginContent(
                         value = uiState.email,
                         onValueChange = onEmailChange,
                         label = emailLabel,
+                        leadingIcon = Icons.Outlined.Email,
                         onClear = { onEmailChange("") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Next),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
@@ -247,6 +255,7 @@ fun LoginContent(
                         value = uiState.password,
                         onValueChange = onPasswordChange,
                         label = passwordLabel,
+                        leadingIcon = Icons.Outlined.Lock,
                         isPassword = true,
                         showPassword = uiState.showPassword,
                         onPasswordToggle = onTogglePassword,

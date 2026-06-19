@@ -46,4 +46,31 @@ object AiTypeHelper {
         )
         return typeMap[type] ?: type
     }
+
+    fun getAiColor(type: String?): androidx.compose.ui.graphics.Color {
+        val t = type?.lowercase() ?: return androidx.compose.ui.graphics.Color(0xFF17B37F)
+        
+        return when {
+            t.contains("face") || t.contains("mask") -> androidx.compose.ui.graphics.Color(0xFFA2821B)
+            t.contains("uniform") || t.contains("hat") || t.contains("vest") || t.contains("id-card") -> androidx.compose.ui.graphics.Color(0xFF0A8F8D)
+            t.contains("crowd") -> androidx.compose.ui.graphics.Color(0xFF3B9D0E)
+            t.contains("heatmap") -> androidx.compose.ui.graphics.Color(0xFF6366F1)
+            t.contains("lpr") || t.contains("plate") || t.contains("license") -> androidx.compose.ui.graphics.Color(0xFFEA580C)
+            t.contains("fire") || t.contains("smoke") -> androidx.compose.ui.graphics.Color(0xFFDC2626)
+            t.contains("helmet") -> androidx.compose.ui.graphics.Color(0xFF198D0A)
+            t.contains("parking") -> androidx.compose.ui.graphics.Color(0xFFA50F69)
+            t.contains("garbage") || t.contains("dumping") || t.contains("littering") -> androidx.compose.ui.graphics.Color(0xFF9E8609)
+            t.contains("person") || t.contains("intrusion") -> androidx.compose.ui.graphics.Color(0xFF0A9C47)
+            t.contains("vehicle") -> androidx.compose.ui.graphics.Color(0xFF0284C7)
+            t.contains("sidewalk") || t.contains("encroachment") -> androidx.compose.ui.graphics.Color(0xFFA78F08)
+            t.contains("construction") -> androidx.compose.ui.graphics.Color(0xFFB97B0F)
+            t.contains("violence") || t.contains("fight") -> androidx.compose.ui.graphics.Color(0xFF7F10AB)
+            t.contains("smoking") || t.contains("pose") -> androidx.compose.ui.graphics.Color(0xFFD97706)
+            t.contains("phone") || t.contains("calling") -> androidx.compose.ui.graphics.Color(0xFF6366F1)
+            t.contains("object") || t.contains("tracking") -> androidx.compose.ui.graphics.Color(0xFF3B82F6)
+            t.contains("absence") -> androidx.compose.ui.graphics.Color(0xFF9CA3AF)
+            t.contains("fall") -> androidx.compose.ui.graphics.Color(0xFFEF4444)
+            else -> androidx.compose.ui.graphics.Color(0xFF17B37F)
+        }
+    }
 }

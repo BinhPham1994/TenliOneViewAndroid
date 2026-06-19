@@ -36,7 +36,7 @@ fun MainBottomNavigation(
 ) {
     NavigationBar(
         modifier = Modifier.height(76.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         windowInsets = WindowInsets(0, 0, 0, 40)
     ) {
@@ -78,8 +78,8 @@ fun MainBottomNavigation(
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
-                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
+                    selectedIconColor = Color(0xFFF97316),
+                    selectedTextColor = Color(0xFFF97316),
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     indicatorColor = Color.Transparent

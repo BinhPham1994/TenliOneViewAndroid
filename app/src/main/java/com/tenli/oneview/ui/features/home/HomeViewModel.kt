@@ -20,8 +20,16 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
+enum class TimeFilter(val title: String) {
+    TODAY("Hôm nay"),
+    YESTERDAY("Hôm qua"),
+    LAST_7_DAYS("7 ngày qua"),
+    LAST_30_DAYS("30 ngày qua")
+}
+
 data class HomeUiState(
     val isLoading: Boolean = false,
+    val selectedFilter: TimeFilter = TimeFilter.TODAY,
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
     val eventsOverTime: List<VmsEventStatisticalOverTimeModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
@@ -44,17 +52,49 @@ class HomeViewModel : ViewModel() {
         fetchDashboardData()
     }
 
+    fun setTimeFilter(filter: TimeFilter) {
+        if (_uiState.value.selectedFilter == filter) return
+        _uiState.update { it.copy(selectedFilter = filter) }
+        fetchDashboardData()
+    }
+
     fun fetchDashboardData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // Lấy thời gian từ 00:00 hôm nay đến hiện tại
                 val calendar = Calendar.getInstance()
-                val toTime = calendar.timeInMillis
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                val fromTime = calendar.timeInMillis
+                val toTime: Long
+                val fromTime: Long
+                
+                when (_uiState.value.selectedFilter) {
+                    TimeFilter.TODAY -> {
+                        toTime = calendar.timeInMillis
+                        calendar.set(Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(Calendar.MINUTE, 0)
+                        calendar.set(Calendar.SECOND, 0)
+                        calendar.set(Calendar.MILLISECOND, 0)
+                        fromTime = calendar.timeInMillis
+                    }
+                    TimeFilter.YESTERDAY -> {
+                        calendar.set(Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(Calendar.MINUTE, 0)
+                        calendar.set(Calendar.SECOND, 0)
+                        calendar.set(Calendar.MILLISECOND, 0)
+                        toTime = calendar.timeInMillis - 1
+                        calendar.add(Calendar.DAY_OF_YEAR, -1)
+                        fromTime = calendar.timeInMillis
+                    }
+                    TimeFilter.LAST_7_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(Calendar.DAY_OF_YEAR, -7)
+                        fromTime = calendar.timeInMillis
+                    }
+                    TimeFilter.LAST_30_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(Calendar.DAY_OF_YEAR, -30)
+                        fromTime = calendar.timeInMillis
+                    }
+                }
 
                 // Lấy dữ liệu Overview
                 val overviewResponse = bsApi.getVmsCountOverview(
@@ -94,7 +134,11 @@ class HomeViewModel : ViewModel() {
                 } else emptyList()
 
                 // Sự kiện gần đây
-                val recentResponse = eventApi.getDataList(count = 10)
+                val recentResponse = eventApi.getDataList(
+                    count = 5,
+                    from = fromTime / 1000,
+                    to = toTime / 1000
+                )
                 val recentEvents = if (recentResponse.isSuccessful) {
                     recentResponse.body() ?: emptyList()
                 } else emptyList()

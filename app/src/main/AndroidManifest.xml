@@ -21,9 +21,9 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="tiramisu">
 
-
         <activity
             android:name="com.tenli.oneview.main.MainActivity"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:screenOrientation="portrait"
             android:exported="true"

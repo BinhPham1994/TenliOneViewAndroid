@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,11 +28,22 @@ import androidx.compose.ui.unit.sp
 fun HomeLineChart(
     data: List<Pair<String, Float>>,
     modifier: Modifier = Modifier,
-    lineColor: Color = Color(0xFF1890FF),
+    lineColor: Color = Color(0xFFF97316),
     axisColor: Color = Color(0xFF434343)
 ) {
-    if (data.isEmpty()) {
-        Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    if (data.isEmpty() || data.all { it.second == 0f }) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Không có dữ liệu",
+                tint = Color.LightGray,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             Text("Không có dữ liệu", color = Color.Gray, fontSize = 14.sp)
         }
         return
@@ -41,20 +54,20 @@ fun HomeLineChart(
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height
-        val padding = 40.dp.toPx()
+        val padding = 32.dp.toPx()
         
-        val chartWidth = width - padding * 1.5f
-        val chartHeight = height - padding * 1.5f
+        val chartWidth = width - padding * 1.2f
+        val chartHeight = height - padding * 1.2f
         
         // Vẽ trục X, Y
         drawLine(
-            color = axisColor,
+            color = axisColor.copy(alpha = 0.5f),
             start = Offset(padding, height - padding),
             end = Offset(width - padding / 2, height - padding),
             strokeWidth = 2f
         )
         drawLine(
-            color = axisColor,
+            color = axisColor.copy(alpha = 0.5f),
             start = Offset(padding, height - padding),
             end = Offset(padding, padding / 2),
             strokeWidth = 2f
@@ -72,33 +85,62 @@ fun HomeLineChart(
         for (i in 0..steps) {
             val yValue = maxValue * i / steps
             val yPos = height - padding - (i.toFloat() / steps) * chartHeight
+            val labelValue = java.text.NumberFormat.getNumberInstance(java.util.Locale("vi", "VN")).format(yValue.toLong())
             drawContext.canvas.nativeCanvas.drawText(
-                yValue.toInt().toString(),
-                padding - 10f,
+                labelValue,
+                padding - 12f,
                 yPos + 10f,
                 textPaint
             )
         }
 
         // Vẽ đường line
-        if (data.size > 1) {
+        if (data.isNotEmpty()) {
             val path = Path()
-            val stepX = chartWidth / (data.size - 1)
+            val fillPath = Path()
+            val stepX = if (data.size > 1) chartWidth / (data.size - 1) else chartWidth / 2f
+            
+            // Tính toán các index của nhãn dán sẽ được hiển thị (tối đa 5 nhãn)
+            val maxLabels = 5
+            val labelIndices = mutableListOf<Int>()
+            if (data.size <= maxLabels) {
+                labelIndices.addAll(data.indices)
+            } else {
+                val step = (data.size - 1).toFloat() / (maxLabels - 1)
+                for (i in 0 until maxLabels) {
+                    labelIndices.add(Math.round(i * step).coerceIn(0, data.size - 1))
+                }
+            }
             
             data.forEachIndexed { index, pair ->
-                val x = padding + index * stepX
+                val x = padding + if (data.size > 1) index * stepX else stepX
                 val y = height - padding - (pair.second / maxValue) * chartHeight
+                
                 if (index == 0) {
                     path.moveTo(x, y)
+                    fillPath.moveTo(x, height - padding)
+                    fillPath.lineTo(x, y)
                 } else {
-                    path.lineTo(x, y)
+                    val prevX = padding + (index - 1) * stepX
+                    val prevPair = data[index - 1]
+                    val prevY = height - padding - (prevPair.second / maxValue) * chartHeight
+                    
+                    val controlX1 = prevX + stepX / 2f
+                    val controlY1 = prevY
+                    val controlX2 = x - stepX / 2f
+                    val controlY2 = y
+                    
+                    path.cubicTo(controlX1, controlY1, controlX2, controlY2, x, y)
+                    fillPath.cubicTo(controlX1, controlY1, controlX2, controlY2, x, y)
                 }
                 
-                // Vẽ điểm
-                drawCircle(color = lineColor, radius = 6f, center = Offset(x, y))
+                if (index == data.size - 1) {
+                    fillPath.lineTo(x, height - padding)
+                    fillPath.close()
+                }
                 
-                // Vẽ nhãn trục X (chỉ vẽ một vài nhãn để tránh đè chữ)
-                if (data.size < 10 || index % (data.size / 5) == 0 || index == data.size - 1) {
+                // Vẽ nhãn trục X (chỉ vẽ các nhãn đã được chọn để tránh đè chữ)
+                if (labelIndices.contains(index)) {
                     textPaint.textAlign = Paint.Align.CENTER
                     drawContext.canvas.nativeCanvas.drawText(
                         pair.first,
@@ -109,11 +151,30 @@ fun HomeLineChart(
                 }
             }
             
-            drawPath(
-                path = path,
-                color = lineColor,
-                style = Stroke(width = 4f)
-            )
+            if (data.size > 1) {
+                drawPath(
+                    path = fillPath,
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(lineColor.copy(alpha = 0.3f), Color.Transparent),
+                        startY = height - padding - chartHeight,
+                        endY = height - padding
+                    )
+                )
+                
+                drawPath(
+                    path = path,
+                    color = lineColor,
+                    style = Stroke(width = 4f)
+                )
+            }
+            
+            // Vẽ các điểm đè lên trên cùng
+            data.forEachIndexed { index, pair ->
+                val x = padding + if (data.size > 1) index * stepX else stepX
+                val y = height - padding - (pair.second / maxValue) * chartHeight
+                drawCircle(color = Color.White, radius = 8f, center = Offset(x, y))
+                drawCircle(color = lineColor, radius = 5f, center = Offset(x, y))
+            }
         }
     }
 }
@@ -122,11 +183,22 @@ fun HomeLineChart(
 fun HomeHorizontalBarChart(
     data: List<Pair<String, Float>>,
     modifier: Modifier = Modifier,
-    barColor: Color = Color(0xFF1890FF),
+    barColor: Color = Color(0xFFF97316),
     barHeight: Float = 40f
 ) {
-    if (data.isEmpty()) {
-        Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+    if (data.isEmpty() || data.all { it.second == 0f }) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = Icons.Default.Warning,
+                contentDescription = "Không có dữ liệu",
+                tint = Color.LightGray,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             Text("Không có dữ liệu", color = Color.Gray, fontSize = 14.sp)
         }
         return
@@ -136,11 +208,14 @@ fun HomeHorizontalBarChart(
 
     Canvas(modifier = modifier) {
         val width = size.width
-        val paddingLeft = 120.dp.toPx() // Chỗ cho Label
+        val paddingLeft = 90.dp.toPx() // Chỗ cho Label
         val paddingRight = 40.dp.toPx()
         val chartWidth = width - paddingLeft - paddingRight
         
-        val itemHeight = size.height / data.size
+        val maxItemHeight = 60.dp.toPx()
+        val itemHeight = minOf(size.height / data.size, maxItemHeight)
+        val totalHeight = itemHeight * data.size
+        val startY = (size.height - totalHeight) / 2f
         
         val textPaintLabel = Paint().apply {
             color = android.graphics.Color.DKGRAY
@@ -155,7 +230,7 @@ fun HomeHorizontalBarChart(
         }
 
         data.forEachIndexed { index, pair ->
-            val y = index * itemHeight + itemHeight / 2
+            val y = startY + index * itemHeight + itemHeight / 2f
             
             // Tên nhãn (Label)
             val labelStr = if (pair.first.length > 15) pair.first.take(12) + "..." else pair.first
@@ -166,18 +241,31 @@ fun HomeHorizontalBarChart(
                 textPaintLabel
             )
             
-            // Vẽ Bar
+            val corner = 6.dp.toPx()
+            val actualBarHeight = itemHeight * 0.8f // Tăng độ dày cột lên 80% không gian
+            
+            // Vẽ Bar (bo cong toàn bộ)
             val barW = (pair.second / maxValue) * chartWidth
             drawRoundRect(
                 color = barColor,
-                topLeft = Offset(paddingLeft, y - barHeight / 2),
-                size = Size(barW, barHeight),
-                cornerRadius = CornerRadius(barHeight / 2, barHeight / 2)
+                topLeft = Offset(paddingLeft, y - actualBarHeight / 2),
+                size = Size(barW, actualBarHeight),
+                cornerRadius = CornerRadius(corner, corner)
             )
             
+            // Vẽ đè một hình chữ nhật nhỏ lên phần bên trái để làm cho nó vuông góc (không bo cong bên phía nhãn)
+            if (barW > corner) {
+                drawRect(
+                    color = barColor,
+                    topLeft = Offset(paddingLeft, y - actualBarHeight / 2),
+                    size = Size(corner, actualBarHeight)
+                )
+            }
+            
             // Vẽ giá trị
+            val valueStr = java.text.NumberFormat.getNumberInstance(java.util.Locale("vi", "VN")).format(pair.second.toLong())
             drawContext.canvas.nativeCanvas.drawText(
-                pair.second.toInt().toString(),
+                valueStr,
                 paddingLeft + barW + 10f,
                 y + 10f,
                 textPaintValue
@@ -195,8 +283,10 @@ fun StatCard(
 ) {
     Column(
         modifier = modifier
+            .aspectRatio(16f / 9f)
             .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.Center
     ) {
         Text(text = title.uppercase(), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(8.dp))

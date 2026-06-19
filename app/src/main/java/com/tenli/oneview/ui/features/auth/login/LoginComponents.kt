@@ -1,14 +1,18 @@
 package com.tenli.oneview.ui.features.auth.login
 
 import androidx.annotation.DrawableRes
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -48,7 +52,7 @@ fun LoginInputField(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
-    @DrawableRes leadingIcon: Int = 0,
+    leadingIcon: ImageVector? = null,
     isPassword: Boolean = false,
     showPassword: Boolean = false,
     onPasswordToggle: (() -> Unit)? = null,
@@ -59,91 +63,88 @@ fun LoginInputField(
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    OutlinedTextField(
+    androidx.compose.foundation.text.BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        textStyle = MaterialTheme.typography.bodyLarge.copy(
-            color = MaterialTheme.colorScheme.onSurface
-        ),
         modifier = Modifier
             .fillMaxWidth()
             .height(60.dp)
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
             .focusRequester(focusRequester),
-        placeholder = {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        },
-        leadingIcon = if (leadingIcon != 0) {
-            {
-                Icon(
-                    painter = painterResource(id = leadingIcon),
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else null,
-        trailingIcon = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(end = MaterialTheme.spacing.extraSmall)
-            ) {
-                if (value.isNotEmpty()) {
-                    IconButton(onClick = {
-                        onClear()
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Clear,
-                            contentDescription = "Clear",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                if (isPassword && onPasswordToggle != null) {
-                    IconButton(onClick = onPasswordToggle) {
-                        Icon(
-                            imageVector = if (showPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                            contentDescription = "Toggle Password",
-                            modifier = Modifier.size(22.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-        },
+        textStyle = MaterialTheme.typography.bodyLarge.copy(
+            color = MaterialTheme.colorScheme.onSurface
+        ),
         visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
-        colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = MaterialTheme.colorScheme.onSurface,
-            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        singleLine = true,
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+        decorationBox = { innerTextField ->
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        start = 16.dp,
+                        end = 4.dp
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (leadingIcon != null) {
+                    Icon(
+                        imageVector = leadingIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(8.dp))
+                }
 
-            focusedLabelColor = MaterialTheme.colorScheme.primary,
-            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    innerTextField()
+                }
 
-            focusedBorderColor = Color.Transparent,
-            unfocusedBorderColor = Color.Transparent,
-            disabledBorderColor = Color.Transparent,
-
-            focusedContainerColor = MaterialTheme.colorScheme.surface,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
-
-            cursorColor = MaterialTheme.colorScheme.primary,
-            selectionColors = TextSelectionColors(
-                handleColor = MaterialTheme.colorScheme.primary,
-                backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-            )
-        ),
-        shape = RoundedCornerShape(16.dp),
-        singleLine = true
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (value.isNotEmpty()) {
+                        IconButton(onClick = {
+                            onClear()
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear",
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    if (isPassword && onPasswordToggle != null) {
+                        IconButton(onClick = onPasswordToggle) {
+                            Icon(
+                                imageVector = if (showPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = "Toggle Password",
+                                modifier = Modifier.size(22.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
     )
 }
 
