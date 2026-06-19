@@ -1,21 +1,27 @@
 package com.tenli.oneview.ui.features.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.utils.AiTypeHelper
@@ -57,9 +63,9 @@ fun HomeScreen(
         // 4 Thẻ thống kê
         item {
             // Lấy giá trị từ Overview (nếu API có nhãn cụ thể, ở đây minh họa cách lấy)
-            val totalEvents = uiState.overviewStats.find { it.label == "event-count" && it.tag == "all" }?.count?.toString() ?: "0"
-            val totalCameras = uiState.overviewStats.find { it.label == "camera-count" && it.tag == "all" }?.count?.toString() ?: "0"
-            val totalAI = uiState.overviewStats.find { it.label == "monitor-count" && it.tag == "all" }?.count?.toString() ?: "0"
+            val totalEvents = uiState.overviewStats.find { it.label == "event-count" && it.tag == "all" }?.count?.toLong()?.toString() ?: "0"
+            val totalCameras = uiState.overviewStats.find { it.label == "camera-count" && it.tag == "all" }?.count?.toLong()?.toString() ?: "0"
+            val totalAI = uiState.overviewStats.find { it.label == "monitor-count" && it.tag == "all" }?.count?.toLong()?.toString() ?: "0"
             val systemStatus = "An toàn" // Default mock as per requirement
 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -111,7 +117,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(200.dp)
-                    .background(Color(0xFFF8F9FA), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(8.dp)
             )
         }
@@ -127,7 +133,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(250.dp)
-                    .background(Color(0xFFF8F9FA), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                     .padding(8.dp)
             )
         }
@@ -151,9 +157,19 @@ fun HomeScreen(
                 Text("Chưa có sự kiện nào", color = Color.Gray, modifier = Modifier.padding(16.dp))
             }
         } else {
-            items(uiState.recentEvents) { event ->
-                RecentEventItem(event) {
-                    onEventClick(event.id.toString())
+            item {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                        .padding(vertical = 4.dp)
+                ) {
+                    uiState.recentEvents.forEachIndexed { index, event ->
+                        RecentEventItem(event, uiState.cameraList) {
+                            onEventClick(event.id.toString())
+                        }
+
+                    }
                 }
             }
         }
@@ -171,33 +187,31 @@ fun SectionTitle(title: String) {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecentEventItem(event: EventData, onClick: () -> Unit) {
-    Card(
-        onClick = onClick,
+fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, onClick: () -> Unit) {
+    androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
             AsyncImage(
-                model = event.data?.image ?: event.data?.cropImage,
+                model = getEventImageUrl(event),
                 contentDescription = "Event Image",
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(60.dp)
-                    .background(Color.DarkGray, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                    .width(120.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                    .background(Color.DarkGray)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
+                val cameraName = cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name 
+                                 ?: event.data?.cameraUUID?.take(6)?.let { "Camera $it" } ?: "Camera"
                 Text(
-                    text = event.data?.cameraUUID?.take(6)?.let { "Camera $it" } ?: "Camera",
+                    text = cameraName,
                     color = Color.Black,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
@@ -216,7 +230,6 @@ fun RecentEventItem(event: EventData, onClick: () -> Unit) {
                 fontSize = 12.sp
             )
         }
-    }
 }
 
 private fun formatEventTime(time: Double?): String {
@@ -225,4 +238,13 @@ private fun formatEventTime(time: Double?): String {
     val timeMillis = if (time < 100000000000.0) (time * 1000).toLong() else time.toLong()
     val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     return sdf.format(Date(timeMillis))
+}
+
+private fun getEventImageUrl(event: EventData): String? {
+    val filename = event.data?.image ?: event.data?.cropImage ?: return null
+    if (filename.startsWith("http")) return filename
+    val domain = UserSession.domain.trimEnd('/')
+    val serviceId = event.serviceId
+    val containerId = event.data?.containerId ?: return null
+    return "$domain/Data/api/Data/Media/$serviceId/$containerId/$filename"
 }

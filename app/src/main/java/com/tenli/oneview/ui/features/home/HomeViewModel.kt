@@ -11,6 +11,8 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByCameraModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
+import com.tenli.oneview.data.network.api.VmsApi
+import com.tenli.oneview.model.network.CameraModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +26,7 @@ data class HomeUiState(
     val eventsOverTime: List<VmsEventStatisticalOverTimeModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
     val eventsByCamera: List<VmsEventCountByCameraModel> = emptyList(),
+    val cameraList: List<CameraModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
     val error: String? = null
 )
@@ -32,6 +35,7 @@ class HomeViewModel : ViewModel() {
 
     private val bsApi = LoginAuthClient.create(BsApi::class.java)
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
+    private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -95,6 +99,12 @@ class HomeViewModel : ViewModel() {
                     recentResponse.body() ?: emptyList()
                 } else emptyList()
 
+                // Danh sách Camera
+                val cameraResponse = vmsApi.getCameraList()
+                val cameraList = if (cameraResponse.isSuccessful) {
+                    cameraResponse.body() ?: emptyList()
+                } else emptyList()
+
                 var errorMsg: String? = null
                 if (!overviewResponse.isSuccessful) errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
                 else if (!overTimeResponse.isSuccessful) errorMsg = "Lỗi Biểu đồ Thời gian: ${overTimeResponse.code()}"
@@ -107,6 +117,7 @@ class HomeViewModel : ViewModel() {
                         eventsOverTime = eventsOverTime,
                         eventsByType = eventsByType,
                         eventsByCamera = eventsByCamera,
+                        cameraList = cameraList,
                         recentEvents = recentEvents,
                         error = errorMsg
                     )

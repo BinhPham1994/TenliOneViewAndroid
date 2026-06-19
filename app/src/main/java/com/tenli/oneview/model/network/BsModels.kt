@@ -213,7 +213,7 @@ data class VmsEventStatisticalOverTimeModel(
 data class VmsCountOverviewModel(
     val label: String,
     val tag: String,
-    val count: Any,                     // String hoặc Int
+    val count: Double,
     @SerializedName("service_id")
     val serviceId: String? = null
 )
