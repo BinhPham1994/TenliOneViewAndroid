@@ -69,18 +69,27 @@ class LoginViewModel(
 
     fun login() {
         val email = _uiState.value.email
-        if (!ValidationUtils.validateEmail(email)) {
-            viewModelScope.launch { _event.emit(LoginEvent.ShowError("Email không hợp lệ")) }
+        val domain = _uiState.value.domain
+        
+        // Removed email validation because VMS username might not be an email
+        if (email.isEmpty()) {
+            viewModelScope.launch { _event.emit(LoginEvent.ShowError("Tài khoản không được để trống")) }
+            return
+        }
+        
+        if (domain.isEmpty()) {
+            viewModelScope.launch { _event.emit(LoginEvent.ShowError("Domain không được để trống")) }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            val loginRequest = createLoginRequest()
-            android.util.Log.e("LoginAAAA", "JSON Đóng gói: " + com.google.gson.Gson().toJson(loginRequest))
-            Log.e("LoginAAAA", loginRequest.toString())
+            val request = com.tenli.oneview.model.network.LogInModel(
+                username = email,
+                password = _uiState.value.password
+            )
             try {
-                val result = authRepository.login(loginRequest)
+                val result = authRepository.loginVms(domain, request)
                 if (result.isSuccess) {
                     val loginData = result.getOrNull()
                     if (loginData != null) {
@@ -90,7 +99,7 @@ class LoginViewModel(
                         _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
                     }
                 } else {
-                    _event.emit(LoginEvent.ShowError("Tài khoản hoặc mật khẩu không chính xác"))
+                    _event.emit(LoginEvent.ShowError("Tài khoản, mật khẩu hoặc Domain không chính xác"))
                 }
             } catch (e: Exception) {
                 _event.emit(LoginEvent.ShowError("Lỗi kết nối: ${e.message}"))

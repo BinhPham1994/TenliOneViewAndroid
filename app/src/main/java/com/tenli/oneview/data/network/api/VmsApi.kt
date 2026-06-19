@@ -56,6 +56,9 @@ interface VmsApi {
     @GET("VMS/api/User/{id}")
     suspend fun getUser(@Path("id") id: Int): Response<UserModel>
 
+    @GET
+    suspend fun getUserExt(@Url url: String): Response<UserModel>
+
     @POST("VMS/api/User")
     suspend fun createUser(@Body model: UserModel): Response<UserModel>
 
@@ -220,6 +223,9 @@ interface VmsApi {
 
     @POST("VMS/api/LogIn")
     suspend fun logIn(@Body model: LogInModel): Response<TokenModel>
+
+    @POST
+    suspend fun logInExt(@Url url: String, @Body model: LogInModel): Response<TokenModel>
 
     @POST("VMS/api/LogOut")
     suspend fun logOut(@Body model: LogOutModel): Response<Unit>
