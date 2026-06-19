@@ -8,7 +8,7 @@ import org.json.JSONObject
 import retrofit2.Response
 
 object AppConfig {
-    const val PACKAGE_ID = "com.tenli.aiot"
+    const val PACKAGE_ID = "com.tenli.oneview"
     const val DEVICE_KEY_DEFAULT = "key"
     const val PORT_DEVICE_DEFAULT = 8088
     const val ENGLISH = "en"
