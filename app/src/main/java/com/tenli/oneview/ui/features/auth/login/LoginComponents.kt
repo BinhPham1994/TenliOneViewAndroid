@@ -22,9 +22,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -46,7 +46,7 @@ import com.tenli.oneview.ui.utils.bounceClick
 fun LoginInputField(
     value: String,
     onValueChange: (String) -> Unit,
-    hint: String,
+    label: String,
     @DrawableRes leadingIcon: Int = 0,
     isPassword: Boolean = false,
     showPassword: Boolean = false,
@@ -58,7 +58,7 @@ fun LoginInputField(
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    TextField(
+    OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -66,11 +66,11 @@ fun LoginInputField(
         ),
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(60.dp)
             .focusRequester(focusRequester),
         placeholder = {
             Text(
-                text = hint,
+                text = label,
                 style = MaterialTheme.typography.bodyLarge,
             )
         },
@@ -118,19 +118,19 @@ fun LoginInputField(
         visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions,
-        colors = TextFieldDefaults.colors(
+        colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = MaterialTheme.colorScheme.onSurface,
             unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
 
-            focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            focusedLabelColor = MaterialTheme.colorScheme.primary,
+            unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
 
-            focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-            disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.Transparent,
+            disabledBorderColor = Color.Transparent,
 
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
+            focusedContainerColor = MaterialTheme.colorScheme.surface,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surface,
 
             cursorColor = MaterialTheme.colorScheme.primary,
             selectionColors = TextSelectionColors(
@@ -138,7 +138,7 @@ fun LoginInputField(
                 backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
             )
         ),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(16.dp),
         singleLine = true
     )
 }

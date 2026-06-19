@@ -35,13 +35,7 @@ fun MainBottomNavigation(
     onScrollToTop: (MainTab) -> Unit
 ) {
     NavigationBar(
-        modifier = Modifier
-            .height(76.dp)
-            .shadow(
-                elevation = 16.dp,
-                spotColor = Color(0x1A000000),
-                ambientColor = Color(0x1A000000)
-            ),
+        modifier = Modifier.height(76.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
         windowInsets = WindowInsets(0, 0, 0, 40)
@@ -84,8 +78,8 @@ fun MainBottomNavigation(
                     )
                 },
                 colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    selectedIconColor = MaterialTheme.colorScheme.onBackground,
+                    selectedTextColor = MaterialTheme.colorScheme.onBackground,
                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     indicatorColor = Color.Transparent

@@ -93,15 +93,28 @@ class LoginViewModel(
                         _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
                     }
                 } else {
-                    val errorMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+                    val exception = result.exceptionOrNull()
+                    val errorMsg = exception?.message ?: "Unknown error"
+                    
                     if (errorMsg.contains("failed with code 401") || errorMsg.contains("failed with code 400")) {
-                        _event.emit(LoginEvent.ShowError("Tài khoản hoặc mật khẩu không chính xác"))
+                        _event.emit(LoginEvent.ShowError("Thông tin tài khoản hoặc mật khẩu không chính xác."))
+                    } else if (exception is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
+                        _event.emit(LoginEvent.ShowError("Không thể kết nối máy chủ. Vui lòng kiểm tra lại Domain dự án hoặc mạng."))
+                    } else if (exception is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
+                        _event.emit(LoginEvent.ShowError("Kết nối mạng quá hạn, vui lòng thử lại."))
                     } else {
-                        _event.emit(LoginEvent.ShowError("Lỗi: $errorMsg"))
+                        _event.emit(LoginEvent.ShowError("Đã có lỗi xảy ra. Vui lòng thử lại sau."))
                     }
                 }
             } catch (e: Exception) {
-                _event.emit(LoginEvent.ShowError("Lỗi hệ thống: ${e.message}"))
+                val errorMsg = e.message ?: ""
+                if (e is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
+                    _event.emit(LoginEvent.ShowError("Không thể kết nối máy chủ. Vui lòng kiểm tra lại Domain dự án hoặc mạng."))
+                } else if (e is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
+                    _event.emit(LoginEvent.ShowError("Kết nối mạng quá hạn, vui lòng thử lại."))
+                } else {
+                    _event.emit(LoginEvent.ShowError("Đã có lỗi xảy ra. Vui lòng thử lại sau."))
+                }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }

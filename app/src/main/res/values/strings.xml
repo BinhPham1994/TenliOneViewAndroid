@@ -4,9 +4,9 @@
     <string name="login_title">Đăng nhập</string>
     <string name="login_lang_code">VI</string>
     <string name="login_domain_label">Domain dự án</string>
-    <string name="login_domain_hint">Nhập domain dự án</string>
-    <string name="login_email_label">Email</string>
-    <string name="login_email_hint">Nhập email của bạn</string>
+    <string name="login_domain_hint">Nhập tên miền dự án (vd: https://domain.tenli.ai)</string>
+    <string name="login_email_label">Tài khoản</string>
+    <string name="login_email_hint">Nhập tên tài khoản hoặc email</string>
     <string name="login_password_label">Mật khẩu</string>
     <string name="login_password_hint">Nhập mật khẩu</string>
     <string name="login_forgot_password">Quên mật khẩu?</string>

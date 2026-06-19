@@ -36,11 +36,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material3.Icon
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -51,6 +57,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
 import com.tenli.oneview.main.LoginActivity
@@ -130,6 +143,8 @@ fun LoginContent(
     val context = LocalContext.current
     val currentLang = remember { LocaleManager.getLocale(context) }
     val isVietnamese = currentLang == "vi"
+    
+    var isTermsAccepted by remember { mutableStateOf(false) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -159,7 +174,7 @@ fun LoginContent(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(24.dp))
+                            .clip(RoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surface)
                             .bounceClick { onToggleLanguage() }
                             .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -181,61 +196,57 @@ fun LoginContent(
                 Image(
                     painter = painterResource(id = R.drawable.logo_app),
                     contentDescription = null,
-                    modifier = Modifier.height(120.dp)
+                    modifier = Modifier.height(100.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                            append("AI VISION\n")
+                        }
+                        withStyle(style = SpanStyle(color = MaterialTheme.colorScheme.onBackground)) {
+                            append("CHO KỶ NGUYÊN SỐ")
+                        }
+                    },
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    ),
+                    textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(40.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = domainLabel,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(5.dp))
                     LoginInputField(
                         value = uiState.domain,
                         onValueChange = onDomainChange,
-                        hint = domainHint,
+                        label = domainHint,
                         onClear = { onDomainChange("") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = emailLabel,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Spacer(modifier = Modifier.height(5.dp))
                     LoginInputField(
                         value = uiState.email,
                         onValueChange = onEmailChange,
-                        hint = emailHint,
+                        label = emailHint,
                         onClear = { onEmailChange("") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Next),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text(
-                            text = passwordLabel,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(5.dp))
                     LoginInputField(
                         value = uiState.password,
                         onValueChange = onPasswordChange,
-                        hint = passwordHint,
+                        label = passwordHint,
                         isPassword = true,
                         showPassword = uiState.showPassword,
                         onPasswordToggle = onTogglePassword,
@@ -243,7 +254,6 @@ fun LoginContent(
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                         keyboardActions = KeyboardActions(onDone = {
                             focusManager.clearFocus()
-                            if (uiState.isLoginActive && !uiState.isLoading) onLoginClick()
                         })
                     )
                 }
@@ -253,12 +263,12 @@ fun LoginContent(
                         focusManager.clearFocus()
                         onLoginClick()
                     },
-                    enabled = uiState.isLoginActive && !uiState.isLoading,
+                    enabled = uiState.isLoginActive && !uiState.isLoading && isTermsAccepted,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 40.dp)
                         .height(56.dp),
-                    shape = RoundedCornerShape(30.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         disabledContainerColor = MaterialTheme.colorScheme.primary,
@@ -282,6 +292,39 @@ fun LoginContent(
                     }
                 }
 
+            }
+
+            Row(
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp, vertical = 24.dp)
+                    .bounceClick { isTermsAccepted = !isTermsAccepted }
+            ) {
+                Icon(
+                    imageVector = if (isTermsAccepted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = "Accept terms",
+                    tint = if (isTermsAccepted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = buildAnnotatedString {
+                        append("Tôi xác nhận đã đọc và đồng ý với ")
+                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("Điều khoản sử dụng")
+                        }
+                        append(" và ")
+                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("Chính sách Bảo mật")
+                        }
+                        append(" của Tenli")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Start
+                )
             }
         }
     }
