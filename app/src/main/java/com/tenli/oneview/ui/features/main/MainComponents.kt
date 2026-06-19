@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.shadow
 import com.tenli.oneview.R
 import com.tenli.oneview.ui.theme.spacing
 
@@ -34,8 +35,14 @@ fun MainBottomNavigation(
     onScrollToTop: (MainTab) -> Unit
 ) {
     NavigationBar(
-        modifier = Modifier.height(76.dp),
-        containerColor = MaterialTheme.colorScheme.background,
+        modifier = Modifier
+            .height(76.dp)
+            .shadow(
+                elevation = 16.dp,
+                spotColor = Color(0x1A000000),
+                ambientColor = Color(0x1A000000)
+            ),
+        containerColor = MaterialTheme.colorScheme.surface,
         tonalElevation = 0.dp,
         windowInsets = WindowInsets(0, 0, 0, 40)
     ) {

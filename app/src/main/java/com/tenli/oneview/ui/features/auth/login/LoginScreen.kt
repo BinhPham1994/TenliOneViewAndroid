@@ -159,10 +159,10 @@ fun LoginContent(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(MaterialTheme.colorScheme.surface)
                             .bounceClick { onToggleLanguage() }
-                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
                     ) {
                         Image(
                             painter = painterResource(id = if (isVietnamese) R.drawable.vietnam else R.drawable.kingdom),
@@ -256,9 +256,9 @@ fun LoginContent(
                     enabled = uiState.isLoginActive && !uiState.isLoading,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = MaterialTheme.spacing.extraLarge)
-                        .height(52.dp),
-                    shape = RoundedCornerShape(MaterialTheme.spacing.radiusMedium),
+                        .padding(top = 40.dp)
+                        .height(56.dp),
+                    shape = RoundedCornerShape(30.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary,
                         disabledContainerColor = MaterialTheme.colorScheme.primary,

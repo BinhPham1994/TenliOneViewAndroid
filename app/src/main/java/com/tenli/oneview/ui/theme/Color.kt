@@ -6,16 +6,15 @@ val BrandPrimary = Color(0xFFFF751F)       // Thương hiệu Tenli
 val BrandOnPrimary = Color(0xFFFFFFFF)     // Chữ trên nền chính
 val BrandContainer = Color(0xFFFFDBCF)    // Nền nhẹ cho Badge hoặc Nút phụ
 
-// Không dùng xám xanh F2F2F7 nữa, dùng màu trắng sứ pha xanh lá cực nhẹ
-val BackgroundLight = Color(0xFFEDF2EC)   // Nền hệ thống (Android M3 Surface)
-val IoSBackgroundLight = Color(0xFFF2F2F7)
+// --- NỀN (BACKGROUND) ---
+val BackgroundLight = Color(0xFFF8F9FA)   // Nền chính của App (Xám rất nhẹ, sạch sẽ)
 val SurfaceLight = Color(0xFFFFFFFF)      // Nền Card, Dialog (Trắng tinh)
-val SurfaceVariant = Color(0xFFDEE5D8)    // Màu xám lá nhạt cho Input/Divider
+val SurfaceVariant = Color(0xFFF1F3F5)    // Màu nền Input, Divider (Xám trung tính, sáng)
 
-// --- TEXT & CONTENT (Phân cấp rõ ràng theo Android) ---
-val TextPrimary = Color(0xFF191C19)       // OnSurface: Gần như đen nhưng có ánh xanh đậm
-val TextSecondary = Color(0xFF424940)     // OnSurfaceVariant: Xám lá (thay cho 8E8E93)
-val TextDisabled = Color(0xFFC2C9BD)      // Trạng thái vô hiệu hóa (Outline)
+// --- TEXT & CONTENT ---
+val TextPrimary = Color(0xFF1A1A1A)       // Chữ chính (Đen tuyền, độ tương phản cao)
+val TextSecondary = Color(0xFF6C757D)     // Chữ phụ (Xám tro)
+val TextDisabled = Color(0xFFDEE2E6)      // Trạng thái vô hiệu hóa
 
 // --- ERROR ---
-val ErrorRed = Color(0xFFBA1A1A)          // Màu đỏ Error chuẩn Android (Trầm hơn iOS)
+val ErrorRed = Color(0xFFDC3545)          // Màu đỏ báo lỗi chuẩn hiện đại

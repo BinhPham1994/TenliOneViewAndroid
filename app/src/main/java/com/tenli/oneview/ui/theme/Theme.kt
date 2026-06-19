@@ -17,7 +17,7 @@ private val LightColorScheme = lightColorScheme(
     tertiary = BrandPrimary.copy(alpha = 0.7f),
     surfaceTint = Color.Transparent,
 
-    background = IoSBackgroundLight,
+    background = BackgroundLight,
     onBackground = TextPrimary,
 
     surface = SurfaceLight,
