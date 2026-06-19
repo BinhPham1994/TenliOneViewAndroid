@@ -11,7 +11,7 @@ import coil.request.ImageRequest
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.tenli.oneview.R
-import com.tenli.oneview.SplashActivity
+import com.tenli.oneview.main.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,7 +51,7 @@ class EventMessagingService : FirebaseMessagingService() {
     private fun showMissedCallNotification(title: String, body: String, url: String?, eId: String) {
         val notificationId = getSafeNotificationId(eId, 1)
 
-        val intent = Intent(this, SplashActivity::class.java).apply {
+        val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("EVENT_ID", eId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -126,7 +126,7 @@ class EventMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val detailIntent = Intent(this, SplashActivity::class.java).apply {
+        val detailIntent = Intent(this, MainActivity::class.java).apply {
             putExtra("EVENT_ID", eId)
             putExtra("FROM_NOTIFICATION", true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -164,7 +164,7 @@ class EventMessagingService : FirebaseMessagingService() {
     private fun showRegularNotification(title: String, body: String, url: String?, eId: String) {
         val notificationId = getSafeNotificationId(eId)
         
-        val intent = Intent(this, SplashActivity::class.java).apply {
+        val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("EVENT_ID", eId)
             putExtra("FROM_NOTIFICATION", true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP

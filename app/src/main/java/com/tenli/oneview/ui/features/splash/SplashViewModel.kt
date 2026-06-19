@@ -39,6 +39,27 @@ class SplashViewModel : ViewModel() {
         }
     }
 
+    fun navigateToMain() {
+        _uiState.update { it.copy(destination = SplashDestination.Main) }
+    }
+
+    fun logout() {
+        // Clear session data
+        UserSession.accessToken = ""
+        UserSession.refreshToken = ""
+        UserSession.userData = null
+        
+        val prefs = GlobalData.preferences
+        prefs.edit().apply {
+            remove(AppKeys.ACCESS_TOKEN_KEY)
+            remove(AppKeys.REFRESH_TOKEN_KEY)
+            remove(AppKeys.USER_DATA_KEY)
+            apply()
+        }
+        
+        _uiState.update { it.copy(destination = SplashDestination.Login) }
+    }
+
     init {
         setupAndNavigate()
     }

@@ -1,8 +1,8 @@
 -- Merging decision tree log ---
 application
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-106:19
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-106:19
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-106:19
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-101:19
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-101:19
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:8:5-101:19
 MERGED from [com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:22:5-36:19
 MERGED from [com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:22:5-36:19
 MERGED from [androidx.compose.ui:ui-tooling-android:1.10.5] /home/vung/.gradle/caches/8.14.4/transforms/36acdc81ab97ede24f8d0a2df09247ca/transformed/jetified-ui-tooling/AndroidManifest.xml:22:5-26:19
@@ -134,21 +134,21 @@ MERGED from [com.google.android.play:core-common:2.0.3] /home/vung/.gradle/cache
 	android:name
 		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:9:9-33
 provider#androidx.core.content.FileProvider
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:96:9-104:20
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:91:9-99:20
 	android:grantUriPermissions
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:100:13-47
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:95:13-47
 	android:authorities
 		INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:98:13-60
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:93:13-60
 	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:99:13-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:94:13-37
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:97:13-62
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:92:13-62
 manifest
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-134:12
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-134:12
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-134:12
-INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-134:12
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-129:12
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-129:12
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-129:12
+INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:2:1-129:12
 MERGED from [androidx.databinding:databinding-adapters:8.7.3] /home/vung/.gradle/caches/8.14.4/transforms/17f8a09debd806f037530ae5a1391340/transformed/databinding-adapters-8.7.3/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.databinding:databinding-ktx:8.7.3] /home/vung/.gradle/caches/8.14.4/transforms/866bf52005db7ee6dafa506a210d7d17/transformed/jetified-databinding-ktx-8.7.3/AndroidManifest.xml:2:1-7:12
 MERGED from [androidx.databinding:databinding-runtime:8.7.3] /home/vung/.gradle/caches/8.14.4/transforms/f30d822de76d162ed60bc73b6540a3c7/transformed/databinding-runtime-8.7.3/AndroidManifest.xml:2:1-7:12
@@ -341,7 +341,7 @@ ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/A
 	android:name
 		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:6:9-50
 uses-permission#android.permission.INTERNET
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:108:5-110:40
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:5-105:40
 MERGED from [com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:25:5-67
 MERGED from [com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:25:5-67
 MERGED from [com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:23:5-67
@@ -365,21 +365,21 @@ MERGED from [com.google.android.datatransport:transport-backend-cct:3.3.0] /home
 MERGED from [com.squareup.okhttp3:okhttp-android:5.3.2] /home/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:8:5-67
 MERGED from [com.squareup.okhttp3:okhttp-android:5.3.2] /home/vung/.gradle/caches/8.14.4/transforms/faa1d9af7bcca5594f6431ec1f6d1c03/transformed/jetified-okhttp-release/AndroidManifest.xml:8:5-67
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:110:9-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:105:9-37
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:109:9-51
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:104:9-51
 uses-permission#com.google.android.gms.permission.AD_ID
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:111:5-113:31
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:106:5-108:31
 REJECTED from [com.google.android.gms:play-services-measurement-impl:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/ce473936768f42af5b0a5b8d76ed683d/transformed/jetified-play-services-measurement-impl-23.2.0/AndroidManifest.xml:27:5-79
 REJECTED from [com.google.android.gms:play-services-measurement-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/3b5ff573b9480089e70c7790152f846d/transformed/jetified-play-services-measurement-api-23.2.0/AndroidManifest.xml:25:5-79
 REJECTED from [com.google.android.gms:play-services-ads-identifier:18.0.0] /home/vung/.gradle/caches/8.14.4/transforms/5ed135ea24c16b25737b8dc6a40e9441/transformed/jetified-play-services-ads-identifier-18.0.0/AndroidManifest.xml:23:5-79
 REJECTED from [com.google.android.gms:play-services-measurement-sdk-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/f11ee958ab9a5f3101ecdcdd6ca78106/transformed/jetified-play-services-measurement-sdk-api-23.2.0/AndroidManifest.xml:26:5-79
 	tools:node
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:113:9-28
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:108:9-28
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:112:9-63
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:107:9-63
 uses-permission#android.permission.ACCESS_NETWORK_STATE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:5-79
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:109:5-79
 MERGED from [com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:26:5-79
 MERGED from [com.google.firebase:firebase-auth:24.0.1] /home/vung/.gradle/caches/8.14.4/transforms/c0bc84c2682fcaf6d19633bdfc28588a/transformed/jetified-firebase-auth-24.0.1/AndroidManifest.xml:26:5-79
 MERGED from [com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:22:5-79
@@ -409,49 +409,49 @@ MERGED from [com.google.android.datatransport:transport-backend-cct:3.3.0] /home
 MERGED from [com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:20:5-79
 MERGED from [com.google.android.datatransport:transport-runtime:3.3.0] /home/vung/.gradle/caches/8.14.4/transforms/6e59c0c481867c81a314d0258781dc59/transformed/jetified-transport-runtime-3.3.0/AndroidManifest.xml:20:5-79
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:22-76
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:109:22-76
 uses-permission#android.permission.ACCESS_WIFI_STATE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:5-76
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:110:5-76
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:22-73
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:110:22-73
 uses-permission#android.permission.CALL_PHONE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:5-69
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:111:5-69
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:22-66
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:111:22-66
 uses-permission#android.permission.CHANGE_WIFI_MULTICAST_STATE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:5-86
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:112:5-86
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:22-83
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:112:22-83
 uses-permission#android.permission.POST_NOTIFICATIONS
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:5-77
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:113:5-77
 MERGED from [com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:23:5-77
 MERGED from [com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:23:5-77
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:22-74
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:113:22-74
 uses-permission#android.permission.SYSTEM_ALERT_WINDOW
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:5-78
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:5-78
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:22-75
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:114:22-75
 uses-permission#android.permission.USE_FULL_SCREEN_INTENT
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:120:5-122:49
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:115:5-117:49
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:122:9-46
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:117:9-46
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:121:9-65
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:116:9-65
 uses-permission#android.permission.VIBRATE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:5-66
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:5-66
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:22-63
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:118:22-63
 uses-permission#android.permission.FOREGROUND_SERVICE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:124:5-126:51
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:119:5-121:51
 MERGED from [androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:26:5-77
 MERGED from [androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:26:5-77
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:126:9-48
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:121:9-48
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:125:9-61
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:120:9-61
 uses-permission#android.permission.WAKE_LOCK
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:5-68
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:122:5-68
 MERGED from [com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:24:5-68
 MERGED from [com.google.firebase:firebase-messaging:25.0.1] /home/vung/.gradle/caches/8.14.4/transforms/a51542ed48aa87a446a10f692c36750d/transformed/jetified-firebase-messaging-25.0.1/AndroidManifest.xml:24:5-68
 MERGED from [com.google.android.gms:play-services-measurement:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/4cc7e1ef8f02f94be90c18979b44aa7d/transformed/jetified-play-services-measurement-23.2.0/AndroidManifest.xml:25:5-68
@@ -469,167 +469,155 @@ MERGED from [androidx.media3:media3-exoplayer:1.10.0] /home/vung/.gradle/caches/
 MERGED from [com.google.android.gms:play-services-measurement-sdk-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/f11ee958ab9a5f3101ecdcdd6ca78106/transformed/jetified-play-services-measurement-sdk-api-23.2.0/AndroidManifest.xml:25:5-68
 MERGED from [com.google.android.gms:play-services-measurement-sdk-api:23.2.0] /home/vung/.gradle/caches/8.14.4/transforms/f11ee958ab9a5f3101ecdcdd6ca78106/transformed/jetified-play-services-measurement-sdk-api-23.2.0/AndroidManifest.xml:25:5-68
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:22-65
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:122:22-65
 uses-permission#android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:5-95
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:5-95
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:22-92
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:123:22-92
 uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:5-81
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:124:5-81
 MERGED from [androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:25:5-81
 MERGED from [androidx.work:work-runtime:2.11.2] /home/vung/.gradle/caches/8.14.4/transforms/47b674437932f50361e5fa851feb2449/transformed/work-runtime-2.11.2/AndroidManifest.xml:25:5-81
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:129:22-78
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:124:22-78
 uses-permission#android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:5-94
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:125:5-94
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:130:22-91
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:125:22-91
 uses-permission#android.permission.READ_EXTERNAL_STORAGE
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:131:5-133:38
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:126:5-128:38
 	android:maxSdkVersion
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:133:9-35
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:128:9-35
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:132:9-64
-activity#com.tenli.oneview.SplashActivity
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:23:9-31:20
-	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:25:13-36
-	android:theme
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:26:13-54
-	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:24:13-43
-intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:27:13-30:29
-action#android.intent.action.MAIN
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:17-69
-	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:25-66
-category#android.intent.category.LAUNCHER
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:17-77
-	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:27-74
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:127:9-64
 activity#com.tenli.oneview.main.MainActivity
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:33:9-37:71
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:25:9-36:20
 	android:screenOrientation
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:36:13-49
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:28:13-49
+	android:exported
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:29:13-36
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:37:13-68
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:31:13-68
 	android:configChanges
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:35:13-113
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:27:13-113
+	android:theme
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:30:13-54
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:34:13-63
-activity#com.tenli.oneview.main.LoginActivity
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:38:9-41:71
-	android:screenOrientation
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:40:13-49
-	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:41:13-68
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:26:13-63
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:32:13-35:29
+action#android.intent.action.MAIN
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:33:17-69
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:39:13-64
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:33:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:34:17-77
+	android:name
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:34:27-74
 activity#com.canhub.cropper.CropImageActivity
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:42:9-44:59
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:37:9-39:59
 MERGED from [com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:33:9-35:39
 MERGED from [com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:33:9-35:39
 	android:exported
 		ADDED from [com.github.CanHub:Android-Image-Cropper:4.5.0] /home/vung/.gradle/caches/8.14.4/transforms/1ddcbcf7a0291f0a16cf0345cc2046d5/transformed/jetified-Android-Image-Cropper-4.5.0/AndroidManifest.xml:35:13-36
 	android:theme
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:44:13-56
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:39:13-56
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:43:13-64
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:38:13-64
 activity#com.tenli.oneview.firebase.CallComingActivity
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:45:9-55:71
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:40:9-50:71
 	android:screenOrientation
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:50:13-49
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:45:13-49
 	android:turnScreenOn
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:54:13-40
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:49:13-40
 	android:excludeFromRecents
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:47:13-46
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:42:13-46
 	android:showWhenLocked
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:52:13-42
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:47:13-42
 	android:launchMode
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:49:13-48
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:44:13-48
 	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:48:13-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:43:13-37
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:55:13-68
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:50:13-68
 	android:showOnLockScreen
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:51:13-44
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:46:13-44
 	android:theme
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:53:13-66
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:48:13-66
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:46:13-56
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:41:13-56
 service#com.tenli.oneview.firebase.EventMessagingService
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:57:9-63:19
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:52:9-58:19
 	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:59:13-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:54:13-37
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:58:13-59
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:53:13-59
 intent-filter#action:name:com.google.firebase.MESSAGING_EVENT
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:13-62:29
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:55:13-57:29
 action#com.google.firebase.MESSAGING_EVENT
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:17-78
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:56:17-78
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:25-75
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:56:25-75
 receiver#com.tenli.oneview.service.BootReceiver
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:65:9-76:20
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:60:9-71:20
 	android:enabled
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:67:13-35
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:62:13-35
 	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:68:13-36
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:63:13-36
 	android:permission
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:69:13-75
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:64:13-75
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:66:13-49
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:61:13-49
 intent-filter#action:name:android.intent.action.BOOT_COMPLETED+action:name:android.intent.action.QUICKBOOT_POWERON+category:name:android.intent.category.DEFAULT
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:13-75:29
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:65:13-70:29
 	android:priority
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:70:28-50
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:65:28-50
 action#android.intent.action.BOOT_COMPLETED
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:17-79
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:66:17-79
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:71:25-76
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:66:25-76
 action#android.intent.action.QUICKBOOT_POWERON
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:17-82
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:67:17-82
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:72:25-79
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:67:25-79
 category#android.intent.category.DEFAULT
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:17-76
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:69:17-76
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:27-73
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:69:27-73
 service#com.tenli.oneview.service.KeepAliveService
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:78:9-81:58
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:73:9-76:58
 	tools:ignore
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:81:13-55
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:76:13-55
 	android:foregroundServiceType
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:80:13-60
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:75:13-60
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:79:13-53
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:74:13-53
 service#androidx.appcompat.app.AppLocalesMetadataHolderService
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:83:9-90:19
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:78:9-85:19
 	android:enabled
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:85:13-36
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:80:13-36
 	android:exported
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:86:13-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:81:13-37
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:84:13-82
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:79:13-82
 meta-data#autoStoreLocales
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:87:13-89:40
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:82:13-84:40
 	android:value
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:89:17-37
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:84:17-37
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:88:17-48
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:83:17-48
 meta-data#com.google.firebase.messaging.default_notification_icon
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:92:9-94:58
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:87:9-89:58
 	android:resource
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:94:13-55
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:89:13-55
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:93:13-83
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:88:13-83
 meta-data#android.support.FILE_PROVIDER_PATHS
-ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:101:13-103:54
+ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:96:13-98:54
 	android:resource
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:103:17-51
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:98:17-51
 	android:name
-		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:102:17-67
+		ADDED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml:97:17-67
 uses-sdk
 INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /home/vung/Documents/Tenli/Project/TenliOneViewAndroid/app/src/main/AndroidManifest.xml

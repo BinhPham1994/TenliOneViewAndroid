@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
 import coil.compose.AsyncImage
 import com.tenli.oneview.R
-import com.tenli.oneview.SplashActivity
+import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.utils.AppState
 
@@ -81,7 +81,7 @@ class CallComingActivity : ComponentActivity() {
                     onAccept = { eId ->
                         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                         notificationManager.cancel(eId.hashCode())
-                        val intent = Intent(this, SplashActivity::class.java).apply {
+                        val intent = Intent(this@CallComingActivity, MainActivity::class.java).apply {
                             putExtra("EVENT_ID", eId)
                             putExtra("FROM_CALL", true)
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
@@ -211,7 +211,7 @@ private fun showMissedCallNotification(context: Context, title: String, eId: Str
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     // Intent khi bấm vào thông báo nhỡ sẽ mở app vào sự kiện đó
-    val intent = Intent(context, SplashActivity::class.java).apply {
+    val intent = Intent(context, MainActivity::class.java).apply {
         putExtra("EVENT_ID", eId)
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }

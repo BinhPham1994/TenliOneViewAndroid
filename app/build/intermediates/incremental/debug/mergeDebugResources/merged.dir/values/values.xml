@@ -4013,7 +4013,7 @@
     <string name="lbl_device_management">Quản lý thiết bị</string>
     <string name="lbl_receive_full_notifications">Nhận đầy đủ thông báo</string>
     <string name="lbl_settings">Cài đặt</string>
-    <string name="login_domain_hint">Nhập tên miền dự án (vd: https://domain.tenli.ai)</string>
+    <string name="login_domain_hint">Tên miền dự án (https://app.tenli.ai)</string>
     <string name="login_domain_label">Domain dự án</string>
     <string name="login_email_hint">Nhập tên tài khoản hoặc email</string>
     <string name="login_email_label">Tài khoản</string>

@@ -66,7 +66,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
-import com.tenli.oneview.main.LoginActivity
+import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.ui.utils.bounceClick
@@ -89,7 +89,7 @@ fun LoginScreen(
 
         LocaleManager.setLocale(context, newLang)
 
-        val intent = Intent(context, LoginActivity::class.java)
+        val intent = Intent(context, MainActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         context.startActivity(intent)
 
@@ -233,7 +233,7 @@ fun LoginContent(
                     LoginInputField(
                         value = uiState.email,
                         onValueChange = onEmailChange,
-                        label = emailHint,
+                        label = emailLabel,
                         onClear = { onEmailChange("") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Next),
                         keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
@@ -246,7 +246,7 @@ fun LoginContent(
                     LoginInputField(
                         value = uiState.password,
                         onValueChange = onPasswordChange,
-                        label = passwordHint,
+                        label = passwordLabel,
                         isPassword = true,
                         showPassword = uiState.showPassword,
                         onPasswordToggle = onTogglePassword,

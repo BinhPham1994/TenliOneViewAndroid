@@ -57,11 +57,21 @@ import com.tenli.oneview.ui.navigation.AppNavigation
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.ui.utils.PermissionUtils
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.activity.viewModels
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.tenli.oneview.ui.features.splash.SplashDestination
+import com.tenli.oneview.ui.features.splash.SplashViewModel
+import com.tenli.oneview.ui.features.auth.login.LoginScreen
 
 class MainActivity : ComponentActivity() {
 
+    private val splashViewModel: SplashViewModel by viewModels()
     private var startEventId by mutableStateOf<String?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.light(
                 android.graphics.Color.TRANSPARENT,
@@ -75,14 +85,32 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
 
+        splashScreen.setKeepOnScreenCondition {
+            splashViewModel.uiState.value.destination is SplashDestination.Loading
+        }
+
         appUpdateManager = AppUpdateManagerFactory.create(this)
         checkUpdate()
         startEventId = intent.getStringExtra("OPEN_EVENT_DETAIL")
 
         setContent {
             TenliAIoTTheme {
-                val context = LocalContext.current
-                val lifecycleOwner = LocalLifecycleOwner.current
+                val uiState by splashViewModel.uiState.collectAsStateWithLifecycle()
+
+                when (uiState.destination) {
+                    is SplashDestination.Login -> {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            LoginScreen(
+                                onLoginSuccess = { splashViewModel.navigateToMain() }
+                            )
+                        }
+                    }
+                    is SplashDestination.Main -> {
+                        val context = LocalContext.current
+                        val lifecycleOwner = LocalLifecycleOwner.current
 
                 val manufacturer = remember { Build.MANUFACTURER.lowercase() }
                 val isChinesePhone = remember {
@@ -261,7 +289,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 AppNavigation(
-                    onLogoutRequest = { navigateToLogin() },
+                    onLogoutRequest = { splashViewModel.logout() },
                     initialEventId = startEventId
                 )
 
@@ -271,6 +299,9 @@ class MainActivity : ComponentActivity() {
                         startEventId = null
                         intent.removeExtra("OPEN_EVENT_DETAIL")
                     }
+                }
+                    }
+                    is SplashDestination.Loading -> { /* Keep Splash */ }
                 }
             }
         }
@@ -290,13 +321,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun navigateToLogin() {
-        val intent = Intent(this, LoginActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        startActivity(intent)
-        finish()
-    }
+
 
     private lateinit var appUpdateManager: AppUpdateManager
     private val UPDATE_REQUEST_CODE = 123
