@@ -167,41 +167,63 @@ fun HomeScreen(
                 }
                 .sortedByDescending { it.second }
 
-            val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-            val chartWidth = configuration.screenWidthDp.dp * 0.85f
-
-            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
-            androidx.compose.foundation.lazy.LazyRow(
-                state = listState,
-                flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(lazyListState = listState),
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                item {
-                    Column(modifier = Modifier.width(chartWidth)) {
-                        SectionTitle("Phân bố sự kiện theo thời gian")
-                        HomeLineChart(
-                            data = overTimeData,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .padding(8.dp)
-                        )
-                    }
+            val byCameraData = uiState.eventsByCamera
+                .map {
+                    val cameraName = uiState.cameraList.find { cam -> cam.extra?.uuid == it.cameraUUID }?.name 
+                                     ?: it.cameraUUID.take(6).let { uuidStr -> "Camera $uuidStr" }
+                    Pair(cameraName, it.count.toFloat())
                 }
+                .sortedByDescending { it.second }
+                .take(10)
 
-                item {
-                    Column(modifier = Modifier.width(chartWidth)) {
-                        SectionTitle("Phân bố sự kiện theo bài AI")
-                        HomeHorizontalBarChart(
-                            data = byTypeData,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .padding(8.dp)
-                        )
+            val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+
+            val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 3 })
+            androidx.compose.foundation.pager.HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(end = configuration.screenWidthDp.dp * 0.06f),
+                pageSpacing = 12.dp
+            ) { page ->
+                when (page) {
+                    0 -> {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SectionTitle("Phân bố sự kiện theo thời gian")
+                            HomeLineChart(
+                                data = overTimeData,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .padding(8.dp)
+                            )
+                        }
+                    }
+                    1 -> {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SectionTitle("Phân bố sự kiện theo bài AI")
+                            HomeHorizontalBarChart(
+                                data = byTypeData,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .padding(8.dp)
+                            )
+                        }
+                    }
+                    2 -> {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SectionTitle("Phân bố sự kiện theo camera")
+                            HomeHorizontalBarChart(
+                                data = byCameraData,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(16f / 9f)
+                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .padding(8.dp)
+                            )
+                        }
                     }
                 }
             }
