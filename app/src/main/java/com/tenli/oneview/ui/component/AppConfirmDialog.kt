@@ -25,6 +25,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -40,7 +43,7 @@ fun AppConfirmDialog(
     confirmText: String = "Đồng ý",
     cancelText: String = "Huỷ",
     confirmColor: Color = MaterialTheme.colorScheme.error,
-    iconRes: Int? = R.drawable.ai_icon,
+    icon: ImageVector? = Icons.Rounded.Info,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -57,7 +60,7 @@ fun AppConfirmDialog(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                if (iconRes != null) {
+                if (icon != null) {
                     Box(
                         modifier = Modifier
                             .size(50.dp)
@@ -68,7 +71,7 @@ fun AppConfirmDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = iconRes),
+                            imageVector = icon,
                             contentDescription = null,
                             modifier = Modifier.size(32.dp),
                             tint = confirmColor

@@ -1,26 +1,20 @@
 package com.tenli.oneview.model.network;
 
-@kotlin.Metadata(mv = {1, 9, 0}, k = 1, xi = 48, d1 = {"\u0000&\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0018\u0002\n\u0002\b\t\n\u0002\u0010\u000b\n\u0002\b\u0002\n\u0002\u0010\b\n\u0000\n\u0002\u0010\u000e\n\u0000\b\u0087\b\u0018\u00002\u00020\u0001B\u0015\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0003\u00a2\u0006\u0002\u0010\u0005J\t\u0010\t\u001a\u00020\u0003H\u00c6\u0003J\t\u0010\n\u001a\u00020\u0003H\u00c6\u0003J\u001d\u0010\u000b\u001a\u00020\u00002\b\b\u0002\u0010\u0002\u001a\u00020\u00032\b\b\u0002\u0010\u0004\u001a\u00020\u0003H\u00c6\u0001J\u0013\u0010\f\u001a\u00020\r2\b\u0010\u000e\u001a\u0004\u0018\u00010\u0001H\u00d6\u0003J\t\u0010\u000f\u001a\u00020\u0010H\u00d6\u0001J\t\u0010\u0011\u001a\u00020\u0012H\u00d6\u0001R\u0011\u0010\u0002\u001a\u00020\u0003\u00a2\u0006\b\n\u0000\u001a\u0004\b\u0006\u0010\u0007R\u0011\u0010\u0004\u001a\u00020\u0003\u00a2\u0006\b\n\u0000\u001a\u0004\b\b\u0010\u0007\u00a8\u0006\u0013"}, d2 = {"Lcom/tenli/oneview/model/network/TimeRange;", "", "from", "Lcom/tenli/oneview/model/network/TimePoint;", "to", "(Lcom/tenli/oneview/model/network/TimePoint;Lcom/tenli/oneview/model/network/TimePoint;)V", "getFrom", "()Lcom/tenli/oneview/model/network/TimePoint;", "getTo", "component1", "component2", "copy", "equals", "", "other", "hashCode", "", "toString", "", "app_debug"})
+@kotlin.Metadata(mv = {1, 9, 0}, k = 1, xi = 48, d1 = {"\u0000&\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0010\t\n\u0002\b\t\n\u0002\u0010\u000b\n\u0002\b\u0002\n\u0002\u0010\b\n\u0000\n\u0002\u0010\u000e\n\u0000\b\u0087\b\u0018\u00002\u00020\u0001B\u0015\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0003\u00a2\u0006\u0002\u0010\u0005J\t\u0010\t\u001a\u00020\u0003H\u00c6\u0003J\t\u0010\n\u001a\u00020\u0003H\u00c6\u0003J\u001d\u0010\u000b\u001a\u00020\u00002\b\b\u0002\u0010\u0002\u001a\u00020\u00032\b\b\u0002\u0010\u0004\u001a\u00020\u0003H\u00c6\u0001J\u0013\u0010\f\u001a\u00020\r2\b\u0010\u000e\u001a\u0004\u0018\u00010\u0001H\u00d6\u0003J\t\u0010\u000f\u001a\u00020\u0010H\u00d6\u0001J\t\u0010\u0011\u001a\u00020\u0012H\u00d6\u0001R\u0011\u0010\u0002\u001a\u00020\u0003\u00a2\u0006\b\n\u0000\u001a\u0004\b\u0006\u0010\u0007R\u0011\u0010\u0004\u001a\u00020\u0003\u00a2\u0006\b\n\u0000\u001a\u0004\b\b\u0010\u0007\u00a8\u0006\u0013"}, d2 = {"Lcom/tenli/oneview/model/network/TimeRange;", "", "from", "", "to", "(JJ)V", "getFrom", "()J", "getTo", "component1", "component2", "copy", "equals", "", "other", "hashCode", "", "toString", "", "app_debug"})
 public final class TimeRange {
-    @org.jetbrains.annotations.NotNull()
-    private final com.tenli.oneview.model.network.TimePoint from = null;
-    @org.jetbrains.annotations.NotNull()
-    private final com.tenli.oneview.model.network.TimePoint to = null;
+    private final long from = 0L;
+    private final long to = 0L;
     
-    @org.jetbrains.annotations.NotNull()
-    public final com.tenli.oneview.model.network.TimePoint component1() {
-        return null;
+    public final long component1() {
+        return 0L;
+    }
+    
+    public final long component2() {
+        return 0L;
     }
     
     @org.jetbrains.annotations.NotNull()
-    public final com.tenli.oneview.model.network.TimePoint component2() {
-        return null;
-    }
-    
-    @org.jetbrains.annotations.NotNull()
-    public final com.tenli.oneview.model.network.TimeRange copy(@org.jetbrains.annotations.NotNull()
-    com.tenli.oneview.model.network.TimePoint from, @org.jetbrains.annotations.NotNull()
-    com.tenli.oneview.model.network.TimePoint to) {
+    public final com.tenli.oneview.model.network.TimeRange copy(long from, long to) {
         return null;
     }
     
@@ -41,19 +35,15 @@ public final class TimeRange {
         return null;
     }
     
-    public TimeRange(@org.jetbrains.annotations.NotNull()
-    com.tenli.oneview.model.network.TimePoint from, @org.jetbrains.annotations.NotNull()
-    com.tenli.oneview.model.network.TimePoint to) {
+    public TimeRange(long from, long to) {
         super();
     }
     
-    @org.jetbrains.annotations.NotNull()
-    public final com.tenli.oneview.model.network.TimePoint getFrom() {
-        return null;
+    public final long getFrom() {
+        return 0L;
     }
     
-    @org.jetbrains.annotations.NotNull()
-    public final com.tenli.oneview.model.network.TimePoint getTo() {
-        return null;
+    public final long getTo() {
+        return 0L;
     }
 }

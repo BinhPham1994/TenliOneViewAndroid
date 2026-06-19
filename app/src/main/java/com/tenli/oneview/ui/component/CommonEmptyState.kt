@@ -14,6 +14,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -24,7 +28,7 @@ import com.tenli.oneview.R
 @Composable
 fun CommonEmptyState(
     modifier: Modifier = Modifier,
-    iconRes: Int = R.drawable.data_empty, // Mặc định là icon data_empty
+    icon: ImageVector = Icons.Rounded.Inbox, // Mặc định là icon Inbox
     text: String = "Không có dữ liệu",      // Mặc định nếu không truyền text
     iconSize: Dp = 100.dp
 ) {
@@ -36,9 +40,9 @@ fun CommonEmptyState(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
-            painter = painterResource(id = iconRes),
+            imageVector = icon,
             contentDescription = null,
-            tint = Color.Unspecified,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(iconSize)
         )
         Spacer(modifier = Modifier.height(8.dp)) // Tăng một chút cho thoáng

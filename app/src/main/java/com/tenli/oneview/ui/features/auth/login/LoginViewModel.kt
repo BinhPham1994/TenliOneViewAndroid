@@ -17,13 +17,7 @@ import com.google.gson.Gson
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
-import com.tenli.oneview.model.network.CreateUserOptions
-import com.tenli.oneview.model.network.DeviceInfo
-import com.tenli.oneview.model.network.LoginDeviceConfig
-import com.tenli.oneview.model.network.LoginNotifyConfig
-import com.tenli.oneview.model.network.LoginRequest
 import com.tenli.oneview.model.network.LoginResponseData
-import com.tenli.oneview.model.network.UserGroupOptions
 import com.tenli.oneview.ui.utils.AppConfig
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.ValidationUtils
@@ -99,10 +93,15 @@ class LoginViewModel(
                         _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
                     }
                 } else {
-                    _event.emit(LoginEvent.ShowError("Tài khoản, mật khẩu hoặc Domain không chính xác"))
+                    val errorMsg = result.exceptionOrNull()?.message ?: "Unknown error"
+                    if (errorMsg.contains("failed with code 401") || errorMsg.contains("failed with code 400")) {
+                        _event.emit(LoginEvent.ShowError("Tài khoản hoặc mật khẩu không chính xác"))
+                    } else {
+                        _event.emit(LoginEvent.ShowError("Lỗi: $errorMsg"))
+                    }
                 }
             } catch (e: Exception) {
-                _event.emit(LoginEvent.ShowError("Lỗi kết nối: ${e.message}"))
+                _event.emit(LoginEvent.ShowError("Lỗi hệ thống: ${e.message}"))
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -130,44 +129,6 @@ class LoginViewModel(
             putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
             putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
         }
-    }
-
-    private suspend fun createLoginRequest(): LoginRequest {
-        if (notifyToken.isEmpty()) {
-            try {
-                notifyToken = FirebaseMessaging.getInstance().token.await()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-        val context = getApplication<Application>()
-        val deviceID = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ANDROID_ID
-        ) ?: "unknown_device"
-
-        return LoginRequest(
-            email = _uiState.value.email,
-            password = _uiState.value.password,
-            googleIdToken = "",
-
-            notifyConfig = LoginNotifyConfig(token = notifyToken),
-            device = LoginDeviceConfig(
-                uuid = deviceID,
-                model = Build.MODEL,
-                name = AppConfig.getDeviceName(context),
-                information = DeviceInfo(
-                    description = "Tenli AIoT App v1.0",
-                    systemName = "Android",
-                    systemVersion = Build.VERSION.RELEASE
-                )
-            ),
-            saveLogin = true,
-            createIfNotExist = true,
-            createUserOptions = CreateUserOptions(
-                group = UserGroupOptions(joinToDeviceSample = false)
-            )
-        )
     }
 
     companion object {

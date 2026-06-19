@@ -18,18 +18,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.tenli.oneview.model.network.EventItem
-import com.tenli.oneview.ui.features.event.EventScreen
-import com.tenli.oneview.ui.features.home.HomeScreen
-import com.tenli.oneview.ui.features.monitor.MonitorScreen
-import com.tenli.oneview.ui.features.setting.SettingScreen
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
-    onLogoutRequest: () -> Unit,
-    onEventClick: (EventItem) -> Unit
+    onLogoutRequest: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -113,31 +111,21 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(MainTab.Home.route) {
-                HomeScreen(
-                    listState = homeListState,
-                    onShowDevices = { navigateToSettingTarget("devices") },
-                    onShowMembers = { navigateToSettingTarget("members") },
-                    onShowScript = { },
-                    onShowIOT = { },
-                    onEventClick = onEventClick
-                )
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Home Screen (Placeholder)")
+                }
             }
 
             composable(MainTab.Monitor.route) {
-                MonitorScreen(
-                    listState = monitorState,
-                    onEventClick = onEventClick,
-                    onShowBottomBar = { isVisible ->
-                        showBottomBar = isVisible
-                    }
-                )
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Monitor Screen (Placeholder)")
+                }
             }
 
             composable(MainTab.Event.route) {
-                EventScreen(
-                    listState = eventListState,
-                    onEventClick = onEventClick
-                )
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Event Screen (Placeholder)")
+                }
             }
 
             composable(
@@ -148,15 +136,10 @@ fun MainScreen(
                         defaultValue = null
                     }
                 )
-            ) { backStackEntry ->
-                val target = backStackEntry.arguments?.getString("target")
-
-                SettingScreen(
-                    listState = settingListState,
-                    onLogoutRequest = onLogoutRequest,
-                    initialTarget = target,
-                    onShowBottomBar = { isVisible -> showBottomBar = isVisible }
-                )
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Setting Screen (Placeholder)")
+                }
             }
         }
     }

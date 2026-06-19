@@ -16,6 +16,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -104,7 +106,7 @@ fun LoginInputField(
                 if (isPassword && onPasswordToggle != null) {
                     IconButton(onClick = onPasswordToggle) {
                         Icon(
-                            painter = painterResource(id = if (showPassword) R.drawable.show_pass else R.drawable.hide_pass),
+                            imageVector = if (showPassword) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                             contentDescription = "Toggle Password",
                             modifier = Modifier.size(22.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant

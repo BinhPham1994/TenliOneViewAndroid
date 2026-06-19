@@ -8,12 +8,12 @@
         "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/password.xml"
     },
     {
-        "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_google.xml.flat",
-        "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/google.xml"
-    },
-    {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_video_icon.xml.flat",
         "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/video_icon.xml"
+    },
+    {
+        "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_google.xml.flat",
+        "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/google.xml"
     },
     {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_image.xml.flat",
@@ -68,12 +68,12 @@
         "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/three.xml"
     },
     {
-        "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/mipmap-xxxhdpi_miss_call.png.flat",
-        "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/mipmap-xxxhdpi/miss_call.png"
-    },
-    {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_new_device.xml.flat",
         "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/drawable/new_device.xml"
+    },
+    {
+        "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/mipmap-xxxhdpi_miss_call.png.flat",
+        "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/mipmap-xxxhdpi/miss_call.png"
     },
     {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_group_default.xml.flat",
@@ -494,10 +494,6 @@
     {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/mipmap-xhdpi_app_icon.png.flat",
         "source": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-main-97:/mipmap-xhdpi/app_icon.png"
-    },
-    {
-        "merged": "com.tenli.oneview.app-debug-95:/drawable_logo_app.xml.flat",
-        "source": "com.tenli.oneview.app-main-97:/drawable/logo_app.xml"
     },
     {
         "merged": "/home/vung/.gradle/daemon/8.14.4/com.tenli.oneview.app-debug-95:/drawable_device_manager.xml.flat",

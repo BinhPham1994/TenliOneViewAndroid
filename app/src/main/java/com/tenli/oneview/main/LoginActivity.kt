@@ -16,9 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.tenli.oneview.ui.features.auth.forgot.ForgotPassScreen
 import com.tenli.oneview.ui.features.auth.login.LoginScreen
-import com.tenli.oneview.ui.features.auth.register.RegisterScreen
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.utils.LocaleManager
 
@@ -54,16 +52,6 @@ class LoginActivity : ComponentActivity() {
                                     startActivity(intent)
                                     finish()
                                 }
-                            )
-                        }
-                        composable("register") {
-                            RegisterScreen(
-                                onFinish = { navController.popBackStack() }
-                            )
-                        }
-                        composable("forgot_pass") {
-                            ForgotPassScreen(
-                                onFinish = { navController.popBackStack() }
                             )
                         }
                     }

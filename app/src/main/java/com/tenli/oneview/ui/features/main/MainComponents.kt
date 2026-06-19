@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -36,10 +40,10 @@ fun MainBottomNavigation(
         windowInsets = WindowInsets(0, 0, 0, 40)
     ) {
         val items = listOf(
-            Triple(MainTab.Home, R.string.tab_home, R.drawable.home),
-            Triple(MainTab.Monitor, R.string.tab_monitor, R.drawable.ai_icon),
-            Triple(MainTab.Event, R.string.tab_event, R.drawable.event),
-            Triple(MainTab.Setting, R.string.tab_setting, R.drawable.setting)
+            Triple(MainTab.Home, R.string.tab_home, Icons.Rounded.Home),
+            Triple(MainTab.Monitor, R.string.tab_monitor, Icons.Rounded.Videocam),
+            Triple(MainTab.Event, R.string.tab_event, Icons.Rounded.Notifications),
+            Triple(MainTab.Setting, R.string.tab_setting, Icons.Rounded.Settings)
         )
 
         items.forEach { (tab, labelRes, iconRes) ->
@@ -65,10 +69,7 @@ fun MainBottomNavigation(
                 },
                 icon = {
                     Icon(
-                        painter = if (showBackToTop)
-                            rememberVectorPainter(image = Icons.Default.ExpandLess)
-                        else
-                            painterResource(id = iconRes),
+                        imageVector = if (showBackToTop) Icons.Default.ExpandLess else iconRes,
                         contentDescription = "Back to top",
                         modifier = Modifier
                             .size(MaterialTheme.spacing.iconMedium)

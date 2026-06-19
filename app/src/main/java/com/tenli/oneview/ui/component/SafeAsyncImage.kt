@@ -14,6 +14,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -26,8 +31,8 @@ fun SafeAsyncImage(
     deviceKey: String,
     modifier: Modifier = Modifier.fillMaxSize(),
     contentScale: ContentScale = ContentScale.Crop,
-    placeholderRes: Int = R.drawable.image_default,
-    errorRes: Int = R.drawable.image_default,
+    placeholderIcon: ImageVector = Icons.Rounded.Image,
+    errorIcon: ImageVector = Icons.Rounded.BrokenImage,
     showLoading: Boolean = true
 ) {
     var isImageLoading by remember { mutableStateOf(true) }
@@ -51,8 +56,8 @@ fun SafeAsyncImage(
             contentScale = contentScale,
             onSuccess = { isImageLoading = false },
             onError = { isImageLoading = false },
-            placeholder = painterResource(placeholderRes),
-            error = painterResource(errorRes)
+            placeholder = rememberVectorPainter(image = placeholderIcon),
+            error = rememberVectorPainter(image = errorIcon)
         )
 
         // Hiển thị vòng xoay loading nếu được phép [cite: 2026-03-16]
