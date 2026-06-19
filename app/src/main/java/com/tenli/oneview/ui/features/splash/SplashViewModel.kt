@@ -21,6 +21,7 @@ class SplashViewModel : ViewModel() {
         val prefs = GlobalData.preferences
         UserSession.accessToken = prefs.getString(AppKeys.ACCESS_TOKEN_KEY, "").orEmpty()
         UserSession.refreshToken = prefs.getString(AppKeys.REFRESH_TOKEN_KEY, "").orEmpty()
+        UserSession.domain = prefs.getString("DOMAIN_KEY", "").orEmpty()
         val userDataJson = prefs.getString(AppKeys.USER_DATA_KEY, null)
         if (!userDataJson.isNullOrEmpty()) {
             try {
@@ -54,6 +55,7 @@ class SplashViewModel : ViewModel() {
             remove(AppKeys.ACCESS_TOKEN_KEY)
             remove(AppKeys.REFRESH_TOKEN_KEY)
             remove(AppKeys.USER_DATA_KEY)
+            remove("DOMAIN_KEY")
             apply()
         }
         

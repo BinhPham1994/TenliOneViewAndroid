@@ -21,7 +21,7 @@ data class AIServiceModel(
 data class FaceData(
     val cropImage: String? = null,
     val similarity: Double = 0.0,
-    val cropBox: List<Int>? = null,
+    val cropBox: List<Double>? = null,
     val hasMask: Boolean? = null
 )
 
@@ -30,30 +30,30 @@ data class PlateData(
     val cropImage: String? = null,
     val deblurCropImage: String? = null,
     val similarity: Double = 0.0,
-    val cropBox: List<Int>? = null
+    val cropBox: List<Double>? = null
 )
 
 data class AttributeData(
     val label: Int = 0,
     val cropImage: String? = null,
     val similarity: Double = 0.0,
-    val cropBox: List<Int>? = null
+    val cropBox: List<Double>? = null
 )
 
 data class BoxData(
-    val box: List<Int>? = null,
-    val time: Long = 0
+    val box: List<Double>? = null,
+    val time: Double = 0.0
 )
 
 data class UniformData(
     val image: String? = null,
-    val cropBox: List<Int>? = null,
+    val cropBox: List<Double>? = null,
     val cropImage: String? = null
 )
 
 data class ObjectData(
     val image: String? = null,
-    val cropBox: List<Int>? = null,
+    val cropBox: List<Double>? = null,
     val cropImage: String? = null
 )
 
@@ -61,7 +61,7 @@ data class WeaponData(
     val image: String? = null,
     val label: String? = null,
     val cropImage: String? = null,
-    val cropBox: List<Int>? = null
+    val cropBox: List<Double>? = null
 )
 
 data class EventDataDetail(
@@ -70,7 +70,7 @@ data class EventDataDetail(
     val video: String? = null,
     val cropImage: String? = null,
     val name: String? = null,
-    val box: List<Int>? = null,
+    val box: List<Double>? = null,
     val value: String? = null,
     val face: FaceData? = null,
     val plate: PlateData? = null,
@@ -93,7 +93,7 @@ data class EventData(
     val serviceId: Int,
     val originId: Int,
     val type: String,
-    val time: Long,
+    val time: Double,
     val isConfirmed: Boolean,
     val data: EventDataDetail? = null
 )

@@ -179,7 +179,7 @@ data class TaskModel(
 // ==================== Vehicle Statistics ====================
 
 data class VehicleStatisticalOverTimeModel(
-    val time: Long,
+    val time: Double,
     val date: String,
     val hour: Int,
     val value: String
@@ -204,7 +204,7 @@ data class VehicleCountByPrefixModel(
 // ==================== VMS Event Statistics ====================
 
 data class VmsEventStatisticalOverTimeModel(
-    val time: Long,
+    val time: Double,
     val date: String,
     val hour: Int,
     val value: String
@@ -222,9 +222,9 @@ data class VmsEventCountByTypeModel(
     val type: String,
     val count: Int,
     @SerializedName("min_time")
-    val minTime: Long? = null,
+    val minTime: Double? = null,
     @SerializedName("max_time")
-    val maxTime: Long? = null
+    val maxTime: Double? = null
 )
 
 data class VmsEventCountByCameraModel(

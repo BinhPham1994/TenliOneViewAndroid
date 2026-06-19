@@ -87,7 +87,7 @@ class LoginViewModel(
                 if (result.isSuccess) {
                     val loginData = result.getOrNull()
                     if (loginData != null) {
-                        handleLoginSuccess(loginData)
+                        handleLoginSuccess(loginData, domain)
                         _event.emit(LoginEvent.LoginSuccess)
                     } else {
                         _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
@@ -130,17 +130,20 @@ class LoginViewModel(
 
     private var notifyToken: String = ""
 
-    private fun handleLoginSuccess(loginData: LoginResponseData) {
+    private fun handleLoginSuccess(loginData: LoginResponseData, domain: String) {
+        val formattedDomain = if (!domain.startsWith("http://") && !domain.startsWith("https://")) "http://$domain" else domain
         UserSession.apply {
             userData = loginData.target
             accessToken = loginData.credential.accessToken
             refreshToken = loginData.credential.refreshToken
+            this.domain = formattedDomain
         }
         val userDataJson = Gson().toJson(loginData.target)
         GlobalData.preferences.edit {
             putString(AppKeys.USER_DATA_KEY, userDataJson)
             putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
             putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
+            putString("DOMAIN_KEY", formattedDomain)
         }
     }
 

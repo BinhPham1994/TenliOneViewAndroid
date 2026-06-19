@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.tenli.oneview.ui.features.home.HomeScreen
 
 @Composable
 fun MainScreen(
@@ -120,9 +121,11 @@ fun MainScreen(
             modifier = Modifier.padding(innerPadding)
         ) {
             composable(MainTab.Home.route) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Home Screen (Placeholder)")
-                }
+                HomeScreen(
+                    onEventClick = { eventId ->
+                        // Điều hướng đến chi tiết sự kiện nếu có
+                    }
+                )
             }
 
             composable(MainTab.Monitor.route) {

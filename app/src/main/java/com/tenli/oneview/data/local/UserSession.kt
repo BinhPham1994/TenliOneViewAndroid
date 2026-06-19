@@ -9,11 +9,13 @@ object UserSession {
     var userData: UserData? = null
     var accessToken: String = ""
     var refreshToken: String = ""
+    var domain: String = ""
 
     fun clear() {
         userData = null
         accessToken = ""
         refreshToken = ""
+        domain = ""
     }
 
     fun saveSession(prefs: SharedPreferences?) {
