@@ -64,7 +64,10 @@ fun MonitorScreen(
                 if (selectedCam != null) {
                     CameraGridItem(
                         selectedCamera = selectedCam,
-                        onRemoveClick = { viewModel.removeCamera(index) },
+                        onClick = {
+                            activeSlotIndex = index
+                            showBottomSheet = true
+                        },
                         onRetryClick = { viewModel.retryCameraStream(index) },
                         onSuccess = { viewModel.resetRetryCount(index) },
                         onFullscreenClick = { fullscreenIndex = index },
@@ -328,7 +331,7 @@ fun MonitorScreen(
 @Composable
 fun CameraGridItem(
     selectedCamera: SelectedCamera,
-    onRemoveClick: () -> Unit,
+    onClick: () -> Unit,
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
     onFullscreenClick: () -> Unit,
@@ -345,6 +348,7 @@ fun CameraGridItem(
             .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))
             .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
+            .clickable { onClick() }
     ) {
         if (selectedCamera.streamUrl.isNotEmpty()) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
@@ -394,7 +398,7 @@ fun CameraGridItem(
             }
         }
 
-        // Overlay for Camera Name and Close Button
+        // Overlay for Camera Name
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -412,19 +416,6 @@ fun CameraGridItem(
                 )
             } else {
                 Spacer(modifier = Modifier.weight(1f))
-            }
-            // Delete button
-            IconButton(
-                onClick = onRemoveClick,
-                modifier = Modifier
-                    .size(24.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = "Xoá camera",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                )
             }
         }
         
@@ -548,7 +539,8 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
                 java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
                 java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()),
-                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()),
+                java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", java.util.Locale.getDefault())
             )
             
             for (f in formatters) {
@@ -585,7 +577,8 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 com.tenli.oneview.ui.component.VideoFrameImage(
                     url = link,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    cacheKey = "playback_${cameraName}_${playback.time}"
                 )
             }
             Icon(
@@ -601,7 +594,9 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 text = cameraName,
                 color = Color.Black,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(

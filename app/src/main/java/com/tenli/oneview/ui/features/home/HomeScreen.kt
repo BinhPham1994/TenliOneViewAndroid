@@ -311,7 +311,9 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, onClick: ()
                     text = cameraName,
                     color = Color.Black,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 val timeStr = formatEventTime(event.time)

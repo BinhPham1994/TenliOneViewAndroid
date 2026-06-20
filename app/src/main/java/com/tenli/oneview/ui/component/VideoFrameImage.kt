@@ -28,13 +28,34 @@ import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
 
+import android.util.LruCache
+
+object VideoFrameCache {
+    private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
+    private val cacheSize = maxMemory / 8 // Use 1/8th of available memory for cache
+    val cache = object : LruCache<String, Bitmap>(cacheSize) {
+        override fun sizeOf(key: String, bitmap: Bitmap): Int {
+            return bitmap.byteCount / 1024
+        }
+    }
+    
+    // Track URLs that are confirmed to be videos (failed as images)
+    val knownVideoUrls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+}
+
 @Composable
 fun VideoFrameImage(
     url: String?,
     modifier: Modifier = Modifier,
-    contentScale: ContentScale = ContentScale.Crop
+    contentScale: ContentScale = ContentScale.Crop,
+    cacheKey: String? = null
 ) {
-    var isVideoFallback by remember(url) { mutableStateOf(false) }
+    val effectiveKey = cacheKey ?: url ?: ""
+    
+    // Automatically fallback if we already know this URL is a video
+    var isVideoFallback by remember(effectiveKey) { 
+        mutableStateOf(url != null && (VideoFrameCache.knownVideoUrls.contains(effectiveKey) || url.lowercase().endsWith(".mp4"))) 
+    }
 
     if (!isVideoFallback) {
         SubcomposeAsyncImage(
@@ -48,24 +69,34 @@ fun VideoFrameImage(
             error = {
                 // If normal image loading fails, we fallback to video frame extraction
                 LaunchedEffect(Unit) {
+                    if (effectiveKey.isNotEmpty()) {
+                        VideoFrameCache.knownVideoUrls.add(effectiveKey)
+                    }
                     isVideoFallback = true
                 }
             }
         )
     } else {
         // Here we handle the video frame extraction
-        var bitmap by remember(url) { mutableStateOf<Bitmap?>(null) }
-        var hasError by remember(url) { mutableStateOf(false) }
+        var bitmap by remember(effectiveKey) { mutableStateOf<Bitmap?>(if (effectiveKey.isNotEmpty()) VideoFrameCache.cache.get(effectiveKey) else null) }
+        var hasError by remember(effectiveKey) { mutableStateOf(false) }
         val context = LocalContext.current
 
-        LaunchedEffect(url) {
-            if (url == null) {
+        LaunchedEffect(effectiveKey, url) {
+            if (url == null || effectiveKey.isEmpty()) {
                 hasError = true
                 return@LaunchedEffect
             }
+            if (bitmap != null) return@LaunchedEffect
+            
             try {
-                bitmap = extractVideoFrameWithRange(context, url)
-                if (bitmap == null) hasError = true
+                val extracted = extractVideoFrameWithRange(context, url)
+                if (extracted == null) {
+                    hasError = true
+                } else {
+                    bitmap = extracted
+                    VideoFrameCache.cache.put(effectiveKey, extracted)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 hasError = true
@@ -150,6 +181,20 @@ private suspend fun extractVideoFrameWithRange(context: Context, url: String): B
         // Fallback to default frame
         if (bestFrame == null) {
             bestFrame = retriever.getFrameAtTime()
+        }
+        
+        if (bestFrame != null) {
+            val maxWidth = 600
+            if (bestFrame.width > maxWidth) {
+                val ratio = maxWidth.toFloat() / bestFrame.width
+                val newHeight = (bestFrame.height * ratio).toInt()
+                val scaledFrame = Bitmap.createScaledBitmap(bestFrame, maxWidth, newHeight, true)
+                if (scaledFrame != bestFrame) {
+                    // bestFrame.recycle() // Avoid recycling as it might be used internally or cause issues, but generally it's safe to recycle the original if we created a scaled copy
+                    bestFrame.recycle()
+                    bestFrame = scaledFrame
+                }
+            }
         }
         
         return@withContext bestFrame
