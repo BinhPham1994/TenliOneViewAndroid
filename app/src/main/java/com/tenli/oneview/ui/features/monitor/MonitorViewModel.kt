@@ -25,7 +25,8 @@ data class SelectedCamera(
     val camera: CameraModel,
     val streamUrl: String,
     val videoCodecTag: String = "",
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+    val streamType: String = "LIVE" // "LIVE", "EVENT", "PLAYBACK"
 )
 
 enum class MonitorTab {
@@ -225,7 +226,8 @@ class MonitorViewModel : ViewModel() {
         
         if (slotIndex != 0) return
 
-        if (currentState.selectedCameras.any { it?.camera?.id == camera.id }) {
+        val existing = currentState.selectedCameras.find { it?.camera?.id == camera.id }
+        if (existing != null && existing.streamUrl.startsWith("ws")) {
             return
         }
 
@@ -239,6 +241,25 @@ class MonitorViewModel : ViewModel() {
 
         fetchLiveStreamUrl(camera.id, slotIndex)
         fetchListData()
+    }
+
+    fun playVideo(videoUrl: String, streamType: String) {
+        if (videoUrl.isBlank()) return
+        
+        _uiState.update { state ->
+            val cameras = state.selectedCameras.toMutableList()
+            val currentSelection = cameras[0]
+            if (currentSelection != null) {
+                var fullUrl = videoUrl
+                if (fullUrl.startsWith("/")) {
+                    val domain = com.tenli.oneview.data.local.UserSession.domain.trimEnd('/')
+                    fullUrl = "$domain$fullUrl"
+                }
+                
+                cameras[0] = currentSelection.copy(streamUrl = fullUrl, streamType = streamType)
+            }
+            state.copy(selectedCameras = cameras)
+        }
     }
 
     /**
@@ -298,12 +319,12 @@ class MonitorViewModel : ViewModel() {
                         _uiState.update { state ->
                             val cameras = state.selectedCameras.toMutableList()
                             val currentSelection = cameras[slotIndex]
-                            if (currentSelection?.camera?.id == cameraId) {
-                                android.util.Log.d("MonitorVM", "fetchLiveStreamUrl: updating slot $slotIndex with url=$streamUrl codec=${liveStreamModel.videoCodecTag}")
+                            if (currentSelection != null && currentSelection.camera.id == cameraId) {
                                 cameras[slotIndex] = currentSelection.copy(
-                                    streamUrl = streamUrl, 
-                                    videoCodecTag = liveStreamModel.videoCodecTag
-                                    // Removed retryCount = 0 to prevent infinite loop
+                                    streamUrl = streamUrl,
+                                    videoCodecTag = liveStreamModel.videoCodecTag,
+                                    retryCount = 0,
+                                    streamType = "LIVE"
                                 )
                             } else {
                                 android.util.Log.w("MonitorVM", "fetchLiveStreamUrl: camera id mismatch at slot $slotIndex. Expected=$cameraId, found=${currentSelection?.camera?.id}")

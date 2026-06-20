@@ -74,6 +74,7 @@ fun MonitorScreen(
                         onRetryClick = { viewModel.retryCameraStream(index) },
                         onSuccess = { viewModel.resetRetryCount(index) },
                         onFullscreenClick = { fullscreenIndex = index },
+                        onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, index) },
                         isFullscreen = fullscreenIndex == index
                     )
                 } else {
@@ -288,17 +289,37 @@ fun MonitorScreen(
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
                         val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
+                        val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
                         items(uiState.events) { event ->
+                            val videoUrl = event.data?.video ?: ""
+                            val dummyUrl = "error://no-video?id=${event.id}"
+                            val isSelected = currentStreamUrl.isNotEmpty() && 
+                                (if (videoUrl.isNotEmpty()) currentStreamUrl.endsWith(videoUrl) else currentStreamUrl == dummyUrl)
+
                             com.tenli.oneview.ui.features.home.RecentEventItem(
                                 event = event,
                                 cameraList = cameraListForEvent,
-                                onClick = { /* TODO: Navigate to Event Details */ }
+                                isSelected = isSelected,
+                                onClick = { 
+                                    if (videoUrl.isEmpty()) {
+                                        viewModel.playVideo(dummyUrl, "EVENT")
+                                    } else {
+                                        viewModel.playVideo(videoUrl, "EVENT")
+                                    }
+                                }
                             )
                         }
                     } else {
                         val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
+                        val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
                         items(uiState.playbacks) { playback ->
-                            PlaybackItemView(playback, currentCameraName)
+                            val isSelected = currentStreamUrl.isNotEmpty() && playback.videoLink.isNotEmpty() && currentStreamUrl.endsWith(playback.videoLink)
+                            PlaybackItemView(
+                                playback = playback, 
+                                cameraName = currentCameraName,
+                                isSelected = isSelected,
+                                onClick = { viewModel.playVideo(playback.videoLink, "PLAYBACK") }
+                            )
                         }
                     }
                 }
@@ -357,12 +378,14 @@ fun CameraGridItem(
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
     onFullscreenClick: () -> Unit,
+    onBackToLiveClick: () -> Unit,
     isFullscreen: Boolean = false
 ) {
     val deviceKey = UserSession.accessToken
     val camera = selectedCamera.camera
     var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
+    val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://no-video")
 
     Box(
         modifier = Modifier
@@ -371,7 +394,7 @@ fun CameraGridItem(
             .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
     ) {
-        if (selectedCamera.streamUrl.isNotEmpty()) {
+        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
                 // WebSocket stream - use native ExoPlayer with forced FragmentedMp4Extractor
                 com.tenli.oneview.ui.component.LiveStreamPlayer(
@@ -408,7 +431,7 @@ fun CameraGridItem(
         }
 
         // Loading Overlay
-        if (selectedCamera.streamUrl.isEmpty() || (!isLiveViewPlaying && !isLiveViewError)) {
+        if (selectedCamera.streamUrl.isEmpty() || (!isLiveViewPlaying && !hasError && selectedCamera.streamUrl.isNotEmpty())) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -419,8 +442,29 @@ fun CameraGridItem(
             }
         }
 
-        // LIVE Indicator Overlay
-        if (isLiveViewPlaying) {
+        // Error Overlay
+        if (hasError) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White)
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                val errorMsg = if (selectedCamera.streamUrl.startsWith("error://no-video")) "Không có video cho sự kiện này" else "Lỗi tải video"
+                com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
+            }
+        }
+
+        // Stream Type Indicator Overlay (LIVE, EVENT, PLAYBACK)
+        if (selectedCamera.streamUrl.isNotEmpty() && (isLiveViewPlaying || selectedCamera.streamType != "LIVE")) {
+            val badgeText = selectedCamera.streamType
+            val badgeColor = when (selectedCamera.streamType) {
+                "LIVE" -> Color.Red
+                "EVENT" -> Color(0xFFF59E0B) // Orange
+                "PLAYBACK" -> Color(0xFF3B82F6) // Blue
+                else -> Color.Gray
+            }
             Row(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -432,11 +476,11 @@ fun CameraGridItem(
                 Box(
                     modifier = Modifier
                         .size(6.dp)
-                        .background(Color.Red, androidx.compose.foundation.shape.CircleShape)
+                        .background(badgeColor, androidx.compose.foundation.shape.CircleShape)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "LIVE",
+                    text = badgeText,
                     color = Color.White,
                     fontSize = 10.sp,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
@@ -444,6 +488,34 @@ fun CameraGridItem(
             }
         }
         
+        // Back to Live button
+        if (selectedCamera.streamType != "LIVE") {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color.Black.copy(alpha = 0.5f))
+                    .clickable { onBackToLiveClick() }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Về xem Live",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            }
+        }
+
         // Fullscreen button at Bottom Right
         IconButton(
             onClick = onFullscreenClick,
@@ -549,7 +621,7 @@ fun EmptyGridItem(onClick: () -> Unit) {
 }
 
 @Composable
-fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, cameraName: String) {
+fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, cameraName: String, isSelected: Boolean = false, onClick: () -> Unit) {
     val formattedTime = remember(playback.time) {
         var parsedDate: java.util.Date? = null
         
@@ -584,7 +656,8 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { /* TODO: Playback click */ }
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+            .clickable { onClick() }
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

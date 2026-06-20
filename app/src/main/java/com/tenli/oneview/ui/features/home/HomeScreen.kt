@@ -286,10 +286,11 @@ fun SectionTitle(title: String) {
 }
 
 @Composable
-fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, onClick: () -> Unit) {
+fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected: Boolean = false, onClick: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
