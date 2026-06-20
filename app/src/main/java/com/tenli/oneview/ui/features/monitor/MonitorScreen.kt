@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.outlined.Videocam
@@ -271,10 +272,9 @@ fun MonitorScreen(
                         )
                     }
                 } else {
+                    val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
                     items(uiState.playbacks) { playback ->
-                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                            PlaybackItemView(playback)
-                        }
+                        PlaybackItemView(playback, currentCameraName)
                     }
                 }
             }
@@ -534,18 +534,35 @@ fun EmptyGridItem(onClick: () -> Unit) {
 }
 
 @Composable
-fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel) {
-    // Attempt to format if playback.time is an ISO string, otherwise fallback to raw string
+fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, cameraName: String) {
     val formattedTime = remember(playback.time) {
-        try {
-            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
-            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
-            val date = parser.parse(playback.time)
-            val formatter = java.text.SimpleDateFormat("HH:mm a - dd/MM/yyyy", java.util.Locale.getDefault())
-            date?.let { formatter.format(it) } ?: playback.time
-        } catch (e: Exception) {
-            playback.time
+        var parsedDate: java.util.Date? = null
+        
+        // Try parsing as numeric timestamp first (like event time)
+        val numericTime = playback.time.toDoubleOrNull()
+        if (numericTime != null && numericTime > 0) {
+            val timeMillis = if (numericTime < 100000000000.0) (numericTime * 1000).toLong() else numericTime.toLong()
+            parsedDate = java.util.Date(timeMillis)
+        } else {
+            val formatters = listOf(
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()),
+                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault())
+            )
+            
+            for (f in formatters) {
+                try {
+                    parsedDate = f.parse(playback.time)
+                    if (parsedDate != null) break
+                } catch (e: Exception) {
+                    // ignore
+                }
+            }
         }
+        
+        val outputFormatter = java.text.SimpleDateFormat("HH:mm:ss dd/MM/yyyy", java.util.Locale.getDefault())
+        parsedDate?.let { outputFormatter.format(it) } ?: playback.time
     }
 
     Row(
@@ -581,14 +598,25 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel) {
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = formattedTime,
+                text = cameraName,
                 color = Color.Black,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "Bản ghi video",
+                text = androidx.compose.ui.text.buildAnnotatedString {
+                    val parts = formattedTime.split(" ")
+                    if (parts.size == 2) {
+                        withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.DarkGray)) {
+                            append(parts[0])
+                        }
+                        append(" ")
+                        append(parts[1])
+                    } else {
+                        append(formattedTime)
+                    }
+                },
                 color = Color.Gray,
                 fontSize = 12.sp
             )
