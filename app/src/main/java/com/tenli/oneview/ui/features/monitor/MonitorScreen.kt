@@ -11,6 +11,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
@@ -20,6 +22,9 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -142,7 +147,6 @@ fun MonitorScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp)
     ) {
         // Header
         Text(
@@ -150,13 +154,12 @@ fun MonitorScreen(
             style = MaterialTheme.typography.headlineSmall,
             color = MaterialTheme.colorScheme.onBackground,
             fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
         )
 
         Box(
             modifier = Modifier
-                .fillMaxSize()
-                .weight(1f) // Ensure it takes the remaining space
+                .fillMaxWidth()
         ) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(1),
@@ -175,6 +178,103 @@ fun MonitorScreen(
                         )
                     } else {
                         cameraItems[index](uiState.selectedCameras[index])
+                    }
+                }
+            }
+        }
+
+        // --- Tabs: Sự kiện | Playback ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            val isEvents = uiState.selectedTab == MonitorTab.EVENTS
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isEvents) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { viewModel.setTab(MonitorTab.EVENTS) }
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Sự kiện", color = if (isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (!isEvents) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { viewModel.setTab(MonitorTab.PLAYBACK) }
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("Playback", color = if (!isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // --- Time Filter Scrollable Row ---
+        androidx.compose.foundation.lazy.LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp)
+        ) {
+            items(MonitorTimeFilter.entries.toTypedArray()) { filter ->
+                val isSelected = uiState.selectedTimeFilter == filter
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable { viewModel.setTimeFilter(filter) }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = filter.title,
+                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        }
+
+        // --- Danh sách (Events / Playbacks) ---
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp)
+                .background(Color.White, shape = RoundedCornerShape(12.dp))
+        ) {
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                if (uiState.selectedTab == MonitorTab.EVENTS) {
+                    val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
+                    val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
+                    items(uiState.events) { event ->
+                        com.tenli.oneview.ui.features.home.RecentEventItem(
+                            event = event,
+                            cameraList = cameraListForEvent,
+                            onClick = { /* TODO: Navigate to Event Details */ }
+                        )
+                    }
+                } else {
+                    items(uiState.playbacks) { playback ->
+                        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                            PlaybackItemView(playback)
+                        }
                     }
                 }
             }
@@ -236,14 +336,14 @@ fun CameraGridItem(
 ) {
     val deviceKey = UserSession.accessToken
     val camera = selectedCamera.camera
-    var isLiveViewPlaying by remember { mutableStateOf(false) }
-    var isLiveViewError by remember { mutableStateOf(false) }
+    var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
+    var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))
-            .clip(RoundedCornerShape(if (isFullscreen) 0.dp else 8.dp))
+            .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
     ) {
         if (selectedCamera.streamUrl.isNotEmpty()) {
@@ -307,9 +407,7 @@ fun CameraGridItem(
             if (isLiveViewPlaying || isLiveViewError) {
                 Text(
                     text = camera.name,
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
+                    fontSize = 14.sp,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -432,5 +530,78 @@ fun EmptyGridItem(onClick: () -> Unit) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = Modifier.size(56.dp)
         )
+    }
+}
+
+@Composable
+fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel) {
+    // Attempt to format if playback.time is an ISO string, otherwise fallback to raw string
+    val formattedTime = remember(playback.time) {
+        try {
+            val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+            parser.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            val date = parser.parse(playback.time)
+            val formatter = java.text.SimpleDateFormat("HH:mm a - dd/MM/yyyy", java.util.Locale.getDefault())
+            date?.let { formatter.format(it) } ?: playback.time
+        } catch (e: Exception) {
+            playback.time
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { /* TODO: Playback click */ }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(120.dp)
+                .aspectRatio(16f / 9f)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFFF3F4F6))
+        ) {
+            val rawLink = playback.thumbnailLink.ifEmpty { playback.imageLink }
+            val link = if (rawLink.startsWith("http")) rawLink else if (rawLink.isNotEmpty()) "${UserSession.domain.trimEnd('/')}/$rawLink" else ""
+            if (link.isNotEmpty()) {
+                com.tenli.oneview.ui.component.VideoFrameImage(
+                    url = link,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.8f),
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = formattedTime,
+                color = Color.Black,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Bản ghi video",
+                color = Color.Gray,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "PLAYBACK",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .background(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(4.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
     }
 }

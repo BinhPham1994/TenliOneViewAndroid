@@ -28,16 +28,33 @@ data class SelectedCamera(
     val retryCount: Int = 0
 )
 
+enum class MonitorTab {
+    EVENTS, PLAYBACK
+}
+
+enum class MonitorTimeFilter(val title: String) {
+    TODAY("Hôm nay"),
+    YESTERDAY("Hôm qua"),
+    LAST_7_DAYS("7 ngày qua"),
+    LAST_30_DAYS("30 ngày qua")
+}
+
+
 data class MonitorUiState(
     val isLoading: Boolean = false,
     val treeData: List<CameraTreeNode> = emptyList(),
     val selectedCameras: List<SelectedCamera?> = List(1) { null },
-    val expandedNodes: Set<Any> = emptySet(), // Store IDs or object references of expanded nodes
-    val error: String? = null
+    val expandedNodes: Set<Any> = emptySet(),
+    val error: String? = null,
+    val selectedTab: MonitorTab = MonitorTab.EVENTS,
+    val selectedTimeFilter: MonitorTimeFilter = MonitorTimeFilter.TODAY,
+    val events: List<com.tenli.oneview.model.network.EventData> = emptyList(),
+    val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList()
 )
 
 class MonitorViewModel : ViewModel() {
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
+    private val eventApi = LoginAuthClient.create(com.tenli.oneview.data.network.api.EventApi::class.java)
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
@@ -149,7 +166,23 @@ class MonitorViewModel : ViewModel() {
                     }
 
                     val prunedTree = pruneEmptyNodes(treeData)
-                    _uiState.update { it.copy(isLoading = false, treeData = prunedTree.toList()) }
+                    val finalTree = prunedTree.toList()
+                    _uiState.update { it.copy(isLoading = false, treeData = finalTree) }
+
+                    val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                    val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
+                    var targetCamera: CameraModel? = null
+
+                    if (savedCameraId != -1) {
+                        targetCamera = findCameraById(finalTree, savedCameraId)
+                    }
+                    if (targetCamera == null) {
+                        targetCamera = findFirstCamera(finalTree)
+                    }
+
+                    if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
+                        addCamera(targetCamera, 0)
+                    }
                 } else {
                     _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
                 }
@@ -193,21 +226,22 @@ class MonitorViewModel : ViewModel() {
         if (slotIndex != 0) return
 
         if (currentState.selectedCameras.any { it?.camera?.id == camera.id }) {
-            return // Prevent duplicates
+            return
         }
 
+        val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+        prefs.edit().putInt("saved_monitor_camera_id", camera.id).apply()
+
         val updatedCameras = currentState.selectedCameras.toMutableList()
-        // Placeholder SelectedCamera with streamUrl = ""
         updatedCameras[slotIndex] = SelectedCamera(camera, "")
 
         _uiState.update { it.copy(selectedCameras = updatedCameras) }
 
-        // Fetch live stream URL asynchronously
         fetchLiveStreamUrl(camera.id, slotIndex)
+        fetchListData()
     }
 
     /**
-     * Re-fetches live stream URLs for all active cameras.
      * Called when returning to the Monitor tab or resuming from background,
      * since WebSocket sessions expire when the screen is not visible.
      */
@@ -304,9 +338,16 @@ class MonitorViewModel : ViewModel() {
     fun removeCamera(slotIndex: Int) {
         if (slotIndex != 0) return
         _uiState.update { state ->
-            val updatedCameras = state.selectedCameras.toMutableList()
-            updatedCameras[slotIndex] = null
-            state.copy(selectedCameras = updatedCameras)
+            val cameras = state.selectedCameras.toMutableList()
+            cameras[slotIndex] = null
+            
+            // Clear saved preference if the first slot is removed
+            if (slotIndex == 0) {
+                val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                prefs.edit().remove("saved_monitor_camera_id").apply()
+            }
+            
+            state.copy(selectedCameras = cameras)
         }
     }
 
@@ -342,5 +383,116 @@ class MonitorViewModel : ViewModel() {
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun setTab(tab: MonitorTab) {
+        _uiState.update { it.copy(selectedTab = tab) }
+        fetchListData()
+    }
+
+    fun setTimeFilter(filter: MonitorTimeFilter) {
+        _uiState.update { it.copy(selectedTimeFilter = filter) }
+        fetchListData()
+    }
+
+    private fun fetchListData() {
+        val selectedCam = _uiState.value.selectedCameras.firstOrNull()?.camera ?: return
+        
+        viewModelScope.launch {
+            try {
+                if (_uiState.value.selectedTab == MonitorTab.EVENTS) {
+                    val calendar = java.util.Calendar.getInstance()
+                    val toTime: Long
+                    val fromTime: Long
+                    
+                    when (_uiState.value.selectedTimeFilter) {
+                        MonitorTimeFilter.TODAY -> {
+                            toTime = calendar.timeInMillis
+                            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                            calendar.set(java.util.Calendar.MINUTE, 0)
+                            calendar.set(java.util.Calendar.SECOND, 0)
+                            calendar.set(java.util.Calendar.MILLISECOND, 0)
+                            fromTime = calendar.timeInMillis
+                        }
+                        MonitorTimeFilter.YESTERDAY -> {
+                            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                            calendar.set(java.util.Calendar.MINUTE, 0)
+                            calendar.set(java.util.Calendar.SECOND, 0)
+                            calendar.set(java.util.Calendar.MILLISECOND, 0)
+                            toTime = calendar.timeInMillis - 1
+                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+                            fromTime = calendar.timeInMillis
+                        }
+                        MonitorTimeFilter.LAST_7_DAYS -> {
+                            toTime = calendar.timeInMillis
+                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
+                            fromTime = calendar.timeInMillis
+                        }
+                        MonitorTimeFilter.LAST_30_DAYS -> {
+                            toTime = calendar.timeInMillis
+                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
+                            fromTime = calendar.timeInMillis
+                        }
+                    }
+
+                    val uuid = selectedCam.extra?.uuid
+                    if (uuid != null) {
+                        val response = eventApi.getDataList(
+                            cameraUUID = uuid,
+                            from = fromTime / 1000,
+                            to = toTime / 1000,
+                            count = 20
+                        )
+                        if (response.isSuccessful) {
+                            _uiState.update { it.copy(events = response.body() ?: emptyList()) }
+                        }
+                    }
+                } else {
+                    val response = vmsApi.getVideoList(
+                        camera = selectedCam.id,
+                        count = 10
+                    )
+                    if (response.isSuccessful) {
+                        _uiState.update { it.copy(playbacks = response.body() ?: emptyList()) }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MonitorViewModel", "Error fetching list data", e)
+            }
+        }
+    }
+
+    private fun findCameraById(nodes: List<CameraTreeNode>, id: Int): CameraModel? {
+        for (node in nodes) {
+            when (node) {
+                is CameraTreeNode.CameraLeaf -> if (node.camera.id == id) return node.camera
+                is CameraTreeNode.GroupNode -> {
+                    val found = findCameraById(node.children, id)
+                    if (found != null) return found
+                }
+                is CameraTreeNode.VMSNode -> {
+                    val found = findCameraById(node.children, id)
+                    if (found != null) return found
+                }
+            }
+        }
+        return null
+    }
+
+    private fun findFirstCamera(nodes: List<CameraTreeNode>): CameraModel? {
+        for (node in nodes) {
+            when (node) {
+                is CameraTreeNode.CameraLeaf -> return node.camera
+                is CameraTreeNode.GroupNode -> {
+                    val found = findFirstCamera(node.children)
+                    if (found != null) return found
+                }
+                is CameraTreeNode.VMSNode -> {
+                    val found = findFirstCamera(node.children)
+                    if (found != null) return found
+                }
+            }
+        }
+        return null
     }
 }
