@@ -30,7 +30,13 @@ import com.tenli.oneview.R
 @SuppressLint("InflateParams")
 @OptIn(UnstableApi::class)
 @Composable
-fun VideoPlayer(videoUrl: String, thumbnailUrl: String?, deviceKey: String) {
+fun VideoPlayer(
+    videoUrl: String,
+    thumbnailUrl: String?,
+    deviceKey: String,
+    onPlayingChange: (Boolean) -> Unit = {},
+    onErrorChange: (Boolean) -> Unit = {}
+) {
     var isError by remember { mutableStateOf(false) }
     val context = LocalContext.current
     var isVideoReady by remember { mutableStateOf(false) }
@@ -46,10 +52,15 @@ fun VideoPlayer(videoUrl: String, thumbnailUrl: String?, deviceKey: String) {
             addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     isVideoReady = true; isError = false
+                    onPlayingChange(true)
+                    onErrorChange(false)
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
                     isError = true; isVideoReady = false
+                    onPlayingChange(false)
+                    onErrorChange(true)
                 }
             })
         }
@@ -69,6 +80,7 @@ fun VideoPlayer(videoUrl: String, thumbnailUrl: String?, deviceKey: String) {
                     player = exoPlayer
                     useController = true
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
                 }
             }
         }, update = { view ->

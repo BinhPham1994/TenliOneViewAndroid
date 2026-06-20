@@ -294,7 +294,7 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, onClick: ()
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-            AsyncImage(
+            coil.compose.SubcomposeAsyncImage(
                 model = getEventImageUrl(event),
                 contentDescription = "Event Image",
                 contentScale = ContentScale.Crop,
@@ -302,7 +302,27 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, onClick: ()
                     .width(120.dp)
                     .aspectRatio(16f / 9f)
                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
-                    .background(Color.DarkGray)
+                    .background(Color(0xFFF3F4F6)),
+                loading = {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery),
+                            contentDescription = "Loading",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                },
+                error = {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(
+                            painter = androidx.compose.ui.res.painterResource(id = android.R.drawable.ic_menu_gallery),
+                            contentDescription = "Error",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {

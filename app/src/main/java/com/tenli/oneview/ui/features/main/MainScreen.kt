@@ -129,9 +129,7 @@ fun MainScreen(
             }
 
             composable(MainTab.Monitor.route) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Monitor Screen (Placeholder)")
-                }
+                com.tenli.oneview.ui.features.monitor.MonitorScreen()
             }
 
             composable(MainTab.Event.route) {
