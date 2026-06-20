@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -343,10 +344,17 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .background(color = aiColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
-        }
+            Spacer(modifier = Modifier.width(12.dp))
+            androidx.compose.material3.Icon(
+                imageVector = Icons.Default.KeyboardArrowRight,
+                contentDescription = "Chi tiết",
+                tint = Color.LightGray,
+                modifier = Modifier.size(24.dp)
+            )
+    }
 }
 
 private fun formatEventTime(time: Double?): String {

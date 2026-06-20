@@ -260,6 +260,10 @@ fun LiveStreamWebView(
         },
         update = { webView ->
             // If URL changes, load the new content. Handled by `remember` triggering recomposition if params change.
+        },
+        onRelease = { webView ->
+            webView.evaluateJavascript("if(typeof unload === 'function') { unload(); }", null)
+            webView.destroy()
         }
     )
 }

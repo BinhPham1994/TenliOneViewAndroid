@@ -72,6 +72,27 @@ fun LiveStreamPlayer(
     var isPlaying by remember { mutableStateOf(false) }
     var isError by remember { mutableStateOf(false) }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    var isLifecycleActive by remember { mutableStateOf(true) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_START || event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                isLifecycleActive = true
+            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                isLifecycleActive = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    if (!isLifecycleActive) {
+        return // Component will be destroyed, saving battery and network
+    }
+
     val exoPlayer = remember(wsUrl) {
         val dataSourceFactory = DataSource.Factory {
             val wsClient = OkHttpClient.Builder()

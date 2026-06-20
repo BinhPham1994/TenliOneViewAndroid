@@ -73,6 +73,21 @@ fun VideoPlayer(
         }
     }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, exoPlayer) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                exoPlayer.pause()
+            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                exoPlayer.play()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(factory = { ctx ->
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {

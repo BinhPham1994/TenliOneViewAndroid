@@ -133,9 +133,7 @@ fun MainScreen(
             }
 
             composable(MainTab.Event.route) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Event Screen (Placeholder)")
-                }
+                com.tenli.oneview.ui.features.event.EventScreen()
             }
 
             composable(
