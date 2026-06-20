@@ -48,7 +48,8 @@ fun VideoFrameImage(
     url: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
-    cacheKey: String? = null
+    cacheKey: String? = null,
+    errorContent: @Composable (() -> Unit)? = null
 ) {
     val effectiveKey = cacheKey ?: url ?: ""
     
@@ -111,7 +112,11 @@ fun VideoFrameImage(
                 modifier = modifier
             )
         } else if (hasError) {
-            ErrorPlaceholder(modifier)
+            if (errorContent != null) {
+                errorContent()
+            } else {
+                ErrorPlaceholder(modifier)
+            }
         } else {
             LoadingPlaceholder(modifier)
         }

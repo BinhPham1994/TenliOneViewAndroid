@@ -26,7 +26,8 @@ data class SelectedCamera(
     val streamUrl: String,
     val videoCodecTag: String = "",
     val retryCount: Int = 0,
-    val streamType: String = "LIVE" // "LIVE", "EVENT", "PLAYBACK"
+    val streamType: String = "LIVE", // "LIVE", "EVENT", "PLAYBACK"
+    val fallbackImageUrl: String = ""
 )
 
 enum class MonitorTab {
@@ -243,7 +244,7 @@ class MonitorViewModel : ViewModel() {
         fetchListData()
     }
 
-    fun playVideo(videoUrl: String, streamType: String) {
+    fun playVideo(videoUrl: String, streamType: String, fallbackImageUrl: String = "") {
         if (videoUrl.isBlank()) return
         
         _uiState.update { state ->
@@ -256,7 +257,7 @@ class MonitorViewModel : ViewModel() {
                     fullUrl = "$domain$fullUrl"
                 }
                 
-                cameras[0] = currentSelection.copy(streamUrl = fullUrl, streamType = streamType)
+                cameras[0] = currentSelection.copy(streamUrl = fullUrl, streamType = streamType, fallbackImageUrl = fallbackImageUrl)
             }
             state.copy(selectedCameras = cameras)
         }

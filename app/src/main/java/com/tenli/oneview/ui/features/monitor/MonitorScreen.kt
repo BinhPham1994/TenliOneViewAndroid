@@ -301,10 +301,11 @@ fun MonitorScreen(
                                 cameraList = cameraListForEvent,
                                 isSelected = isSelected,
                                 onClick = { 
+                                    val imageUrl = com.tenli.oneview.ui.features.home.getEventImageUrl(event) ?: ""
                                     if (videoUrl.isEmpty()) {
-                                        viewModel.playVideo(dummyUrl, "EVENT")
+                                        viewModel.playVideo(dummyUrl, "EVENT", fallbackImageUrl = imageUrl)
                                     } else {
-                                        viewModel.playVideo(videoUrl, "EVENT")
+                                        viewModel.playVideo(videoUrl, "EVENT", fallbackImageUrl = imageUrl)
                                     }
                                 }
                             )
@@ -452,7 +453,33 @@ fun CameraGridItem(
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = if (selectedCamera.streamUrl.startsWith("error://no-video")) "Không có video cho sự kiện này" else "Lỗi tải video"
-                com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
+
+                if (selectedCamera.fallbackImageUrl.isNotEmpty()) {
+                    com.tenli.oneview.ui.component.VideoFrameImage(
+                        url = selectedCamera.fallbackImageUrl,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        errorContent = {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
+                            }
+                        }
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
+                    }
+                }
             }
         }
 

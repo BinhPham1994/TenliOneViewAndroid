@@ -357,7 +357,7 @@ private fun formatEventTime(time: Double?): String {
     return sdf.format(Date(timeMillis))
 }
 
-private fun getEventImageUrl(event: EventData): String? {
+fun getEventImageUrl(event: EventData): String? {
     val filename = event.data?.image ?: event.data?.cropImage ?: return null
     if (filename.startsWith("http")) return filename
     val domain = UserSession.domain.trimEnd('/')
