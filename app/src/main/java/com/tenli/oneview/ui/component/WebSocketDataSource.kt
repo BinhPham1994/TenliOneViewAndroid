@@ -87,7 +87,14 @@ class WebSocketDataSource(
 
         while (currentBuffer == null || currentBufferPosition >= currentBuffer!!.size) {
             try {
-                currentBuffer = dataQueue.take()
+                currentBuffer = dataQueue.poll(5, java.util.concurrent.TimeUnit.SECONDS)
+                if (currentBuffer == null) {
+                    if (!isOpen) {
+                        return C.RESULT_END_OF_INPUT
+                    } else {
+                        throw IOException("WebSocket read timeout (no data received for 5s)")
+                    }
+                }
                 currentBufferPosition = 0
                 if (error != null) throw error!!
                 if (currentBuffer!!.isEmpty() && !isOpen) {

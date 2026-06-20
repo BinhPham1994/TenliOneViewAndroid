@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.monitor
 
 import android.widget.Toast
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,6 +23,8 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
@@ -153,13 +156,31 @@ fun MonitorScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         // Header
-        Text(
-            text = "Giám sát",
-            style = MaterialTheme.typography.headlineSmall,
-            color = MaterialTheme.colorScheme.onBackground,
-            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
-        )
+        val headerText = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Giám sát"
+        Row(
+            modifier = Modifier
+                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
+                .clickable {
+                    activeSlotIndex = 0
+                    showBottomSheet = true
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = headerText,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Chọn Camera",
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
 
         Box(
             modifier = Modifier
@@ -187,68 +208,60 @@ fun MonitorScreen(
             }
         }
 
-        // --- Tabs: Sự kiện | Playback ---
+        // --- Header Row: Tabs (Left) and Time Filter (Right) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 16.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             val isEvents = uiState.selectedTab == MonitorTab.EVENTS
-            Box(
+            
+            // Tabs Segmented Control
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (isEvents) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { viewModel.setTab(MonitorTab.EVENTS) }
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(4.dp)
             ) {
-                Text("Sự kiện", color = if (isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (!isEvents) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                    .clickable { viewModel.setTab(MonitorTab.PLAYBACK) }
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Playback", color = if (!isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // --- Time Filter Scrollable Row ---
-        androidx.compose.foundation.lazy.LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(horizontal = 16.dp)
-        ) {
-            items(MonitorTimeFilter.entries.toTypedArray()) { filter ->
-                val isSelected = uiState.selectedTimeFilter == filter
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
-                        .border(
-                            width = 1.dp,
-                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.LightGray,
-                            shape = RoundedCornerShape(16.dp)
-                        )
-                        .clickable { viewModel.setTimeFilter(filter) }
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
+                        .clickable { viewModel.setTab(MonitorTab.EVENTS) }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = filter.title,
-                        color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Gray,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        "Sự kiện",
+                        color = if (isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (isEvents) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(if (!isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
+                        .clickable { viewModel.setTab(MonitorTab.PLAYBACK) }
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "Playback",
+                        color = if (!isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (!isEvents) FontWeight.Bold else FontWeight.Medium,
                         fontSize = 14.sp
                     )
                 }
             }
+
+            // Time Filter Dropdown
+            MonitorTimeFilterDropdown(
+                selectedFilter = uiState.selectedTimeFilter,
+                onFilterSelected = { viewModel.setTimeFilter(it) }
+            )
         }
 
         // --- Danh sách (Events / Playbacks) ---
@@ -260,24 +273,33 @@ fun MonitorScreen(
                 .padding(bottom = 16.dp)
                 .background(Color.White, shape = RoundedCornerShape(12.dp))
         ) {
-            androidx.compose.foundation.lazy.LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                if (uiState.selectedTab == MonitorTab.EVENTS) {
-                    val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
-                    val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
-                    items(uiState.events) { event ->
-                        com.tenli.oneview.ui.features.home.RecentEventItem(
-                            event = event,
-                            cameraList = cameraListForEvent,
-                            onClick = { /* TODO: Navigate to Event Details */ }
-                        )
-                    }
-                } else {
-                    val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
-                    items(uiState.playbacks) { playback ->
-                        PlaybackItemView(playback, currentCameraName)
+            val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
+            
+            if (isEmpty) {
+                com.tenli.oneview.ui.component.CommonEmptyState(
+                    text = "Không có dữ liệu",
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                androidx.compose.foundation.lazy.LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    if (uiState.selectedTab == MonitorTab.EVENTS) {
+                        val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
+                        val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
+                        items(uiState.events) { event ->
+                            com.tenli.oneview.ui.features.home.RecentEventItem(
+                                event = event,
+                                cameraList = cameraListForEvent,
+                                onClick = { /* TODO: Navigate to Event Details */ }
+                            )
+                        }
+                    } else {
+                        val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
+                        items(uiState.playbacks) { playback ->
+                            PlaybackItemView(playback, currentCameraName)
+                        }
                     }
                 }
             }
@@ -348,7 +370,6 @@ fun CameraGridItem(
             .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))
             .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
-            .clickable { onClick() }
     ) {
         if (selectedCamera.streamUrl.isNotEmpty()) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
@@ -398,24 +419,28 @@ fun CameraGridItem(
             }
         }
 
-        // Overlay for Camera Name
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(if (isLiveViewPlaying || isLiveViewError) Color.Black.copy(alpha = 0.5f) else Color.Transparent)
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .align(Alignment.TopCenter),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (isLiveViewPlaying || isLiveViewError) {
-                Text(
-                    text = camera.name,
-                    fontSize = 14.sp,
-                    modifier = Modifier.weight(1f)
+        // LIVE Indicator Overlay
+        if (isLiveViewPlaying) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color.Red, androidx.compose.foundation.shape.CircleShape)
                 )
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "LIVE",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
             }
         }
         
@@ -424,14 +449,13 @@ fun CameraGridItem(
             onClick = onFullscreenClick,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(8.dp)
-                .size(32.dp)
+                .size(48.dp)
         ) {
             Icon(
                 imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
                 contentDescription = "Toàn màn hình",
                 tint = Color.White,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(28.dp)
             )
         }
     }
@@ -625,6 +649,97 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                     .background(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(4.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             )
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun MonitorTimeFilterDropdown(
+    selectedFilter: MonitorTimeFilter,
+    onFilterSelected: (MonitorTimeFilter) -> Unit
+) {
+    var showBottomSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { showBottomSheet = true }
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = selectedFilter.title,
+                color = Color.Black,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.sp
+            )
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Select Time Filter",
+                tint = Color.Black
+            )
+        }
+
+        if (showBottomSheet) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showBottomSheet = false },
+                sheetState = sheetState,
+                containerColor = Color.White,
+                dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
+                ) {
+                    Text(
+                        text = "Chọn thời gian",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp, start = 8.dp)
+                    )
+                    
+                    MonitorTimeFilter.entries.forEach { filter ->
+                        val isSelected = filter == selectedFilter
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+                                .clickable {
+                                    scope.launch {
+                                        sheetState.hide()
+                                        showBottomSheet = false
+                                        onFilterSelected(filter)
+                                    }
+                                }
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = filter.title,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 16.sp,
+                                modifier = Modifier.weight(1f)
+                            )
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    }
+                }
+            }
         }
     }
 }

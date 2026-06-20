@@ -400,41 +400,41 @@ class MonitorViewModel : ViewModel() {
         
         viewModelScope.launch {
             try {
-                if (_uiState.value.selectedTab == MonitorTab.EVENTS) {
-                    val calendar = java.util.Calendar.getInstance()
-                    val toTime: Long
-                    val fromTime: Long
-                    
-                    when (_uiState.value.selectedTimeFilter) {
-                        MonitorTimeFilter.TODAY -> {
-                            toTime = calendar.timeInMillis
-                            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                            calendar.set(java.util.Calendar.MINUTE, 0)
-                            calendar.set(java.util.Calendar.SECOND, 0)
-                            calendar.set(java.util.Calendar.MILLISECOND, 0)
-                            fromTime = calendar.timeInMillis
-                        }
-                        MonitorTimeFilter.YESTERDAY -> {
-                            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                            calendar.set(java.util.Calendar.MINUTE, 0)
-                            calendar.set(java.util.Calendar.SECOND, 0)
-                            calendar.set(java.util.Calendar.MILLISECOND, 0)
-                            toTime = calendar.timeInMillis - 1
-                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
-                            fromTime = calendar.timeInMillis
-                        }
-                        MonitorTimeFilter.LAST_7_DAYS -> {
-                            toTime = calendar.timeInMillis
-                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
-                            fromTime = calendar.timeInMillis
-                        }
-                        MonitorTimeFilter.LAST_30_DAYS -> {
-                            toTime = calendar.timeInMillis
-                            calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
-                            fromTime = calendar.timeInMillis
-                        }
+                val calendar = java.util.Calendar.getInstance()
+                val toTime: Long
+                val fromTime: Long
+                
+                when (_uiState.value.selectedTimeFilter) {
+                    MonitorTimeFilter.TODAY -> {
+                        toTime = calendar.timeInMillis
+                        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(java.util.Calendar.MINUTE, 0)
+                        calendar.set(java.util.Calendar.SECOND, 0)
+                        calendar.set(java.util.Calendar.MILLISECOND, 0)
+                        fromTime = calendar.timeInMillis
                     }
+                    MonitorTimeFilter.YESTERDAY -> {
+                        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(java.util.Calendar.MINUTE, 0)
+                        calendar.set(java.util.Calendar.SECOND, 0)
+                        calendar.set(java.util.Calendar.MILLISECOND, 0)
+                        toTime = calendar.timeInMillis - 1
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+                        fromTime = calendar.timeInMillis
+                    }
+                    MonitorTimeFilter.LAST_7_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
+                        fromTime = calendar.timeInMillis
+                    }
+                    MonitorTimeFilter.LAST_30_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
+                        fromTime = calendar.timeInMillis
+                    }
+                }
 
+                if (_uiState.value.selectedTab == MonitorTab.EVENTS) {
                     val uuid = selectedCam.extra?.uuid
                     if (uuid != null) {
                         val response = eventApi.getDataList(
@@ -448,9 +448,16 @@ class MonitorViewModel : ViewModel() {
                         }
                     }
                 } else {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    val fromStr = sdf.format(java.util.Date(fromTime))
+                    val toStr = sdf.format(java.util.Date(toTime))
+
                     val response = vmsApi.getVideoList(
                         camera = selectedCam.id,
-                        count = 10
+                        count = 20,
+                        from = fromStr,
+                        to = toStr
                     )
                     if (response.isSuccessful) {
                         _uiState.update { it.copy(playbacks = response.body() ?: emptyList()) }

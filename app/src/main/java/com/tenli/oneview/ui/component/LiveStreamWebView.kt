@@ -18,7 +18,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 @Composable
 fun LiveStreamWebView(
     wsUrl: String,
-    videoCodecTag: String
+    videoCodecTag: String,
+    onPlayingChange: (Boolean) -> Unit = {},
+    onErrorChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -182,11 +184,13 @@ fun LiveStreamWebView(
                     ws.binaryType = 'arraybuffer';
                     ws.addEventListener('open', () => {
                         reconnectAttempts = 0;
+                        if (window.Android) window.Android.onPlay();
                     });
                     ws.addEventListener('message', (event) => {
                         player.feed(new Uint8Array(event.data));
                     });
                     ws.addEventListener('error', () => {
+                        if (window.Android) window.Android.onError();
                         if (!intentionalClose) attemptReconnect();
                     });
                     ws.addEventListener('close', () => {
@@ -239,6 +243,18 @@ fun LiveStreamWebView(
                 }
                 webChromeClient = WebChromeClient()
                 webViewClient = WebViewClient()
+                addJavascriptInterface(object {
+                    @android.webkit.JavascriptInterface
+                    fun onPlay() {
+                        onPlayingChange(true)
+                        onErrorChange(false)
+                    }
+                    @android.webkit.JavascriptInterface
+                    fun onError() {
+                        onErrorChange(true)
+                        onPlayingChange(false)
+                    }
+                }, "Android")
                 loadDataWithBaseURL(null, htmlContent, "text/html", "UTF-8", null)
             }
         },

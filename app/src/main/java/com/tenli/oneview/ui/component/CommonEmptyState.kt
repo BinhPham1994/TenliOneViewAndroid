@@ -30,7 +30,7 @@ fun CommonEmptyState(
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Rounded.Inbox, // Mặc định là icon Inbox
     text: String = "Không có dữ liệu",      // Mặc định nếu không truyền text
-    iconSize: Dp = 100.dp
+    iconSize: Dp = 64.dp
 ) {
     Column(
         modifier = modifier
@@ -42,13 +42,13 @@ fun CommonEmptyState(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
             modifier = Modifier.size(iconSize)
         )
-        Spacer(modifier = Modifier.height(8.dp)) // Tăng một chút cho thoáng
+        Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             lineHeight = 20.sp // Giúp text 2 dòng dễ đọc hơn
