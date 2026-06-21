@@ -59,7 +59,10 @@ data class MonitorUiState(
     val selectedTab: MonitorTab = MonitorTab.EVENTS,
     val selectedTimeFilter: MonitorTimeFilter = MonitorTimeFilter.TODAY,
     val events: List<com.tenli.oneview.model.network.EventData> = emptyList(),
-    val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList()
+    val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList(),
+    val isPaginating: Boolean = false,
+    val hasMoreEvents: Boolean = true,
+    val hasMorePlaybacks: Boolean = true
 )
 
 
@@ -502,6 +505,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     }
                 }
 
+                _uiState.update { it.copy(hasMoreEvents = true, hasMorePlaybacks = true) }
+
                 if (_uiState.value.selectedTab == MonitorTab.EVENTS) {
                     val uuid = selectedCam.extra?.uuid
                     if (uuid != null) {
@@ -512,7 +517,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                             count = 20
                         )
                         if (response.isSuccessful) {
-                            _uiState.update { it.copy(events = response.body() ?: emptyList()) }
+                            val newEvents = response.body() ?: emptyList()
+                            _uiState.update { it.copy(events = newEvents, hasMoreEvents = newEvents.size == 20) }
                         }
                     }
                 } else {
@@ -528,11 +534,119 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         to = toStr
                     )
                     if (response.isSuccessful) {
-                        _uiState.update { it.copy(playbacks = response.body() ?: emptyList()) }
+                        val newPlaybacks = response.body() ?: emptyList()
+                        _uiState.update { it.copy(playbacks = newPlaybacks, hasMorePlaybacks = newPlaybacks.size == 20) }
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MonitorViewModel", "Error fetching list data", e)
+            }
+        }
+    }
+
+    fun loadMoreData() {
+        val currentState = _uiState.value
+        if (currentState.isPaginating) return
+
+        val selectedCam = currentState.selectedCameras.firstOrNull()?.camera ?: return
+
+        if (currentState.selectedTab == MonitorTab.EVENTS && (!currentState.hasMoreEvents || currentState.events.isEmpty())) return
+        if (currentState.selectedTab == MonitorTab.PLAYBACK && (!currentState.hasMorePlaybacks || currentState.playbacks.isEmpty())) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPaginating = true) }
+            try {
+                val calendar = java.util.Calendar.getInstance()
+                val toTime: Long
+                val fromTime: Long
+                
+                when (currentState.selectedTimeFilter) {
+                    MonitorTimeFilter.TODAY -> {
+                        toTime = calendar.timeInMillis
+                        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(java.util.Calendar.MINUTE, 0)
+                        calendar.set(java.util.Calendar.SECOND, 0)
+                        calendar.set(java.util.Calendar.MILLISECOND, 0)
+                        fromTime = calendar.timeInMillis
+                    }
+                    MonitorTimeFilter.YESTERDAY -> {
+                        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(java.util.Calendar.MINUTE, 0)
+                        calendar.set(java.util.Calendar.SECOND, 0)
+                        calendar.set(java.util.Calendar.MILLISECOND, 0)
+                        toTime = calendar.timeInMillis - 1
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
+                        fromTime = calendar.timeInMillis
+                    }
+                    MonitorTimeFilter.LAST_7_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
+                        fromTime = calendar.timeInMillis
+                    }
+                    MonitorTimeFilter.LAST_30_DAYS -> {
+                        toTime = calendar.timeInMillis
+                        calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
+                        fromTime = calendar.timeInMillis
+                    }
+                }
+
+                if (currentState.selectedTab == MonitorTab.EVENTS) {
+                    val uuid = selectedCam.extra?.uuid
+                    if (uuid != null) {
+                        val lastId = currentState.events.last().id
+                        val response = eventApi.getDataList(
+                            cameraUUID = uuid,
+                            lastId = lastId,
+                            from = fromTime / 1000,
+                            to = toTime / 1000,
+                            count = 20
+                        )
+                        if (response.isSuccessful) {
+                            val newEvents = response.body() ?: emptyList()
+                            _uiState.update { 
+                                it.copy(
+                                    events = it.events + newEvents,
+                                    hasMoreEvents = newEvents.size == 20,
+                                    isPaginating = false
+                                ) 
+                            }
+                        } else {
+                            _uiState.update { it.copy(isPaginating = false) }
+                        }
+                    } else {
+                        _uiState.update { it.copy(isPaginating = false) }
+                    }
+                } else {
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
+                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    val fromStr = sdf.format(java.util.Date(fromTime))
+                    // For playback, we use the time of the last item as `to` time
+                    val lastVideoTimeStr = currentState.playbacks.last().time
+                    // However time string from api is often without 'Z', we need to pass what API expects.
+                    // Just pass it directly as toStr, or reformat. We'll pass it directly as `to` parameter
+                    
+                    val response = vmsApi.getVideoList(
+                        camera = selectedCam.id,
+                        count = 20,
+                        from = fromStr,
+                        to = lastVideoTimeStr
+                    )
+                    if (response.isSuccessful) {
+                        val newPlaybacks = response.body() ?: emptyList()
+                        _uiState.update { 
+                            it.copy(
+                                playbacks = it.playbacks + newPlaybacks,
+                                hasMorePlaybacks = newPlaybacks.size == 20,
+                                isPaginating = false
+                            ) 
+                        }
+                    } else {
+                        _uiState.update { it.copy(isPaginating = false) }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MonitorViewModel", "Error loading more list data", e)
+                _uiState.update { it.copy(isPaginating = false) }
             }
         }
     }

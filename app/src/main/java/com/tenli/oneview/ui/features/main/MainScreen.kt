@@ -135,6 +135,7 @@ fun MainScreen(
         ) {
             composable(MainTab.Home.route) {
                 HomeScreen(
+                    listState = homeListState,
                     onEventClick = { eventId ->
                         // Điều hướng đến chi tiết sự kiện nếu có
                     }
@@ -142,11 +143,11 @@ fun MainScreen(
             }
 
             composable(MainTab.Monitor.route) {
-                com.tenli.oneview.ui.features.monitor.MonitorScreen()
+                com.tenli.oneview.ui.features.monitor.MonitorScreen(listState = monitorState)
             }
 
             composable(MainTab.Event.route) {
-                com.tenli.oneview.ui.features.event.EventScreen()
+                com.tenli.oneview.ui.features.event.EventScreen(listState = eventListState)
             }
 
             composable(

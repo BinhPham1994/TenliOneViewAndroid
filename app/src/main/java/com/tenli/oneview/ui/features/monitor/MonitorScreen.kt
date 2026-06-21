@@ -51,7 +51,8 @@ import com.tenli.oneview.ui.component.VideoPlayer
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonitorScreen(
-    viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+    viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -272,7 +273,6 @@ fun MonitorScreen(
                 .weight(1f)
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 16.dp)
-                .background(Color.White, shape = RoundedCornerShape(12.dp))
         ) {
             val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
             
@@ -283,8 +283,10 @@ fun MonitorScreen(
                 )
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp)
+                    contentPadding = PaddingValues(vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
@@ -310,6 +312,18 @@ fun MonitorScreen(
                                 }
                             )
                         }
+                        if (uiState.hasMoreEvents && uiState.events.isNotEmpty()) {
+                            item {
+                                LaunchedEffect(Unit) {
+                                    viewModel.loadMoreData()
+                                }
+                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    if (uiState.isPaginating) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
                         val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
@@ -321,6 +335,18 @@ fun MonitorScreen(
                                 isSelected = isSelected,
                                 onClick = { viewModel.playVideo(playback.videoLink, "PLAYBACK") }
                             )
+                        }
+                        if (uiState.hasMorePlaybacks && uiState.playbacks.isNotEmpty()) {
+                            item {
+                                LaunchedEffect(Unit) {
+                                    viewModel.loadMoreData()
+                                }
+                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    if (uiState.isPaginating) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -683,16 +709,17 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.White)
             .clickable { onClick() }
-            .padding(16.dp),
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .width(120.dp)
+                .width(140.dp)
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFFF3F4F6))
         ) {
             val rawLink = playback.thumbnailLink.ifEmpty { playback.imageLink }

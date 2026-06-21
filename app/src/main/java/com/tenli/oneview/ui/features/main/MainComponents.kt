@@ -70,8 +70,8 @@ fun MainBottomNavigation(
                 },
                 icon = {
                     Icon(
-                        imageVector = if (showBackToTop) Icons.Default.ExpandLess else iconRes,
-                        contentDescription = "Back to top",
+                        imageVector = iconRes,
+                        contentDescription = stringResource(id = labelRes),
                         modifier = Modifier
                             .size(MaterialTheme.spacing.iconMedium)
                             .offset(y = MaterialTheme.spacing.borderMedium)

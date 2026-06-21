@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -25,12 +26,21 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.features.home.RecentEventItem
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun EventScreen(
-    viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
+    viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory),
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var isRefreshing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    LaunchedEffect(uiState.isLoading) {
+        if (!uiState.isLoading) {
+            isRefreshing = false
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -55,8 +65,15 @@ fun EventScreen(
             )
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
-            if (uiState.isLoading) {
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                viewModel.fetchInitialData()
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (uiState.isLoading && !isRefreshing) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
                     color = MaterialTheme.colorScheme.primary
@@ -65,11 +82,12 @@ fun EventScreen(
                 CommonEmptyState(text = "Chưa có sự kiện nào", modifier = Modifier.align(Alignment.Center))
             } else {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                        .background(androidx.compose.ui.graphics.Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                        .padding(vertical = 4.dp)
+                        .padding(horizontal = 16.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 16.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
                 ) {
                     items(items = uiState.events, key = { it.id }) { event ->
                         val currentCamera = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }

@@ -44,6 +44,7 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     onEventClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -71,6 +72,7 @@ fun HomeScreen(
         modifier = Modifier.fillMaxSize()
     ) {
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
@@ -242,7 +244,12 @@ fun HomeScreen(
                         modifier = Modifier.padding(16.dp)
                     )
                 } else if (uiState.recentEvents.isEmpty()) {
-                    Text("Chưa có sự kiện nào", color = Color.Gray, modifier = Modifier.padding(16.dp))
+                    com.tenli.oneview.ui.component.CommonEmptyState(
+                        text = "Chưa có sự kiện nào",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp)
+                    )
                 } else {
                     androidx.compose.foundation.layout.Column(
                         modifier = Modifier
@@ -294,15 +301,15 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
             .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.White)
             .clickable(onClick = onClick)
-            .padding(16.dp),
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp), // Ảnh sát mép 4dp, chữ cách lề phải 12dp
         verticalAlignment = Alignment.CenterVertically
     ) {
             com.tenli.oneview.ui.component.VideoFrameImage(
                 url = getEventImageUrl(event),
                 modifier = Modifier
-                    .width(120.dp)
+                    .width(140.dp) // Tăng kích thước ảnh
                     .aspectRatio(16f / 9f)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) // Bán kính góc = 12(khung) - 4(padding)
                     .background(Color(0xFFF3F4F6)),
                 contentScale = ContentScale.Crop
             )
