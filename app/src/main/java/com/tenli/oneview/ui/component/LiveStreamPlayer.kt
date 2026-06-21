@@ -94,12 +94,13 @@ fun LiveStreamPlayer(
     }
 
     val exoPlayer = remember(wsUrl) {
+        val wsClient = OkHttpClient.Builder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+            
         val dataSourceFactory = DataSource.Factory {
-            val wsClient = OkHttpClient.Builder()
-                .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
-                .build()
             WebSocketDataSource(wsClient, UserSession.accessToken)
         }
 

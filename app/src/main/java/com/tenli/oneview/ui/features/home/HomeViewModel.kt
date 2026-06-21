@@ -19,6 +19,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.data.local.CachedHomeData
+import com.tenli.oneview.data.local.HomeCacheManager
 
 enum class TimeFilter(val title: String) {
     TODAY("Hôm nay"),
@@ -39,7 +47,8 @@ data class HomeUiState(
     val error: String? = null
 )
 
-class HomeViewModel : ViewModel() {
+
+class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val bsApi = LoginAuthClient.create(BsApi::class.java)
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
@@ -61,12 +70,29 @@ class HomeViewModel : ViewModel() {
     fun fetchDashboardData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+            
+            // Try to load from cache first
+            val filter = _uiState.value.selectedFilter
+            val cachedData = HomeCacheManager.getHomeData(getApplication(), filter)
+            if (cachedData != null) {
+                _uiState.update {
+                    it.copy(
+                        overviewStats = cachedData.overviewStats,
+                        eventsOverTime = cachedData.eventsOverTime,
+                        eventsByType = cachedData.eventsByType,
+                        eventsByCamera = cachedData.eventsByCamera,
+                        cameraList = cachedData.cameraList,
+                        recentEvents = cachedData.recentEvents
+                    )
+                }
+            }
+
             try {
                 val calendar = Calendar.getInstance()
                 val toTime: Long
                 val fromTime: Long
                 
-                when (_uiState.value.selectedFilter) {
+                when (filter) {
                     TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
                         calendar.set(Calendar.HOUR_OF_DAY, 0)
@@ -167,9 +193,31 @@ class HomeViewModel : ViewModel() {
                     )
                 }
 
+                // Save fresh data to cache
+                if (errorMsg == null) {
+                    val newCachedData = CachedHomeData(
+                        overviewStats = overviewStats,
+                        eventsOverTime = eventsOverTime,
+                        eventsByType = eventsByType,
+                        eventsByCamera = eventsByCamera,
+                        cameraList = cameraList,
+                        recentEvents = recentEvents
+                    )
+                    HomeCacheManager.saveHomeData(getApplication(), filter, newCachedData)
+                }
+
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error fetching data", e)
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+            }
+        }
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = this[APPLICATION_KEY] as Application
+                HomeViewModel(application)
             }
         }
     }

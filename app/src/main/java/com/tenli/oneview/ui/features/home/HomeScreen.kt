@@ -43,7 +43,7 @@ import java.util.Locale
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel = viewModel(),
+    viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     onEventClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -110,10 +110,10 @@ fun HomeScreen(
             val totalAI = uiState.overviewStats.find { it.label == "monitor-count" && it.tag == "all" }?.count.formatCount()
             val systemStatus = "An toàn" // Default mock as per requirement
 
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatCard(
                         title = "Tổng sự kiện",
@@ -130,7 +130,7 @@ fun HomeScreen(
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatCard(
                         title = "Tổng tiến trình AI",
@@ -184,7 +184,7 @@ fun HomeScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxWidth(),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(end = configuration.screenWidthDp.dp * 0.06f),
-                pageSpacing = 12.dp
+                pageSpacing = 8.dp
             ) { page ->
                 when (page) {
                     0 -> {
@@ -247,8 +247,8 @@ fun HomeScreen(
                     androidx.compose.foundation.layout.Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .padding(vertical = 4.dp)
+                            .padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         uiState.recentEvents.forEachIndexed { index, event ->
                             RecentEventItem(event, uiState.cameraList) {
@@ -291,7 +291,8 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.White)
             .clickable(onClick = onClick)
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically

@@ -1,8 +1,11 @@
 package com.tenli.oneview.ui.features.splash
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.google.gson.Gson
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.UserData
@@ -11,8 +14,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-class SplashViewModel : ViewModel() {
+import com.google.gson.Gson
+import androidx.lifecycle.viewModelScope
+class SplashViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(SplashUiState())
     val uiState = _uiState.asStateFlow()
@@ -46,9 +50,7 @@ class SplashViewModel : ViewModel() {
 
     fun logout() {
         // Clear session data
-        UserSession.accessToken = ""
-        UserSession.refreshToken = ""
-        UserSession.userData = null
+        UserSession.clear()
         
         val prefs = GlobalData.preferences
         prefs.edit().apply {
@@ -59,7 +61,21 @@ class SplashViewModel : ViewModel() {
             apply()
         }
         
+        // Clear all local caches
+        com.tenli.oneview.data.local.HomeCacheManager.clearCache(getApplication())
+        com.tenli.oneview.data.local.EventCacheManager.clearCache(getApplication())
+        com.tenli.oneview.data.local.MonitorCacheManager.clearCache(getApplication())
+        
         _uiState.update { it.copy(destination = SplashDestination.Login) }
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = this[APPLICATION_KEY] as Application
+                SplashViewModel(application)
+            }
+        }
     }
 
     init {

@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.tenli.oneview.ui.features.home.HomeScreen
+import androidx.navigation.compose.currentBackStackEntryAsState
 
 @Composable
 fun MainScreen(
@@ -78,6 +79,18 @@ fun MainScreen(
             when (event) {
                 is MainEvent.Logout -> onLogoutRequest()
                 else -> {}
+            }
+        }
+    }
+
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    LaunchedEffect(currentRoute) {
+        currentRoute?.let { route ->
+            val tab = MainTab.values().find { route.startsWith(it.route) }
+            if (tab != null && tab != uiState.currentTab) {
+                viewModel.onTabSelected(tab)
             }
         }
     }

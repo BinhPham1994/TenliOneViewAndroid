@@ -14,7 +14,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.data.local.CachedEventData
+import com.tenli.oneview.data.local.EventCacheManager
 data class EventScreenUiState(
     val events: List<EventData> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
@@ -25,7 +32,8 @@ data class EventScreenUiState(
     val error: String? = null
 )
 
-class EventViewModel : ViewModel() {
+
+class EventViewModel(application: Application) : AndroidViewModel(application) {
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
 
@@ -82,6 +90,20 @@ class EventViewModel : ViewModel() {
     fun fetchInitialData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null, hasMore = true) }
+            
+            // Try to load from cache first
+            val filter = _uiState.value.selectedFilter
+            val cachedData = EventCacheManager.getEventData(getApplication(), filter)
+            if (cachedData != null) {
+                _uiState.update {
+                    it.copy(
+                        cameraList = cachedData.cameraList,
+                        events = cachedData.events,
+                        hasMore = cachedData.events.size >= 20 // Fallback
+                    )
+                }
+            }
+
             try {
                 // Fetch cameras first if needed, or in parallel
                 val cameraResponse = vmsApi.getCameraList()
@@ -102,6 +124,12 @@ class EventViewModel : ViewModel() {
                         events = newEvents,
                         hasMore = newEvents.size == 20
                     )
+                }
+
+                // Save to cache on success
+                if (response.isSuccessful && cameraResponse.isSuccessful) {
+                    val freshCachedData = CachedEventData(events = newEvents, cameraList = cameraList)
+                    EventCacheManager.saveEventData(getApplication(), filter, freshCachedData)
                 }
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error fetching initial events", e)
@@ -138,6 +166,15 @@ class EventViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error loading more events", e)
                 _uiState.update { it.copy(isPaginating = false, error = e.localizedMessage) }
+            }
+        }
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = this[APPLICATION_KEY] as Application
+                EventViewModel(application)
             }
         }
     }

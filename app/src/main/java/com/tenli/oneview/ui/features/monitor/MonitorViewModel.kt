@@ -13,7 +13,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.data.local.CachedMonitorData
+import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.model.network.CameraInGroupModel
 sealed class CameraTreeNode {
     abstract val key: String
     data class VMSNode(val vms: VMSServiceModel, val children: MutableList<CameraTreeNode>, override val key: String) : CameraTreeNode()
@@ -54,7 +62,8 @@ data class MonitorUiState(
     val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList()
 )
 
-class MonitorViewModel : ViewModel() {
+
+class MonitorViewModel(application: Application) : AndroidViewModel(application) {
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
     private val eventApi = LoginAuthClient.create(com.tenli.oneview.data.network.api.EventApi::class.java)
 
@@ -65,9 +74,128 @@ class MonitorViewModel : ViewModel() {
         loadData()
     }
 
+    private fun buildTree(
+        vmsList: List<VMSServiceModel>,
+        groupList: List<CameraGroupModel>,
+        cameraList: List<CameraModel>,
+        cameraInGroups: List<CameraInGroupModel>
+    ): List<CameraTreeNode> {
+        val treeData = mutableListOf<CameraTreeNode>()
+        val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
+
+        val fullVmsList = mutableListOf(
+            VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")
+        )
+        fullVmsList.addAll(vmsList)
+
+        val camerasByVms = cameraList.groupBy { it.vmsId }
+        val groupsByVms = groupList.groupBy { it.vmsId }
+        val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
+        val cameraById = cameraList.associateBy { it.id }
+
+        for (item in cameraInGroups) {
+            val cam = cameraById[item.cameraId] ?: continue
+            cameraInGroupByVms.getOrPut(cam.vmsId) { mutableListOf() }.add(item)
+        }
+
+        for (service in fullVmsList) {
+            val serviceId = service.id
+
+            val groups = groupsByVms[serviceId] ?: emptyList()
+            val cameras = camerasByVms[serviceId] ?: emptyList()
+            val camGroups = cameraInGroupByVms[serviceId] ?: emptyList()
+
+            val vmsNodeKey = "vms-$serviceId"
+            val vmsNode = CameraTreeNode.VMSNode(service, mutableListOf(), vmsNodeKey)
+            treeData.add(vmsNode)
+
+            for (group in groups) {
+                if (group.parentGroupId == 0) continue
+
+                val groupNodeKey = "group-$serviceId-${group.id}"
+                val groupNode = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
+                groupMapData[groupNodeKey] = groupNode
+
+                val parentNode = groupMapData["group-$serviceId-${group.parentGroupId}"]
+                if (parentNode != null) {
+                    parentNode.children.add(groupNode)
+                } else {
+                    vmsNode.children.add(groupNode)
+                }
+            }
+
+            val groupedCameraIds = mutableSetOf<Int>()
+
+            for (item in camGroups) {
+                val cam = cameraById[item.cameraId] ?: continue
+                groupedCameraIds.add(cam.id)
+
+                val groupNode = groupMapData["group-$serviceId-${item.groupId}"] ?: continue
+
+                val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
+                val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
+                groupNode.children.add(camNode)
+            }
+
+            for (cam in cameras) {
+                if (groupedCameraIds.contains(cam.id)) continue
+
+                val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
+                val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
+                vmsNode.children.add(camNode)
+            }
+
+            sortNodeChildren(vmsNode.children)
+        }
+
+        fun pruneEmptyNodes(nodes: MutableList<CameraTreeNode>): MutableList<CameraTreeNode> {
+            val it = nodes.iterator()
+            while (it.hasNext()) {
+                val node = it.next()
+                if (node is CameraTreeNode.GroupNode) {
+                    pruneEmptyNodes(node.children)
+                    if (node.children.isEmpty()) {
+                        it.remove()
+                    }
+                } else if (node is CameraTreeNode.VMSNode) {
+                    pruneEmptyNodes(node.children)
+                    if (node.children.isEmpty()) {
+                        it.remove()
+                    }
+                }
+            }
+            return nodes
+        }
+
+        val prunedTree = pruneEmptyNodes(treeData)
+        return prunedTree.toList()
+    }
+
     private fun loadData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
+            
+            val cachedData = MonitorCacheManager.getMonitorData(getApplication())
+            if (cachedData != null && cachedData.vmsList.isNotEmpty()) {
+                val finalTree = buildTree(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
+                _uiState.update { it.copy(treeData = finalTree) }
+                
+                val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
+                var targetCamera: CameraModel? = null
+
+                if (savedCameraId != -1) {
+                    targetCamera = findCameraById(finalTree, savedCameraId)
+                }
+                if (targetCamera == null) {
+                    targetCamera = findFirstCamera(finalTree)
+                }
+
+                if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
+                    addCamera(targetCamera, 0)
+                }
+            }
+
             try {
                 val vmsResponse = vmsApi.getVMSServiceList()
                 val groupResponse = vmsApi.getCameraGroupList()
@@ -80,95 +208,8 @@ class MonitorViewModel : ViewModel() {
                     val cameraList = cameraResponse.body() ?: emptyList()
                     val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
 
-                    val treeData = mutableListOf<CameraTreeNode>()
-                    val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
+                    val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
 
-                    val fullVmsList = mutableListOf(
-                        VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")
-                    )
-                    fullVmsList.addAll(vmsList)
-
-                    val camerasByVms = cameraList.groupBy { it.vmsId }
-                    val groupsByVms = groupList.groupBy { it.vmsId }
-                    val cameraInGroupByVms = mutableMapOf<Int, MutableList<com.tenli.oneview.model.network.CameraInGroupModel>>()
-                    val cameraById = cameraList.associateBy { it.id }
-
-                    for (item in cameraInGroups) {
-                        val cam = cameraById[item.cameraId] ?: continue
-                        cameraInGroupByVms.getOrPut(cam.vmsId) { mutableListOf() }.add(item)
-                    }
-
-                    for (service in fullVmsList) {
-                        val serviceId = service.id
-
-                        val groups = groupsByVms[serviceId] ?: emptyList()
-                        val cameras = camerasByVms[serviceId] ?: emptyList()
-                        val camGroups = cameraInGroupByVms[serviceId] ?: emptyList()
-
-                        val vmsNodeKey = "vms-$serviceId"
-                        val vmsNode = CameraTreeNode.VMSNode(service, mutableListOf(), vmsNodeKey)
-                        treeData.add(vmsNode)
-
-                        for (group in groups) {
-                            if (group.parentGroupId == 0) continue
-
-                            val groupNodeKey = "group-$serviceId-${group.id}"
-                            val groupNode = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
-                            groupMapData[groupNodeKey] = groupNode
-
-                            val parentNode = groupMapData["group-$serviceId-${group.parentGroupId}"]
-                            if (parentNode != null) {
-                                parentNode.children.add(groupNode)
-                            } else {
-                                vmsNode.children.add(groupNode)
-                            }
-                        }
-
-                        val groupedCameraIds = mutableSetOf<Int>()
-
-                        for (item in camGroups) {
-                            val cam = cameraById[item.cameraId] ?: continue
-                            groupedCameraIds.add(cam.id)
-
-                            val groupNode = groupMapData["group-$serviceId-${item.groupId}"] ?: continue
-
-                            val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
-                            val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
-                            groupNode.children.add(camNode)
-                        }
-
-                        for (cam in cameras) {
-                            if (groupedCameraIds.contains(cam.id)) continue
-
-                            val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
-                            val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
-                            vmsNode.children.add(camNode)
-                        }
-
-                        sortNodeChildren(vmsNode.children)
-                    }
-
-                    fun pruneEmptyNodes(nodes: MutableList<CameraTreeNode>): MutableList<CameraTreeNode> {
-                        val it = nodes.iterator()
-                        while (it.hasNext()) {
-                            val node = it.next()
-                            if (node is CameraTreeNode.GroupNode) {
-                                pruneEmptyNodes(node.children)
-                                if (node.children.isEmpty()) {
-                                    it.remove()
-                                }
-                            } else if (node is CameraTreeNode.VMSNode) {
-                                pruneEmptyNodes(node.children)
-                                if (node.children.isEmpty()) {
-                                    it.remove()
-                                }
-                            }
-                        }
-                        return nodes
-                    }
-
-                    val prunedTree = pruneEmptyNodes(treeData)
-                    val finalTree = prunedTree.toList()
                     _uiState.update { it.copy(isLoading = false, treeData = finalTree) }
 
                     val prefs = com.tenli.oneview.data.local.GlobalData.preferences
@@ -185,6 +226,11 @@ class MonitorViewModel : ViewModel() {
                     if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
                         addCamera(targetCamera, 0)
                     }
+
+                    MonitorCacheManager.saveMonitorData(
+                        getApplication(),
+                        CachedMonitorData(vmsList, groupList, cameraList, cameraInGroups)
+                    )
                 } else {
                     _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
                 }
@@ -523,5 +569,14 @@ class MonitorViewModel : ViewModel() {
             }
         }
         return null
+    }
+
+    companion object {
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
+            initializer {
+                val application = this[APPLICATION_KEY] as Application
+                MonitorViewModel(application)
+            }
+        }
     }
 }

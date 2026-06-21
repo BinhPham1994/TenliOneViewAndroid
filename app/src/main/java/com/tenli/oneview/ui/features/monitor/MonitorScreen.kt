@@ -51,7 +51,7 @@ import com.tenli.oneview.ui.component.VideoPlayer
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonitorScreen(
-    viewModel: MonitorViewModel = viewModel()
+    viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -290,7 +290,7 @@ fun MonitorScreen(
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
                         val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
                         val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
-                        items(uiState.events) { event ->
+                        items(items = uiState.events, key = { it.id }) { event ->
                             val videoUrl = event.data?.video ?: ""
                             val dummyUrl = "error://no-video?id=${event.id}"
                             val isSelected = currentStreamUrl.isNotEmpty() && 
@@ -313,7 +313,7 @@ fun MonitorScreen(
                     } else {
                         val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
                         val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
-                        items(uiState.playbacks) { playback ->
+                        items(items = uiState.playbacks, key = { it.videoLink }) { playback ->
                             val isSelected = currentStreamUrl.isNotEmpty() && playback.videoLink.isNotEmpty() && currentStreamUrl.endsWith(playback.videoLink)
                             PlaybackItemView(
                                 playback = playback, 
@@ -350,7 +350,7 @@ fun MonitorScreen(
                         }
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(uiState.treeData) { node ->
+                            items(items = uiState.treeData, key = { it.key }) { node ->
                                 CameraTreeNodeView(
                                     node = node,
                                     depth = 0,

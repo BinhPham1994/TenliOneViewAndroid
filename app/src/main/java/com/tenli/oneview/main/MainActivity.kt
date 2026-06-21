@@ -68,7 +68,7 @@ import com.tenli.oneview.ui.features.auth.login.LoginScreen
 
 class MainActivity : ComponentActivity() {
 
-    private val splashViewModel: SplashViewModel by viewModels()
+    private val splashViewModel: SplashViewModel by viewModels { SplashViewModel.Factory }
     private var startEventId by mutableStateOf<String?>(null)
     override fun onCreate(savedInstanceState: Bundle?) {
         val splashScreen = installSplashScreen()

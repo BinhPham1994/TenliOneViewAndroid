@@ -27,7 +27,7 @@ import com.tenli.oneview.ui.features.home.RecentEventItem
 
 @Composable
 fun EventScreen(
-    viewModel: EventViewModel = viewModel()
+    viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -71,7 +71,7 @@ fun EventScreen(
                         .background(androidx.compose.ui.graphics.Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                         .padding(vertical = 4.dp)
                 ) {
-                    items(uiState.events) { event ->
+                    items(items = uiState.events, key = { it.id }) { event ->
                         val currentCamera = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }
                         val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
                         

@@ -37,8 +37,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            UserSession.accessToken = ""
+            UserSession.clear()
             GlobalData.preferences.edit { clear() }
+            
+            // Clear all local caches
+            com.tenli.oneview.data.local.HomeCacheManager.clearCache(getApplication())
+            com.tenli.oneview.data.local.EventCacheManager.clearCache(getApplication())
+            com.tenli.oneview.data.local.MonitorCacheManager.clearCache(getApplication())
 
             _event.emit(MainEvent.Logout)
             _uiState.update { it.copy(isLoading = false) }
