@@ -38,7 +38,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
-    onLogoutRequest: () -> Unit
+    onLogoutRequest: () -> Unit,
+    onNavigateToEventDetail: (Int) -> Unit = {},
+    onNavigateToPlaybackDetail: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -137,17 +139,29 @@ fun MainScreen(
                 HomeScreen(
                     listState = homeListState,
                     onEventClick = { eventId ->
-                        // Điều hướng đến chi tiết sự kiện nếu có
+                        val id = eventId.toIntOrNull()
+                        if (id != null) {
+                            onNavigateToEventDetail(id)
+                        }
                     }
                 )
             }
 
             composable(MainTab.Monitor.route) {
-                com.tenli.oneview.ui.features.monitor.MonitorScreen(listState = monitorState)
+                com.tenli.oneview.ui.features.monitor.MonitorScreen(
+                    listState = monitorState,
+                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
+                    onPlaybackClick = { videoLink, time, imageLink, cameraName ->
+                        onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+                    }
+                )
             }
 
             composable(MainTab.Event.route) {
-                com.tenli.oneview.ui.features.event.EventScreen(listState = eventListState)
+                com.tenli.oneview.ui.features.event.EventScreen(
+                    listState = eventListState,
+                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
+                )
             }
 
             composable(

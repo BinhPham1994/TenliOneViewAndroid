@@ -30,7 +30,8 @@ import com.tenli.oneview.ui.features.home.RecentEventItem
 @Composable
 fun EventScreen(
     viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory),
-    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -97,7 +98,7 @@ fun EventScreen(
                             event = event,
                             cameraList = cameraListForEvent,
                             onClick = {
-                                Toast.makeText(context, "Clicked Event ${event.id}", Toast.LENGTH_SHORT).show()
+                                onEventClick(event.id)
                             }
                         )
                     }

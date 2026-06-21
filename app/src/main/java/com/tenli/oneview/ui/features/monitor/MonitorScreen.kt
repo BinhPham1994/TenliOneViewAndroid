@@ -52,7 +52,9 @@ import com.tenli.oneview.ui.component.VideoPlayer
 @Composable
 fun MonitorScreen(
     viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
-    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    onEventClick: (Int) -> Unit = {},
+    onPlaybackClick: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -303,12 +305,7 @@ fun MonitorScreen(
                                 cameraList = cameraListForEvent,
                                 isSelected = isSelected,
                                 onClick = { 
-                                    val imageUrl = com.tenli.oneview.ui.features.home.getEventImageUrl(event) ?: ""
-                                    if (videoUrl.isEmpty()) {
-                                        viewModel.playVideo(dummyUrl, "EVENT", fallbackImageUrl = imageUrl)
-                                    } else {
-                                        viewModel.playVideo(videoUrl, "EVENT", fallbackImageUrl = imageUrl)
-                                    }
+                                    onEventClick(event.id)
                                 }
                             )
                         }
@@ -333,7 +330,9 @@ fun MonitorScreen(
                                 playback = playback, 
                                 cameraName = currentCameraName,
                                 isSelected = isSelected,
-                                onClick = { viewModel.playVideo(playback.videoLink, "PLAYBACK") }
+                                onClick = { 
+                                    onPlaybackClick(playback.videoLink, playback.time, playback.imageLink, currentCameraName)
+                                }
                             )
                         }
                         if (uiState.hasMorePlaybacks && uiState.playbacks.isNotEmpty()) {
