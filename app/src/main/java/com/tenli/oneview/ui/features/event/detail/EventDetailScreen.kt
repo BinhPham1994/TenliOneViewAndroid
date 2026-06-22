@@ -45,6 +45,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -144,12 +146,29 @@ fun EventDetailScreen(
                         Text(
                             text = camera?.name ?: "Camera không xác định",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onBackground
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        val timeStr = formatDateTime(event.time)
+                        val parts = timeStr.split(" ")
                         Text(
-                            text = formatDateTime(event.time),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = androidx.compose.ui.text.buildAnnotatedString {
+                                if (parts.size >= 2) {
+                                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                        append(parts[0])
+                                    }
+                                    append(" " + parts.drop(1).joinToString(" "))
+                                } else {
+                                    append(timeStr)
+                                }
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
 
@@ -162,7 +181,9 @@ fun EventDetailScreen(
                             text = com.tenli.oneview.ui.utils.AiTypeHelper.getTypeName(event.type).uppercase(),
                             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                             color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -180,21 +201,19 @@ fun EventDetailScreen(
                     // Left: Media Tabs
                     Row(
                         modifier = Modifier
-                            .weight(1f)
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             .padding(4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         EventMediaTab.values().forEach { tab ->
                             val isSelected = selectedTab == tab
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
                                     .clickable { selectedTab = tab }
-                                    .padding(vertical = 8.dp),
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
