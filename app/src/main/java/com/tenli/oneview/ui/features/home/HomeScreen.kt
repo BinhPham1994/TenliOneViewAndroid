@@ -61,12 +61,6 @@ fun HomeScreen(
         }
     }
 
-    if (uiState.isLoading && uiState.overviewStats.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = BrandPrimary, strokeWidth = 6.dp)
-        }
-        return
-    }
 
     Column(
         modifier = Modifier
@@ -275,8 +269,11 @@ fun HomeScreen(
                             .padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
+                            uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
+                        }
                         uiState.recentEvents.forEachIndexed { index, event ->
-                            val cameraName = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name ?: "Camera"
+                            val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
                             RecentEventItem(event, cameraName) {
                                 onEventClick(event.id.toString())
                             }
@@ -287,17 +284,7 @@ fun HomeScreen(
         }
     } // End of LazyColumn
 
-    if (uiState.isLoading && !isRefreshing) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.White.copy(alpha = 0.5f))
-                .pointerInput(Unit) {},
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator(color = BrandPrimary, strokeWidth = 6.dp)
-        }
-    }
+
     } // End of PullToRefreshBox
 } // End of Column
 } // End of HomeScreen
@@ -358,9 +345,9 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                val timeStr = formatEventTime(event.time)
-                Text(
-                    text = androidx.compose.ui.text.buildAnnotatedString {
+                val timeAnnotatedString = androidx.compose.runtime.remember(event.time) {
+                    androidx.compose.ui.text.buildAnnotatedString {
+                        val timeStr = formatEventTime(event.time)
                         val parts = timeStr.split(" ")
                         if (parts.size == 2) {
                             withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.DarkGray)) {
@@ -371,7 +358,10 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
                         } else {
                             append(timeStr)
                         }
-                    },
+                    }
+                }
+                Text(
+                    text = timeAnnotatedString,
                     color = Color.Gray,
                     fontSize = 12.sp
                 )
@@ -399,13 +389,17 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
     }
 }
 
-private val eventTimeFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+private val eventTimeFormat = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue(): SimpleDateFormat {
+        return SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+    }
+}
 
 private fun formatEventTime(time: Double?): String {
     if (time == null || time == 0.0) return "N/A"
     // API returns time in seconds as Double
     val timeMillis = if (time < 100000000000.0) (time * 1000).toLong() else time.toLong()
-    return eventTimeFormat.format(Date(timeMillis))
+    return eventTimeFormat.get()!!.format(Date(timeMillis))
 }
 
 fun getEventImageUrl(event: EventData): String? {

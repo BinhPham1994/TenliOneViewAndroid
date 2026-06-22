@@ -59,24 +59,28 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
-        SubcomposeAsyncImage(
-            model = url,
-            contentDescription = "Event Image",
-            contentScale = contentScale,
-            modifier = modifier,
-            loading = {
-                LoadingPlaceholder()
-            },
-            error = {
-                // If normal image loading fails, we fallback to video frame extraction
-                LaunchedEffect(Unit) {
-                    if (effectiveKey.isNotEmpty()) {
-                        VideoFrameCache.knownVideoUrls.add(effectiveKey)
+        var imageState by remember(url) { mutableStateOf<coil.compose.AsyncImagePainter.State>(coil.compose.AsyncImagePainter.State.Empty) }
+        
+        Box(modifier = modifier) {
+            coil.compose.AsyncImage(
+                model = url,
+                contentDescription = "Event Image",
+                contentScale = contentScale,
+                modifier = Modifier.fillMaxSize(),
+                onState = { state ->
+                    imageState = state
+                    if (state is coil.compose.AsyncImagePainter.State.Error) {
+                        if (effectiveKey.isNotEmpty()) {
+                            VideoFrameCache.knownVideoUrls.add(effectiveKey)
+                        }
+                        isVideoFallback = true
                     }
-                    isVideoFallback = true
                 }
+            )
+            if (imageState is coil.compose.AsyncImagePainter.State.Loading || imageState is coil.compose.AsyncImagePainter.State.Empty) {
+                LoadingPlaceholder(Modifier.fillMaxSize())
             }
-        )
+        }
     } else {
         // Here we handle the video frame extraction
         var bitmap by remember(effectiveKey) { mutableStateOf<Bitmap?>(if (effectiveKey.isNotEmpty()) VideoFrameCache.cache.get(effectiveKey) else null) }

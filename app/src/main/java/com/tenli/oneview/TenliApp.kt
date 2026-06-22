@@ -22,10 +22,31 @@ import com.tenli.oneview.service.KeepAliveService
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import java.util.concurrent.TimeUnit
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 
-class TenliApp : Application() {
+class TenliApp : Application(), ImageLoaderFactory {
 
     lateinit var container: AppContainer
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(this.cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.02)
+                    .build()
+            }
+            .crossfade(true)
+            .build()
+    }
 
     override fun onCreate() {
         super.onCreate()

@@ -224,13 +224,13 @@ fun MonitorScreen(
             // Tabs Segmented Control
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     .padding(4.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
                         .clickable { viewModel.setTab(MonitorTab.EVENTS) }
                         .padding(horizontal = 20.dp, vertical = 8.dp),
@@ -245,7 +245,7 @@ fun MonitorScreen(
                 }
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(8.dp))
                         .background(if (!isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
                         .clickable { viewModel.setTab(MonitorTab.PLAYBACK) }
                         .padding(horizontal = 20.dp, vertical = 8.dp),
@@ -790,8 +790,8 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = androidx.compose.ui.text.buildAnnotatedString {
+            val timeAnnotatedString = remember(formattedTime) {
+                androidx.compose.ui.text.buildAnnotatedString {
                     val parts = formattedTime.split(" ")
                     if (parts.size == 2) {
                         withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.DarkGray)) {
@@ -802,7 +802,10 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                     } else {
                         append(formattedTime)
                     }
-                },
+                }
+            }
+            Text(
+                text = timeAnnotatedString,
                 color = Color.Gray,
                 fontSize = 12.sp
             )

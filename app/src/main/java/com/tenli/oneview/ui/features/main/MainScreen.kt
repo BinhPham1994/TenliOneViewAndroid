@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +37,28 @@ import com.tenli.oneview.ui.features.home.HomeScreen
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
-
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoMode
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Monitor
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
@@ -137,26 +159,10 @@ fun MainScreen(
             startDestination = MainTab.Home.route,
             modifier = Modifier.padding(innerPadding),
             enterTransition = {
-                val initialIndex = MainTab.entries.find { initialState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
-                val targetIndex = MainTab.entries.find { targetState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
-                if (targetIndex > initialIndex) {
-                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
-                } else if (targetIndex < initialIndex) {
-                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
-                } else {
-                    androidx.compose.animation.fadeIn(animationSpec = tween(300))
-                }
+                androidx.compose.animation.EnterTransition.None
             },
             exitTransition = {
-                val initialIndex = MainTab.entries.find { initialState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
-                val targetIndex = MainTab.entries.find { targetState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
-                if (targetIndex > initialIndex) {
-                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
-                } else if (targetIndex < initialIndex) {
-                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
-                } else {
-                    androidx.compose.animation.fadeOut(animationSpec = tween(300))
-                }
+                androidx.compose.animation.ExitTransition.None
             }
         ) {
             composable(MainTab.Home.route) {
@@ -197,37 +203,253 @@ fun MainScreen(
                     }
                 )
             ) {
+                SettingScreen(
+                    onLogoutClick = { viewModel.logout() },
+                    onNavigateToDetail = navigateToSettingTarget
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingScreen(
+    onLogoutClick: () -> Unit,
+    onNavigateToDetail: (String) -> Unit
+) {
+    var themeMode by remember { mutableStateOf(2) } // 0: Light, 1: Dark, 2: System
+    
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp),
+        contentAlignment = Alignment.TopCenter
+    ) {
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+        item {
+            // Profile Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.background)
-                        .padding(16.dp),
-                    contentAlignment = Alignment.TopCenter
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "Quản lý tài khoản",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = { viewModel.logout() },
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
-                        ) {
-                            Text("Đăng xuất")
-                        }
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = "Avatar",
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(
+                        text = "Người dùng",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Quản trị viên",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
+        
+        item {
+            Text(
+                text = "Cài đặt chung",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            SettingItem(
+                icon = Icons.Default.Settings,
+                title = "Cấu hình chung",
+                onClick = { onNavigateToDetail("general") }
+            )
+            SettingItem(
+                icon = Icons.Default.Notifications,
+                title = "Thông báo hệ thống",
+                onClick = { onNavigateToDetail("notifications") }
+            )
+            SettingItem(
+                icon = Icons.Default.AutoMode,
+                title = "Kịch bản tự động",
+                onClick = { onNavigateToDetail("automation") }
+            )
+            SettingItem(
+                icon = Icons.Default.Group,
+                title = "Quản lý người dùng",
+                onClick = { onNavigateToDetail("users") }
+            )
+        }
+        
+        item {
+            Divider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+            Text(
+                text = "Cá nhân hóa",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            SettingItem(
+                icon = Icons.Default.Language,
+                title = "Ngôn ngữ",
+                onClick = { onNavigateToDetail("language") }
+            )
+            
+            // Theme toggle row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { }
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Palette,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(16.dp))
+                Text(
+                    text = "Giao diện",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f)
+                )
+                
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(4.dp)
+                ) {
+                    ThemeModeButton(
+                        icon = Icons.Default.LightMode,
+                        isSelected = themeMode == 0,
+                        onClick = { themeMode = 0 }
+                    )
+                    ThemeModeButton(
+                        icon = Icons.Default.DarkMode,
+                        isSelected = themeMode == 1,
+                        onClick = { themeMode = 1 }
+                    )
+                    ThemeModeButton(
+                        icon = Icons.Default.Monitor,
+                        isSelected = themeMode == 2,
+                        onClick = { themeMode = 2 }
+                    )
+                }
+            }
+        }
+        
+        item {
+            Divider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
+            Text(
+                text = "Tài khoản",
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            SettingItem(
+                icon = Icons.Default.VpnKey,
+                title = "Đổi mật khẩu",
+                onClick = { onNavigateToDetail("password") }
+            )
+            SettingItem(
+                icon = Icons.Default.Logout,
+                title = "Đăng xuất",
+                onClick = onLogoutClick,
+                titleColor = MaterialTheme.colorScheme.error,
+                iconColor = MaterialTheme.colorScheme.error,
+                showChevron = false
+            )
+            Spacer(modifier = Modifier.height(40.dp))
+        }
+    }
+    }
+}
+
+@Composable
+fun SettingItem(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+    titleColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onBackground,
+    iconColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    showChevron: Boolean = true
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = iconColor,
+            modifier = Modifier.size(24.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = titleColor,
+            modifier = Modifier.weight(1f)
+        )
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun ThemeModeButton(
+    icon: ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }

@@ -74,15 +74,13 @@ fun EventScreen(
             },
             modifier = Modifier.fillMaxSize()
         ) {
-            if (uiState.isLoading && !isRefreshing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 6.dp
-                )
-            } else if (uiState.events.isEmpty() && uiState.error == null) {
+            if (uiState.events.isEmpty() && uiState.error == null) {
                 CommonEmptyState(text = "Chưa có sự kiện nào", modifier = Modifier.align(Alignment.Center))
             } else {
+                val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
+                    uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
+                }
+                
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
@@ -92,7 +90,7 @@ fun EventScreen(
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
                 ) {
                     items(items = uiState.events, key = { it.id }) { event ->
-                        val cameraName = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name ?: "Camera"
+                        val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
                         
                         RecentEventItem(
                             event = event,
