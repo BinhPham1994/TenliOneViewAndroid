@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -121,6 +123,127 @@ fun EventDetailScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
+                // Tiêu đề & Tag
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                        .alpha(instantAlpha)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = { showMetadataSheet = true }
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = camera?.name ?: "Camera không xác định",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        Text(
+                            text = formatDateTime(event.time),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Nhãn sự kiện
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event.type)
+                    ) {
+                        Text(
+                            text = com.tenli.oneview.ui.utils.AiTypeHelper.getTypeName(event.type).uppercase(),
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                // Media Tabs & Crop Images
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp)
+                        .alpha(instantAlpha),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left: Media Tabs
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        EventMediaTab.values().forEach { tab ->
+                            val isSelected = selectedTab == tab
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable { selectedTab = tab }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = tab.title,
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // Right: Crop Images
+                    val cropUrls = com.tenli.oneview.ui.features.home.getEventCropUrls(event)
+                    if (cropUrls.isNotEmpty()) {
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier
+                                .padding(start = 12.dp)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            cropUrls.forEach { url ->
+                                coil.compose.SubcomposeAsyncImage(
+                                    model = url,
+                                    contentDescription = "Crop Image"
+                                ) {
+                                    val state = painter.state
+                                    if (state is coil.compose.AsyncImagePainter.State.Success) {
+                                        androidx.compose.foundation.Image(
+                                            painter = painter,
+                                            contentDescription = "Crop Image",
+                                            modifier = Modifier
+                                                .height(44.dp)
+                                                .widthIn(max = 120.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.Black.copy(alpha = 0.5f))
+                                                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
+                                            contentScale = ContentScale.Fit
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Media Viewer
                     val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
                     val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
@@ -338,39 +461,7 @@ fun EventDetailScreen(
                             }
                         }
 
-                        // Overlay Crop Images
-                        val cropUrls = com.tenli.oneview.ui.features.home.getEventCropUrls(event)
-                        if (cropUrls.isNotEmpty()) {
-                            androidx.compose.foundation.layout.Row(
-                                modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(8.dp)
-                                    .zIndex(10f),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                cropUrls.forEach { url ->
-                                    coil.compose.SubcomposeAsyncImage(
-                                        model = url,
-                                        contentDescription = "Crop Image"
-                                    ) {
-                                        val state = painter.state
-                                        if (state is coil.compose.AsyncImagePainter.State.Success) {
-                                            androidx.compose.foundation.Image(
-                                                painter = painter,
-                                                contentDescription = "Crop Image",
-                                                modifier = Modifier
-                                                    .height(60.dp)
-                                                    .widthIn(max = 180.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.Black.copy(alpha = 0.5f))
-                                                    .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
-                                                contentScale = ContentScale.Fit
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+
                     }
 
                 Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -378,83 +469,7 @@ fun EventDetailScreen(
                         modifier = Modifier.fillMaxSize().padding(top = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                // Media Tabs
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .alpha(instantAlpha)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        EventMediaTab.values().forEach { tab ->
-                            val isSelected = selectedTab == tab
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable { selectedTab = tab }
-                                    .padding(vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = tab.title,
-                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
 
-                // Tiêu đề & Tag
-                    Column(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp)
-                            .alpha(instantAlpha)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null,
-                                onClick = { showMetadataSheet = true }
-                            ),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = camera?.name ?: "Camera không xác định",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                            Text(
-                                text = formatDateTime(event.time),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
-                        // Nhãn sự kiện
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event.type)
-                        ) {
-                            Text(
-                                text = com.tenli.oneview.ui.utils.AiTypeHelper.getTypeName(event.type).uppercase(),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
 
                 // Tabs Lịch sử & Biển số
                     Row(
