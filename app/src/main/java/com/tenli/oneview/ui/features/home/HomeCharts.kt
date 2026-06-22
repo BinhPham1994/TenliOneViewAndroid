@@ -22,6 +22,11 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.drawWithContent
 
 
 @Composable
@@ -279,6 +284,7 @@ fun StatCard(
     title: String,
     value: String,
     iconColor: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -288,8 +294,53 @@ fun StatCard(
             .padding(16.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text(text = title.uppercase(), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(text = value, color = iconColor, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(iconColor.copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = iconColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title.uppercase(), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Spacer(modifier = Modifier.height(4.dp))
+                
+                var textSize by remember(value) { mutableStateOf(24.sp) }
+                var readyToDraw by remember(value) { mutableStateOf(false) }
+                
+                Text(
+                    text = value, 
+                    color = iconColor, 
+                    fontSize = textSize, 
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.drawWithContent {
+                        if (readyToDraw) drawContent()
+                    },
+                    onTextLayout = { textLayoutResult ->
+                        if (textLayoutResult.didOverflowWidth) {
+                            textSize = textSize * 0.9f
+                        } else {
+                            readyToDraw = true
+                        }
+                    }
+                )
+            }
+        }
     }
 }

@@ -59,7 +59,6 @@ fun MonitorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showBottomSheet by remember { mutableStateOf(false) }
     var activeSlotIndex by remember { mutableIntStateOf(-1) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
     val activity = LocalContext.current as? Activity
@@ -316,7 +315,7 @@ fun MonitorScreen(
                                 }
                                 Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                     if (uiState.isPaginating) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 6.dp)
                                     }
                                 }
                             }
@@ -342,7 +341,7 @@ fun MonitorScreen(
                                 }
                                 Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                                     if (uiState.isPaginating) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 6.dp)
                                     }
                                 }
                             }
@@ -353,41 +352,76 @@ fun MonitorScreen(
         }
 
         if (showBottomSheet) {
-            ModalBottomSheet(
+            Dialog(
                 onDismissRequest = { showBottomSheet = false },
-                sheetState = sheetState
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
             ) {
-                Column(
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.8f)
-                        .padding(16.dp)
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = { showBottomSheet = false }
+                        ),
+                    contentAlignment = Alignment.BottomCenter
                 ) {
-                    Text(
-                        text = "Chọn Camera",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    if (uiState.isLoading) {
-                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(items = uiState.treeData, key = { it.key }) { node ->
-                                CameraTreeNodeView(
-                                    node = node,
-                                    depth = 0,
-                                    expandedNodes = uiState.expandedNodes,
-                                    onToggleExpand = { viewModel.toggleNodeExpansion(it) },
-                                    onCameraClick = { camera ->
-                                        if (activeSlotIndex in 0..3) {
-                                            viewModel.addCamera(camera, activeSlotIndex)
-                                        }
-                                        showBottomSheet = false
-                                    }
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.8f)
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null,
+                                onClick = {} // Chặn click xuyên qua box để không bị đóng khi bấm nhầm
+                            ),
+                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+                        color = MaterialTheme.colorScheme.surface
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .navigationBarsPadding()
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Chọn Camera",
+                                    style = MaterialTheme.typography.titleLarge
                                 )
+                                IconButton(onClick = { showBottomSheet = false }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Đóng")
+                                }
+                            }
+
+                            if (uiState.isLoading) {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(strokeWidth = 6.dp)
+                                }
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(items = uiState.treeData, key = { it.key }) { node ->
+                                        CameraTreeNodeView(
+                                            node = node,
+                                            depth = 0,
+                                            expandedNodes = uiState.expandedNodes,
+                                            onToggleExpand = { viewModel.toggleNodeExpansion(it) },
+                                            onCameraClick = { camera ->
+                                                if (activeSlotIndex in 0..3) {
+                                                    viewModel.addCamera(camera, activeSlotIndex)
+                                                }
+                                                showBottomSheet = false
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -412,6 +446,14 @@ fun CameraGridItem(
     var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://no-video")
+    
+    var shouldRenderPlayer by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
+    LaunchedEffect(selectedCamera.streamUrl) {
+        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
+            kotlinx.coroutines.delay(350)
+            shouldRenderPlayer = true
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -420,7 +462,7 @@ fun CameraGridItem(
             .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
     ) {
-        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
+        if (shouldRenderPlayer && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
                 // WebSocket stream - use native ExoPlayer with forced FragmentedMp4Extractor
                 com.tenli.oneview.ui.component.LiveStreamPlayer(
@@ -464,7 +506,7 @@ fun CameraGridItem(
                     .background(MaterialTheme.colorScheme.surfaceVariant),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
             }
         }
 
@@ -801,7 +843,7 @@ fun MonitorTimeFilterDropdown(
                 text = selectedFilter.title,
                 color = Color.Black,
                 fontWeight = FontWeight.Medium,
-                fontSize = 14.sp
+                fontSize = 16.sp
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,

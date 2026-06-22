@@ -77,7 +77,8 @@ fun EventScreen(
             if (uiState.isLoading && !isRefreshing) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 6.dp
                 )
             } else if (uiState.events.isEmpty() && uiState.error == null) {
                 CommonEmptyState(text = "Chưa có sự kiện nào", modifier = Modifier.align(Alignment.Center))
@@ -114,7 +115,7 @@ fun EventScreen(
                                     .padding(16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
                             }
                         }
                     }

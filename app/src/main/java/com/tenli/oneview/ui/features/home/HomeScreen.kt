@@ -16,7 +16,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.VerifiedUser
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -58,46 +63,50 @@ fun HomeScreen(
 
     if (uiState.isLoading && uiState.overviewStats.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = BrandPrimary)
+            CircularProgressIndicator(color = BrandPrimary, strokeWidth = 6.dp)
         }
         return
     }
 
-    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = {
-            isRefreshing = true
-            viewModel.fetchDashboardData()
-        },
-        modifier = Modifier.fillMaxSize()
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
     ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
         // Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Tổng quan",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = FontWeight.Bold
-                )
-                TimeFilterDropdown(
-                    selectedFilter = uiState.selectedFilter,
-                    onFilterSelected = { viewModel.setTimeFilter(it) }
-                )
-            }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Tổng quan",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                fontWeight = FontWeight.Bold
+            )
+            TimeFilterDropdown(
+                selectedFilter = uiState.selectedFilter,
+                onFilterSelected = { viewModel.setTimeFilter(it) }
+            )
         }
+
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                viewModel.fetchDashboardData()
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
 
         // 4 Thẻ thống kê
         item {
@@ -121,12 +130,14 @@ fun HomeScreen(
                         title = "Tổng sự kiện",
                         value = totalEvents,
                         iconColor = Color(0xFFF97316),
+                        icon = androidx.compose.material.icons.Icons.Default.Notifications,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        title = "Tổng số camera",
+                        title = "Camera",
                         value = totalCameras,
                         iconColor = Color(0xFF52C41A),
+                        icon = androidx.compose.material.icons.Icons.Default.Videocam,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -135,15 +146,17 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     StatCard(
-                        title = "Tổng tiến trình AI",
+                        title = "Tiến trình AI",
                         value = totalAI,
                         iconColor = Color(0xFFFF1493), // Vibrant Deep Pink
+                        icon = androidx.compose.material.icons.Icons.Default.Memory,
                         modifier = Modifier.weight(1f)
                     )
                     StatCard(
-                        title = "Tình trạng hệ thống",
+                        title = "Trạng thái",
                         value = systemStatus,
                         iconColor = Color(0xFF13C2C2),
+                        icon = androidx.compose.material.icons.Icons.Default.VerifiedUser,
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -164,7 +177,12 @@ fun HomeScreen(
             }
             
             val byTypeData = uiState.eventsByType
-                .filter { !it.type.contains("online", ignoreCase = true) && !it.type.contains("offline", ignoreCase = true) }
+                .filter { 
+                    !it.type.contains("online", ignoreCase = true) && 
+                    !it.type.contains("offline", ignoreCase = true) &&
+                    !it.type.contains("security-enable", ignoreCase = true) &&
+                    !it.type.contains("security-disable", ignoreCase = true)
+                }
                 .map {
                     Pair(AiTypeHelper.getTypeName(it.type), it.count.toFloat())
                 }
@@ -276,10 +294,11 @@ fun HomeScreen(
                 .pointerInput(Unit) {},
             contentAlignment = Alignment.Center
         ) {
-            CircularProgressIndicator(color = BrandPrimary)
+            CircularProgressIndicator(color = BrandPrimary, strokeWidth = 6.dp)
         }
     }
-} // End of PullToRefreshBox
+    } // End of PullToRefreshBox
+} // End of Column
 } // End of HomeScreen
 
 @Composable
@@ -350,9 +369,11 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier
                         .background(color = aiColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -404,7 +425,7 @@ fun TimeFilterDropdown(
                 text = selectedFilter.title,
                 color = Color.Black,
                 fontWeight = FontWeight.Medium,
-                fontSize = 14.sp
+                fontSize = 16.sp
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,

@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.tenli.oneview.ui.features.home.HomeScreen
 import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.tween
 
 @Composable
 fun MainScreen(
@@ -133,7 +135,29 @@ fun MainScreen(
         NavHost(
             navController = navController,
             startDestination = MainTab.Home.route,
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.padding(innerPadding),
+            enterTransition = {
+                val initialIndex = MainTab.entries.find { initialState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
+                val targetIndex = MainTab.entries.find { targetState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
+                if (targetIndex > initialIndex) {
+                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
+                } else if (targetIndex < initialIndex) {
+                    slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
+                } else {
+                    androidx.compose.animation.fadeIn(animationSpec = tween(300))
+                }
+            },
+            exitTransition = {
+                val initialIndex = MainTab.entries.find { initialState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
+                val targetIndex = MainTab.entries.find { targetState.destination.route?.startsWith(it.route) == true }?.ordinal ?: 0
+                if (targetIndex > initialIndex) {
+                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Left, animationSpec = tween(300))
+                } else if (targetIndex < initialIndex) {
+                    slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.Right, animationSpec = tween(300))
+                } else {
+                    androidx.compose.animation.fadeOut(animationSpec = tween(300))
+                }
+            }
         ) {
             composable(MainTab.Home.route) {
                 HomeScreen(
