@@ -27,7 +27,12 @@ data class EventDetailUiState(
     val relatedEvents: List<EventData> = emptyList(),
     val licensePlateEvents: List<EventData> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val originalVideoUrl: String? = null,
+    val originalVideoSeekTimeMs: Long? = null,
+    val originalVideoEventPositionMs: Long? = null,
+    val originalVideoLoading: Boolean = false,
+    val originalVideoError: String? = null
 )
 
 class EventDetailViewModel(
@@ -159,6 +164,75 @@ class EventDetailViewModel(
         }
     }
 
+    fun loadOriginalVideo() {
+        val event = _uiState.value.event ?: return
+        val camera = _uiState.value.camera ?: return
+        
+        if (_uiState.value.originalVideoUrl != null || _uiState.value.originalVideoLoading) {
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(originalVideoLoading = true, originalVideoError = null) }
+            try {
+                val eventTimeMs = (event.time * 1000).toLong()
+                val fromMs = eventTimeMs - 61 * 1000
+                val toMs = eventTimeMs
+
+                val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", java.util.Locale.getDefault())
+                val fromDate = dateFormat.format(java.util.Date(fromMs))
+                val toDate = dateFormat.format(java.util.Date(toMs))
+
+                val response = vmsApi.getVideoList(
+                    camera = camera.id,
+                    count = 1,
+                    from = fromDate,
+                    to = toDate
+                )
+                if (response.isSuccessful) {
+                    val videos = response.body()
+                    if (!videos.isNullOrEmpty() && videos.first().videoLink.isNotEmpty()) {
+                        val videoItem = videos.first()
+                        
+                        val videoStartMs = dateFormat.parse(videoItem.time)?.time ?: 0L
+                        val diffSeconds = (eventTimeMs - videoStartMs) / 1000
+                        val seekSeconds = java.lang.Math.max(0, java.lang.Math.min(61, diffSeconds - 10))
+                        
+                        _uiState.update {
+                            it.copy(
+                                originalVideoUrl = videoItem.videoLink,
+                                originalVideoSeekTimeMs = seekSeconds * 1000,
+                                originalVideoEventPositionMs = diffSeconds * 1000,
+                                originalVideoLoading = false
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                originalVideoLoading = false,
+                                originalVideoError = "Video không khả dụng hoặc chưa có dữ liệu ghi hình"
+                            )
+                        }
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            originalVideoLoading = false,
+                            originalVideoError = "Lỗi khi lấy video gốc"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("EventDetailVM", "Error loading original video", e)
+                _uiState.update {
+                    it.copy(
+                        originalVideoLoading = false,
+                        originalVideoError = "Lỗi khi tải video"
+                    )
+                }
+            }
+        }
+    }
 
     companion object {
         fun provideFactory(eventId: Int): ViewModelProvider.Factory = viewModelFactory {

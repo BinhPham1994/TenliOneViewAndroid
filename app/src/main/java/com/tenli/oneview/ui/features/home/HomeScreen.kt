@@ -266,8 +266,10 @@ fun HomeScreen(
                     androidx.compose.foundation.layout.Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
                             uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
@@ -307,7 +309,7 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
         modifier = Modifier
             .fillMaxWidth()
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.White)
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp), // Ảnh sát mép 4dp, chữ cách lề phải 12dp
         verticalAlignment = Alignment.CenterVertically
@@ -402,8 +404,78 @@ private fun formatEventTime(time: Double?): String {
     return eventTimeFormat.get()!!.format(Date(timeMillis))
 }
 
+fun findAllBoxes(event: EventData): List<List<Float>> {
+    val boxes = mutableListOf<List<Float>>()
+
+    val addBox = { b: List<Double>? ->
+        if (b != null && b.size >= 4) {
+            boxes.add(b.map { it.toFloat() })
+        }
+    }
+
+    // Root level boxes
+    addBox(event.data?.box)
+
+    // Nested AI model boxes
+    val d = event.data
+    addBox(d?.uniform?.cropBox)
+    addBox(d?.face?.cropBox)
+    addBox(d?.plate?.cropBox)
+    addBox(d?.attribute?.cropBox)
+    addBox(d?.objectData?.cropBox)
+
+    // Array of boxes
+    d?.boxes?.forEach { item ->
+        addBox(item.box)
+    }
+
+
+    // Deduplicate
+    return boxes.distinctBy { it.joinToString(",") }
+}
+
+fun getEventCropUrls(event: EventData): List<String> {
+    val urls = mutableListOf<String>()
+    val domain = UserSession.domain.trimEnd('/')
+    val serviceId = event.serviceId
+    val containerId = event.data?.containerId ?: return emptyList()
+
+    val addUrl = { file: String? ->
+        if (!file.isNullOrEmpty() && file != event.data?.image) {
+            if (!file.startsWith("http")) {
+                urls.add("$domain/Data/api/Data/Media/$serviceId/$containerId/$file")
+            } else {
+                urls.add(file)
+            }
+        }
+    }
+
+    event.data?.plate?.deblurCropImage?.let { addUrl(it) } ?: event.data?.plate?.cropImage?.let { addUrl(it) }
+    if (urls.isEmpty()) {
+        addUrl(event.data?.objectData?.cropImage)
+        addUrl(event.data?.uniform?.cropImage)
+        val faceCrop = event.data?.face?.cropImage ?: event.data?.faceCrop
+        if (faceCrop != null) {
+            addUrl(faceCrop)
+        } else if (event.data?.cropImage != event.data?.image) {
+            addUrl(event.data?.cropImage)
+        }
+        addUrl(event.data?.attribute?.cropImage)
+    }
+    return urls.distinct()
+}
+
 fun getEventImageUrl(event: EventData): String? {
     val filename = event.data?.image ?: event.data?.cropImage ?: return null
+    if (filename.startsWith("http")) return filename
+    val domain = UserSession.domain.trimEnd('/')
+    val serviceId = event.serviceId
+    val containerId = event.data?.containerId ?: return null
+    return "$domain/Data/api/Data/Media/$serviceId/$containerId/$filename"
+}
+
+fun getEventVideoUrl(event: EventData): String? {
+    val filename = event.data?.video ?: return null
     if (filename.startsWith("http")) return filename
     val domain = UserSession.domain.trimEnd('/')
     val serviceId = event.serviceId

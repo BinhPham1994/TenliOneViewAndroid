@@ -1,5 +1,8 @@
 package com.tenli.oneview.ui.component
 
+
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
@@ -34,8 +37,10 @@ fun VideoPlayer(
     videoUrl: String,
     thumbnailUrl: String?,
     deviceKey: String,
+    initialSeekPositionMs: Long? = null,
     onPlayingChange: (Boolean) -> Unit = {},
-    onErrorChange: (Boolean) -> Unit = {}
+    onErrorChange: (Boolean) -> Unit = {},
+    onTimeUpdate: (Long) -> Unit = {}
 ) {
     var isError by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -47,6 +52,9 @@ fun VideoPlayer(
             setMediaSource(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(MediaItem.fromUri(videoUrl))
             )
+            if (initialSeekPositionMs != null) {
+                seekTo(initialSeekPositionMs)
+            }
             prepare()
             playWhenReady = true
             addListener(object : Player.Listener {
@@ -85,6 +93,13 @@ fun VideoPlayer(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady) {
+        while (isActive && isVideoReady) {
+            onTimeUpdate(exoPlayer.currentPosition)
+            delay(100)
         }
     }
 

@@ -285,9 +285,12 @@ fun MonitorScreen(
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White),
+                    contentPadding = PaddingValues(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
@@ -750,7 +753,7 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.White)
+            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
             .clickable { onClick() }
             .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically
