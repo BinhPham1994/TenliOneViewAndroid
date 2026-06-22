@@ -25,6 +25,7 @@ data class EventDetailUiState(
     val event: EventData? = null,
     val camera: CameraModel? = null,
     val relatedEvents: List<EventData> = emptyList(),
+    val licensePlateEvents: List<EventData> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -96,14 +97,22 @@ class EventDetailViewModel(
                     )
                 }
 
-                // Fetch related events for "Hành trình tại vị trí"
-                foundEvent.data?.cameraUUID?.let { uuid ->
-                    fetchRelatedEvents(uuid)
-                }
+
 
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error loading event", e)
                 _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+            }
+        }
+    }
+
+    fun loadRelatedEvents() {
+        viewModelScope.launch {
+            _uiState.value.event?.let { event ->
+                event.data?.cameraUUID?.let { uuid ->
+                    fetchRelatedEvents(uuid)
+                }
+                fetchLicensePlateEvents(event.time, event.data?.cameraUUID)
             }
         }
     }
@@ -128,6 +137,28 @@ class EventDetailViewModel(
             Log.e("EventDetailVM", "Error fetching related events", e)
         }
     }
+
+    private suspend fun fetchLicensePlateEvents(eventTime: Double, cameraUUID: String?) {
+        try {
+            val fromTime = (eventTime - 10).toLong()
+            val toTime = (eventTime + 10).toLong()
+
+            val response = eventApi.getDataList(
+                count = 20,
+                from = fromTime,
+                to = toTime,
+                cameraUUID = cameraUUID,
+                type = "sensor-license-plate"
+            )
+            if (response.isSuccessful) {
+                val events = response.body() ?: emptyList()
+                _uiState.update { it.copy(licensePlateEvents = events) }
+            }
+        } catch (e: Exception) {
+            Log.e("EventDetailVM", "Error fetching license plate events", e)
+        }
+    }
+
 
     companion object {
         fun provideFactory(eventId: Int): ViewModelProvider.Factory = viewModelFactory {

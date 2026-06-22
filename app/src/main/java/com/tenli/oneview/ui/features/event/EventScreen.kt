@@ -92,12 +92,11 @@ fun EventScreen(
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
                 ) {
                     items(items = uiState.events, key = { it.id }) { event ->
-                        val currentCamera = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }
-                        val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
+                        val cameraName = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name ?: "Camera"
                         
                         RecentEventItem(
                             event = event,
-                            cameraList = cameraListForEvent,
+                            cameraName = cameraName,
                             onClick = {
                                 onEventClick(event.id)
                             }

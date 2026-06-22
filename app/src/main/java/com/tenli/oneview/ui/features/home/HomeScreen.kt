@@ -276,7 +276,8 @@ fun HomeScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         uiState.recentEvents.forEachIndexed { index, event ->
-                            RecentEventItem(event, uiState.cameraList) {
+                            val cameraName = uiState.cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name ?: "Camera"
+                            RecentEventItem(event, cameraName) {
                                 onEventClick(event.id.toString())
                             }
                         }
@@ -312,8 +313,9 @@ fun SectionTitle(title: String) {
     )
 }
 
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
-fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected: Boolean = false, onClick: () -> Unit) {
+fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = false, enableSharedElement: Boolean = true, onClick: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -323,19 +325,30 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
             .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp), // Ảnh sát mép 4dp, chữ cách lề phải 12dp
         verticalAlignment = Alignment.CenterVertically
     ) {
+            val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
+            val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
+            
+                var imageModifier = Modifier
+                    .width(140.dp)
+                    .aspectRatio(16f / 9f)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                
+            if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
+                with(sharedTransitionScope) {
+                    imageModifier = imageModifier.sharedElement(
+                        sharedContentState = rememberSharedContentState(key = "event_image_${event.id}"),
+                        animatedVisibilityScope = animatedVisibilityScope
+                    )
+                }
+            }
+
             com.tenli.oneview.ui.component.VideoFrameImage(
                 url = getEventImageUrl(event),
-                modifier = Modifier
-                    .width(140.dp) // Tăng kích thước ảnh
-                    .aspectRatio(16f / 9f)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)) // Bán kính góc = 12(khung) - 4(padding)
-                    .background(Color(0xFFF3F4F6)),
+                modifier = imageModifier,
                 contentScale = ContentScale.Crop
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                val cameraName = cameraList.find { it.extra?.uuid == event.data?.cameraUUID }?.name 
-                                 ?: event.data?.cameraUUID?.take(6)?.let { "Camera $it" } ?: "Camera"
                 Text(
                     text = cameraName,
                     color = Color.Black,
@@ -386,12 +399,13 @@ fun RecentEventItem(event: EventData, cameraList: List<CameraModel>, isSelected:
     }
 }
 
+private val eventTimeFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+
 private fun formatEventTime(time: Double?): String {
     if (time == null || time == 0.0) return "N/A"
     // API returns time in seconds as Double
     val timeMillis = if (time < 100000000000.0) (time * 1000).toLong() else time.toLong()
-    val sdf = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
-    return sdf.format(Date(timeMillis))
+    return eventTimeFormat.format(Date(timeMillis))
 }
 
 fun getEventImageUrl(event: EventData): String? {

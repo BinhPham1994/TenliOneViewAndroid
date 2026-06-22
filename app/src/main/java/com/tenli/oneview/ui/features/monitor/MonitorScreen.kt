@@ -291,7 +291,7 @@ fun MonitorScreen(
                 ) {
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
-                        val cameraListForEvent = currentCamera?.let { listOf(it) } ?: emptyList()
+                        val cameraName = currentCamera?.name ?: "Camera"
                         val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
                         items(items = uiState.events, key = { it.id }) { event ->
                             val videoUrl = event.data?.video ?: ""
@@ -301,7 +301,7 @@ fun MonitorScreen(
 
                             com.tenli.oneview.ui.features.home.RecentEventItem(
                                 event = event,
-                                cameraList = cameraListForEvent,
+                                cameraName = cameraName,
                                 isSelected = isSelected,
                                 onClick = { 
                                     onEventClick(event.id)
@@ -503,7 +503,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
@@ -515,8 +515,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White)
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = if (selectedCamera.streamUrl.startsWith("error://no-video")) "Không có video cho sự kiện này" else "Lỗi tải video"
