@@ -148,24 +148,26 @@ fun EventDetailScreen(
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        val timeStr = formatDateTime(event.time)
-                        val parts = timeStr.split(" ")
-                        Text(
-                            text = androidx.compose.ui.text.buildAnnotatedString {
-                                if (parts.size >= 2) {
-                                    withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                        append(parts[0])
+                        Column(horizontalAlignment = Alignment.End) {
+                            val timeStr = formatDateTime(event.time)
+                            val parts = timeStr.split(" ")
+                            Text(
+                                text = androidx.compose.ui.text.buildAnnotatedString {
+                                    if (parts.size >= 2) {
+                                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                            append(parts[0])
+                                        }
+                                        append(" " + parts.drop(1).joinToString(" "))
+                                    } else {
+                                        append(timeStr)
                                     }
-                                    append(" " + parts.drop(1).joinToString(" "))
-                                } else {
-                                    append(timeStr)
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     // Nhãn sự kiện
@@ -189,28 +191,43 @@ fun EventDetailScreen(
                         }
 
                         val baseEvent = uiState.baseEvent
-                        if (baseEvent != null && event.id != baseEvent.id) {
-                            androidx.compose.material3.TextButton(
-                                onClick = {
-                                    viewModel.selectEvent(baseEvent)
-                                    selectedTab = EventMediaTab.EVENT_IMAGE
-                                    expandedCropUrl = null
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                androidx.compose.material3.Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
-                                    contentDescription = "Reset",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
+                        val plateText = event.data?.plate?.plate ?: (if (event.type.contains("plate", ignoreCase = true)) event.data?.value else null)
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            if (!plateText.isNullOrEmpty()) {
                                 Text(
-                                    text = "Về sự kiện gốc", 
-                                    style = MaterialTheme.typography.labelMedium,
+                                    text = plateText,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
                                     color = MaterialTheme.colorScheme.primary
                                 )
+                            }
+
+                            if (baseEvent != null && event.id != baseEvent.id) {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        viewModel.selectEvent(baseEvent)
+                                        selectedTab = EventMediaTab.EVENT_IMAGE
+                                        expandedCropUrl = null
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    androidx.compose.material3.Icon(
+                                        imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
+                                        contentDescription = "Reset",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Về sự kiện gốc", 
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
