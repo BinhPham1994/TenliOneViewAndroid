@@ -9,6 +9,9 @@ import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.model.network.AIServiceModel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,7 +28,10 @@ import com.tenli.oneview.data.local.EventCacheManager
 data class EventScreenUiState(
     val events: List<EventData> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
+    val aiServices: List<AIServiceModel> = emptyList(),
     val selectedFilter: TimeFilter = TimeFilter.TODAY,
+    val selectedServiceId: Int? = null,
+    val selectedAiType: String? = null,
     val isLoading: Boolean = false,
     val isPaginating: Boolean = false,
     val hasMore: Boolean = true,
@@ -44,9 +50,11 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
         fetchInitialData()
     }
 
-    fun setTimeFilter(filter: TimeFilter) {
-        if (_uiState.value.selectedFilter == filter) return
-        _uiState.update { it.copy(selectedFilter = filter) }
+    fun applyFilters(filter: TimeFilter, serviceId: Int?, aiType: String?) {
+        if (_uiState.value.selectedFilter == filter && 
+            _uiState.value.selectedServiceId == serviceId &&
+            _uiState.value.selectedAiType == aiType) return
+        _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId, selectedAiType = aiType) }
         fetchInitialData()
     }
 
@@ -93,7 +101,9 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
             
             // Try to load from cache first
             val filter = _uiState.value.selectedFilter
-            val cachedData = EventCacheManager.getEventData(getApplication(), filter)
+            val serviceId = _uiState.value.selectedServiceId
+            val aiType = _uiState.value.selectedAiType
+            val cachedData = EventCacheManager.getEventData(getApplication(), filter, serviceId, aiType)
             if (cachedData != null) {
                 _uiState.update {
                     it.copy(
@@ -105,14 +115,23 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                // Fetch cameras first if needed, or in parallel
-                val cameraResponse = vmsApi.getCameraList()
+                // Fetch cameras and AI Services first if needed, or in parallel
+                val cameraDeferred = async { vmsApi.getCameraList() }
+                val aiServiceDeferred = async { eventApi.getAIServiceList() }
+                
+                val cameraResponse = cameraDeferred.await()
+                val aiServiceResponse = aiServiceDeferred.await()
+
                 val cameraList = if (cameraResponse.isSuccessful) {
                     cameraResponse.body() ?: emptyList()
                 } else emptyList()
 
+                val aiServices = if (aiServiceResponse.isSuccessful) {
+                    aiServiceResponse.body() ?: emptyList()
+                } else _uiState.value.aiServices
+
                 val (from, to) = getTimeRange()
-                val response = eventApi.getDataList(count = 20, from = from, to = to)
+                val response = eventApi.getDataList(count = 20, from = from, to = to, serviceId = serviceId, type = aiType)
                 val newEvents = if (response.isSuccessful) {
                     response.body() ?: emptyList()
                 } else emptyList()
@@ -121,6 +140,7 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         isLoading = false,
                         cameraList = cameraList,
+                        aiServices = aiServices,
                         events = newEvents,
                         hasMore = newEvents.size == 20
                     )
@@ -129,7 +149,7 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
                 // Save to cache on success
                 if (response.isSuccessful && cameraResponse.isSuccessful) {
                     val freshCachedData = CachedEventData(events = newEvents, cameraList = cameraList)
-                    EventCacheManager.saveEventData(getApplication(), filter, freshCachedData)
+                    EventCacheManager.saveEventData(getApplication(), filter, serviceId, aiType, freshCachedData)
                 }
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error fetching initial events", e)
@@ -147,7 +167,7 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val lastId = currentState.events.last().id
                 val (from, to) = getTimeRange()
-                val response = eventApi.getDataList(lastId = lastId, count = 20, from = from, to = to)
+                val response = eventApi.getDataList(lastId = lastId, count = 20, from = from, to = to, serviceId = currentState.selectedServiceId, type = currentState.selectedAiType)
                 
                 if (response.isSuccessful) {
                     val newEvents = response.body() ?: emptyList()

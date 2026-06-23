@@ -18,14 +18,16 @@ object EventCacheManager {
 
     private val gson = Gson()
 
-    private fun getCacheFile(context: Context, filter: TimeFilter): File {
-        return File(context.cacheDir, "event_cache_${filter.name}.json")
+    private fun getCacheFile(context: Context, filter: TimeFilter, serviceId: Int?, aiType: String?): File {
+        val servicePart = serviceId?.toString() ?: "all"
+        val aiTypePart = aiType ?: "all"
+        return File(context.cacheDir, "event_cache_${filter.name}_${servicePart}_${aiTypePart}.json")
     }
 
-    suspend fun saveEventData(context: Context, filter: TimeFilter, data: CachedEventData) {
+    suspend fun saveEventData(context: Context, filter: TimeFilter, serviceId: Int?, aiType: String?, data: CachedEventData) {
         withContext(Dispatchers.IO) {
             try {
-                val file = getCacheFile(context, filter)
+                val file = getCacheFile(context, filter, serviceId, aiType)
                 val json = gson.toJson(data)
                 file.writeText(json)
             } catch (e: Exception) {
@@ -34,10 +36,10 @@ object EventCacheManager {
         }
     }
 
-    suspend fun getEventData(context: Context, filter: TimeFilter): CachedEventData? {
+    suspend fun getEventData(context: Context, filter: TimeFilter, serviceId: Int?, aiType: String?): CachedEventData? {
         return withContext(Dispatchers.IO) {
             try {
-                val file = getCacheFile(context, filter)
+                val file = getCacheFile(context, filter, serviceId, aiType)
                 if (file.exists()) {
                     val json = file.readText()
                     gson.fromJson(json, CachedEventData::class.java)
@@ -61,6 +63,28 @@ object EventCacheManager {
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    suspend fun findEventById(context: Context, eventId: Int): Pair<EventData, List<CameraModel>>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val files = context.cacheDir.listFiles() ?: return@withContext null
+                for (file in files) {
+                    if (file.name.startsWith("event_cache_")) {
+                        val json = file.readText()
+                        val data = gson.fromJson(json, CachedEventData::class.java)
+                        val event = data.events.find { it.id == eventId }
+                        if (event != null) {
+                            return@withContext Pair(event, data.cameraList)
+                        }
+                    }
+                }
+                null
+            } catch (e: Exception) {
+                e.printStackTrace()
+                null
+            }
         }
     }
 }

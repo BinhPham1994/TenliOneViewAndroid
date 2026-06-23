@@ -55,19 +55,14 @@ class EventDetailViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // Find event in cache across all time filters
+                // Find event in cache across all cache files
                 var foundEvent: EventData? = null
                 var cameraList: List<CameraModel> = emptyList()
 
-                for (filter in TimeFilter.values()) {
-                    val cache = EventCacheManager.getEventData(getApplication(), filter)
-                    if (cache != null) {
-                        foundEvent = cache.events.find { it.id == eventId }
-                        if (cameraList.isEmpty() && cache.cameraList.isNotEmpty()) {
-                            cameraList = cache.cameraList
-                        }
-                        if (foundEvent != null) break
-                    }
+                val cacheResult = EventCacheManager.findEventById(getApplication(), eventId)
+                if (cacheResult != null) {
+                    foundEvent = cacheResult.first
+                    cameraList = cacheResult.second
                 }
 
                 if (foundEvent == null) {
