@@ -83,6 +83,7 @@ fun EventDetailScreen(
     var selectedTab by remember { mutableStateOf(EventMediaTab.EVENT_IMAGE) }
     var selectedHistoryTab by remember { mutableStateOf(EventHistoryTab.HISTORY) }
     var showMetadataSheet by remember { mutableStateOf(false) }
+    var expandedCropUrl by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var showContent by remember { mutableStateOf(false) }
@@ -130,12 +131,7 @@ fun EventDetailScreen(
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 16.dp)
                         .alpha(instantAlpha)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = { showMetadataSheet = true }
-                        ),
+                        .clip(RoundedCornerShape(8.dp)),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
@@ -173,18 +169,50 @@ fun EventDetailScreen(
                     }
 
                     // Nhãn sự kiện
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event.type)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = com.tenli.oneview.ui.utils.AiTypeHelper.getTypeName(event.type).uppercase(),
-                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event)
+                        ) {
+                            Text(
+                                text = com.tenli.oneview.ui.utils.AiTypeHelper.getEventName(event).uppercase(),
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
+
+                        val baseEvent = uiState.baseEvent
+                        if (baseEvent != null && event.id != baseEvent.id) {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    viewModel.selectEvent(baseEvent)
+                                    selectedTab = EventMediaTab.EVENT_IMAGE
+                                    expandedCropUrl = null
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
+                                    contentDescription = "Reset",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Về sự kiện gốc", 
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -243,18 +271,62 @@ fun EventDetailScreen(
                                     model = url,
                                     contentDescription = "Crop Image"
                                 ) {
-                                    val state = painter.state
+                                    val currentPainter = painter
+                                    val state = currentPainter.state
                                     if (state is coil.compose.AsyncImagePainter.State.Success) {
-                                        androidx.compose.foundation.Image(
-                                            painter = painter,
-                                            contentDescription = "Crop Image",
+                                        Box {
+                                            androidx.compose.foundation.Image(
+                                                painter = currentPainter,
+                                                contentDescription = "Crop Image",
+                                                modifier = Modifier
+                                                    .height(44.dp)
+                                                    .widthIn(max = 120.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(Color.Black.copy(alpha = 0.5f))
+                                                    .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                                    .clickable { expandedCropUrl = if (expandedCropUrl == url) null else url },
+                                                contentScale = ContentScale.Fit
+                                            )
+                                            
+                                            if (expandedCropUrl == url) {
+                                                androidx.compose.ui.window.Popup(
+                                                    alignment = Alignment.Center,
+                                                    onDismissRequest = { expandedCropUrl = null }
+                                                ) {
+                                                    val intrinsicSize = currentPainter.intrinsicSize
+                                                    val isSizeValid = intrinsicSize != androidx.compose.ui.geometry.Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
+                                                    val imgModifier = if (isSizeValid) {
+                                                        val ratio = intrinsicSize.width / intrinsicSize.height
+                                                        Modifier
+                                                            .widthIn(max = 360.dp)
+                                                            .heightIn(max = 132.dp)
+                                                            .aspectRatio(ratio, matchHeightConstraintsFirst = false)
+                                                    } else {
+                                                        Modifier
+                                                            .height(132.dp)
+                                                            .widthIn(max = 360.dp)
+                                                    }
+
+                                                    androidx.compose.foundation.Image(
+                                                        painter = currentPainter,
+                                                        contentDescription = "Expanded Crop Image",
+                                                        modifier = imgModifier
+                                                            .clip(RoundedCornerShape(12.dp))
+                                                            .background(Color.Black.copy(alpha = 0.8f))
+                                                            .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                                            .clickable { expandedCropUrl = null },
+                                                        contentScale = ContentScale.Fit
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Box(
                                             modifier = Modifier
                                                 .height(44.dp)
-                                                .widthIn(max = 120.dp)
+                                                .width(60.dp)
                                                 .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Black.copy(alpha = 0.5f))
-                                                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
-                                            contentScale = ContentScale.Fit
+                                                .background(Color.Gray.copy(alpha = 0.3f))
                                         )
                                     }
                                 }
@@ -292,7 +364,7 @@ fun EventDetailScreen(
                     if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                         with(sharedTransitionScope) {
                             boxModifier = boxModifier.sharedElement(
-                                sharedContentState = rememberSharedContentState(key = "event_image_${event.id}"),
+                                sharedContentState = rememberSharedContentState(key = "event_image_${eventId}"),
                                 animatedVisibilityScope = animatedVisibilityScope
                             )
                         }
@@ -493,7 +565,6 @@ fun EventDetailScreen(
                 // Tabs Lịch sử & Biển số
                     Row(
                         modifier = Modifier
-                            .fillMaxWidth()
                             .padding(top = 8.dp)
                             .padding(horizontal = 16.dp)
                             .offset(y = offsetY)
@@ -501,24 +572,23 @@ fun EventDetailScreen(
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                             .padding(4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         EventHistoryTab.values().forEach { tab ->
                             val isSelected = selectedHistoryTab == tab
                             Box(
                                 modifier = Modifier
-                                    .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
                                     .clickable { selectedHistoryTab = tab }
-                                    .padding(vertical = 8.dp),
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = tab.title,
                                     color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 13.sp,
+                                    fontSize = 11.sp,
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
@@ -527,9 +597,9 @@ fun EventDetailScreen(
                     }
 
                 val currentEventsList = if (selectedHistoryTab == EventHistoryTab.HISTORY) {
-                    uiState.relatedEvents.filter { it.id != event.id }
+                    uiState.relatedEvents
                 } else {
-                    uiState.licensePlateEvents.filter { it.id != event.id }
+                    uiState.licensePlateEvents
                 }
 
                 LazyColumn(
@@ -560,8 +630,17 @@ fun EventDetailScreen(
                                 RecentEventItem(
                                     event = relatedEvent,
                                     cameraName = cameraName,
+                                    isSelected = relatedEvent.id == event.id,
                                     enableSharedElement = false,
-                                    onClick = { /* Could navigate to another event */ }
+                                    onClick = { 
+                                        if (selectedHistoryTab == EventHistoryTab.HISTORY) {
+                                            viewModel.selectBaseEvent(relatedEvent)
+                                        } else {
+                                            viewModel.selectEvent(relatedEvent)
+                                        }
+                                        selectedTab = EventMediaTab.EVENT_IMAGE
+                                        expandedCropUrl = null
+                                    }
                                 )
                             } // end Box
                         } // end items

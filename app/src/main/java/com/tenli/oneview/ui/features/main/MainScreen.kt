@@ -157,7 +157,7 @@ fun MainScreen(
         NavHost(
             navController = navController,
             startDestination = MainTab.Home.route,
-            modifier = Modifier.padding(innerPadding),
+            modifier = Modifier.padding(if (showBottomBar) innerPadding else PaddingValues(0.dp)),
             enterTransition = {
                 androidx.compose.animation.EnterTransition.None
             },
@@ -183,6 +183,9 @@ fun MainScreen(
                     onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
                     onPlaybackClick = { videoLink, time, imageLink, cameraName ->
                         onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+                    },
+                    onFullscreenChange = { isFullscreen ->
+                        showBottomBar = !isFullscreen
                     }
                 )
             }

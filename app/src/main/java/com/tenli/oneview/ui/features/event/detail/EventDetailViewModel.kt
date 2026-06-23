@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class EventDetailUiState(
+    val baseEvent: EventData? = null,
     val event: EventData? = null,
     val camera: CameraModel? = null,
     val relatedEvents: List<EventData> = emptyList(),
@@ -96,6 +97,7 @@ class EventDetailViewModel(
 
                 _uiState.update { 
                     it.copy(
+                        baseEvent = foundEvent,
                         event = foundEvent,
                         camera = camera,
                         isLoading = false
@@ -111,9 +113,33 @@ class EventDetailViewModel(
         }
     }
 
+    fun selectEvent(event: EventData) {
+        _uiState.update { 
+            it.copy(
+                event = event,
+                originalVideoUrl = null,
+                originalVideoLoading = false,
+                originalVideoError = null
+            ) 
+        }
+    }
+
+    fun selectBaseEvent(event: EventData) {
+        _uiState.update { 
+            it.copy(
+                baseEvent = event,
+                event = event,
+                originalVideoUrl = null,
+                originalVideoLoading = false,
+                originalVideoError = null
+            ) 
+        }
+        loadRelatedEvents()
+    }
+
     fun loadRelatedEvents() {
         viewModelScope.launch {
-            _uiState.value.event?.let { event ->
+            _uiState.value.baseEvent?.let { event ->
                 event.data?.cameraUUID?.let { uuid ->
                     fetchRelatedEvents(uuid)
                 }
@@ -210,7 +236,7 @@ class EventDetailViewModel(
                         _uiState.update {
                             it.copy(
                                 originalVideoLoading = false,
-                                originalVideoError = "Video không khả dụng hoặc chưa có dữ liệu ghi hình"
+                                originalVideoError = "Video không khả dụng"
                             )
                         }
                     }

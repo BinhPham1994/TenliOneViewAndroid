@@ -155,15 +155,17 @@ fun LiveStreamPlayer(
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = false
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+                android.view.LayoutInflater.from(ctx).inflate(com.tenli.oneview.R.layout.view_exo_texture, null).apply {
+                    (this as PlayerView).apply {
+                        player = exoPlayer
+                        useController = false
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    }
                 }
             },
-            update = { view -> view.player = exoPlayer },
-            onRelease = { view -> view.player = null },
+            update = { view -> (view as PlayerView).player = exoPlayer },
+            onRelease = { view -> (view as? PlayerView)?.player = null },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = if (isPlaying) 1f else 0f }

@@ -1,48 +1,76 @@
 package com.tenli.oneview.ui.utils
 
+import com.tenli.oneview.model.network.EventData
+
 object AiTypeHelper {
+    fun getEventName(event: EventData): String {
+        val type = event.type
+        if (type == "logic-uniform" || type == "sensor-uniform-camera") {
+            val data = event.data
+            if (data?.uniform != null) {
+                return "Vi phạm trang phục"
+            }
+            if (data?.face != null) {
+                if (data.face.hasMask == false) {
+                    return "Không đeo khẩu trang"
+                }
+                return "Vi phạm trang phục"
+            }
+            return "Vi phạm trang phục"
+        }
+        return getTypeName(type)
+    }
+
+    fun getAiColor(event: EventData): androidx.compose.ui.graphics.Color {
+        val eventName = getEventName(event)
+        if (eventName == "Không đeo khẩu trang") {
+            return androidx.compose.ui.graphics.Color(0xFFA2821B) // Color for mask/face
+        }
+        return getAiColor(event.type)
+    }
+
     fun getTypeName(type: String?): String {
         if (type == null) return "Sự kiện không xác định"
         val typeMap = mapOf(
-            "logic-person" to "Xâm nhập",
-            "sensor-person-camera" to "Xâm nhập",
-            "logic-fish-out" to "Cá nhảy ra ngoài",
-            "sensor-fish-out-camera" to "Cá nhảy ra ngoài",
-            "logic-person-pond" to "Người tới gần hồ",
-            "sensor-person-pond-camera" to "Người tới gần hồ",
-            "sensor-person-pond-camera-v2" to "Người tới gần hồ",
-            "logic-fire" to "Báo cháy, khói",
-            "sensor-fire-camera" to "Báo cháy, khói",
-            "logic-fall-person" to "Phát hiện té ngã",
-            "sensor-fall-person-camera" to "Phát hiện té ngã",
-            "logic-power" to "Cảnh báo điện",
-            "sensor-person-entry-exit-camera" to "Vào/Ra",
-            "sensor-person-dwell-camera" to "Lảng vảng",
+            "logic-person" to "Phát hiện xâm nhập",
+            "sensor-person-camera" to "Phát hiện xâm nhập",
+            "logic-fish-out" to "Phát hiện cá koi nhảy lên bờ",
+            "sensor-fish-out-camera" to "Phát hiện cá koi nhảy lên bờ",
+            "logic-person-pond" to "Phát hiện người ngã xuống Hồ Koi",
+            "sensor-person-pond-camera" to "Phát hiện người ngã xuống Hồ Koi",
+            "sensor-person-pond-camera-v2" to "Phát hiện người ngã xuống Hồ Koi",
+            "logic-fire" to "Phát hiện Cháy & Khói",
+            "sensor-fire-camera" to "Phát hiện Cháy & Khói",
+            "logic-fall-person" to "Phát hiện người ngã bất thường",
+            "sensor-fall-person-camera" to "Phát hiện người ngã bất thường",
+            "logic-power" to "Phát hiện mất điện",
+            "sensor-person-entry-exit-camera" to "Đếm người vào ra",
+            "sensor-person-dwell-camera" to "Phát hiện người ở lâu",
             "logic-face" to "Nhận diện khuôn mặt",
-            "sensor-license-plate" to "Nhận diện biển số",
+            "sensor-license-plate" to "Nhận dạng biển số",
             "sensor-face-unknown-camera" to "Nhận diện khuôn mặt",
-            "logic-uniform" to "Kiểm tra đồng phục",
-            "sensor-object" to "Phát hiện đồ vật",
-            "object-begin" to "Phát hiện đồ vật",
-            "object-end" to "Phát hiện đồ vật",
-            "sensor-object-tracking" to "Phát hiện đồ vật",
-            "sensor-gesture-camera" to "Hành động/Cử chỉ",
-            "sensor-heatmap-camera" to "Biểu đồ nhiệt (Heatmap)",
-            "sensor-crowd-camera" to "Phát hiện đám đông",
-            "sensor-uniform-camera" to "Kiểm tra đồng phục",
-            "sensor-violence" to "Đánh nhau/Bạo lực",
-            "sensor-pose-camera" to "Hút thuốc",
-            "sensor-phone-camera" to "Sử dụng điện thoại",
+            "logic-uniform" to "Nhận diện trang phục",
+            "sensor-object" to "Nhận diện đối tượng",
+            "object-begin" to "Nhận diện đối tượng",
+            "object-end" to "Nhận diện đối tượng",
+            "sensor-object-tracking" to "Nhận diện đối tượng",
+            "sensor-gesture-camera" to "Nhận diện cử chỉ",
+            "sensor-heatmap-camera" to "Phân tích mật độ",
+            "sensor-crowd-camera" to "Phát hiện đông người",
+            "sensor-uniform-camera" to "Nhận diện trang phục",
+            "sensor-violence" to "Phát hiện đánh nhau",
+            "sensor-pose-camera" to "Phát hiện hút thuốc",
+            "sensor-phone-camera" to "Phát hiện dùng điện thoại",
             "sensor-vehicle-camera" to "Nhận diện phương tiện",
             "sensor-helmet-camera" to "Không đội mũ bảo hiểm",
             "sensor-helmet-violation-camera" to "Không đội mũ bảo hiểm",
-            "sensor-parking-camera" to "Đỗ xe sai quy định",
+            "sensor-parking-camera" to "Phát hiện dừng đỗ xe",
             "sensor-animal-camera" to "Phát hiện động vật",
             "sensor-weapon-camera" to "Phát hiện vũ khí",
-            "sensor-absence-tracking-camera" to "Giám sát vắng mặt",
+            "sensor-absence-tracking-camera" to "Phát hiện rời vị trí",
             "sensor-encroachment-camera" to "Lấn chiếm vỉa hè",
-            "sensor-littering-camera" to "Xả rác bừa bãi",
-            "construction-sensor-camera" to "Giám sát thi công"
+            "sensor-littering-camera" to "Phát hiện đổ rác",
+            "construction-sensor-camera" to "Xây dựng trái phép"
         )
         return typeMap[type] ?: type
     }

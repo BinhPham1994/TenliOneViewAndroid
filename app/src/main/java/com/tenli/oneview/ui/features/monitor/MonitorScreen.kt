@@ -54,7 +54,8 @@ fun MonitorScreen(
     viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
     onEventClick: (Int) -> Unit = {},
-    onPlaybackClick: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
+    onPlaybackClick: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> },
+    onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -62,6 +63,10 @@ fun MonitorScreen(
     val context = LocalContext.current
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
     val activity = LocalContext.current as? Activity
+
+    LaunchedEffect(fullscreenIndex) {
+        onFullscreenChange(fullscreenIndex != null)
+    }
 
     val cameraItems = remember(uiState.selectedCameras.size) {
         List(uiState.selectedCameras.size) { index ->
@@ -117,47 +122,12 @@ fun MonitorScreen(
         }
     }
 
-    if (fullscreenIndex != null) {
-        val index = fullscreenIndex!!
-        val selectedCam = uiState.selectedCameras[index]
-        
-        if (selectedCam != null) {
-            Dialog(
-                onDismissRequest = { fullscreenIndex = null },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false
-                )
-            ) {
-                // Remove the default fade-in/out animations and dim background of the Dialog Window
-                val dialogWindowProvider = androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider
-                dialogWindowProvider?.window?.let { window ->
-                    window.setWindowAnimations(0)
-                    window.setDimAmount(0f)
-                }
-
-                DisposableEffect(Unit) {
-                    val originalOrientation = activity?.requestedOrientation
-                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    onDispose {
-                        activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    }
-                }
-                
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    cameraItems[index](selectedCam)
-                }
-            }
-        } else {
-            fullscreenIndex = null
-        }
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
         // Header
         val headerText = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Giám sát"
         Row(
@@ -273,7 +243,6 @@ fun MonitorScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(horizontal = 16.dp)
-                .padding(bottom = 16.dp)
         ) {
             val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
             
@@ -431,7 +400,53 @@ fun MonitorScreen(
                 }
             }
         }
-    }
+        } // End of Column
+
+        // Fullscreen overlay
+        if (fullscreenIndex != null) {
+            val index = fullscreenIndex!!
+            val selectedCam = uiState.selectedCameras[index]
+            
+            if (selectedCam != null) {
+                DisposableEffect(Unit) {
+                    val originalOrientation = activity?.requestedOrientation
+                    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                    
+                    val window = activity?.window
+                    val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+                    
+                    if (insetsController != null) {
+                        insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    }
+                    
+                    onDispose {
+                        activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                    }
+                }
+                
+                androidx.activity.compose.BackHandler {
+                    fullscreenIndex = null
+                }
+                
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null,
+                            onClick = {} // Block clicks from passing through
+                        )
+                ) {
+                    cameraItems[index](selectedCam)
+                }
+            } else {
+                fullscreenIndex = null
+            }
+        }
+    } // End of root Box
 }
 
 @Composable

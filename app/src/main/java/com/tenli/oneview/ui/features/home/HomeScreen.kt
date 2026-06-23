@@ -98,7 +98,7 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(horizontal = 16.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 16.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
 
@@ -311,7 +311,7 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
             .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp), // Ảnh sát mép 4dp, chữ cách lề phải 12dp
+            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 4.dp), // Ảnh sát mép 4dp, chữ cách lề phải 4dp
         verticalAlignment = Alignment.CenterVertically
     ) {
             val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
@@ -368,9 +368,9 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
                     fontSize = 12.sp
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                val aiColor = AiTypeHelper.getAiColor(event.type)
+                val aiColor = AiTypeHelper.getAiColor(event)
                 Text(
-                    text = AiTypeHelper.getTypeName(event.type),
+                    text = AiTypeHelper.getEventName(event),
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -381,7 +381,7 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(4.dp))
             androidx.compose.material3.Icon(
                 imageVector = Icons.Default.KeyboardArrowRight,
                 contentDescription = "Chi tiết",
