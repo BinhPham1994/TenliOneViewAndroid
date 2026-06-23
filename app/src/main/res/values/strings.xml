@@ -171,6 +171,21 @@
     <string name="setting_language">Ngôn ngữ</string>
     <string name="setting_logout">Đăng xuất</string>
     <string name="setting_developing">Tính năng đang phát triển</string>
+    <string name="setting_profile">Hồ sơ</string>
+    <string name="setting_my_page">Trang của tôi</string>
+    <string name="setting_support">Hỗ trợ</string>
+    <string name="setting_general">Cài đặt chung</string>
+    <string name="setting_general_config">Cấu hình chung</string>
+    <string name="setting_notifications">Thông báo hệ thống</string>
+    <string name="setting_automation">Kịch bản tự động</string>
+    <string name="setting_users">Quản lý người dùng</string>
+    <string name="setting_theme">Giao diện</string>
+    <string name="setting_personalization">Cá nhân hóa</string>
+    <string name="setting_account_title">Tài khoản</string>
+    <string name="setting_choose_language">Chọn ngôn ngữ</string>
+    <string name="dialog_btn_close">Đóng</string>
+    <string name="lang_vi">Tiếng Việt</string>
+    <string name="lang_en">English</string>
 
     <string name="dialog_logout_title">Đăng xuất</string>
     <string name="dialog_logout_msg">Bạn có chắc chắn muốn đăng xuất khỏi tài khoản không? Mọi phiên làm việc hiện tại trên thiết bị này sẽ kết thúc.</string>

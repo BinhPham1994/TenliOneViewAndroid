@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Logout
@@ -59,6 +60,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.tenli.oneview.R
+
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
@@ -207,7 +211,7 @@ fun MainScreen(
                 )
             ) {
                 SettingScreen(
-                    onLogoutClick = { viewModel.logout() },
+                    onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
                     onNavigateToDetail = navigateToSettingTarget
                 )
             }
@@ -215,220 +219,414 @@ fun MainScreen(
     }
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun SettingScreen(
-    onLogoutClick: () -> Unit,
+    onLogoutClick: (Boolean) -> Unit,
     onNavigateToDetail: (String) -> Unit
 ) {
     var themeMode by remember { mutableStateOf(2) } // 0: Light, 1: Dark, 2: System
+    var showLogoutDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showChangePasswordDialog by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var currentLanguage by remember { mutableStateOf(com.tenli.oneview.ui.utils.LocaleManager.getLocale(context)) }
     
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val backgroundColor = if (isDark) MaterialTheme.colorScheme.background else androidx.compose.ui.graphics.Color(0xFFF2F4F8)
+    val surfaceColor = if (isDark) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.White
+    val textColor = MaterialTheme.colorScheme.onBackground
+    val sectionColor = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color(0xFF64748B)
+    
+    val userName = com.tenli.oneview.data.local.UserSession.userData?.name?.takeIf { it.isNotBlank() } ?: stringResource(id = R.string.setting_my_page)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(16.dp),
-        contentAlignment = Alignment.TopCenter
+            .background(backgroundColor)
     ) {
         androidx.compose.foundation.lazy.LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surface)
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 80.dp)
         ) {
-        item {
-            // Profile Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "Avatar",
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text(
-                        text = "Người dùng",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-                    Text(
-                        text = "Quản trị viên",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-        
-        item {
-            Text(
-                text = "Cài đặt chung",
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            SettingItem(
-                icon = Icons.Default.Settings,
-                title = "Cấu hình chung",
-                onClick = { onNavigateToDetail("general") }
-            )
-            SettingItem(
-                icon = Icons.Default.Notifications,
-                title = "Thông báo hệ thống",
-                onClick = { onNavigateToDetail("notifications") }
-            )
-            SettingItem(
-                icon = Icons.Default.AutoMode,
-                title = "Kịch bản tự động",
-                onClick = { onNavigateToDetail("automation") }
-            )
-            SettingItem(
-                icon = Icons.Default.Group,
-                title = "Quản lý người dùng",
-                onClick = { onNavigateToDetail("users") }
-            )
-        }
-        
-        item {
-            Divider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
-            Text(
-                text = "Cá nhân hóa",
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            SettingItem(
-                icon = Icons.Default.Language,
-                title = "Ngôn ngữ",
-                onClick = { onNavigateToDetail("language") }
-            )
-            
-            // Theme toggle row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { }
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Palette,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(16.dp))
-                Text(
-                    text = "Giao diện",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.weight(1f)
-                )
-                
+            item {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(4.dp)
+                        .fillMaxWidth()
+                        .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ThemeModeButton(
-                        icon = Icons.Default.LightMode,
-                        isSelected = themeMode == 0,
-                        onClick = { themeMode = 0 }
+                    Text(
+                        text = stringResource(id = R.string.lbl_settings),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = textColor
                     )
-                    ThemeModeButton(
-                        icon = Icons.Default.DarkMode,
-                        isSelected = themeMode == 1,
-                        onClick = { themeMode = 1 }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(surfaceColor)
+                            .clickable { }
+                            .padding(vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Person,
+                            contentDescription = stringResource(id = R.string.setting_profile),
+                            tint = androidx.compose.ui.graphics.Color(0xFF8B5CF6),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = userName,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(surfaceColor)
+                            .clickable { uriHandler.openUri("https://tenli.ai") }
+                            .padding(vertical = 20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = stringResource(id = R.string.setting_support),
+                            tint = androidx.compose.ui.graphics.Color(0xFF3B82F6),
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = stringResource(id = R.string.setting_support),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = textColor
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            item {
+                Text(
+                    text = stringResource(id = R.string.setting_general),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = sectionColor,
+                    fontWeight = FontWeight.Medium
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(surfaceColor)
+                ) {
+                    ModernSettingItem(
+                        icon = Icons.Default.Settings,
+                        iconTint = androidx.compose.ui.graphics.Color(0xFF3B82F6),
+                        title = stringResource(id = R.string.setting_general_config),
+                        onClick = { onNavigateToDetail("general") }
                     )
-                    ThemeModeButton(
-                        icon = Icons.Default.Monitor,
-                        isSelected = themeMode == 2,
-                        onClick = { themeMode = 2 }
+                    ModernSettingItem(
+                        icon = Icons.Default.Notifications,
+                        iconTint = androidx.compose.ui.graphics.Color(0xFFF59E0B),
+                        title = stringResource(id = R.string.setting_notifications),
+                        onClick = { onNavigateToDetail("notifications") },
+                        showDivider = false
+                    )
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+            
+            item {
+                Text(
+                    text = stringResource(id = R.string.setting_personalization),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = sectionColor,
+                    fontWeight = FontWeight.Medium
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(surfaceColor)
+                ) {
+                    ModernSettingItem(
+                        icon = Icons.Default.Language,
+                        iconTint = androidx.compose.ui.graphics.Color(0xFF6366F1),
+                        title = stringResource(id = R.string.setting_language),
+                        valueText = if (currentLanguage == "vi") stringResource(id = R.string.lang_vi) else stringResource(id = R.string.lang_en),
+                        onClick = { showLanguageDialog = true }
+                    )
+                    
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { }
+                                .padding(horizontal = 20.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = androidx.compose.ui.graphics.Color(0xFFEC4899),
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Text(
+                                text = stringResource(id = R.string.setting_theme),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = textColor,
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(if (isDark) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color(0xFFF1F5F9))
+                                    .padding(4.dp)
+                            ) {
+                                ThemeModeButton(
+                                    icon = Icons.Default.LightMode,
+                                    isSelected = themeMode == 0,
+                                    onClick = { themeMode = 0 }
+                                )
+                                ThemeModeButton(
+                                    icon = Icons.Default.DarkMode,
+                                    isSelected = themeMode == 1,
+                                    onClick = { themeMode = 1 }
+                                )
+                                ThemeModeButton(
+                                    icon = Icons.Default.Monitor,
+                                    isSelected = themeMode == 2,
+                                    onClick = { themeMode = 2 }
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+            
+            item {
+                Text(
+                    text = stringResource(id = R.string.setting_account_title),
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = sectionColor,
+                    fontWeight = FontWeight.Medium
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(surfaceColor)
+                ) {
+                    ModernSettingItem(
+                        icon = Icons.Default.VpnKey,
+                        iconTint = androidx.compose.ui.graphics.Color(0xFF14B8A6),
+                        title = stringResource(id = R.string.acc_password_security),
+                        onClick = { showChangePasswordDialog = true }
+                    )
+                    ModernSettingItem(
+                        icon = Icons.Default.Logout,
+                        iconTint = androidx.compose.ui.graphics.Color(0xFFEF4444),
+                        title = stringResource(id = R.string.setting_logout),
+                        onClick = { showLogoutDialog = true },
+                        titleColor = androidx.compose.ui.graphics.Color(0xFFEF4444),
+                        showChevron = false,
+                        showDivider = false
                     )
                 }
             }
         }
-        
-        item {
-            Divider(modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp))
-            Text(
-                text = "Tài khoản",
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
+
+        if (showLogoutDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showLogoutDialog = false },
+                title = {
+                    Text(text = stringResource(id = R.string.dialog_logout_title), fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(text = stringResource(id = R.string.dialog_logout_msg))
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            showLogoutDialog = false
+                            onLogoutClick(false)
+                        }
+                    ) {
+                        Text(stringResource(id = R.string.setting_logout), color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { showLogoutDialog = false }
+                    ) {
+                        Text(stringResource(id = R.string.dialog_btn_cancel), color = MaterialTheme.colorScheme.onSurface)
+                    }
+                }
             )
-            SettingItem(
-                icon = Icons.Default.VpnKey,
-                title = "Đổi mật khẩu",
-                onClick = { onNavigateToDetail("password") }
-            )
-            SettingItem(
-                icon = Icons.Default.Logout,
-                title = "Đăng xuất",
-                onClick = onLogoutClick,
-                titleColor = MaterialTheme.colorScheme.error,
-                iconColor = MaterialTheme.colorScheme.error,
-                showChevron = false
-            )
-            Spacer(modifier = Modifier.height(40.dp))
         }
-    }
+        
+        if (showLanguageDialog) {
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showLanguageDialog = false }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.setting_choose_language),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                com.tenli.oneview.ui.utils.LocaleManager.setLocale(context, "vi")
+                                currentLanguage = "vi"
+                                showLanguageDialog = false
+                                (context as? android.app.Activity)?.recreate()
+                            }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = currentLanguage == "vi",
+                            onClick = null
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(text = stringResource(id = R.string.lang_vi), style = MaterialTheme.typography.bodyLarge)
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                com.tenli.oneview.ui.utils.LocaleManager.setLocale(context, "en")
+                                currentLanguage = "en"
+                                showLanguageDialog = false
+                                (context as? android.app.Activity)?.recreate()
+                            }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = currentLanguage == "en",
+                            onClick = null
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(text = stringResource(id = R.string.lang_en), style = MaterialTheme.typography.bodyLarge)
+                    }
+                    
+                    Spacer(modifier = Modifier.height(32.dp))
+                }
+            }
+        }
+
+        if (showChangePasswordDialog) {
+            val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            androidx.compose.material3.ModalBottomSheet(
+                onDismissRequest = { showChangePasswordDialog = false },
+                sheetState = sheetState,
+                containerColor = backgroundColor
+            ) {
+                com.tenli.oneview.ui.features.auth.password.ChangePasswordScreen(
+                    onBack = { showChangePasswordDialog = false },
+                    onPasswordChangedSuccess = {
+                        showChangePasswordDialog = false
+                        onLogoutClick(true)
+                    }
+                )
+            }
+        }
     }
 }
 
 @Composable
-fun SettingItem(
+fun ModernSettingItem(
     icon: ImageVector,
+    iconTint: androidx.compose.ui.graphics.Color,
     title: String,
     onClick: () -> Unit,
     titleColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onBackground,
-    iconColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    showChevron: Boolean = true
+    valueText: String? = null,
+    showChevron: Boolean = true,
+    showDivider: Boolean = true
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = iconColor,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.width(16.dp))
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyLarge,
-            color = titleColor,
-            modifier = Modifier.weight(1f)
-        )
-        if (showChevron) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Icon(
-                imageVector = Icons.Default.ChevronRight,
+                imageVector = icon,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                tint = iconTint,
                 modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = titleColor,
+                modifier = Modifier.weight(1f)
+            )
+            if (valueText != null) {
+                Text(
+                    text = valueText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color(0xFF64748B),
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+            if (showChevron) {
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else androidx.compose.ui.graphics.Color(0xFFCBD5E1),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        if (showDivider) {
+            Divider(
+                modifier = Modifier.padding(start = 60.dp, end = 20.dp),
+                color = if (isDark) MaterialTheme.colorScheme.surfaceVariant else androidx.compose.ui.graphics.Color(0xFFF1F5F9),
+                thickness = 1.dp
             )
         }
     }
@@ -440,18 +638,23 @@ fun ThemeModeButton(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val selectedBg = if (isDark) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.White
+    val selectedTint = if (isDark) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+    val unselectedTint = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color(0xFF94A3B8)
+
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(36.dp)
             .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Transparent)
+            .background(if (isSelected) selectedBg else androidx.compose.ui.graphics.Color.Transparent)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (isSelected) selectedTint else unselectedTint,
             modifier = Modifier.size(20.dp)
         )
     }
