@@ -212,7 +212,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(16f / 9f)
-                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                                     .padding(8.dp)
                             )
                         }
@@ -225,7 +225,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(16f / 9f)
-                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                                     .padding(8.dp)
                             )
                         }
@@ -238,7 +238,7 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(16f / 9f)
-                                    .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                                     .padding(8.dp)
                             )
                         }
@@ -270,7 +270,7 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .background(Color.White)
+                            .background(MaterialTheme.colorScheme.surface)
                             .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -358,7 +358,7 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                 ) {
                     Text(
                         text = cameraName,
-                        color = Color.Black,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                         maxLines = 1,
@@ -368,7 +368,7 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = timePart,
-                        color = Color.DarkGray,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 12.sp
                     )
@@ -382,7 +382,7 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                     if (!aiServiceName.isNullOrBlank()) {
                         Text(
                             text = aiServiceName,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
@@ -396,7 +396,7 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = datePart,
-                            color = Color.Gray,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp
                         )
                     }
@@ -531,14 +531,14 @@ fun TimeFilterDropdown(
         ) {
             Text(
                 text = selectedFilter.title,
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onBackground,
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "Select Time Filter",
-                tint = Color.Black
+                tint = MaterialTheme.colorScheme.onBackground
             )
         }
 
@@ -546,7 +546,7 @@ fun TimeFilterDropdown(
             androidx.compose.material3.ModalBottomSheet(
                 onDismissRequest = { showBottomSheet = false },
                 sheetState = sheetState,
-                containerColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
                 dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
             ) {
                 Column(
@@ -580,7 +580,7 @@ fun TimeFilterDropdown(
                         ) {
                             Text(
                                 text = filter.title,
-                                color = if (isSelected) BrandPrimary else Color.Black,
+                                color = if (isSelected) BrandPrimary else MaterialTheme.colorScheme.onBackground,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 fontSize = 16.sp,
                                 modifier = Modifier.weight(1f)

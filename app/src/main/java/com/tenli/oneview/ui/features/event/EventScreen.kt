@@ -135,7 +135,7 @@ fun EventScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White),
+                        .background(MaterialTheme.colorScheme.surface),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
                     verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp)
                 ) {

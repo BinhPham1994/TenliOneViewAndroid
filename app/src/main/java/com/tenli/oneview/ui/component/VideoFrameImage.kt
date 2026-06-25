@@ -129,7 +129,7 @@ fun VideoFrameImage(
 
 @Composable
 private fun LoadingPlaceholder(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFFF3F4F6)), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(
             color = Color.LightGray,
             modifier = Modifier.size(24.dp)
@@ -139,7 +139,7 @@ private fun LoadingPlaceholder(modifier: Modifier = Modifier) {
 
 @Composable
 private fun ErrorPlaceholder(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().background(Color(0xFFF3F4F6)), contentAlignment = Alignment.Center) {
+    Box(modifier = modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         Icon(
             painter = painterResource(id = android.R.drawable.ic_menu_gallery),
             contentDescription = "Error",

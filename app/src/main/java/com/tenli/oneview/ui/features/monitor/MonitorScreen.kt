@@ -546,7 +546,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White),
+                    .background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
@@ -558,7 +558,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White),
+                    .background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = when {
@@ -575,7 +575,7 @@ fun CameraGridItem(
                         errorContent = {
                             Box(
                                 modifier = Modifier
-                                    .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
                                     .padding(horizontal = 16.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -586,7 +586,7 @@ fun CameraGridItem(
                 } else {
                     Box(
                         modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {

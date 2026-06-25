@@ -85,6 +85,8 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
 
+        com.tenli.oneview.ui.theme.ThemeManager.init(applicationContext)
+
         splashScreen.setKeepOnScreenCondition {
             splashViewModel.uiState.value.destination is SplashDestination.Loading
         }

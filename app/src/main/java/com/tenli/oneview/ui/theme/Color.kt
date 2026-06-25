@@ -18,3 +18,13 @@ val TextDisabled = Color(0xFFDEE2E6)      // Trạng thái vô hiệu hóa
 
 // --- ERROR ---
 val ErrorRed = Color(0xFFDC3545)          // Màu đỏ báo lỗi chuẩn hiện đại
+
+// --- NỀN (BACKGROUND) DARK ---
+val BackgroundDark = Color(0xFF121212)
+val SurfaceDark = Color(0xFF1E1E1E)
+val SurfaceVariantDark = Color(0xFF2C2C2C)
+
+// --- TEXT & CONTENT DARK ---
+val TextPrimaryDark = Color(0xFFFFFFFF)
+val TextSecondaryDark = Color(0xFFAAAAAA)
+val TextDisabledDark = Color(0xFF555555)

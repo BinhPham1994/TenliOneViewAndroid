@@ -225,14 +225,20 @@ fun SettingScreen(
     onLogoutClick: (Boolean) -> Unit,
     onNavigateToDetail: (String) -> Unit
 ) {
-    var themeMode by remember { mutableStateOf(2) } // 0: Light, 1: Dark, 2: System
+    val themeMode by com.tenli.oneview.ui.theme.ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     var showLogoutDialog by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     var currentLanguage by remember { mutableStateOf(com.tenli.oneview.ui.utils.LocaleManager.getLocale(context)) }
     
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        0 -> false
+        1 -> true
+        else -> isSystemDark
+    }
+    
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     val backgroundColor = if (isDark) MaterialTheme.colorScheme.background else androidx.compose.ui.graphics.Color(0xFFF2F4F8)
     val surfaceColor = if (isDark) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.White
@@ -412,17 +418,17 @@ fun SettingScreen(
                                 ThemeModeButton(
                                     icon = Icons.Default.LightMode,
                                     isSelected = themeMode == 0,
-                                    onClick = { themeMode = 0 }
+                                    onClick = { com.tenli.oneview.ui.theme.ThemeManager.setThemeMode(0) }
                                 )
                                 ThemeModeButton(
                                     icon = Icons.Default.DarkMode,
                                     isSelected = themeMode == 1,
-                                    onClick = { themeMode = 1 }
+                                    onClick = { com.tenli.oneview.ui.theme.ThemeManager.setThemeMode(1) }
                                 )
                                 ThemeModeButton(
                                     icon = Icons.Default.Monitor,
                                     isSelected = themeMode == 2,
-                                    onClick = { themeMode = 2 }
+                                    onClick = { com.tenli.oneview.ui.theme.ThemeManager.setThemeMode(2) }
                                 )
                             }
                         }
@@ -584,7 +590,13 @@ fun ModernSettingItem(
     showChevron: Boolean = true,
     showDivider: Boolean = true
 ) {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val themeMode by com.tenli.oneview.ui.theme.ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+    val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        0 -> false
+        1 -> true
+        else -> isSystemDark
+    }
     Column {
         Row(
             modifier = Modifier
@@ -639,7 +651,13 @@ fun ThemeModeButton(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val themeMode by com.tenli.oneview.ui.theme.ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+    val isSystemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        0 -> false
+        1 -> true
+        else -> isSystemDark
+    }
     val selectedBg = if (isDark) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.White
     val selectedTint = if (isDark) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
     val unselectedTint = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color(0xFF94A3B8)

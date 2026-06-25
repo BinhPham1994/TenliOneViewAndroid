@@ -55,6 +55,11 @@ fun HomeLineChart(
     }
 
     val maxValue = data.maxOfOrNull { it.second }?.coerceAtLeast(10f) ?: 10f
+    
+    val textColorArgb = MaterialTheme.colorScheme.onSurface.run { 
+        android.graphics.Color.argb((alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())
+    }
+    val surfaceColor = MaterialTheme.colorScheme.surface
 
     Canvas(modifier = modifier) {
         val width = size.width
@@ -79,7 +84,7 @@ fun HomeLineChart(
         )
 
         val textPaint = Paint().apply {
-            color = android.graphics.Color.DKGRAY
+            color = textColorArgb
             textSize = 28f
             typeface = Typeface.DEFAULT
             textAlign = Paint.Align.RIGHT
@@ -177,7 +182,7 @@ fun HomeLineChart(
             data.forEachIndexed { index, pair ->
                 val x = padding + if (data.size > 1) index * stepX else stepX
                 val y = height - padding - (pair.second / maxValue) * chartHeight
-                drawCircle(color = Color.White, radius = 8f, center = Offset(x, y))
+                drawCircle(color = surfaceColor, radius = 8f, center = Offset(x, y))
                 drawCircle(color = lineColor, radius = 5f, center = Offset(x, y))
             }
         }
@@ -211,6 +216,10 @@ fun HomeHorizontalBarChart(
 
     val maxValue = data.maxOfOrNull { it.second }?.coerceAtLeast(10f) ?: 10f
 
+    val textColorArgb = MaterialTheme.colorScheme.onSurface.run { 
+        android.graphics.Color.argb((alpha * 255).toInt(), (red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())
+    }
+
     Canvas(modifier = modifier) {
         val width = size.width
         val paddingLeft = 90.dp.toPx() // Chỗ cho Label
@@ -223,13 +232,13 @@ fun HomeHorizontalBarChart(
         val startY = (size.height - totalHeight) / 2f
         
         val textPaintLabel = Paint().apply {
-            color = android.graphics.Color.DKGRAY
+            color = textColorArgb
             textSize = 28f
             textAlign = Paint.Align.RIGHT
         }
         
         val textPaintValue = Paint().apply {
-            color = android.graphics.Color.BLACK
+            color = textColorArgb
             textSize = 28f
             textAlign = Paint.Align.LEFT
         }
@@ -290,7 +299,7 @@ fun StatCard(
     Column(
         modifier = modifier
             .aspectRatio(16f / 9f)
-            .background(Color.White, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
             .padding(16.dp),
         verticalArrangement = Arrangement.Center
     ) {
@@ -316,7 +325,7 @@ fun StatCard(
                 Spacer(modifier = Modifier.width(12.dp))
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = title.uppercase(), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(text = title.uppercase(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 var textSize by remember(value) { mutableStateOf(24.sp) }
