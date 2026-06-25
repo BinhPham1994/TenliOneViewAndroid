@@ -35,7 +35,8 @@ data class SelectedCamera(
     val videoCodecTag: String = "",
     val retryCount: Int = 0,
     val streamType: String = "LIVE", // "LIVE", "EVENT", "PLAYBACK"
-    val fallbackImageUrl: String = ""
+    val fallbackImageUrl: String = "",
+    val vmsName: String = ""
 )
 
 enum class MonitorTab {
@@ -271,6 +272,15 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    private fun getVmsNameForCamera(vmsId: Int): String {
+        for (node in _uiState.value.treeData) {
+            if (node is CameraTreeNode.VMSNode && node.vms.id == vmsId) {
+                return node.vms.name
+            }
+        }
+        return ""
+    }
+
     fun addCamera(camera: CameraModel, slotIndex: Int) {
         val currentState = _uiState.value
         
@@ -284,8 +294,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val prefs = com.tenli.oneview.data.local.GlobalData.preferences
         prefs.edit().putInt("saved_monitor_camera_id", camera.id).apply()
 
+        val vmsName = getVmsNameForCamera(camera.vmsId)
+
         val updatedCameras = currentState.selectedCameras.toMutableList()
-        updatedCameras[slotIndex] = SelectedCamera(camera, "")
+        updatedCameras[slotIndex] = SelectedCamera(camera, "", vmsName = vmsName)
 
         _uiState.update { it.copy(selectedCameras = updatedCameras) }
 
@@ -386,11 +398,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 } else {
-                    _uiState.update { it.copy(error = "Failed to get live stream for camera") }
                     retryCameraStream(slotIndex) // Retry on API failure too
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = "Error starting live stream: ${e.message}") }
                 retryCameraStream(slotIndex) // Retry on network failure
             }
         }
@@ -429,9 +439,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         
         if (currentSelection == null || currentSelection.retryCount >= 5) {
             if (currentSelection?.retryCount == 5) {
-                // To avoid spamming, only show toast once when reaching max
-                _uiState.update { it.copy(error = "Không thể phát luồng camera ${currentSelection.camera.name}") }
-                cameras[slotIndex] = currentSelection.copy(retryCount = 6)
+                cameras[slotIndex] = currentSelection.copy(
+                    retryCount = 6,
+                    streamUrl = "error://failed"
+                )
                 _uiState.update { it.copy(selectedCameras = cameras) }
             }
             return

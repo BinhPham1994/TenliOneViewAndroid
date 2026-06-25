@@ -129,30 +129,52 @@ fun MonitorScreen(
                 .background(MaterialTheme.colorScheme.background)
         ) {
         // Header
-        val headerText = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Giám sát"
+        val selectedCam = uiState.selectedCameras.firstOrNull()
+        val headerText = selectedCam?.camera?.name ?: "Giám sát"
+        val vmsName = selectedCam?.vmsName?.takeIf { it.isNotBlank() }
+        
         Row(
             modifier = Modifier
-                .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp)
+                .fillMaxWidth()
+                .height(64.dp)
                 .clickable {
                     activeSlotIndex = 0
                     showBottomSheet = true
-                },
+                }
+                .padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = headerText,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            Icon(
-                imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "Chọn Camera",
-                tint = MaterialTheme.colorScheme.onBackground
-            )
+            Row(
+                modifier = Modifier.weight(1f, fill = true),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = headerText,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Chọn Camera",
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+            
+            if (vmsName != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = vmsName,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier
+                        .background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
         }
 
         Box(
@@ -463,11 +485,11 @@ fun CameraGridItem(
     val camera = selectedCamera.camera
     var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
-    val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://no-video")
+    val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
     
     var shouldRenderPlayer by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     LaunchedEffect(selectedCamera.streamUrl) {
-        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
+        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
             kotlinx.coroutines.delay(350)
             shouldRenderPlayer = true
         }
@@ -480,7 +502,7 @@ fun CameraGridItem(
             .clip(RoundedCornerShape(0.dp))
             .background(Color.Black)
     ) {
-        if (shouldRenderPlayer && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://no-video")) {
+        if (shouldRenderPlayer && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
                 // WebSocket stream - use native ExoPlayer with forced FragmentedMp4Extractor
                 com.tenli.oneview.ui.component.LiveStreamPlayer(
@@ -517,7 +539,7 @@ fun CameraGridItem(
         }
 
         // Loading Overlay
-        if (selectedCamera.streamUrl.isEmpty() || (!isLiveViewPlaying && !hasError && selectedCamera.streamUrl.isNotEmpty())) {
+        if (selectedCamera.streamUrl.isEmpty() || (!isLiveViewPlaying && !hasError && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://"))) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -536,7 +558,11 @@ fun CameraGridItem(
                     .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
-                val errorMsg = if (selectedCamera.streamUrl.startsWith("error://no-video")) "Không có video cho sự kiện này" else "Lỗi tải video"
+                val errorMsg = when {
+                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có video cho sự kiện này"
+                    selectedCamera.streamUrl.startsWith("error://failed") -> "Lỗi không xem được camera"
+                    else -> "Lỗi tải video"
+                }
 
                 if (selectedCamera.fallbackImageUrl.isNotEmpty()) {
                     com.tenli.oneview.ui.component.VideoFrameImage(
@@ -665,8 +691,8 @@ fun CameraTreeNodeView(
                     .padding(start = paddingStart),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null)
-                Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 8.dp))
+                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
                 Text(node.vms.name, style = MaterialTheme.typography.bodyLarge)
             }
             if (isExpanded) {
@@ -685,8 +711,8 @@ fun CameraTreeNodeView(
                     .padding(start = paddingStart),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null)
-                Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 8.dp))
+                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
                 Text(node.group.name, style = MaterialTheme.typography.bodyMedium)
             }
             if (isExpanded) {
@@ -704,7 +730,7 @@ fun CameraTreeNodeView(
                     .padding(start = paddingStart + 24.dp), // Extra padding to align with folder content
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(end = 8.dp))
+                Icon(Icons.Default.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
                 Text(node.camera.name, style = MaterialTheme.typography.bodyMedium)
             }
         }
