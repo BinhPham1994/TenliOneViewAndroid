@@ -19,6 +19,7 @@ data class CachedHomeData(
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
     val eventsByCamera: List<VmsEventCountByCameraModel> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
+    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList()
 )
 

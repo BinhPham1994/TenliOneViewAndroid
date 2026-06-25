@@ -293,9 +293,12 @@ fun MonitorScreen(
                             val isSelected = currentStreamUrl.isNotEmpty() && 
                                 (if (videoUrl.isNotEmpty()) currentStreamUrl.endsWith(videoUrl) else currentStreamUrl == dummyUrl)
 
+                            val aiServiceName = uiState.aiServices.find { it.id == event.serviceId }?.name ?: "Unknown Service"
+
                             com.tenli.oneview.ui.features.home.RecentEventItem(
                                 event = event,
                                 cameraName = cameraName,
+                                aiServiceName = aiServiceName,
                                 isSelected = isSelected,
                                 onClick = { 
                                     onEventClick(event.id)

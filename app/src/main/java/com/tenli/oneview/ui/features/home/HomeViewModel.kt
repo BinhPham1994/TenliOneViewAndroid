@@ -43,6 +43,7 @@ data class HomeUiState(
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
     val eventsByCamera: List<VmsEventCountByCameraModel> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
+    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
     val error: String? = null
 )
@@ -82,6 +83,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         eventsByType = cachedData.eventsByType,
                         eventsByCamera = cachedData.eventsByCamera,
                         cameraList = cachedData.cameraList,
+                        aiServices = cachedData.aiServices,
                         recentEvents = cachedData.recentEvents
                     )
                 }
@@ -175,6 +177,12 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     cameraResponse.body() ?: emptyList()
                 } else emptyList()
 
+                // Danh sách dịch vụ AI
+                val aiServiceResponse = eventApi.getAIServiceList()
+                val aiServices = if (aiServiceResponse.isSuccessful) {
+                    aiServiceResponse.body() ?: emptyList()
+                } else emptyList()
+
                 var errorMsg: String? = null
                 if (!overviewResponse.isSuccessful) errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
                 else if (!overTimeResponse.isSuccessful) errorMsg = "Lỗi Biểu đồ Thời gian: ${overTimeResponse.code()}"
@@ -188,6 +196,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         eventsByType = eventsByType,
                         eventsByCamera = eventsByCamera,
                         cameraList = cameraList,
+                        aiServices = aiServices,
                         recentEvents = recentEvents,
                         error = errorMsg
                     )
@@ -201,6 +210,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         eventsByType = eventsByType,
                         eventsByCamera = eventsByCamera,
                         cameraList = cameraList,
+                        aiServices = aiServices,
                         recentEvents = recentEvents
                     )
                     HomeCacheManager.saveHomeData(getApplication(), filter, newCachedData)

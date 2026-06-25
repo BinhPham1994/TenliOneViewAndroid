@@ -57,6 +57,7 @@ data class MonitorUiState(
     val selectedCameras: List<SelectedCamera?> = List(1) { null },
     val expandedNodes: Set<Any> = emptySet(),
     val error: String? = null,
+    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val selectedTab: MonitorTab = MonitorTab.EVENTS,
     val selectedTimeFilter: MonitorTimeFilter = MonitorTimeFilter.TODAY,
     val events: List<com.tenli.oneview.model.network.EventData> = emptyList(),
@@ -205,16 +206,18 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val groupResponse = vmsApi.getCameraGroupList()
                 val cameraResponse = vmsApi.getCameraList()
                 val cameraInGroupResponse = vmsApi.getCameraInGroupList()
+                val aiServiceResponse = eventApi.getAIServiceList()
 
                 if (vmsResponse.isSuccessful && groupResponse.isSuccessful && cameraResponse.isSuccessful && cameraInGroupResponse.isSuccessful) {
                     val vmsList = vmsResponse.body() ?: emptyList()
                     val groupList = groupResponse.body() ?: emptyList()
                     val cameraList = cameraResponse.body() ?: emptyList()
                     val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
+                    val aiServices = if (aiServiceResponse.isSuccessful) aiServiceResponse.body() ?: emptyList() else emptyList()
 
                     val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
 
-                    _uiState.update { it.copy(isLoading = false, treeData = finalTree) }
+                    _uiState.update { it.copy(isLoading = false, treeData = finalTree, aiServices = aiServices) }
 
                     val prefs = com.tenli.oneview.data.local.GlobalData.preferences
                     val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)

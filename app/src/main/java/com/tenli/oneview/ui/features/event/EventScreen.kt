@@ -125,6 +125,9 @@ fun EventScreen(
                 val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
                     uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
                 }
+                val serviceMap = androidx.compose.runtime.remember(uiState.aiServices) {
+                    uiState.aiServices.associateBy({ it.id }, { it.name })
+                }
                 
                 LazyColumn(
                     state = listState,
@@ -138,10 +141,12 @@ fun EventScreen(
                 ) {
                     items(items = uiState.events, key = { it.id }) { event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
+                        val aiServiceName = serviceMap[event.serviceId] ?: "Unknown Service"
                         
                         RecentEventItem(
                             event = event,
                             cameraName = cameraName,
+                            aiServiceName = aiServiceName,
                             onClick = {
                                 onEventClick(event.id)
                             }

@@ -163,7 +163,7 @@ fun EventDetailScreen(
                                     }
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.onBackground,
                                 maxLines = 1,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                             )
@@ -192,11 +192,23 @@ fun EventDetailScreen(
 
                         val baseEvent = uiState.baseEvent
                         val plateText = event.data?.plate?.plate ?: (if (event.type.contains("plate", ignoreCase = true)) event.data?.value else null)
+                        val aiService = uiState.aiServices.find { it.id == event.serviceId }
+                        val aiServiceName = aiService?.name
                         
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            if (!aiServiceName.isNullOrBlank()) {
+                                Text(
+                                    text = aiServiceName,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                    color = Color.Gray,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                            
                             if (!plateText.isNullOrEmpty()) {
                                 Text(
                                     text = plateText,
@@ -643,10 +655,12 @@ fun EventDetailScreen(
                     } else {
                         items(items = currentEventsList) { relatedEvent ->
                             val cameraName = camera?.name ?: "Camera"
+                            val aiServiceName = uiState.aiServices.find { it.id == relatedEvent.serviceId }?.name ?: "Unknown Service"
                             Box(modifier = Modifier.offset(y = offsetY).alpha(finalAlpha)) {
                                 RecentEventItem(
                                     event = relatedEvent,
                                     cameraName = cameraName,
+                                    aiServiceName = aiServiceName,
                                     isSelected = relatedEvent.id == event.id,
                                     enableSharedElement = false,
                                     onClick = { 

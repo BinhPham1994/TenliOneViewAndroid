@@ -277,9 +277,13 @@ fun HomeScreen(
                         val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
                             uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
                         }
+                        val serviceMap = androidx.compose.runtime.remember(uiState.aiServices) {
+                            uiState.aiServices.associateBy({ it.id }, { it.name })
+                        }
                         uiState.recentEvents.forEachIndexed { index, event ->
                             val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
-                            RecentEventItem(event, cameraName) {
+                            val aiServiceName = serviceMap[event.serviceId] ?: "Unknown Service"
+                            RecentEventItem(event, cameraName, aiServiceName) {
                                 onEventClick(event.id.toString())
                             }
                         }
@@ -307,7 +311,7 @@ fun SectionTitle(title: String) {
 
 @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
-fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = false, enableSharedElement: Boolean = true, onClick: () -> Unit) {
+fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String? = null, isSelected: Boolean = false, enableSharedElement: Boolean = true, onClick: () -> Unit) {
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -341,35 +345,63 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = cameraName,
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
+                val timeStr = androidx.compose.runtime.remember(event.time) {
+                    formatEventTime(event.time)
+                }
+                val parts = timeStr.split(" ")
+                val timePart = if (parts.isNotEmpty()) parts[0] else ""
+                val datePart = if (parts.size > 1) parts[1] else ""
+                
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = cameraName,
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = timePart,
+                        color = Color.DarkGray,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp
+                    )
+                }
+                
                 Spacer(modifier = Modifier.height(2.dp))
-                val timeAnnotatedString = androidx.compose.runtime.remember(event.time) {
-                    androidx.compose.ui.text.buildAnnotatedString {
-                        val timeStr = formatEventTime(event.time)
-                        val parts = timeStr.split(" ")
-                        if (parts.size == 2) {
-                            withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.DarkGray)) {
-                                append(parts[0])
-                            }
-                            append(" ")
-                            append(parts[1])
-                        } else {
-                            append(timeStr)
-                        }
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (!aiServiceName.isNullOrBlank()) {
+                        Text(
+                            text = aiServiceName,
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+                    if (datePart.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = datePart,
+                            color = Color.Gray,
+                            fontSize = 12.sp
+                        )
                     }
                 }
-                Text(
-                    text = timeAnnotatedString,
-                    color = Color.Gray,
-                    fontSize = 12.sp
-                )
+                
                 Spacer(modifier = Modifier.height(6.dp))
                 val aiColor = AiTypeHelper.getAiColor(event)
                 Text(
@@ -384,13 +416,6 @@ fun RecentEventItem(event: EventData, cameraName: String, isSelected: Boolean = 
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            Spacer(modifier = Modifier.width(4.dp))
-            androidx.compose.material3.Icon(
-                imageVector = Icons.Default.KeyboardArrowRight,
-                contentDescription = "Chi tiết",
-                tint = Color.LightGray,
-                modifier = Modifier.size(24.dp)
-            )
     }
 }
 

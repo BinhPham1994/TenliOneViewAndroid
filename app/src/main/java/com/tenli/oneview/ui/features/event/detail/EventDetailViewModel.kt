@@ -33,7 +33,8 @@ data class EventDetailUiState(
     val originalVideoSeekTimeMs: Long? = null,
     val originalVideoEventPositionMs: Long? = null,
     val originalVideoLoading: Boolean = false,
-    val originalVideoError: String? = null
+    val originalVideoError: String? = null,
+    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList()
 )
 
 class EventDetailViewModel(
@@ -90,11 +91,15 @@ class EventDetailViewModel(
 
                 val camera = cameraList.find { it.extra?.uuid == foundEvent?.data?.cameraUUID }
 
+                val aiServiceResponse = eventApi.getAIServiceList()
+                val aiServices = if (aiServiceResponse.isSuccessful) aiServiceResponse.body() ?: emptyList() else emptyList()
+
                 _uiState.update { 
                     it.copy(
                         baseEvent = foundEvent,
                         event = foundEvent,
                         camera = camera,
+                        aiServices = aiServices,
                         isLoading = false
                     )
                 }
