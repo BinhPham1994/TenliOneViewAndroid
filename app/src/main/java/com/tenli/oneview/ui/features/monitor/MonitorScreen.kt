@@ -68,6 +68,8 @@ fun MonitorScreen(
         onFullscreenChange(fullscreenIndex != null)
     }
 
+    val coroutineScope = rememberCoroutineScope()
+    
     val cameraItems = remember(uiState.selectedCameras.size) {
         List(uiState.selectedCameras.size) { index ->
             movableContentOf { selectedCam: SelectedCamera? ->
@@ -80,7 +82,22 @@ fun MonitorScreen(
                         },
                         onRetryClick = { viewModel.retryCameraStream(index) },
                         onSuccess = { viewModel.resetRetryCount(index) },
-                        onFullscreenClick = { fullscreenIndex = index },
+                        onFullscreenClick = {
+                            if (fullscreenIndex == index) {
+                                coroutineScope.launch {
+                                    // Trigger orientation change FIRST so system captures a non-black screenshot
+                                    activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                    val window = activity?.window
+                                    val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+                                    insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                                    
+                                    kotlinx.coroutines.delay(150)
+                                    fullscreenIndex = null
+                                }
+                            } else {
+                                fullscreenIndex = index
+                            }
+                        },
                         onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, index) },
                         isFullscreen = fullscreenIndex == index
                     )
@@ -279,7 +296,7 @@ fun MonitorScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White),
+                        .background(MaterialTheme.colorScheme.surface),
                     contentPadding = PaddingValues(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -452,7 +469,15 @@ fun MonitorScreen(
                 }
                 
                 androidx.activity.compose.BackHandler {
-                    fullscreenIndex = null
+                    coroutineScope.launch {
+                        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        val window = activity?.window
+                        val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+                        insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                        
+                        kotlinx.coroutines.delay(150)
+                        fullscreenIndex = null
+                    }
                 }
                 
                 Box(
@@ -747,7 +772,7 @@ fun EmptyGridItem(onClick: () -> Unit) {
             .fillMaxWidth()
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White)
+            .background(MaterialTheme.colorScheme.surface)
             .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
@@ -890,14 +915,14 @@ fun MonitorTimeFilterDropdown(
         ) {
             Text(
                 text = selectedFilter.title,
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
                 fontSize = 16.sp
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
                 contentDescription = "Select Time Filter",
-                tint = Color.Black
+                tint = MaterialTheme.colorScheme.onSurface
             )
         }
 
@@ -905,7 +930,7 @@ fun MonitorTimeFilterDropdown(
             androidx.compose.material3.ModalBottomSheet(
                 onDismissRequest = { showBottomSheet = false },
                 sheetState = sheetState,
-                containerColor = Color.White,
+                containerColor = MaterialTheme.colorScheme.surface,
                 dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
             ) {
                 Column(

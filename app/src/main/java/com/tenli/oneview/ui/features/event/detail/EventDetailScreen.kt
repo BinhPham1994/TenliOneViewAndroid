@@ -478,13 +478,13 @@ fun EventDetailScreen(
                                 )
 
                                 if (uiState.originalVideoLoading) {
-                                    Box(modifier = Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
                                         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                                     }
                                 } else if (uiState.originalVideoError != null) {
                                     CommonEmptyState(
                                         text = uiState.originalVideoError ?: "Lỗi tải video",
-                                        modifier = Modifier.fillMaxSize().background(Color.White)
+                                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
                                     )
                                 } else {
                                     val videoUrl = uiState.originalVideoUrl
@@ -569,7 +569,7 @@ fun EventDetailScreen(
                                 } else {
                                     CommonEmptyState(
                                         text = "Không có video sự kiện",
-                                        modifier = Modifier.fillMaxSize().background(Color.White)
+                                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
                                     )
                                 }
                             }
@@ -637,7 +637,7 @@ fun EventDetailScreen(
                         .weight(1f)
                         .padding(horizontal = 16.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color.White),
+                        .background(MaterialTheme.colorScheme.surface),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     contentPadding = PaddingValues(8.dp)
                 ) {
