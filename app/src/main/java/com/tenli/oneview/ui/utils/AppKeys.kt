@@ -8,4 +8,6 @@ object AppKeys {
     const val GROUP_ID = "tenli_89061_key"
     const val GROUP_ID_CAMERA = "tenli_01845_key"
     const val USER_DATA_KEY = "tenli_78902_key"
+    const val USERNAME_KEY = "tenli_62341_key"
+    const val PASSWORD_KEY = "tenli_95173_key"
 }

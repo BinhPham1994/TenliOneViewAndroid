@@ -26,6 +26,8 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
         UserSession.accessToken = prefs.getString(AppKeys.ACCESS_TOKEN_KEY, "").orEmpty()
         UserSession.refreshToken = prefs.getString(AppKeys.REFRESH_TOKEN_KEY, "").orEmpty()
         UserSession.domain = prefs.getString("DOMAIN_KEY", "").orEmpty()
+        UserSession.savedUsername = prefs.getString(AppKeys.USERNAME_KEY, "").orEmpty()
+        UserSession.savedPassword = prefs.getString(AppKeys.PASSWORD_KEY, "").orEmpty()
         val userDataJson = prefs.getString(AppKeys.USER_DATA_KEY, null)
         if (!userDataJson.isNullOrEmpty()) {
             try {
@@ -57,6 +59,8 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
             remove(AppKeys.ACCESS_TOKEN_KEY)
             remove(AppKeys.REFRESH_TOKEN_KEY)
             remove(AppKeys.USER_DATA_KEY)
+            remove(AppKeys.USERNAME_KEY)
+            remove(AppKeys.PASSWORD_KEY)
             remove("DOMAIN_KEY")
             apply()
         }

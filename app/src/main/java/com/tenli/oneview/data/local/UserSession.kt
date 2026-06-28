@@ -10,12 +10,19 @@ object UserSession {
     var accessToken: String = ""
     var refreshToken: String = ""
     var domain: String = ""
+    var savedUsername: String = ""
+    var savedPassword: String = ""
+
+    fun hasSavedCredentials(): Boolean =
+        savedUsername.isNotEmpty() && savedPassword.isNotEmpty() && domain.isNotEmpty()
 
     fun clear() {
         userData = null
         accessToken = ""
         refreshToken = ""
         domain = ""
+        savedUsername = ""
+        savedPassword = ""
     }
 
     fun saveSession(prefs: SharedPreferences?) {

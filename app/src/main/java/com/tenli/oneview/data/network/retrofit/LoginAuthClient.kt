@@ -19,6 +19,7 @@ object LoginAuthClient {
         OkHttpClient.Builder()
             .addInterceptor(LoginAuthInterceptor())
             .addInterceptor(logging)
+            .authenticator(TokenAuthenticator())
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(15, TimeUnit.SECONDS)

@@ -137,6 +137,8 @@ class LoginViewModel(
             accessToken = loginData.credential.accessToken
             refreshToken = loginData.credential.refreshToken
             this.domain = formattedDomain
+            savedUsername = _uiState.value.email
+            savedPassword = _uiState.value.password
         }
         val userDataJson = Gson().toJson(loginData.target)
         GlobalData.preferences.edit {
@@ -144,6 +146,8 @@ class LoginViewModel(
             putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
             putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
             putString("DOMAIN_KEY", formattedDomain)
+            putString(AppKeys.USERNAME_KEY, _uiState.value.email)
+            putString(AppKeys.PASSWORD_KEY, _uiState.value.password)
         }
     }
 
