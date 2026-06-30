@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +42,8 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.ui.component.TimeFilterDropdown
+import com.tenli.oneview.ui.component.AiServiceFilterDropdown
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -73,15 +77,15 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .height(64.dp)
                 .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Tổng quan",
-                style = MaterialTheme.typography.headlineSmall,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Bold
+            AiServiceFilterDropdown(
+                services = uiState.aiServices,
+                selectedServiceId = uiState.selectedServiceId,
+                onServiceSelected = { viewModel.setServiceFilter(it) }
             )
+            Spacer(modifier = Modifier.width(8.dp))
             TimeFilterDropdown(
                 selectedFilter = uiState.selectedFilter,
                 onFilterSelected = { viewModel.setTimeFilter(it) }
@@ -509,95 +513,4 @@ fun getEventVideoUrl(event: EventData): String? {
     val serviceId = event.serviceId
     val containerId = event.data?.containerId ?: return null
     return "$domain/Data/api/Data/Media/$serviceId/$containerId/$filename"
-}
-
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-fun TimeFilterDropdown(
-    selectedFilter: TimeFilter,
-    onFilterSelected: (TimeFilter) -> Unit
-) {
-    var showBottomSheet by remember { mutableStateOf(false) }
-    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-
-    Box {
-        Row(
-            modifier = Modifier
-                .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                .clickable { showBottomSheet = true }
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = selectedFilter.title,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp
-            )
-            Icon(
-                imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "Select Time Filter",
-                tint = MaterialTheme.colorScheme.onBackground
-            )
-        }
-
-        if (showBottomSheet) {
-            androidx.compose.material3.ModalBottomSheet(
-                onDismissRequest = { showBottomSheet = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface,
-                dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
-                ) {
-                    Text(
-                        text = "Chọn thời gian",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp, start = 8.dp)
-                    )
-                    
-                    TimeFilter.entries.forEach { filter ->
-                        val isSelected = filter == selectedFilter
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .background(if (isSelected) BrandPrimary.copy(alpha = 0.1f) else Color.Transparent)
-                                .clickable {
-                                    scope.launch {
-                                        sheetState.hide()
-                                        showBottomSheet = false
-                                        onFilterSelected(filter)
-                                    }
-                                }
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = filter.title,
-                                color = if (isSelected) BrandPrimary else MaterialTheme.colorScheme.onBackground,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 16.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = BrandPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
-        }
-    }
 }

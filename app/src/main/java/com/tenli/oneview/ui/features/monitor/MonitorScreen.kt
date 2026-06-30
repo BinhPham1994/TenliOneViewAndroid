@@ -47,6 +47,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.ui.component.VideoPlayer
+import com.tenli.oneview.ui.component.TimeFilterDropdown
+import com.tenli.oneview.ui.theme.BrandPrimary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,14 +164,26 @@ fun MonitorScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
-                modifier = Modifier.weight(1f, fill = true),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = null,
+                    tint = BrandPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = headerText,
-                    style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 16.sp,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -183,14 +197,20 @@ fun MonitorScreen(
             
             if (vmsName != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = vmsName,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
+                Box(
                     modifier = Modifier
-                        .background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = vmsName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                    )
+                }
             }
         }
 
@@ -270,7 +290,8 @@ fun MonitorScreen(
             }
 
             // Time Filter Dropdown
-            MonitorTimeFilterDropdown(
+            // TimeFilterDropdown instead of MonitorTimeFilterDropdown
+            TimeFilterDropdown(
                 selectedFilter = uiState.selectedTimeFilter,
                 onFilterSelected = { viewModel.setTimeFilter(it) }
             )
@@ -285,7 +306,14 @@ fun MonitorScreen(
         ) {
             val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
             
-            if (isEmpty) {
+            if (uiState.isLoading && isEmpty) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    com.tenli.oneview.ui.component.WaveDotsLoading()
+                }
+            } else if (isEmpty) {
                 com.tenli.oneview.ui.component.CommonEmptyState(
                     text = "Không có dữ liệu",
                     modifier = Modifier.fillMaxSize()
@@ -574,7 +602,9 @@ fun CameraGridItem(
                     .background(MaterialTheme.colorScheme.surface),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
+                com.tenli.oneview.ui.component.WaveDotsLoading(
+                    dotColor = MaterialTheme.colorScheme.primary
+                )
             }
         }
 
@@ -891,97 +921,6 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                     .background(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(4.dp))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             )
-        }
-    }
-}
-
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-fun MonitorTimeFilterDropdown(
-    selectedFilter: MonitorTimeFilter,
-    onFilterSelected: (MonitorTimeFilter) -> Unit
-) {
-    var showBottomSheet by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-
-    Box {
-        Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { showBottomSheet = true }
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = selectedFilter.title,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp
-            )
-            Icon(
-                imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "Select Time Filter",
-                tint = MaterialTheme.colorScheme.onSurface
-            )
-        }
-
-        if (showBottomSheet) {
-            androidx.compose.material3.ModalBottomSheet(
-                onDismissRequest = { showBottomSheet = false },
-                sheetState = sheetState,
-                containerColor = MaterialTheme.colorScheme.surface,
-                dragHandle = { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 32.dp, start = 16.dp, end = 16.dp)
-                ) {
-                    Text(
-                        text = "Chọn thời gian",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp, start = 8.dp)
-                    )
-                    
-                    MonitorTimeFilter.entries.forEach { filter ->
-                        val isSelected = filter == selectedFilter
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
-                                .clickable {
-                                    scope.launch {
-                                        sheetState.hide()
-                                        showBottomSheet = false
-                                        onFilterSelected(filter)
-                                    }
-                                }
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = filter.title,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 16.sp,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-                }
-            }
         }
     }
 }

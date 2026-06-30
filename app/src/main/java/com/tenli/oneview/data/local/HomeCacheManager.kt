@@ -27,14 +27,15 @@ object HomeCacheManager {
 
     private val gson = Gson()
 
-    private fun getCacheFile(context: Context, filter: TimeFilter): File {
-        return File(context.cacheDir, "home_cache_${filter.name}.json")
+    private fun getCacheFile(context: Context, filter: TimeFilter, serviceId: Int?): File {
+        val servicePart = serviceId?.toString() ?: "all"
+        return File(context.cacheDir, "home_cache_${filter.name}_${servicePart}.json")
     }
 
-    suspend fun saveHomeData(context: Context, filter: TimeFilter, data: CachedHomeData) {
+    suspend fun saveHomeData(context: Context, filter: TimeFilter, serviceId: Int?, data: CachedHomeData) {
         withContext(Dispatchers.IO) {
             try {
-                val file = getCacheFile(context, filter)
+                val file = getCacheFile(context, filter, serviceId)
                 val json = gson.toJson(data)
                 file.writeText(json)
             } catch (e: Exception) {
@@ -43,10 +44,10 @@ object HomeCacheManager {
         }
     }
 
-    suspend fun getHomeData(context: Context, filter: TimeFilter): CachedHomeData? {
+    suspend fun getHomeData(context: Context, filter: TimeFilter, serviceId: Int?): CachedHomeData? {
         return withContext(Dispatchers.IO) {
             try {
-                val file = getCacheFile(context, filter)
+                val file = getCacheFile(context, filter, serviceId)
                 if (file.exists()) {
                     val json = file.readText()
                     gson.fromJson(json, CachedHomeData::class.java)

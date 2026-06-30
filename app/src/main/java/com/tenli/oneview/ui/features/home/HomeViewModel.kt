@@ -38,6 +38,7 @@ enum class TimeFilter(val title: String) {
 data class HomeUiState(
     val isLoading: Boolean = false,
     val selectedFilter: TimeFilter = TimeFilter.TODAY,
+    val selectedServiceId: Int? = null,
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
     val eventsOverTime: List<VmsEventStatisticalOverTimeModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
@@ -68,13 +69,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         fetchDashboardData()
     }
 
+    fun setServiceFilter(serviceId: Int?) {
+        if (_uiState.value.selectedServiceId == serviceId) return
+        _uiState.update { it.copy(selectedServiceId = serviceId) }
+        fetchDashboardData()
+    }
+
     fun fetchDashboardData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             
             // Try to load from cache first
             val filter = _uiState.value.selectedFilter
-            val cachedData = HomeCacheManager.getHomeData(getApplication(), filter)
+            val serviceId = _uiState.value.selectedServiceId
+            val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
             if (cachedData != null) {
                 _uiState.update {
                     it.copy(
@@ -126,7 +134,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
                 // Lấy dữ liệu Overview
                 val overviewResponse = bsApi.getVmsCountOverview(
-                    serviceId = "-1",
+                    serviceId = _uiState.value.selectedServiceId?.toString() ?: "-1",
                     fromTime = fromTime,
                     toTime = toTime
                 )
@@ -137,7 +145,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // Phân bố sự kiện theo thời gian
                 val overTimeResponse = bsApi.getVmsEventStatsOverTime(
                     fromTime = fromTime,
-                    toTime = toTime
+                    toTime = toTime,
+                    serviceId = _uiState.value.selectedServiceId?.toString()
                 )
                 val eventsOverTime = if (overTimeResponse.isSuccessful) {
                     overTimeResponse.body() ?: emptyList()
@@ -146,7 +155,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // Phân bố sự kiện theo bài AI
                 val byTypeResponse = bsApi.getVmsEventCountByType(
                     fromTime = fromTime,
-                    toTime = toTime
+                    toTime = toTime,
+                    serviceId = _uiState.value.selectedServiceId?.toString()
                 )
                 val eventsByType = if (byTypeResponse.isSuccessful) {
                     byTypeResponse.body() ?: emptyList()
@@ -155,7 +165,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 // Phân bố sự kiện theo camera
                 val byCameraResponse = bsApi.getVmsEventCountByCamera(
                     fromTime = fromTime,
-                    toTime = toTime
+                    toTime = toTime,
+                    serviceId = _uiState.value.selectedServiceId?.toString()
                 )
                 val eventsByCamera = if (byCameraResponse.isSuccessful) {
                     byCameraResponse.body() ?: emptyList()
@@ -165,7 +176,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val recentResponse = eventApi.getDataList(
                     count = 5,
                     from = fromTime / 1000,
-                    to = toTime / 1000
+                    to = toTime / 1000,
+                    serviceId = _uiState.value.selectedServiceId
                 )
                 val recentEvents = if (recentResponse.isSuccessful) {
                     recentResponse.body() ?: emptyList()
@@ -213,7 +225,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         aiServices = aiServices,
                         recentEvents = recentEvents
                     )
-                    HomeCacheManager.saveHomeData(getApplication(), filter, newCachedData)
+                    HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
                 }
 
             } catch (e: Exception) {

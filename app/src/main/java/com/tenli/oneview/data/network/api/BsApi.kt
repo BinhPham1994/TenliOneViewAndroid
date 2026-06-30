@@ -126,7 +126,8 @@ interface BsApi {
         @Query("fromTime") fromTime: Long,
         @Query("toTime") toTime: Long,
         @Query("eventType") eventType: String? = null,
-        @Query("dataEventType") dataEventType: String? = null
+        @Query("dataEventType") dataEventType: String? = null,
+        @Query("serviceId") serviceId: String? = null
     ): Response<List<VmsEventStatisticalOverTimeModel>>
 
     @GET("ts/api/v1/e/vms-core/count-overview")
@@ -141,7 +142,8 @@ interface BsApi {
     @GET("ts/api/v1/e/vms-event/count-by-type")
     suspend fun getVmsEventCountByType(
         @Query("fromTime") fromTime: Long,
-        @Query("toTime") toTime: Long
+        @Query("toTime") toTime: Long,
+        @Query("serviceId") serviceId: String? = null
     ): Response<List<VmsEventCountByTypeModel>>
 
     @GET("ts/api/v1/e/vms-event/count-by-camera")
@@ -149,7 +151,8 @@ interface BsApi {
         @Query("fromTime") fromTime: Long,
         @Query("toTime") toTime: Long,
         @Query("eventType") eventType: String? = null,
-        @Query("dataEventType") dataEventType: String? = null
+        @Query("dataEventType") dataEventType: String? = null,
+        @Query("serviceId") serviceId: String? = null
     ): Response<List<VmsEventCountByCameraModel>>
 
     // ==================== File Upload ====================

@@ -22,6 +22,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.model.network.CameraInGroupModel
+import com.tenli.oneview.ui.features.home.TimeFilter
 sealed class CameraTreeNode {
     abstract val key: String
     data class VMSNode(val vms: VMSServiceModel, val children: MutableList<CameraTreeNode>, override val key: String) : CameraTreeNode()
@@ -43,14 +44,6 @@ enum class MonitorTab {
     EVENTS, PLAYBACK
 }
 
-enum class MonitorTimeFilter(val title: String) {
-    TODAY("Hôm nay"),
-    YESTERDAY("Hôm qua"),
-    LAST_7_DAYS("7 ngày qua"),
-    LAST_30_DAYS("30 ngày qua")
-}
-
-
 data class MonitorUiState(
     val isLoading: Boolean = false,
     val treeData: List<CameraTreeNode> = emptyList(),
@@ -59,7 +52,7 @@ data class MonitorUiState(
     val error: String? = null,
     val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val selectedTab: MonitorTab = MonitorTab.EVENTS,
-    val selectedTimeFilter: MonitorTimeFilter = MonitorTimeFilter.TODAY,
+    val selectedTimeFilter: TimeFilter = TimeFilter.TODAY,
     val events: List<com.tenli.oneview.model.network.EventData> = emptyList(),
     val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList(),
     val isPaginating: Boolean = false,
@@ -475,7 +468,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         fetchListData()
     }
 
-    fun setTimeFilter(filter: MonitorTimeFilter) {
+    fun setTimeFilter(filter: TimeFilter) {
         _uiState.update { it.copy(selectedTimeFilter = filter) }
         fetchListData()
     }
@@ -490,7 +483,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val fromTime: Long
                 
                 when (_uiState.value.selectedTimeFilter) {
-                    MonitorTimeFilter.TODAY -> {
+                    TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
                         calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
                         calendar.set(java.util.Calendar.MINUTE, 0)
@@ -498,7 +491,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         calendar.set(java.util.Calendar.MILLISECOND, 0)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.YESTERDAY -> {
+                    TimeFilter.YESTERDAY -> {
                         calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
                         calendar.set(java.util.Calendar.MINUTE, 0)
                         calendar.set(java.util.Calendar.SECOND, 0)
@@ -507,12 +500,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.LAST_7_DAYS -> {
+                    TimeFilter.LAST_7_DAYS -> {
                         toTime = calendar.timeInMillis
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.LAST_30_DAYS -> {
+                    TimeFilter.LAST_30_DAYS -> {
                         toTime = calendar.timeInMillis
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
                         fromTime = calendar.timeInMillis
@@ -575,7 +568,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val fromTime: Long
                 
                 when (currentState.selectedTimeFilter) {
-                    MonitorTimeFilter.TODAY -> {
+                    TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
                         calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
                         calendar.set(java.util.Calendar.MINUTE, 0)
@@ -583,7 +576,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         calendar.set(java.util.Calendar.MILLISECOND, 0)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.YESTERDAY -> {
+                    TimeFilter.YESTERDAY -> {
                         calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
                         calendar.set(java.util.Calendar.MINUTE, 0)
                         calendar.set(java.util.Calendar.SECOND, 0)
@@ -592,12 +585,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.LAST_7_DAYS -> {
+                    TimeFilter.LAST_7_DAYS -> {
                         toTime = calendar.timeInMillis
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
                         fromTime = calendar.timeInMillis
                     }
-                    MonitorTimeFilter.LAST_30_DAYS -> {
+                    TimeFilter.LAST_30_DAYS -> {
                         toTime = calendar.timeInMillis
                         calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
                         fromTime = calendar.timeInMillis
