@@ -124,7 +124,7 @@ fun EventScreen(
                 ) {
                     com.tenli.oneview.ui.component.WaveDotsLoading()
                 }
-            } else if (uiState.events.isEmpty() && uiState.error == null) {
+            } else if (uiState.events.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -185,20 +185,7 @@ fun EventScreen(
                 }
             }
 
-            uiState.error?.let {
-                if (uiState.events.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CommonEmptyState(text = it)
-                    }
-                }
-            }
+
         }
     }
 }

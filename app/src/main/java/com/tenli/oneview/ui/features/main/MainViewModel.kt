@@ -17,13 +17,24 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel(
+    application: Application,
+    private val networkMonitor: com.tenli.oneview.util.NetworkMonitor
+) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(MainUiState())
     val uiState = _uiState.asStateFlow()
 
     private val _event = MutableSharedFlow<MainEvent>()
     val event = _event.asSharedFlow()
+
+    init {
+        viewModelScope.launch {
+            networkMonitor.isOnline.collect { isOnline ->
+                _uiState.update { it.copy(isOffline = !isOnline) }
+            }
+        }
+    }
 
     fun onTabSelected(tab: MainTab) {
         _uiState.update { it.copy(currentTab = tab) }
@@ -53,8 +64,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
-                MainViewModel(application)
+                val application = this[APPLICATION_KEY] as com.tenli.oneview.TenliApp
+                MainViewModel(application, application.container.networkMonitor)
             }
         }
     }

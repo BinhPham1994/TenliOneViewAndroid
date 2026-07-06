@@ -50,7 +50,7 @@ class TenliApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
-        container = DefaultAppContainer()
+        container = DefaultAppContainer(this)
         val currentLang = LocaleManager.getLocale(this)
         val appLocale = LocaleListCompat.forLanguageTags(currentLang)
         AppCompatDelegate.setApplicationLocales(appLocale)

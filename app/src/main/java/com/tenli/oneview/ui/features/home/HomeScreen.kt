@@ -258,13 +258,7 @@ fun HomeScreen(
             Column {
                 SectionTitle("Sự kiện gần đây")
                 
-                if (uiState.error != null) {
-                    Text(
-                        text = uiState.error ?: "",
-                        color = Color.Red,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                } else if (uiState.recentEvents.isEmpty()) {
+                if (uiState.recentEvents.isEmpty()) {
                     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
                     val screenWidth = configuration.screenWidthDp.dp
                     

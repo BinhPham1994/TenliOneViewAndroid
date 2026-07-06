@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.tenli.oneview.util.toUserFriendlyMessage
 import java.util.Calendar
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
@@ -230,7 +231,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error fetching data", e)
-                _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+                _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }
             }
         }
     }

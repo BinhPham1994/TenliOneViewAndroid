@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.tenli.oneview.util.toUserFriendlyMessage
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -235,7 +236,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.message) }
+                _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }
             }
         }
     }

@@ -127,6 +127,24 @@ fun MainScreen(
     }
 
     Scaffold(
+        topBar = {
+            androidx.compose.animation.AnimatedVisibility(visible = uiState.isOffline) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(com.tenli.oneview.ui.theme.ErrorRed)
+                        .padding(vertical = 8.dp, horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    androidx.compose.material3.Text(
+                        text = "Không có kết nối mạng. Vui lòng kiểm tra lại.",
+                        color = androidx.compose.ui.graphics.Color.White,
+                        style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        },
         bottomBar = {
             if (uiState.isBottomBarVisible && showBottomBar) {
                 MainBottomNavigation(

@@ -7,7 +7,8 @@ data class MainUiState(
     val currentTab: MainTab = MainTab.Home,
     val isBottomBarVisible: Boolean = true,
     val isLoading: Boolean = false,
-    val unreadEventCount: Int = 0
+    val unreadEventCount: Int = 0,
+    val isOffline: Boolean = false
 )
 
 enum class MainTab(val route: String) {

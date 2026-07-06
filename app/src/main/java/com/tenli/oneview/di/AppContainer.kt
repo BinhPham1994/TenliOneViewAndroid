@@ -10,14 +10,19 @@ import com.tenli.oneview.util.DispatcherProvider
 interface AppContainer {
     val authRepository: AuthRepository
     val dispatcherProvider: DispatcherProvider
+    val networkMonitor: com.tenli.oneview.util.NetworkMonitor
 }
 
-class DefaultAppContainer : AppContainer {
+class DefaultAppContainer(private val context: android.content.Context) : AppContainer {
     override val authRepository: AuthRepository by lazy {
         AuthRepository()
     }
 
     override val dispatcherProvider: DispatcherProvider by lazy {
         DefaultDispatcherProvider()
+    }
+
+    override val networkMonitor: com.tenli.oneview.util.NetworkMonitor by lazy {
+        com.tenli.oneview.util.NetworkMonitor(context, dispatcherProvider)
     }
 }
