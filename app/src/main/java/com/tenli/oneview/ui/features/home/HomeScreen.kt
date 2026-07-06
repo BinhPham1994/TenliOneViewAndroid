@@ -92,15 +92,17 @@ fun HomeScreen(
             )
         }
 
-        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                viewModel.fetchDashboardData()
-            },
-            modifier = Modifier.fillMaxSize()
-        ) {
-            LazyColumn(
+        androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val lazyColumnHeight = maxHeight
+            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    viewModel.fetchDashboardData()
+                },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
@@ -263,12 +265,31 @@ fun HomeScreen(
                         modifier = Modifier.padding(16.dp)
                     )
                 } else if (uiState.recentEvents.isEmpty()) {
-                    com.tenli.oneview.ui.component.CommonEmptyState(
-                        text = "Chưa có sự kiện nào",
+                    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+                    val screenWidth = configuration.screenWidthDp.dp
+                    
+                    val pagerEndPadding = screenWidth * 0.06f
+                    val chartWidth = screenWidth - 32.dp - pagerEndPadding
+                    val chartHeight = chartWidth * 9f / 16f
+                    
+                    val statWidth = (screenWidth - 40.dp) / 2f
+                    val statHeight = statWidth * 9f / 16f
+                    val statsHeight = statHeight * 2 + 8.dp
+                    
+                    // Tổng chiều cao các thành phần: Biểu đồ + Thống kê + Paddings/Titles(~100dp)
+                    val emptyHeight = (lazyColumnHeight - chartHeight - statsHeight - 100.dp).coerceAtLeast(150.dp)
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 32.dp)
-                    )
+                            .height(emptyHeight)
+                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        com.tenli.oneview.ui.component.CommonEmptyState(
+                            text = "Chưa có sự kiện nào"
+                        )
+                    }
                 } else {
                     androidx.compose.foundation.layout.Column(
                         modifier = Modifier
@@ -298,8 +319,9 @@ fun HomeScreen(
     } // End of LazyColumn
 
 
-    } // End of PullToRefreshBox
-} // End of Column
+            } // End of PullToRefreshBox
+        } // End of BoxWithConstraints
+    } // End of Column
 } // End of HomeScreen
 
 @Composable

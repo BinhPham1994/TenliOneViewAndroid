@@ -125,7 +125,16 @@ fun EventScreen(
                     com.tenli.oneview.ui.component.WaveDotsLoading()
                 }
             } else if (uiState.events.isEmpty() && uiState.error == null) {
-                CommonEmptyState(text = "Chưa có sự kiện nào", modifier = Modifier.align(Alignment.Center))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CommonEmptyState(text = "Chưa có sự kiện nào")
+                }
             } else {
                 val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
                     uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
@@ -178,10 +187,16 @@ fun EventScreen(
 
             uiState.error?.let {
                 if (uiState.events.isEmpty()) {
-                    CommonEmptyState(
-                        text = it,
-                        modifier = Modifier.align(Alignment.Center)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CommonEmptyState(text = it)
+                    }
                 }
             }
         }

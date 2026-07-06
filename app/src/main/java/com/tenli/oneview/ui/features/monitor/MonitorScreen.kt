@@ -168,7 +168,7 @@ fun MonitorScreen(
                     .weight(1f, fill = false)
                     .height(36.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -197,14 +197,21 @@ fun MonitorScreen(
             
             if (vmsName != null) {
                 Spacer(modifier = Modifier.width(8.dp))
-                Box(
+                Row(
                     modifier = Modifier
                         .height(36.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .background(MaterialTheme.colorScheme.surface)
                         .padding(horizontal = 12.dp),
-                    contentAlignment = Alignment.Center
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.Storage,
+                        contentDescription = null,
+                        tint = BrandPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = vmsName,
                         style = MaterialTheme.typography.labelMedium,
@@ -254,7 +261,7 @@ fun MonitorScreen(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(4.dp)
             ) {
                 Box(
@@ -314,10 +321,17 @@ fun MonitorScreen(
                     com.tenli.oneview.ui.component.WaveDotsLoading()
                 }
             } else if (isEmpty) {
-                com.tenli.oneview.ui.component.CommonEmptyState(
-                    text = "Không có dữ liệu",
-                    modifier = Modifier.fillMaxSize()
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    com.tenli.oneview.ui.component.CommonEmptyState(
+                        text = "Không có dữ liệu"
+                    )
+                }
             } else {
                 androidx.compose.foundation.lazy.LazyColumn(
                     state = listState,

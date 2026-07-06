@@ -44,6 +44,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Language
@@ -291,10 +292,10 @@ fun SettingScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Person,
+                            imageVector = Icons.Default.Face,
                             contentDescription = stringResource(id = R.string.setting_profile),
-                            tint = androidx.compose.ui.graphics.Color(0xFF8B5CF6),
-                            modifier = Modifier.size(32.dp)
+                            tint = com.tenli.oneview.ui.theme.BrandPrimary,
+                            modifier = Modifier.size(40.dp)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -318,7 +319,7 @@ fun SettingScreen(
                             imageVector = Icons.Default.Info,
                             contentDescription = stringResource(id = R.string.setting_support),
                             tint = androidx.compose.ui.graphics.Color(0xFF3B82F6),
-                            modifier = Modifier.size(32.dp)
+                            modifier = Modifier.size(40.dp)
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -329,7 +330,7 @@ fun SettingScreen(
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             item {
@@ -361,7 +362,7 @@ fun SettingScreen(
                         showDivider = false
                     )
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
             
             item {
@@ -434,7 +435,7 @@ fun SettingScreen(
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(12.dp))
             }
             
             item {
