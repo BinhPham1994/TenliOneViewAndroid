@@ -88,13 +88,11 @@ fun EventDetailScreen(
 
     var showContent by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(300) // Tải API và bắt đầu hiện thông tin sớm hơn
-        viewModel.loadRelatedEvents()
         showContent = true
     }
     val contentAlpha by animateFloatAsState(
         targetValue = if (showContent) 1f else 0f,
-        animationSpec = tween(durationMillis = 300) 
+        animationSpec = tween(durationMillis = 200) 
     )
     val offsetY by animateDpAsState(
         targetValue = if (showContent) 0.dp else (-50).dp,
@@ -129,7 +127,7 @@ fun EventDetailScreen(
                 // Tiêu đề & Tag
                 Column(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                        .padding(horizontal = 10.dp, vertical = 16.dp)
                         .alpha(instantAlpha)
                         .clip(RoundedCornerShape(8.dp)),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -249,7 +247,7 @@ fun EventDetailScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 10.dp)
                         .padding(bottom = 16.dp)
                         .alpha(instantAlpha),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -403,7 +401,7 @@ fun EventDetailScreen(
                         modifier = boxModifier,
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = finalAlpha)))
+                        Box(modifier = Modifier.fillMaxSize().background(Color.Transparent))
                         when (selectedTab) {
                             EventMediaTab.EVENT_IMAGE -> {
                                 val imageUrl = getEventImageUrl(event)
@@ -595,7 +593,7 @@ fun EventDetailScreen(
                     Row(
                         modifier = Modifier
                             .padding(top = 8.dp)
-                            .padding(horizontal = 16.dp)
+                            .padding(horizontal = 10.dp)
                             .offset(y = offsetY)
                             .alpha(finalAlpha)
                             .clip(RoundedCornerShape(12.dp))
@@ -635,10 +633,10 @@ fun EventDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 10.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.surface),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(8.dp)
                 ) {
                     if (currentEventsList.isEmpty()) {

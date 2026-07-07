@@ -103,8 +103,8 @@ class EventDetailViewModel(
                         isLoading = false
                     )
                 }
-
-
+                
+                loadRelatedEvents()
 
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error loading event", e)
@@ -141,25 +141,30 @@ class EventDetailViewModel(
         viewModelScope.launch {
             _uiState.value.baseEvent?.let { event ->
                 event.data?.cameraUUID?.let { uuid ->
-                    fetchRelatedEvents(uuid)
+                    fetchRelatedEvents(uuid, event.time, event.serviceId, event.type)
                 }
                 fetchLicensePlateEvents(event.time, event.data?.cameraUUID)
             }
         }
     }
 
-    private suspend fun fetchRelatedEvents(cameraUUID: String) {
+    private suspend fun fetchRelatedEvents(cameraUUID: String, eventTime: Double, serviceId: Int?, type: String?) {
         try {
-            // Get today range
+            // Lấy khoảng thời gian trong cùng ngày của sự kiện
             val calendar = java.util.Calendar.getInstance()
-            val toTime = calendar.timeInMillis / 1000
+            calendar.timeInMillis = (eventTime * 1000).toLong()
             calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
             calendar.set(java.util.Calendar.MINUTE, 0)
             calendar.set(java.util.Calendar.SECOND, 0)
             calendar.set(java.util.Calendar.MILLISECOND, 0)
             val fromTime = calendar.timeInMillis / 1000
 
-            val response = eventApi.getDataList(count = 20, from = fromTime, to = toTime, cameraUUID = cameraUUID)
+            calendar.set(java.util.Calendar.HOUR_OF_DAY, 23)
+            calendar.set(java.util.Calendar.MINUTE, 59)
+            calendar.set(java.util.Calendar.SECOND, 59)
+            val toTime = calendar.timeInMillis / 1000
+
+            val response = eventApi.getDataList(count = 20, from = fromTime, to = toTime, cameraUUID = cameraUUID, serviceId = serviceId, type = type)
             if (response.isSuccessful) {
                 val events = response.body() ?: emptyList()
                 _uiState.update { it.copy(relatedEvents = events) }

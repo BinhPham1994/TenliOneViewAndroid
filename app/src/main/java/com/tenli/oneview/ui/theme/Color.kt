@@ -7,9 +7,9 @@ val BrandOnPrimary = Color(0xFFFFFFFF)     // Chữ trên nền chính
 val BrandContainer = Color(0xFFFFDBCF)    // Nền nhẹ cho Badge hoặc Nút phụ
 
 // --- NỀN (BACKGROUND) ---
-val BackgroundLight = Color(0xFFF0F2F5)   // Nền chính của App (Màu xám nhạt giúp phân tách Card tốt hơn)
+val BackgroundLight = Color(0xFFF5F5F5)   // Nền chính của App (Màu xám trung tính nhạt)
 val SurfaceLight = Color(0xFFFFFFFF)      // Nền Card, Dialog (Trắng tinh)
-val SurfaceVariant = Color(0xFFEDF0F5)    // Màu nền Input, Divider (Xám nhạt)
+val SurfaceVariant = Color(0xFFEEEEEE)    // Màu nền Input, Divider (Xám nhạt trung tính)
 
 // --- TEXT & CONTENT ---
 val TextPrimary = Color(0xFF1E1E1E)       // Chữ chính (Đen/Xám cực đậm)

@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -105,6 +106,27 @@ fun MainScreen(
         MainTab.Setting -> isSettingScrolled
     }
 
+    val nestedScrollConnection = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (uiState.currentTab == MainTab.Event) {
+                    if (available.y < -10f) {
+                        showBottomBar = false
+                    } else if (available.y > 10f) {
+                        showBottomBar = true
+                    }
+                }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+        }
+    }
+
+    LaunchedEffect(uiState.currentTab) {
+        if (uiState.currentTab != MainTab.Monitor) {
+            showBottomBar = true
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.event.collect { event ->
             when (event) {
@@ -127,13 +149,14 @@ fun MainScreen(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(nestedScrollConnection),
         topBar = {
             androidx.compose.animation.AnimatedVisibility(visible = uiState.isOffline) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(com.tenli.oneview.ui.theme.ErrorRed)
-                        .padding(vertical = 8.dp, horizontal = 16.dp),
+                        .padding(vertical = 8.dp, horizontal = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     androidx.compose.material3.Text(
@@ -259,8 +282,8 @@ fun SettingScreen(
     }
     
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
-    val backgroundColor = if (isDark) MaterialTheme.colorScheme.background else androidx.compose.ui.graphics.Color(0xFFF2F4F8)
-    val surfaceColor = if (isDark) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.White
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val surfaceColor = MaterialTheme.colorScheme.surface
     val textColor = MaterialTheme.colorScheme.onBackground
     val sectionColor = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color(0xFF64748B)
     
@@ -280,7 +303,7 @@ fun SettingScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(64.dp)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -297,7 +320,7 @@ fun SettingScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Column(
@@ -362,7 +385,7 @@ fun SettingScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 10.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(surfaceColor)
                 ) {
@@ -394,7 +417,7 @@ fun SettingScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 10.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(surfaceColor)
                 ) {
@@ -467,7 +490,7 @@ fun SettingScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 10.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .background(surfaceColor)
                 ) {

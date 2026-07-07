@@ -36,7 +36,7 @@ fun MainBottomNavigation(
 ) {
     NavigationBar(
         modifier = Modifier.height(76.dp),
-        containerColor = Color.Transparent,
+        containerColor = MaterialTheme.colorScheme.background,
         tonalElevation = 0.dp,
         windowInsets = WindowInsets(0, 0, 0, 40)
     ) {

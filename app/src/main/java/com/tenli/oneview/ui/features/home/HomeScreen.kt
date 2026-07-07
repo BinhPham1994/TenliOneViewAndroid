@@ -76,7 +76,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(64.dp)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 10.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -106,7 +106,7 @@ fun HomeScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 10.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -291,7 +291,7 @@ fun HomeScreen(
                             .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surface)
                             .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
                             uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })

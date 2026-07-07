@@ -54,9 +54,8 @@ fun TimeFilterDropdown(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = selectedFilter.title,
-                color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onBackground
             )
             Icon(
                 imageVector = Icons.Default.ArrowDropDown,
@@ -156,9 +155,8 @@ fun AiServiceFilterDropdown(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = selectedName,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 120.dp)
@@ -271,9 +269,8 @@ fun AiTaskFilterDropdown(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = selectedName,
+                style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground,
-                fontWeight = FontWeight.Medium,
-                fontSize = 16.sp,
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.widthIn(max = 120.dp)

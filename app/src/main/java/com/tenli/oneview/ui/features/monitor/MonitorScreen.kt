@@ -160,7 +160,7 @@ fun MonitorScreen(
                     activeSlotIndex = 0
                     showBottomSheet = true
                 }
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
@@ -182,8 +182,7 @@ fun MonitorScreen(
                 Text(
                     text = headerText,
                     color = MaterialTheme.colorScheme.onBackground,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
+                    style = MaterialTheme.typography.labelLarge,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false)
@@ -214,7 +213,7 @@ fun MonitorScreen(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = vmsName,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
                     )
                 }
@@ -251,7 +250,7 @@ fun MonitorScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -309,7 +308,7 @@ fun MonitorScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 10.dp)
         ) {
             val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
             
@@ -340,7 +339,7 @@ fun MonitorScreen(
                         .clip(RoundedCornerShape(12.dp))
                         .background(MaterialTheme.colorScheme.surface),
                     contentPadding = PaddingValues(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
                         val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
@@ -645,7 +644,7 @@ fun CameraGridItem(
                             Box(
                                 modifier = Modifier
                                     .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
@@ -656,7 +655,7 @@ fun CameraGridItem(
                     Box(
                         modifier = Modifier
                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
