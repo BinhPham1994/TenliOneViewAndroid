@@ -582,22 +582,29 @@ fun EventDetailScreen(
 
                     }
 
-                Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 10.dp)
+                        .padding(top = 16.dp)
+                ) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(top = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .offset(y = offsetY)
+                            .alpha(finalAlpha)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surface),
+                        verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
 
 
                 // Tabs Lịch sử & Biển số
                     Row(
                         modifier = Modifier
-                            .padding(top = 8.dp)
-                            .padding(horizontal = 10.dp)
-                            .offset(y = offsetY)
-                            .alpha(finalAlpha)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface)
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
                             .padding(4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -632,12 +639,9 @@ fun EventDetailScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface),
+                        .weight(1f),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(8.dp)
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp)
                 ) {
                     if (currentEventsList.isEmpty()) {
                         item {
@@ -646,15 +650,13 @@ fun EventDetailScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 32.dp)
-                                    .offset(y = offsetY)
-                                    .alpha(finalAlpha)
                             )
                         }
                     } else {
                         items(items = currentEventsList) { relatedEvent ->
                             val cameraName = camera?.name ?: "Camera"
                             val aiServiceName = uiState.aiServices.find { it.id == relatedEvent.serviceId }?.name ?: "Unknown Service"
-                            Box(modifier = Modifier.offset(y = offsetY).alpha(finalAlpha)) {
+                            Box(modifier = Modifier) {
                                 RecentEventItem(
                                     event = relatedEvent,
                                     cameraName = cameraName,

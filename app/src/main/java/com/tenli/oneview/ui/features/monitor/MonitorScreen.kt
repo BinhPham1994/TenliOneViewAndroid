@@ -246,11 +246,24 @@ fun MonitorScreen(
             }
         }
 
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(horizontal = 10.dp)
+                .padding(top = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
         // --- Header Row: Tabs (Left) and Time Filter (Right) ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -259,8 +272,6 @@ fun MonitorScreen(
             // Tabs Segmented Control
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surface)
                     .padding(4.dp)
             ) {
                 Box(
@@ -308,7 +319,6 @@ fun MonitorScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 10.dp)
         ) {
             val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
             
@@ -322,9 +332,7 @@ fun MonitorScreen(
             } else if (isEmpty) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface),
+                        .fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     com.tenli.oneview.ui.component.CommonEmptyState(
@@ -335,10 +343,8 @@ fun MonitorScreen(
                 androidx.compose.foundation.lazy.LazyColumn(
                     state = listState,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentPadding = PaddingValues(8.dp),
+                        .fillMaxSize(),
+                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (uiState.selectedTab == MonitorTab.EVENTS) {
@@ -403,8 +409,12 @@ fun MonitorScreen(
                         }
                     }
                 }
-            }
+            } // Close List Box
+            } // Close inner Column
+        } // Close outer Box
         }
+
+
 
         if (showBottomSheet) {
             Dialog(

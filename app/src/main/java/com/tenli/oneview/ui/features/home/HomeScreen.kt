@@ -358,19 +358,25 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                 }
             }
 
+            val imageUrl = androidx.compose.runtime.remember(event.data?.image, event.data?.cropImage, event.data?.containerId) {
+                getEventImageUrl(event)
+            }
+            
             com.tenli.oneview.ui.component.VideoFrameImage(
-                url = getEventImageUrl(event),
+                url = imageUrl,
                 modifier = imageModifier,
                 contentScale = ContentScale.Crop
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                val timeStr = androidx.compose.runtime.remember(event.time) {
-                    formatEventTime(event.time)
+                val (timePart, datePart) = androidx.compose.runtime.remember(event.time) {
+                    val timeStr = formatEventTime(event.time)
+                    val parts = timeStr.split(" ")
+                    Pair(
+                        if (parts.isNotEmpty()) parts[0] else "",
+                        if (parts.size > 1) parts[1] else ""
+                    )
                 }
-                val parts = timeStr.split(" ")
-                val timePart = if (parts.isNotEmpty()) parts[0] else ""
-                val datePart = if (parts.size > 1) parts[1] else ""
                 
                 androidx.compose.foundation.layout.Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -423,9 +429,10 @@ fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String?
                 }
                 
                 Spacer(modifier = Modifier.height(6.dp))
-                val aiColor = AiTypeHelper.getAiColor(event)
+                val aiColor = androidx.compose.runtime.remember(event.serviceId, event.type) { AiTypeHelper.getAiColor(event) }
+                val eventName = androidx.compose.runtime.remember(event.serviceId, event.type) { AiTypeHelper.getEventName(event) }
                 Text(
-                    text = AiTypeHelper.getEventName(event),
+                    text = eventName,
                     color = Color.White,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
