@@ -58,7 +58,8 @@ data class MonitorUiState(
     val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList(),
     val isPaginating: Boolean = false,
     val hasMoreEvents: Boolean = true,
-    val hasMorePlaybacks: Boolean = true
+    val hasMorePlaybacks: Boolean = true,
+    val cameraStatusMap: Map<String, String> = emptyMap()
 )
 
 
@@ -71,6 +72,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         loadData()
+        
+        viewModelScope.launch {
+            val app = application as com.tenli.oneview.TenliApp
+            val wsManager = app.container.webSocketManager
+            wsManager.cameraStatusMap.collect { statusMap ->
+                _uiState.update { it.copy(cameraStatusMap = statusMap) }
+            }
+        }
     }
 
     private fun buildTree(

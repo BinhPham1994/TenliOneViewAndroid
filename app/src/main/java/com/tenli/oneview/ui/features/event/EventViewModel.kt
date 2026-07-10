@@ -19,6 +19,9 @@ import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
+import java.util.Calendar
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -41,7 +44,11 @@ data class EventScreenUiState(
 )
 
 
-class EventViewModel(application: Application) : AndroidViewModel(application) {
+@OptIn(FlowPreview::class)
+class EventViewModel(
+    application: Application,
+    private val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager
+) : AndroidViewModel(application) {
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
 
@@ -50,6 +57,46 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         fetchInitialData()
+        listenToWebSocket()
+    }
+
+    private fun listenToWebSocket() {
+        viewModelScope.launch {
+            webSocketManager.notifyEvent
+                .debounce(600L)
+                .collect { _ ->
+                    // Chỉ cập nhật nếu đang ở filter TODAY
+                    if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
+                        fetchRecentEvents()
+                    }
+                }
+        }
+    }
+
+    private fun fetchRecentEvents() {
+        viewModelScope.launch {
+            try {
+                val (from, to) = getTimeRange()
+                val response = eventApi.getDataList(
+                    count = 5,
+                    from = from,
+                    to = to,
+                    serviceId = _uiState.value.selectedServiceId,
+                    type = _uiState.value.selectedAiType
+                )
+                if (response.isSuccessful) {
+                    val newEvents = response.body() ?: emptyList()
+                    _uiState.update { state ->
+                        // Hợp nhất (merge) để tránh trùng lặp
+                        val merged = (newEvents + state.events)
+                            .distinctBy { it.id }
+                        state.copy(events = merged)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("EventViewModel", "Error fetching recent events via WebSocket", e)
+            }
+        }
     }
 
     fun applyFilters(filter: TimeFilter, serviceId: Int?, aiType: String?) {
@@ -197,8 +244,8 @@ class EventViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
-                EventViewModel(application)
+                val application = this[APPLICATION_KEY] as com.tenli.oneview.TenliApp
+                EventViewModel(application, application.container.webSocketManager)
             }
         }
     }

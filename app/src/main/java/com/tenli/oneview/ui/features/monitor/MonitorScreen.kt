@@ -477,6 +477,7 @@ fun MonitorScreen(
                                             node = node,
                                             depth = 0,
                                             expandedNodes = uiState.expandedNodes,
+                                            cameraStatusMap = uiState.cameraStatusMap,
                                             onToggleExpand = { viewModel.toggleNodeExpansion(it) },
                                             onCameraClick = { camera ->
                                                 if (activeSlotIndex in 0..3) {
@@ -756,6 +757,7 @@ fun CameraTreeNodeView(
     node: CameraTreeNode,
     depth: Int,
     expandedNodes: Set<Any>,
+    cameraStatusMap: Map<String, String>,
     onToggleExpand: (Any) -> Unit,
     onCameraClick: (CameraModel) -> Unit
 ) {
@@ -778,7 +780,7 @@ fun CameraTreeNodeView(
             }
             if (isExpanded) {
                 node.children.forEach { child ->
-                    CameraTreeNodeView(child, depth + 1, expandedNodes, onToggleExpand, onCameraClick)
+                    CameraTreeNodeView(child, depth + 1, expandedNodes, cameraStatusMap, onToggleExpand, onCameraClick)
                 }
             }
         }
@@ -798,21 +800,25 @@ fun CameraTreeNodeView(
             }
             if (isExpanded) {
                 node.children.forEach { child ->
-                    CameraTreeNodeView(child, depth + 1, expandedNodes, onToggleExpand, onCameraClick)
+                    CameraTreeNodeView(child, depth + 1, expandedNodes, cameraStatusMap, onToggleExpand, onCameraClick)
                 }
             }
         }
         is CameraTreeNode.CameraLeaf -> {
+            val statusColor = when (cameraStatusMap[node.key]) {
+                "red" -> Color(0xFFEF4444)
+                else -> Color(0xFF10B981) // Mặc định xanh nếu không phải đỏ
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onCameraClick(node.camera) }
                     .padding(vertical = 8.dp)
-                    .padding(start = paddingStart + 24.dp), // Extra padding to align with folder content
+                    .padding(start = paddingStart + 24.dp, end = 16.dp), // Extra padding to align with folder content
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Videocam, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = 8.dp))
-                Text(node.camera.name, style = MaterialTheme.typography.bodyMedium)
+                Icon(Icons.Default.Videocam, contentDescription = null, tint = statusColor, modifier = Modifier.padding(end = 8.dp))
+                Text(node.camera.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
             }
         }
     }

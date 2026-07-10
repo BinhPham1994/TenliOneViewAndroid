@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.FlowPreview
 import com.tenli.oneview.util.toUserFriendlyMessage
 import java.util.Calendar
 import android.app.Application
@@ -51,7 +53,11 @@ data class HomeUiState(
 )
 
 
-class HomeViewModel(application: Application) : AndroidViewModel(application) {
+@OptIn(FlowPreview::class)
+class HomeViewModel(
+    application: Application,
+    private val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager
+) : AndroidViewModel(application) {
 
     private val bsApi = LoginAuthClient.create(BsApi::class.java)
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
@@ -62,6 +68,53 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         fetchDashboardData()
+        listenToWebSocket()
+    }
+
+    private fun listenToWebSocket() {
+        viewModelScope.launch {
+            webSocketManager.notifyEvent
+                .debounce(600L)
+                .collect { _ ->
+                    // Chỉ cập nhật nếu đang ở filter TODAY
+                    if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
+                        fetchRecentEvents()
+                    }
+                }
+        }
+    }
+
+    private fun fetchRecentEvents() {
+        viewModelScope.launch {
+            try {
+                val calendar = Calendar.getInstance()
+                val toTime = calendar.timeInMillis
+                calendar.set(Calendar.HOUR_OF_DAY, 0)
+                calendar.set(Calendar.MINUTE, 0)
+                calendar.set(Calendar.SECOND, 0)
+                calendar.set(Calendar.MILLISECOND, 0)
+                val fromTime = calendar.timeInMillis
+
+                val recentResponse = eventApi.getDataList(
+                    count = 5,
+                    from = fromTime / 1000,
+                    to = toTime / 1000,
+                    serviceId = _uiState.value.selectedServiceId
+                )
+                if (recentResponse.isSuccessful) {
+                    val newEvents = recentResponse.body() ?: emptyList()
+                    _uiState.update { state ->
+                        // Hợp nhất (merge) để tránh trùng lặp
+                        val merged = (newEvents + state.recentEvents)
+                            .distinctBy { it.id }
+                            .take(5)
+                        state.copy(recentEvents = merged)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HomeViewModel", "Error fetching recent events via WebSocket", e)
+            }
+        }
     }
 
     fun setTimeFilter(filter: TimeFilter) {
@@ -239,8 +292,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
-                HomeViewModel(application)
+                val application = this[APPLICATION_KEY] as com.tenli.oneview.TenliApp
+                HomeViewModel(application, application.container.webSocketManager)
             }
         }
     }

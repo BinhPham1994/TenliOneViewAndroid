@@ -55,15 +55,25 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material3.Divider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import coil.compose.AsyncImage
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import androidx.compose.material.icons.outlined.Lock
 import com.tenli.oneview.R
+import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @Composable
 fun MainScreen(
@@ -200,61 +210,154 @@ fun MainScreen(
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = MainTab.Home.route,
-            modifier = Modifier.padding(if (showBottomBar) innerPadding else PaddingValues(0.dp)),
-            enterTransition = {
-                androidx.compose.animation.EnterTransition.None
-            },
-            exitTransition = {
-                androidx.compose.animation.ExitTransition.None
-            }
-        ) {
-            composable(MainTab.Home.route) {
-                HomeScreen(
-                    listState = homeListState,
-                    onEventClick = { eventId ->
-                        val id = eventId.toIntOrNull()
-                        if (id != null) {
-                            onNavigateToEventDetail(id)
-                        }
-                    }
-                )
-            }
-
-            composable(MainTab.Monitor.route) {
-                com.tenli.oneview.ui.features.monitor.MonitorScreen(
-                    listState = monitorState,
-                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
-                    onPlaybackClick = { videoLink, time, imageLink, cameraName ->
-                        onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
-                    },
-                    onFullscreenChange = { isFullscreen ->
-                        showBottomBar = !isFullscreen
-                    }
-                )
-            }
-
-            composable(MainTab.Event.route) {
-                com.tenli.oneview.ui.features.event.EventScreen(
-                    listState = eventListState,
-                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
-                )
-            }
-
-            composable(
-                route = "${MainTab.Setting.route}?target={target}",
-                arguments = listOf(
-                    navArgument("target") {
-                        nullable = true
-                        defaultValue = null
-                    }
-                )
+        Box(modifier = Modifier.fillMaxSize()) {
+            NavHost(
+                navController = navController,
+                startDestination = MainTab.Home.route,
+                modifier = Modifier.padding(if (showBottomBar) innerPadding else PaddingValues(0.dp)),
+                enterTransition = {
+                    androidx.compose.animation.EnterTransition.None
+                },
+                exitTransition = {
+                    androidx.compose.animation.ExitTransition.None
+                }
             ) {
-                SettingScreen(
-                    onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
-                    onNavigateToDetail = navigateToSettingTarget
+                composable(MainTab.Home.route) {
+                    HomeScreen(
+                        listState = homeListState,
+                        onEventClick = { eventId ->
+                            val id = eventId.toIntOrNull()
+                            if (id != null) {
+                                onNavigateToEventDetail(id)
+                            }
+                        }
+                    )
+                }
+
+                composable(MainTab.Monitor.route) {
+                    com.tenli.oneview.ui.features.monitor.MonitorScreen(
+                        listState = monitorState,
+                        onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
+                        onPlaybackClick = { videoLink, time, imageLink, cameraName ->
+                            onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+                        },
+                        onFullscreenChange = { isFullscreen ->
+                            showBottomBar = !isFullscreen
+                        }
+                    )
+                }
+
+                composable(MainTab.Event.route) {
+                    com.tenli.oneview.ui.features.event.EventScreen(
+                        listState = eventListState,
+                        onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
+                    )
+                }
+
+                composable(
+                    route = "${MainTab.Setting.route}?target={target}",
+                    arguments = listOf(
+                        navArgument("target") {
+                            nullable = true
+                            defaultValue = null
+                        }
+                    )
+                ) {
+                    SettingScreen(
+                        onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
+                        onNavigateToDetail = navigateToSettingTarget
+                    )
+                }
+            }
+            
+            // In-app Notification Popup
+            AnimatedVisibility(
+                visible = uiState.latestNotificationEvent != null,
+                enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+                modifier = Modifier.align(Alignment.TopCenter).padding(innerPadding)
+            ) {
+                uiState.latestNotificationEvent?.let { eventData ->
+                    TopDownNotification(
+                        event = eventData,
+                        onClick = {
+                            onNavigateToEventDetail(eventData.id)
+                            // Note: The notification clears itself after 5s in ViewModel
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TopDownNotification(
+    event: com.tenli.oneview.model.network.EventData,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .padding(top = 32.dp) // padding for status bar
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = 8.dp,
+        shadowElevation = 8.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val imageUrl = com.tenli.oneview.ui.features.home.getEventImageUrl(event)
+            
+            if (imageUrl != null) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(androidx.compose.ui.graphics.Color.Black),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(androidx.compose.ui.graphics.Color.Gray),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Notifications, contentDescription = null, tint = androidx.compose.ui.graphics.Color.White)
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Sự kiện AI: ${event.type}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "Camera: ${event.data?.cameraUUID ?: "Không xác định"}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                val timeMillis = if (event.time < 100000000000.0) (event.time * 1000).toLong() else event.time.toLong()
+                val timeStr = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault()).format(Date(timeMillis))
+                Text(
+                    text = timeStr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
             }
         }
@@ -495,7 +598,7 @@ fun SettingScreen(
                         .background(surfaceColor)
                 ) {
                     ModernSettingItem(
-                        icon = Icons.Default.VpnKey,
+                        icon = Icons.Outlined.Lock,
                         iconTint = androidx.compose.ui.graphics.Color(0xFF14B8A6),
                         title = stringResource(id = R.string.acc_password_security),
                         onClick = { showChangePasswordDialog = true }

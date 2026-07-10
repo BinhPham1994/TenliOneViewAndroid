@@ -9,10 +9,18 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
+import com.tenli.oneview.TenliApp
+import com.tenli.oneview.data.local.GlobalData
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.main.MainActivity
+import kotlinx.coroutines.*
 
 class KeepAliveService : Service() {
+
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var webSocketJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -41,7 +49,56 @@ class KeepAliveService : Service() {
             startForeground(1001, notification)
         }
 
+        startWebSocket()
+
         return START_STICKY
+    }
+
+    private fun startWebSocket() {
+        val app = application as TenliApp
+        val wsManager = app.container.webSocketManager
+
+        webSocketJob?.cancel()
+        webSocketJob = serviceScope.launch {
+            if (UserSession.accessToken != null) {
+                wsManager.connectNotify(BuildConfig.DOMAIN_CLOUD)
+                wsManager.connectAllReports()
+            }
+
+            wsManager.notifyEvent.collect { data ->
+                if (data.event == "ai-data") {
+                    showAiNotification(data.message)
+                }
+            }
+        }
+    }
+
+    private fun showAiNotification(message: String) {
+        val notificationIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, System.currentTimeMillis().toInt(), notificationIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, "keep_alive_channel")
+            .setContentTitle("Sự kiện AI mới")
+            .setContentText(message)
+            .setSmallIcon(R.mipmap.app_icon_notify)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(System.currentTimeMillis().toInt(), notification)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.cancel()
     }
 
     private fun createNotificationChannel() {

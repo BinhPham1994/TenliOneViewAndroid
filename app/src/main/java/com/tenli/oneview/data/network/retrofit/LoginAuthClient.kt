@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit
 
 object LoginAuthClient {
 
-    private val client: OkHttpClient by lazy {
+    val client: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
             else HttpLoggingInterceptor.Level.NONE
@@ -26,8 +26,9 @@ object LoginAuthClient {
             .build()
     }
 
+    val gson = GsonBuilder().setLenient().create()
+
     private val retrofit: Retrofit by lazy {
-        val gson = GsonBuilder().setLenient().create()
         Retrofit.Builder()
             .baseUrl(BuildConfig.DOMAIN_CLOUD)
             .client(client)

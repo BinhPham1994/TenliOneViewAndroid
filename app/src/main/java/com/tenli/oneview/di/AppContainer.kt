@@ -11,6 +11,7 @@ interface AppContainer {
     val authRepository: AuthRepository
     val dispatcherProvider: DispatcherProvider
     val networkMonitor: com.tenli.oneview.util.NetworkMonitor
+    val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager
 }
 
 class DefaultAppContainer(private val context: android.content.Context) : AppContainer {
@@ -24,5 +25,12 @@ class DefaultAppContainer(private val context: android.content.Context) : AppCon
 
     override val networkMonitor: com.tenli.oneview.util.NetworkMonitor by lazy {
         com.tenli.oneview.util.NetworkMonitor(context, dispatcherProvider)
+    }
+
+    override val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager by lazy {
+        val client = com.tenli.oneview.data.network.retrofit.LoginAuthClient.client
+        val gson = com.tenli.oneview.data.network.retrofit.LoginAuthClient.gson
+        val vmsApi = com.tenli.oneview.data.network.retrofit.LoginAuthClient.create(com.tenli.oneview.data.network.api.VmsApi::class.java)
+        com.tenli.oneview.data.network.websocket.WebSocketManager(client, gson, vmsApi)
     }
 }
