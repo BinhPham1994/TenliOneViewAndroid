@@ -298,7 +298,7 @@ fun StatCard(
 ) {
     Column(
         modifier = modifier
-            .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+            .background(iconColor.copy(alpha = 0.1f), shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.Start
@@ -312,7 +312,7 @@ fun StatCard(
                 Box(
                     modifier = Modifier
                         .size(36.dp)
-                        .background(iconColor.copy(alpha = 0.15f), shape = androidx.compose.foundation.shape.CircleShape),
+                        .background(iconColor.copy(alpha = 0.2f), shape = androidx.compose.foundation.shape.CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     androidx.compose.material3.Icon(
@@ -324,7 +324,7 @@ fun StatCard(
                 }
             }
             
-            var textSize by remember(value) { mutableStateOf(22.sp) }
+            var textSize by remember(value) { mutableStateOf(26.sp) }
             var readyToDraw by remember(value) { mutableStateOf(false) }
             
             Text(

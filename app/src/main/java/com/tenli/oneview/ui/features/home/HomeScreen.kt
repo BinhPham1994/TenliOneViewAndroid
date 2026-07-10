@@ -156,7 +156,7 @@ fun HomeScreen(
                         StatCard(
                             title = "Tiến trình AI",
                             value = totalAI,
-                            iconColor = Color(0xFFFF1493),
+                            iconColor = Color(0xFF3B82F6),
                             icon = androidx.compose.material.icons.Icons.Default.Memory,
                             modifier = Modifier.width(160.dp)
                         )
@@ -167,7 +167,7 @@ fun HomeScreen(
                         StatCard(
                             title = "Tổng camera",
                             value = totalCameras,
-                            iconColor = Color(0xFF52C41A),
+                            iconColor = Color(0xFF0EA5E9),
                             icon = androidx.compose.material.icons.Icons.Default.Videocam,
                             modifier = Modifier.width(160.dp)
                         )
@@ -185,7 +185,7 @@ fun HomeScreen(
                         StatCard(
                             title = "Camera Online",
                             value = onlineCamerasCount.formatCount(),
-                            iconColor = Color(0xFF3B82F6),
+                            iconColor = Color(0xFF52C41A),
                             icon = androidx.compose.material.icons.Icons.Default.Videocam,
                             modifier = Modifier.width(160.dp)
                         )
