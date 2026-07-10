@@ -52,16 +52,25 @@ class WebSocketManager(
      * Connect to the main Notify WebSocket.
      */
     fun connectNotify(baseUrl: String) {
-        if (notifyClient?.isConnected() == true) return
+        if (notifyClient?.isConnected() == true) {
+            Log.d("WebSocketManager", "Notify already connected, skipping")
+            return
+        }
         
         notifyClient = WebSocketNotifyClient(client, gson) { data ->
-            if (data.event == "ai-data") {
-                scope.launch { _notifyEvent.emit(data) }
+            Log.d("WebSocketManager", "Received notify event/channel: ${data.topic}")
+            if (data.topic == "ai-data") {
+                scope.launch { 
+                    _notifyEvent.emit(data)
+                    Log.d("WebSocketManager", "Emitted ai-data to notifyEvent flow")
+                }
             }
         }
         
-        val protocolUrl = baseUrl.replaceFirst("http", "ws")
-        notifyClient?.connect("$protocolUrl/ws/Notify")
+        val protocolUrl = baseUrl.trimEnd('/').replaceFirst("http", "ws")
+        val wsUrl = "$protocolUrl/ws/Notify"
+        Log.d("WebSocketManager", "Connecting Notify WebSocket to: $wsUrl")
+        notifyClient?.connect(wsUrl)
     }
 
     /**

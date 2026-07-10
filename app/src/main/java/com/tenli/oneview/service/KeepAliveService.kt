@@ -60,14 +60,17 @@ class KeepAliveService : Service() {
 
         webSocketJob?.cancel()
         webSocketJob = serviceScope.launch {
-            if (UserSession.accessToken != null) {
-                wsManager.connectNotify(BuildConfig.DOMAIN_CLOUD)
+            // Dùng UserSession.domain (domain thực tế sau login) thay vì BuildConfig.DOMAIN_CLOUD
+            // vì LoginAuthInterceptor cũng rewrite URL về UserSession.domain
+            val baseUrl = UserSession.domain.ifEmpty { BuildConfig.DOMAIN_CLOUD }
+            if (UserSession.accessToken.isNotEmpty()) {
+                wsManager.connectNotify(baseUrl)
                 wsManager.connectAllReports()
             }
 
             wsManager.notifyEvent.collect { data ->
-                if (data.event == "ai-data") {
-                    showAiNotification(data.message)
+                if (data.topic == "ai-data") {
+                    showAiNotification(data.message ?: "Sự kiện AI mới")
                 }
             }
         }
@@ -82,7 +85,7 @@ class KeepAliveService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(this, "keep_alive_channel")
+        val notification = NotificationCompat.Builder(this, "ai_event_channel")
             .setContentTitle("Sự kiện AI mới")
             .setContentText(message)
             .setSmallIcon(R.mipmap.app_icon_notify)

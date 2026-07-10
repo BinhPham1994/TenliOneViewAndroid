@@ -28,9 +28,16 @@ class DefaultAppContainer(private val context: android.content.Context) : AppCon
     }
 
     override val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager by lazy {
-        val client = com.tenli.oneview.data.network.retrofit.LoginAuthClient.client
+        // Tạo OkHttpClient riêng cho WebSocket:
+        // - Bỏ readTimeout (WebSocket cần giữ kết nối lâu dài, readTimeout=15s sẽ kill connection)
+        // - Thêm pingInterval để OkHttp tự gửi ping/pong giữ kết nối sống
+        val wsClient = com.tenli.oneview.data.network.retrofit.LoginAuthClient.client
+            .newBuilder()
+            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
         val gson = com.tenli.oneview.data.network.retrofit.LoginAuthClient.gson
         val vmsApi = com.tenli.oneview.data.network.retrofit.LoginAuthClient.create(com.tenli.oneview.data.network.api.VmsApi::class.java)
-        com.tenli.oneview.data.network.websocket.WebSocketManager(client, gson, vmsApi)
+        com.tenli.oneview.data.network.websocket.WebSocketManager(wsClient, gson, vmsApi)
     }
 }

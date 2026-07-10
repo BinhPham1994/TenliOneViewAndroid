@@ -49,6 +49,7 @@ data class HomeUiState(
     val cameraList: List<CameraModel> = emptyList(),
     val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
+    val cameraStatusMap: Map<String, String> = emptyMap(),
     val error: String? = null
 )
 
@@ -73,14 +74,21 @@ class HomeViewModel(
 
     private fun listenToWebSocket() {
         viewModelScope.launch {
+            Log.d("HomeViewModel", "Started listening to notifyEvent flow")
             webSocketManager.notifyEvent
                 .debounce(600L)
                 .collect { _ ->
+                    Log.d("HomeViewModel", "notifyEvent debounced → filter=${_uiState.value.selectedFilter}")
                     // Chỉ cập nhật nếu đang ở filter TODAY
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
                         fetchRecentEvents()
                     }
                 }
+        }
+        viewModelScope.launch {
+            webSocketManager.cameraStatusMap.collect { statusMap ->
+                _uiState.update { it.copy(cameraStatusMap = statusMap) }
+            }
         }
     }
 

@@ -41,13 +41,22 @@ class MainViewModel(
         viewModelScope.launch {
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
+                
+                // Reconnect WebSockets when coming back online or starting MainViewModel
+                if (isOnline && com.tenli.oneview.data.local.UserSession.accessToken.isNotEmpty()) {
+                    val baseUrl = com.tenli.oneview.data.local.UserSession.domain.ifEmpty { com.tenli.oneview.BuildConfig.DOMAIN_CLOUD }
+                    webSocketManager.connectNotify(baseUrl)
+                    webSocketManager.connectAllReports()
+                }
             }
         }
         
         viewModelScope.launch {
+            android.util.Log.d("MainViewModel", "Started collecting notifyEvent flow")
             webSocketManager.notifyEvent
                 .debounce(600L) // Wait 600ms before fetching
                 .collect { _ ->
+                    android.util.Log.d("MainViewModel", "notifyEvent debounced → fetching latest events")
                     fetchLatestEvents()
                 }
         }

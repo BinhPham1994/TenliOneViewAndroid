@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -120,48 +121,82 @@ fun HomeScreen(
             }
 
             val totalEvents = uiState.overviewStats.find { it.label == "event-count" && it.tag == "all" }?.count.formatCount()
-            val totalCameras = uiState.overviewStats.find { it.label == "camera-count" && it.tag == "all" }?.count.formatCount()
+            val totalCamerasNum = uiState.overviewStats.find { it.label == "camera-count" && it.tag == "all" }?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
+            val totalCameras = totalCamerasNum.formatCount()
             val totalAI = uiState.overviewStats.find { it.label == "monitor-count" && it.tag == "all" }?.count.formatCount()
             val systemStatus = "An toàn" // Default mock as per requirement
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StatCard(
-                        title = "Tổng sự kiện",
-                        value = totalEvents,
-                        iconColor = Color(0xFFF97316),
-                        icon = androidx.compose.material.icons.Icons.Default.Notifications,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Camera",
-                        value = totalCameras,
-                        iconColor = Color(0xFF52C41A),
-                        icon = androidx.compose.material.icons.Icons.Default.Videocam,
-                        modifier = Modifier.weight(1f)
-                    )
+            val onlineCamerasCount = androidx.compose.runtime.remember(uiState.cameraList, uiState.cameraStatusMap) {
+                var count = 0L
+                uiState.cameraList.forEach { cam ->
+                    val key = "cam-${cam.vmsId}-${if (cam.vmsId == 0) cam.id else cam.cameraId}"
+                    val status = uiState.cameraStatusMap[key]
+                    if (status != "red") {
+                        count++
+                    }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    StatCard(
-                        title = "Tiến trình AI",
-                        value = totalAI,
-                        iconColor = Color(0xFFFF1493), // Vibrant Deep Pink
-                        icon = androidx.compose.material.icons.Icons.Default.Memory,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "Trạng thái",
-                        value = systemStatus,
-                        iconColor = Color(0xFF13C2C2),
-                        icon = androidx.compose.material.icons.Icons.Default.VerifiedUser,
-                        modifier = Modifier.weight(1f)
-                    )
+                count
+            }
+            val offlineCamerasCount = (totalCamerasNum - onlineCamerasCount).coerceAtLeast(0L)
+
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp)
+            ) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatCard(
+                            title = "Tổng sự kiện",
+                            value = totalEvents,
+                            iconColor = Color(0xFFF97316),
+                            icon = androidx.compose.material.icons.Icons.Default.Notifications,
+                            modifier = Modifier.width(160.dp)
+                        )
+                        StatCard(
+                            title = "Tiến trình AI",
+                            value = totalAI,
+                            iconColor = Color(0xFFFF1493),
+                            icon = androidx.compose.material.icons.Icons.Default.Memory,
+                            modifier = Modifier.width(160.dp)
+                        )
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatCard(
+                            title = "Tổng camera",
+                            value = totalCameras,
+                            iconColor = Color(0xFF52C41A),
+                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
+                            modifier = Modifier.width(160.dp)
+                        )
+                        StatCard(
+                            title = "Trạng thái",
+                            value = systemStatus,
+                            iconColor = Color(0xFF13C2C2),
+                            icon = androidx.compose.material.icons.Icons.Default.VerifiedUser,
+                            modifier = Modifier.width(160.dp)
+                        )
+                    }
+                }
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatCard(
+                            title = "Camera Online",
+                            value = onlineCamerasCount.formatCount(),
+                            iconColor = Color(0xFF3B82F6),
+                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
+                            modifier = Modifier.width(160.dp)
+                        )
+                        StatCard(
+                            title = "Camera Offline",
+                            value = offlineCamerasCount.formatCount(),
+                            iconColor = Color(0xFFEF4444),
+                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
+                            modifier = Modifier.width(160.dp)
+                        )
+                    }
                 }
             }
         }

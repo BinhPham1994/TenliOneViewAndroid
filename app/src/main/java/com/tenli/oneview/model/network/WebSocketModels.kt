@@ -6,10 +6,14 @@ import com.google.gson.annotations.SerializedName
 // ==================== WebSocket Notify ====================
 
 data class NotifyData(
-    val event: String,
-    val message: String,
+    val event: String? = null,
+    val channel: String? = null,
+    val message: String? = null,
     val data: JsonElement? = null
-)
+) {
+    val topic: String?
+        get() = event ?: channel
+}
 
 // ==================== WebSocket Report ====================
 

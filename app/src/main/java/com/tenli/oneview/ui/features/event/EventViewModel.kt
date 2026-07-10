@@ -62,9 +62,11 @@ class EventViewModel(
 
     private fun listenToWebSocket() {
         viewModelScope.launch {
+            android.util.Log.d("EventViewModel", "Started listening to notifyEvent flow")
             webSocketManager.notifyEvent
                 .debounce(600L)
                 .collect { _ ->
+                    android.util.Log.d("EventViewModel", "notifyEvent debounced → filter=${_uiState.value.selectedFilter}")
                     // Chỉ cập nhật nếu đang ở filter TODAY
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
                         fetchRecentEvents()

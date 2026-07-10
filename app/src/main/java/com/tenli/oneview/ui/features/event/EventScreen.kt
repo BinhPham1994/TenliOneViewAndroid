@@ -73,31 +73,12 @@ fun EventScreen(
         }
     }
 
-
-
-    var showFilters by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
-    
-    val nestedScrollConnection = androidx.compose.runtime.remember {
-        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (available.y < -10f) {
-                    showFilters = false
-                } else if (available.y > 10f) {
-                    showFilters = true
-                }
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
-        }
-    }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .nestedScroll(nestedScrollConnection)
     ) {
         // Filters
-        androidx.compose.animation.AnimatedVisibility(visible = showFilters) {
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -124,7 +105,6 @@ fun EventScreen(
                     onAiTypeSelected = { viewModel.applyFilters(uiState.selectedFilter, uiState.selectedServiceId, it) }
                 )
             }
-        }
         }
 
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(

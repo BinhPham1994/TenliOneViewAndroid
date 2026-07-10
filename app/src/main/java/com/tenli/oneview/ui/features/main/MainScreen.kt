@@ -214,7 +214,10 @@ fun MainScreen(
             NavHost(
                 navController = navController,
                 startDestination = MainTab.Home.route,
-                modifier = Modifier.padding(if (showBottomBar) innerPadding else PaddingValues(0.dp)),
+                modifier = Modifier.padding(
+                    top = innerPadding.calculateTopPadding(),
+                    bottom = if (showBottomBar) innerPadding.calculateBottomPadding() else 0.dp
+                ),
                 enterTransition = {
                     androidx.compose.animation.EnterTransition.None
                 },
