@@ -780,12 +780,12 @@ fun CameraGridItem(
 fun CameraTreeNodeView(
     node: CameraTreeNode,
     depth: Int,
-    expandedNodes: Set<Any>,
+    expandedNodes: Set<String>,
     cameraStatusMap: Map<String, String>,
-    onToggleExpand: (Any) -> Unit,
+    onToggleExpand: (String) -> Unit,
     onCameraClick: (CameraModel) -> Unit
 ) {
-    val paddingStart = (depth * 16).dp
+    val paddingStart = 16.dp + (depth * 16).dp
 
     when (node) {
         is CameraTreeNode.VMSNode -> {

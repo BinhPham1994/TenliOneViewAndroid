@@ -235,12 +235,12 @@ fun EventDetailScreen(
                             // Nhãn sự kiện - Nền nhạt chữ đậm
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event).copy(alpha = 0.15f)
+                                color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event)
                             ) {
                                 Text(
                                     text = com.tenli.oneview.ui.utils.AiTypeHelper.getEventName(event).uppercase(),
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event),
+                                    color = Color.White,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                     maxLines = 1,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis

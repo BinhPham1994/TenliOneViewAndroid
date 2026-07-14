@@ -49,7 +49,7 @@ data class MonitorUiState(
     val isLoading: Boolean = false,
     val treeData: List<CameraTreeNode> = emptyList(),
     val selectedCameras: List<SelectedCamera?> = List(1) { null },
-    val expandedNodes: Set<Any> = emptySet(),
+    val expandedNodes: Set<String> = emptySet(),
     val error: String? = null,
     val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val selectedTab: MonitorTab = MonitorTab.EVENTS,
@@ -71,6 +71,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
 
     init {
+        val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+        val savedNodes = prefs.getStringSet("saved_expanded_nodes", emptySet()) ?: emptySet()
+        _uiState.update { it.copy(expandedNodes = savedNodes) }
+
         loadData()
         
         viewModelScope.launch {
@@ -266,7 +270,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun toggleNodeExpansion(nodeId: Any) {
+    fun toggleNodeExpansion(nodeId: String) {
         _uiState.update { state ->
             val newExpanded = state.expandedNodes.toMutableSet()
             if (newExpanded.contains(nodeId)) {
@@ -274,6 +278,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 newExpanded.add(nodeId)
             }
+            
+            // Save to SharedPreferences
+            val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+            prefs.edit().putStringSet("saved_expanded_nodes", newExpanded).apply()
+            
             state.copy(expandedNodes = newExpanded)
         }
     }
