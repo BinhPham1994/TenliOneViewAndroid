@@ -70,6 +70,16 @@ class EventViewModel(
                     }
                 }
         }
+        
+        viewModelScope.launch {
+            com.tenli.oneview.util.EventBus.eventReportedFalse.collect { eventId ->
+                _uiState.update { state ->
+                    state.copy(
+                        events = state.events.filter { it.id != eventId }
+                    )
+                }
+            }
+        }
     }
 
     private fun fetchRecentEvents() {

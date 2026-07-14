@@ -515,30 +515,15 @@ fun SettingScreen(
         }
 
         if (showLogoutDialog) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { showLogoutDialog = false },
-                title = {
-                    Text(text = stringResource(id = R.string.dialog_logout_title), fontWeight = FontWeight.Bold)
-                },
-                text = {
-                    Text(text = stringResource(id = R.string.dialog_logout_msg))
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            showLogoutDialog = false
-                            onLogoutClick(false)
-                        }
-                    ) {
-                        Text(stringResource(id = R.string.setting_logout), color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = { showLogoutDialog = false }
-                    ) {
-                        Text(stringResource(id = R.string.dialog_btn_cancel), color = MaterialTheme.colorScheme.onSurface)
-                    }
+            com.tenli.oneview.ui.component.AppConfirmDialog(
+                title = stringResource(id = R.string.dialog_logout_title),
+                message = stringResource(id = R.string.dialog_logout_msg),
+                confirmText = stringResource(id = R.string.setting_logout),
+                cancelText = stringResource(id = R.string.dialog_btn_cancel),
+                onDismiss = { showLogoutDialog = false },
+                onConfirm = {
+                    showLogoutDialog = false
+                    onLogoutClick(false)
                 }
             )
         }

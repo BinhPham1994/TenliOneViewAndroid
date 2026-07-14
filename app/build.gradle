@@ -20,11 +20,11 @@ android {
         applicationId "com.tenli.oneview"
         minSdk 26
         targetSdk 35
-        versionCode 303
-        versionName "3.0.3"
+        versionCode 100
+        versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
-        manifestPlaceholders = [appName: "Tenli Vision",
+        manifestPlaceholders = [appName: "AI OneView",
                                 appIcon: "@drawable/logo_app"]
         buildConfigField "String", "DOMAIN_CLOUD", "\"https://app.tenli.ai/api/v1/\""
         buildConfigField "String", "CLIENT_ID", "\"ysJhBedR7PDrVRpE\""
@@ -86,9 +86,6 @@ dependencies {
     // 3. UI Components & System
     implementation 'com.google.android.material:material:1.13.0'
     implementation 'androidx.core:core-splashscreen:1.2.0'
-    implementation 'com.intuit.sdp:sdp-android:1.1.1'
-    implementation 'com.intuit.ssp:ssp-android:1.1.1'
-    implementation 'com.airbnb.android:lottie:6.7.1'
 
     // 4. Architecture Components (Lifecycle, Navigation, Hilt)
     def lifecycle_version = "2.10.0"
@@ -104,12 +101,6 @@ dependencies {
     implementation 'com.squareup.retrofit2:retrofit:3.0.0'
     implementation 'com.squareup.retrofit2:converter-gson:3.0.0'
     implementation 'com.squareup.okhttp3:logging-interceptor:5.3.2'
-    implementation 'com.android.volley:volley:1.2.1'
-
-    // 6. IoT & Connection (MQTT, mDNS)
-    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
-    implementation 'org.eclipse.paho:org.eclipse.paho.android.service:1.1.1'
-    implementation 'org.jmdns:jmdns:3.6.3'
 
     // 7. Google Services & Updates
     implementation 'com.google.android.gms:play-services-auth:21.5.1'
@@ -120,19 +111,9 @@ dependencies {
     implementation 'androidx.media3:media3-ui:1.10.0'
     implementation 'androidx.media3:media3-common:1.10.0'
     implementation "io.coil-kt:coil-compose:2.7.0"
-    implementation 'com.github.CanHub:Android-Image-Cropper:4.5.0'
 
     // 9. Utils & Workers
     implementation 'androidx.work:work-runtime-ktx:2.11.2'
-    implementation 'org.jetbrains.kotlinx:kotlinx-io-core:0.3.0'
-
-    // 10. Room Database & Auth Credentials
-    implementation "androidx.room:room-runtime:2.8.4"
-    implementation "androidx.room:room-ktx:2.8.4"
-    ksp "androidx.room:room-compiler:2.8.4"
-    implementation "androidx.credentials:credentials:1.5.0"
-    implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
-    implementation "com.google.android.libraries.identity.googleid:googleid:1.2.0"
 
     // 11. Testing & Debug
     debugImplementation "androidx.compose.ui:ui-tooling:$compose_version"

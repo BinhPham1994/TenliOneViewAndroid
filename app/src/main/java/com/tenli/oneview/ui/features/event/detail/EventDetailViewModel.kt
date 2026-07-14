@@ -264,6 +264,23 @@ class EventDetailViewModel(
         }
     }
 
+    fun reportEventAsFalse(eventId: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val response = eventApi.verifyEvent(eventId, com.tenli.oneview.model.network.Confirm(false))
+                if (response.isSuccessful) {
+                    com.tenli.oneview.util.EventBus.emitEventReportedFalse(eventId)
+                    onSuccess()
+                } else {
+                    onError("Lỗi khi báo cáo: ${response.code()}")
+                }
+            } catch (e: Exception) {
+                Log.e("EventDetailVM", "Error reporting event", e)
+                onError("Lỗi kết nối khi báo cáo")
+            }
+        }
+    }
+
     companion object {
         fun provideFactory(eventId: Int): ViewModelProvider.Factory = viewModelFactory {
             initializer {

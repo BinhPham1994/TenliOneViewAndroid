@@ -89,6 +89,15 @@ class HomeViewModel(
                 _uiState.update { it.copy(cameraStatusMap = statusMap) }
             }
         }
+        viewModelScope.launch {
+            com.tenli.oneview.util.EventBus.eventReportedFalse.collect { eventId ->
+                _uiState.update { state ->
+                    state.copy(
+                        recentEvents = state.recentEvents.filter { it.id != eventId }
+                    )
+                }
+            }
+        }
     }
 
     private fun fetchRecentEvents() {

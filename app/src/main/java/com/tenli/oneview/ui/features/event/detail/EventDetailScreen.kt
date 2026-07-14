@@ -40,6 +40,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -82,7 +86,8 @@ enum class EventMediaTab(val title: String) {
 
 enum class EventHistoryTab(val title: String) {
     HISTORY("Lịch sử nhận diện"),
-    LICENSE_PLATE("Biển số liên quan")
+    LICENSE_PLATE("Biển số liên quan"),
+    ACTION("Hành động")
 }
 
 
@@ -98,6 +103,7 @@ fun EventDetailScreen(
     var selectedHistoryTab by remember { mutableStateOf(EventHistoryTab.HISTORY) }
     var showMetadataSheet by remember { mutableStateOf(false) }
     var expandedCropUrl by remember { mutableStateOf<String?>(null) }
+    var showConfirmReportDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     var showContent by remember { mutableStateOf(false) }
@@ -138,135 +144,241 @@ fun EventDetailScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                // Tiêu đề & Tag
-                Column(
+                // Card Tiêu đề & Thông tin
+                val baseEvent = uiState.baseEvent
+                val plateText = event.data?.plate?.plate ?: (if (event.type.contains("plate", ignoreCase = true)) event.data?.value else null)
+                val aiService = uiState.aiServices.find { it.id == event.serviceId }
+                val aiServiceName = aiService?.name
+
+                Surface(
                     modifier = Modifier
-                        .padding(horizontal = 10.dp, vertical = 16.dp)
-                        .alpha(instantAlpha)
-                        .clip(RoundedCornerShape(8.dp)),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 12.dp)
+                        .alpha(instantAlpha),
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        Text(
-                            text = camera?.name ?: "Camera không xác định",
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column(horizontalAlignment = Alignment.End) {
-                            val timeStr = formatDateTime(event.time)
-                            val parts = timeStr.split(" ")
-                            Text(
-                                text = androidx.compose.ui.text.buildAnnotatedString {
-                                    if (parts.size >= 2) {
-                                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                            append(parts[0])
-                                        }
-                                        append(" " + parts.drop(1).joinToString(" "))
-                                    } else {
-                                        append(timeStr)
-                                    }
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    // Nhãn sự kiện
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event)
-                        ) {
-                            Text(
-                                text = com.tenli.oneview.ui.utils.AiTypeHelper.getEventName(event).uppercase(),
-                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-
-                        val baseEvent = uiState.baseEvent
-                        val plateText = event.data?.plate?.plate ?: (if (event.type.contains("plate", ignoreCase = true)) event.data?.value else null)
-                        val aiService = uiState.aiServices.find { it.id == event.serviceId }
-                        val aiServiceName = aiService?.name
-                        
+                        // Row 1: Camera Name & Time
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
                         ) {
-                            if (!aiServiceName.isNullOrBlank()) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = aiServiceName,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                                    color = Color.Gray,
-                                    maxLines = 1,
+                                    text = camera?.name ?: "Camera không xác định",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 2,
                                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                 )
+                                if (!aiServiceName.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = androidx.compose.material.icons.Icons.Outlined.LocationOn,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = aiServiceName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
                             }
-                            
-                            if (!plateText.isNullOrEmpty()) {
-                                Text(
-                                    text = plateText,
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-
-                            if (baseEvent != null && event.id != baseEvent.id) {
-                                androidx.compose.material3.TextButton(
-                                    onClick = {
-                                        viewModel.selectEvent(baseEvent)
-                                        selectedTab = EventMediaTab.EVENT_IMAGE
-                                        expandedCropUrl = null
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                    modifier = Modifier.height(28.dp)
-                                ) {
-                                    androidx.compose.material3.Icon(
-                                        imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
-                                        contentDescription = "Reset",
-                                        modifier = Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(horizontalAlignment = Alignment.End) {
+                                val timeStr = formatDateTime(event.time)
+                                val parts = timeStr.split(" ")
+                                if (parts.size >= 2) {
                                     Text(
-                                        text = "Về sự kiện gốc", 
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
+                                        text = parts[0],
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = parts.drop(1).joinToString(" "),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                } else {
+                                    Text(
+                                        text = timeStr,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
                                     )
                                 }
                             }
                         }
-                    }
-                }
 
-                // Media Tabs & Crop Images
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .padding(bottom = 16.dp)
-                        .alpha(instantAlpha),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        )
+
+                        // Row 2: Event Type & Extra Actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Nhãn sự kiện - Nền nhạt chữ đậm
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event).copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = com.tenli.oneview.ui.utils.AiTypeHelper.getEventName(event).uppercase(),
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.weight(1f).padding(start = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                // Right: Crop Images
+                                val cropUrls = com.tenli.oneview.ui.features.home.getEventCropUrls(event)
+                                if (cropUrls.isNotEmpty()) {
+                                    androidx.compose.foundation.layout.Row(
+                                        modifier = Modifier
+                                            .weight(1f, fill = false)
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        cropUrls.forEach { url ->
+                                            coil.compose.SubcomposeAsyncImage(
+                                                model = url,
+                                                contentDescription = "Crop Image"
+                                            ) {
+                                                val currentPainter = painter
+                                                val state = currentPainter.state
+                                                if (state is coil.compose.AsyncImagePainter.State.Success) {
+                                                    Box {
+                                                        androidx.compose.foundation.Image(
+                                                            painter = currentPainter,
+                                                            contentDescription = "Crop Image",
+                                                            modifier = Modifier
+                                                                .height(36.dp)
+                                                                .widthIn(max = 100.dp)
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(Color.Black.copy(alpha = 0.5f))
+                                                                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
+                                                                .clickable { expandedCropUrl = if (expandedCropUrl == url) null else url },
+                                                            contentScale = ContentScale.Fit
+                                                        )
+                                                        
+                                                        if (expandedCropUrl == url) {
+                                                            androidx.compose.ui.window.Popup(
+                                                                alignment = Alignment.Center,
+                                                                onDismissRequest = { expandedCropUrl = null }
+                                                            ) {
+                                                                val intrinsicSize = currentPainter.intrinsicSize
+                                                                val isSizeValid = intrinsicSize != androidx.compose.ui.geometry.Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
+                                                                val imgModifier = if (isSizeValid) {
+                                                                    val ratio = intrinsicSize.width / intrinsicSize.height
+                                                                    Modifier
+                                                                        .widthIn(max = 360.dp)
+                                                                        .heightIn(max = 132.dp)
+                                                                        .aspectRatio(ratio, matchHeightConstraintsFirst = false)
+                                                                } else {
+                                                                    Modifier
+                                                                        .height(132.dp)
+                                                                        .widthIn(max = 360.dp)
+                                                                }
+
+                                                                androidx.compose.foundation.Image(
+                                                                    painter = currentPainter,
+                                                                    contentDescription = "Expanded Crop Image",
+                                                                    modifier = imgModifier
+                                                                        .clip(RoundedCornerShape(12.dp))
+                                                                        .background(Color.Black.copy(alpha = 0.8f))
+                                                                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                                                        .clickable { expandedCropUrl = null },
+                                                                    contentScale = ContentScale.Fit
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .height(36.dp)
+                                                            .width(50.dp)
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(Color.Gray.copy(alpha = 0.3f))
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+
+                                if (!plateText.isNullOrEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primaryContainer
+                                    ) {
+                                        Text(
+                                            text = plateText,
+                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+
+                                if (baseEvent != null && event.id != baseEvent.id) {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = {
+                                            viewModel.selectEvent(baseEvent)
+                                            selectedTab = EventMediaTab.EVENT_IMAGE
+                                            expandedCropUrl = null
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
+                                            contentDescription = "Reset",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Về sự kiện gốc", 
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Media Tabs & Crop Images
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                     // Left: Media Tabs
                     Row(
                         modifier = Modifier
@@ -297,82 +409,7 @@ fun EventDetailScreen(
                         }
                     }
 
-                    // Right: Crop Images
-                    val cropUrls = com.tenli.oneview.ui.features.home.getEventCropUrls(event)
-                    if (cropUrls.isNotEmpty()) {
-                        androidx.compose.foundation.layout.Row(
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            cropUrls.forEach { url ->
-                                coil.compose.SubcomposeAsyncImage(
-                                    model = url,
-                                    contentDescription = "Crop Image"
-                                ) {
-                                    val currentPainter = painter
-                                    val state = currentPainter.state
-                                    if (state is coil.compose.AsyncImagePainter.State.Success) {
-                                        Box {
-                                            androidx.compose.foundation.Image(
-                                                painter = currentPainter,
-                                                contentDescription = "Crop Image",
-                                                modifier = Modifier
-                                                    .height(44.dp)
-                                                    .widthIn(max = 120.dp)
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color.Black.copy(alpha = 0.5f))
-                                                    .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                                                    .clickable { expandedCropUrl = if (expandedCropUrl == url) null else url },
-                                                contentScale = ContentScale.Fit
-                                            )
-                                            
-                                            if (expandedCropUrl == url) {
-                                                androidx.compose.ui.window.Popup(
-                                                    alignment = Alignment.Center,
-                                                    onDismissRequest = { expandedCropUrl = null }
-                                                ) {
-                                                    val intrinsicSize = currentPainter.intrinsicSize
-                                                    val isSizeValid = intrinsicSize != androidx.compose.ui.geometry.Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
-                                                    val imgModifier = if (isSizeValid) {
-                                                        val ratio = intrinsicSize.width / intrinsicSize.height
-                                                        Modifier
-                                                            .widthIn(max = 360.dp)
-                                                            .heightIn(max = 132.dp)
-                                                            .aspectRatio(ratio, matchHeightConstraintsFirst = false)
-                                                    } else {
-                                                        Modifier
-                                                            .height(132.dp)
-                                                            .widthIn(max = 360.dp)
-                                                    }
-
-                                                    androidx.compose.foundation.Image(
-                                                        painter = currentPainter,
-                                                        contentDescription = "Expanded Crop Image",
-                                                        modifier = imgModifier
-                                                            .clip(RoundedCornerShape(12.dp))
-                                                            .background(Color.Black.copy(alpha = 0.8f))
-                                                            .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                                                            .clickable { expandedCropUrl = null },
-                                                        contentScale = ContentScale.Fit
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    } else {
-                                        Box(
-                                            modifier = Modifier
-                                                .height(44.dp)
-                                                .width(60.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(Color.Gray.copy(alpha = 0.3f))
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                }
                     }
                 }
 
@@ -644,53 +681,98 @@ fun EventDetailScreen(
                         }
                     }
 
-                val currentEventsList = if (selectedHistoryTab == EventHistoryTab.HISTORY) {
-                    uiState.relatedEvents
-                } else {
-                    uiState.licensePlateEvents
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp)
-                ) {
-                    if (currentEventsList.isEmpty()) {
-                        item {
-                            CommonEmptyState(
-                                text = "Không có sự kiện liên quan",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(top = 32.dp)
-                            )
-                        }
-                    } else {
-                        items(items = currentEventsList) { relatedEvent ->
-                            val cameraName = camera?.name ?: "Camera"
-                            val aiServiceName = uiState.aiServices.find { it.id == relatedEvent.serviceId }?.name ?: "Unknown Service"
-                            Box(modifier = Modifier) {
-                                RecentEventItem(
-                                    event = relatedEvent,
-                                    cameraName = cameraName,
-                                    aiServiceName = aiServiceName,
-                                    isSelected = relatedEvent.id == event.id,
-                                    enableSharedElement = false,
-                                    onClick = { 
-                                        if (selectedHistoryTab == EventHistoryTab.HISTORY) {
-                                            viewModel.selectBaseEvent(relatedEvent)
-                                        } else {
-                                            viewModel.selectEvent(relatedEvent)
-                                        }
-                                        selectedTab = EventMediaTab.EVENT_IMAGE
-                                        expandedCropUrl = null
+                if (selectedHistoryTab == EventHistoryTab.ACTION) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    ) {
+                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            item {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(56.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.error)
+                                            .clickable { showConfirmReportDialog = true },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "!",
+                                            color = Color.White,
+                                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold)
+                                        )
                                     }
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        text = "Báo cáo sai",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val currentEventsList = if (selectedHistoryTab == EventHistoryTab.HISTORY) {
+                        uiState.relatedEvents
+                    } else {
+                        uiState.licensePlateEvents
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp)
+                    ) {
+                        if (currentEventsList.isEmpty()) {
+                            item {
+                                CommonEmptyState(
+                                    text = "Không có sự kiện liên quan",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 32.dp)
                                 )
-                            } // end Box
-                        } // end items
-                    } // end else
-                } // end LazyColumn
+                            }
+                        } else {
+                            items(items = currentEventsList) { relatedEvent ->
+                                val cameraName = camera?.name ?: "Camera"
+                                val aiServiceName = uiState.aiServices.find { it.id == relatedEvent.serviceId }?.name ?: "Unknown Service"
+                                Box(modifier = Modifier) {
+                                    RecentEventItem(
+                                        event = relatedEvent,
+                                        cameraName = cameraName,
+                                        aiServiceName = aiServiceName,
+                                        isSelected = relatedEvent.id == event.id,
+                                        enableSharedElement = false,
+                                        onClick = { 
+                                            if (selectedHistoryTab == EventHistoryTab.HISTORY) {
+                                                viewModel.selectBaseEvent(relatedEvent)
+                                            } else {
+                                                viewModel.selectEvent(relatedEvent)
+                                            }
+                                            selectedTab = EventMediaTab.EVENT_IMAGE
+                                            expandedCropUrl = null
+                                        }
+                                    )
+                                } // end Box
+                            } // end items
+                        } // end else
+                    } // end LazyColumn
+                }
                     } // end inner Column
                     
                     // Overlay Bottom Sheet (inside Box)
@@ -763,6 +845,28 @@ fun EventDetailScreen(
     } // end else
     } // end Scaffold
     
+    if (showConfirmReportDialog) {
+        com.tenli.oneview.ui.component.AppConfirmDialog(
+            title = "Báo cáo sự kiện",
+            message = "Bạn có chắc chắn muốn báo cáo sự kiện này là sai?",
+            confirmText = "Báo cáo",
+            cancelText = "Hủy",
+            onDismiss = { showConfirmReportDialog = false },
+            onConfirm = {
+                showConfirmReportDialog = false
+                viewModel.reportEventAsFalse(
+                    eventId = eventId,
+                    onSuccess = {
+                        onBack()
+                    },
+                    onError = {
+                        // Optional: Show error toast
+                    }
+                )
+            }
+        )
+    }
+
     androidx.activity.compose.BackHandler(enabled = showMetadataSheet) {
         showMetadataSheet = false
     }

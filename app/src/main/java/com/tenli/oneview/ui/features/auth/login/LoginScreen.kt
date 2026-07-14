@@ -203,7 +203,7 @@ fun LoginContent(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Tenli Vision",
+                    text = "AI OneView",
                     style = MaterialTheme.typography.headlineSmall.copy(
                         fontWeight = FontWeight.ExtraBold,
                         letterSpacing = 1.sp
