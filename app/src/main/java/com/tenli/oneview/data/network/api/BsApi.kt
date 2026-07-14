@@ -1,9 +1,33 @@
 package com.tenli.oneview.data.network.api
 
-import com.tenli.oneview.model.network.*
+import com.tenli.oneview.model.network.BsProfileGroupModel
+import com.tenli.oneview.model.network.BsProfileModel
+import com.tenli.oneview.model.network.ContractModel
+import com.tenli.oneview.model.network.FileUploadResponse
+import com.tenli.oneview.model.network.FoodModel
+import com.tenli.oneview.model.network.FoodTraceability
+import com.tenli.oneview.model.network.ImageProfileModel
+import com.tenli.oneview.model.network.PlateModel
+import com.tenli.oneview.model.network.TaskModel
+import com.tenli.oneview.model.network.UniformCountByLabelModel
+import com.tenli.oneview.model.network.VehicleCountByPrefixModel
+import com.tenli.oneview.model.network.VehicleQuickCountModel
+import com.tenli.oneview.model.network.VehicleStatisticalOverTimeModel
+import com.tenli.oneview.model.network.VmsCountOverviewModel
+import com.tenli.oneview.model.network.VmsEventCountByCameraModel
+import com.tenli.oneview.model.network.VmsEventCountByTypeModel
+import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
 import okhttp3.MultipartBody
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.Multipart
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Part
+import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface BsApi {
 

@@ -1,9 +1,28 @@
 package com.tenli.oneview.data.network.api
 
-import com.tenli.oneview.model.network.*
+import com.tenli.oneview.model.network.CameraMonitor
+import com.tenli.oneview.model.network.Face
+import com.tenli.oneview.model.network.FaceImageCrop
+import com.tenli.oneview.model.network.LicensePlate
+import com.tenli.oneview.model.network.ModelRunImageResponse
+import com.tenli.oneview.model.network.ModelRunTextResponse
+import com.tenli.oneview.model.network.Monitor
+import com.tenli.oneview.model.network.MonitorState
+import com.tenli.oneview.model.network.MonitorType
+import com.tenli.oneview.model.network.Profile
+import com.tenli.oneview.model.network.ProfileGroup
+import com.tenli.oneview.model.network.ProfileInProfileGroup
+import com.tenli.oneview.model.network.UpdateProfileInProfileGroup
 import okhttp3.RequestBody
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.HTTP
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface AiApi {
 

@@ -1,10 +1,6 @@
 package com.tenli.oneview.ui.features.auth.login
 
-import android.annotation.SuppressLint
 import android.app.Application
-import android.os.Build
-import android.provider.Settings
-import android.util.Log
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -18,9 +14,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.model.network.LoginResponseData
-import com.tenli.oneview.ui.utils.AppConfig
 import com.tenli.oneview.ui.utils.AppKeys
-import com.tenli.oneview.ui.utils.ValidationUtils
 import com.tenli.oneview.util.DispatcherProvider
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -1,35 +1,32 @@
 package com.tenli.oneview.ui.features.event
 
-import android.util.Log
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.tenli.oneview.data.network.api.EventApi
-import com.tenli.oneview.data.network.api.VmsApi
-import com.tenli.oneview.data.network.retrofit.LoginAuthClient
-import com.tenli.oneview.model.network.CameraModel
-import com.tenli.oneview.model.network.EventData
-import com.tenli.oneview.ui.features.home.TimeFilter
-import com.tenli.oneview.model.network.AIServiceModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.coroutineScope
-import com.tenli.oneview.util.toUserFriendlyMessage
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.FlowPreview
-import java.util.Calendar
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.CachedEventData
 import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.network.api.EventApi
+import com.tenli.oneview.data.network.api.VmsApi
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.model.network.AIServiceModel
+import com.tenli.oneview.model.network.CameraModel
+import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.util.toUserFriendlyMessage
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
 data class EventScreenUiState(
     val events: List<EventData> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),

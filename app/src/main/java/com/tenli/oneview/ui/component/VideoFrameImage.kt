@@ -2,8 +2,8 @@ package com.tenli.oneview.ui.component
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
 import android.media.MediaMetadataRetriever
+import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -11,7 +11,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -20,15 +25,13 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
-import coil.compose.SubcomposeAsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-
-import android.util.LruCache
+import android.graphics.Color as AndroidColor
 
 object VideoFrameCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
@@ -153,11 +156,15 @@ private suspend fun extractVideoFrameWithRange(context: Context, url: String): B
     var tempFile: File? = null
     val retriever = MediaMetadataRetriever()
     try {
+        val token = com.tenli.oneview.data.local.UserSession.accessToken
         val client = OkHttpClient.Builder().build()
-        val request = Request.Builder()
+        val requestBuilder = Request.Builder()
             .url(url)
             .header("Range", "bytes=0-2097152") // First 2MB
-            .build()
+        if (token.isNotEmpty()) {
+            requestBuilder.header("Authorization", "Bearer $token")
+        }
+        val request = requestBuilder.build()
             
         val response = client.newCall(request).execute()
         if (!response.isSuccessful && response.code != 206) {

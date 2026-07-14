@@ -14,18 +14,13 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.delay
 
-@OptIn(FlowPreview::class)
 class MainViewModel(
     application: Application,
     private val networkMonitor: com.tenli.oneview.util.NetworkMonitor,
-    private val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager,
-    private val eventApi: com.tenli.oneview.data.network.api.EventApi
+    private val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager
 ) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -33,9 +28,6 @@ class MainViewModel(
 
     private val _event = MutableSharedFlow<MainEvent>()
     val event = _event.asSharedFlow()
-
-    // Dedup: track shown event IDs to prevent duplicate popups (max 100)
-    private val shownEventIds = LinkedHashSet<Int>()
 
     init {
         viewModelScope.launch {
@@ -48,61 +40,6 @@ class MainViewModel(
                     webSocketManager.connectNotify(baseUrl)
                     webSocketManager.connectAllReports()
                 }
-            }
-        }
-        
-        viewModelScope.launch {
-            android.util.Log.d("MainViewModel", "Started collecting notifyEvent flow")
-            webSocketManager.notifyEvent
-                .debounce(600L) // Wait 600ms before fetching
-                .collect { _ ->
-                    android.util.Log.d("MainViewModel", "notifyEvent debounced → fetching latest events")
-                    fetchLatestEvents()
-                }
-        }
-    }
-
-    private fun fetchLatestEvents() {
-        viewModelScope.launch {
-            try {
-                // Fetch the latest 5 events (matching Web logic)
-                val response = eventApi.getDataList(count = 5)
-                if (response.isSuccessful) {
-                    val events = response.body() ?: emptyList()
-                    
-                    // Process from oldest to newest (matching Web: for i = length-1 downTo 0)
-                    for (event in events.reversed()) {
-                        // Dedup: skip if already shown
-                        if (shownEventIds.contains(event.id)) continue
-
-                        // Age check: skip events older than 30 seconds
-                        val eventTimeSec = if (event.time < 100000000000.0) event.time else event.time / 1000.0
-                        val nowSec = System.currentTimeMillis() / 1000.0
-                        if (nowSec - eventTimeSec > 30) continue
-
-                        // Register as shown
-                        shownEventIds.add(event.id)
-                        if (shownEventIds.size > 100) {
-                            shownEventIds.remove(shownEventIds.first())
-                        }
-
-                        // Emit and show popup
-                        _event.emit(MainEvent.NewNotification(event))
-                        _uiState.update { it.copy(latestNotificationEvent = event) }
-                        
-                        // Clear the notification after 5 seconds
-                        delay(5000L)
-                        _uiState.update { 
-                            if (it.latestNotificationEvent == event) {
-                                it.copy(latestNotificationEvent = null)
-                            } else {
-                                it
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                // Ignore fetch errors for in-app notification
             }
         }
     }
@@ -143,8 +80,7 @@ class MainViewModel(
                 MainViewModel(
                     application, 
                     application.container.networkMonitor,
-                    application.container.webSocketManager,
-                    com.tenli.oneview.data.network.retrofit.LoginAuthClient.create(com.tenli.oneview.data.network.api.EventApi::class.java)
+                    application.container.webSocketManager
                 )
             }
         }

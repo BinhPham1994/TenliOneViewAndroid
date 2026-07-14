@@ -2,50 +2,43 @@ package com.tenli.oneview.ui.features.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
-import com.tenli.oneview.ui.theme.BrandPrimary
-import com.tenli.oneview.ui.utils.AiTypeHelper
-import com.tenli.oneview.ui.component.TimeFilterDropdown
 import com.tenli.oneview.ui.component.AiServiceFilterDropdown
-import kotlinx.coroutines.launch
+import com.tenli.oneview.ui.component.TimeFilterDropdown
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -238,51 +231,51 @@ fun HomeScreen(
             val configuration = androidx.compose.ui.platform.LocalConfiguration.current
 
             val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 3 })
+            
+            val currentTitle = when (pagerState.currentPage) {
+                0 -> "Phân bố sự kiện theo thời gian"
+                1 -> "Phân bố sự kiện theo bài AI"
+                else -> "Phân bố sự kiện theo camera"
+            }
+            SectionTitle(currentTitle)
+            
             androidx.compose.foundation.pager.HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxWidth(),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(end = configuration.screenWidthDp.dp * 0.06f),
+                pageSize = androidx.compose.foundation.pager.PageSize.Fixed(configuration.screenWidthDp.dp - 48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 pageSpacing = 8.dp
             ) { page ->
                 when (page) {
                     0 -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            SectionTitle("Phân bố sự kiện theo thời gian")
-                            HomeLineChart(
-                                data = overTimeData,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(16f / 9f)
-                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                    .padding(8.dp)
-                            )
-                        }
+                        HomeLineChart(
+                            data = overTimeData,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        )
                     }
                     1 -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            SectionTitle("Phân bố sự kiện theo bài AI")
-                            HomeHorizontalBarChart(
-                                data = byTypeData,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(16f / 9f)
-                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                    .padding(8.dp)
-                            )
-                        }
+                        HomeHorizontalBarChart(
+                            data = byTypeData,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        )
                     }
                     2 -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            SectionTitle("Phân bố sự kiện theo camera")
-                            HomeHorizontalBarChart(
-                                data = byCameraData,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(16f / 9f)
-                                    .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                    .padding(8.dp)
-                            )
-                        }
+                        HomeHorizontalBarChart(
+                            data = byCameraData,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                .padding(8.dp)
+                        )
                     }
                 }
             }

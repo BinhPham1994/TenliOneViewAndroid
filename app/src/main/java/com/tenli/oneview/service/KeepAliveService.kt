@@ -12,10 +12,14 @@ import androidx.core.app.NotificationCompat
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.TenliApp
-import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.main.MainActivity
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class KeepAliveService : Service() {
 
@@ -68,35 +72,7 @@ class KeepAliveService : Service() {
                 wsManager.connectAllReports()
             }
 
-            wsManager.notifyEvent.collect { data ->
-                if (data.topic == "ai-data") {
-                    showAiNotification(data.message ?: "Sự kiện AI mới")
-                }
-            }
         }
-    }
-
-    private fun showAiNotification(message: String) {
-        val notificationIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, System.currentTimeMillis().toInt(), notificationIntent,
-            PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, "ai_event_channel")
-            .setContentTitle("Sự kiện AI mới")
-            .setContentText(message)
-            .setSmallIcon(R.mipmap.app_icon_notify)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(pendingIntent)
-            .build()
-
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(System.currentTimeMillis().toInt(), notification)
     }
 
     override fun onDestroy() {

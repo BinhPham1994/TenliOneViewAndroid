@@ -3,9 +3,18 @@ package com.tenli.oneview.data.network.websocket
 import android.util.Log
 import com.google.gson.Gson
 import com.tenli.oneview.model.network.NotifyData
-import kotlinx.coroutines.*
-import okhttp3.*
-import okio.ByteString
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 
 class WebSocketNotifyClient(
     private val client: OkHttpClient,

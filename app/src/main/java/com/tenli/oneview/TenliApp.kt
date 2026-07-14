@@ -13,6 +13,10 @@ import androidx.core.os.LocaleListCompat
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.google.gson.GsonBuilder
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.network.KeepAliveWorker
@@ -22,10 +26,6 @@ import com.tenli.oneview.service.KeepAliveService
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import java.util.concurrent.TimeUnit
-import coil.ImageLoader
-import coil.ImageLoaderFactory
-import coil.disk.DiskCache
-import coil.memory.MemoryCache
 
 class TenliApp : Application(), ImageLoaderFactory {
 

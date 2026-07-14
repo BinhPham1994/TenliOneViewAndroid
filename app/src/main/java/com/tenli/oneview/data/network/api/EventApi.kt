@@ -1,8 +1,17 @@
 package com.tenli.oneview.data.network.api
 
-import com.tenli.oneview.model.network.*
+import com.tenli.oneview.model.network.AIServiceModel
+import com.tenli.oneview.model.network.Confirm
+import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.RuleModel
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Path
+import retrofit2.http.Query
 
 interface EventApi {
 

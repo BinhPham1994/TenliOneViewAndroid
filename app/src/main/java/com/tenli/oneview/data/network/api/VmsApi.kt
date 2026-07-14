@@ -1,8 +1,39 @@
 package com.tenli.oneview.data.network.api
 
-import com.tenli.oneview.model.network.*
+import com.tenli.oneview.model.network.AuthTokenModel
+import com.tenli.oneview.model.network.AuthTokenRequest
+import com.tenli.oneview.model.network.CameraGroupAccessModel
+import com.tenli.oneview.model.network.CameraGroupModel
+import com.tenli.oneview.model.network.CameraImageLinkModel
+import com.tenli.oneview.model.network.CameraInGroupModel
+import com.tenli.oneview.model.network.CameraModel
+import com.tenli.oneview.model.network.CameraViewModel
+import com.tenli.oneview.model.network.ChangePasswordModel
+import com.tenli.oneview.model.network.LiveStreamModel
+import com.tenli.oneview.model.network.LogInModel
+import com.tenli.oneview.model.network.LogOutModel
+import com.tenli.oneview.model.network.PermanentLinkModel
+import com.tenli.oneview.model.network.ReportLinkModel
+import com.tenli.oneview.model.network.ResetPasswordModel
+import com.tenli.oneview.model.network.StorageModel
+import com.tenli.oneview.model.network.StorageStatusModel
+import com.tenli.oneview.model.network.SystemSettingModel
+import com.tenli.oneview.model.network.TokenModel
+import com.tenli.oneview.model.network.UserGroupModel
+import com.tenli.oneview.model.network.UserInGroupModel
+import com.tenli.oneview.model.network.UserModel
+import com.tenli.oneview.model.network.VMSServiceModel
+import com.tenli.oneview.model.network.VideoLinkModel
+import com.tenli.oneview.model.network.VideoModel
 import retrofit2.Response
-import retrofit2.http.*
+import retrofit2.http.Body
+import retrofit2.http.DELETE
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.PUT
+import retrofit2.http.Path
+import retrofit2.http.Query
+import retrofit2.http.Url
 
 interface VmsApi {
 

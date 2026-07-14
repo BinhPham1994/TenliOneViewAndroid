@@ -1,8 +1,6 @@
 package com.tenli.oneview.ui.component
 
 
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.delay
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
@@ -29,6 +27,8 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.tenli.oneview.R
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @SuppressLint("InflateParams")
 @OptIn(UnstableApi::class)

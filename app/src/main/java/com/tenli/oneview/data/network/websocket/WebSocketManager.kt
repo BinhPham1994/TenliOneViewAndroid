@@ -2,7 +2,6 @@ package com.tenli.oneview.data.network.websocket
 
 import android.util.Log
 import com.google.gson.Gson
-import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.CameraInfo
 import com.tenli.oneview.model.network.NotifyData
@@ -77,6 +76,10 @@ class WebSocketManager(
      * Fetch VMS list and connect report websockets
      */
     fun connectAllReports() {
+        if (reportClients.isNotEmpty()) {
+            Log.d("WebSocketManager", "Report clients already connected, skipping")
+            return
+        }
         scope.launch {
             try {
                 val response = vmsApi.getVMSServiceList()

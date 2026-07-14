@@ -8,8 +8,7 @@ data class MainUiState(
     val isBottomBarVisible: Boolean = true,
     val isLoading: Boolean = false,
     val unreadEventCount: Int = 0,
-    val isOffline: Boolean = false,
-    val latestNotificationEvent: com.tenli.oneview.model.network.EventData? = null
+    val isOffline: Boolean = false
 )
 
 enum class MainTab(val route: String) {
@@ -23,5 +22,4 @@ sealed class MainEvent {
     object Logout : MainEvent()
     data class ShowToast(val message: String, val isError: Boolean = true) : MainEvent()
     data class OpenUrl(val url: String) : MainEvent()
-    data class NewNotification(val event: com.tenli.oneview.model.network.EventData) : MainEvent()
 }
