@@ -46,3 +46,4 @@ interface OnvifApi {
         @Body request: DeviceServiceRequest
     ): Response<DeviceServiceResponse>
 }
+
