@@ -13,37 +13,40 @@ private val LightColorScheme = lightColorScheme(
     primary = BrandPrimary,
     onPrimary = BrandOnPrimary,
     primaryContainer = BrandContainer,
-    onPrimaryContainer = Color(0xFF331400),
+    onPrimaryContainer = Color(0xFF1E3A8A),
 
-    secondary = BrandPrimary,
-    tertiary = BrandPrimary.copy(alpha = 0.7f),
+    secondary = BrandAccent,
+    tertiary = BrandPrimaryButton,
     surfaceTint = Color.Transparent,
 
     background = BackgroundLight,
-    onBackground = TextPrimary,
+    onBackground = TextTitleLight,
 
     surface = SurfaceLight,
-    onSurface = TextPrimary,
+    onSurface = TextTitleLight,
 
+    surfaceVariant = SurfaceVariant,
     onSurfaceVariant = TextSecondary,
 
     outline = TextDisabled,
-    outlineVariant = SurfaceVariant,
+    outlineVariant = SurfaceSubtleLight,
 
     error = ErrorRed,
     onError = Color.White,
 
-    surfaceContainer = SurfaceLight
+    surfaceContainer = SurfaceLight,
+    surfaceContainerHigh = SurfaceSubtleLight,
+    surfaceContainerLow = SurfaceVariant
 )
 
 private val DarkColorScheme = androidx.compose.material3.darkColorScheme(
-    primary = BrandPrimary,
+    primary = BrandActiveNavDark,
     onPrimary = BrandOnPrimary,
-    primaryContainer = BrandContainer,
-    onPrimaryContainer = Color(0xFF331400),
+    primaryContainer = BrandContainerDark,
+    onPrimaryContainer = Color(0xFFDBEAFE),
 
-    secondary = BrandPrimary,
-    tertiary = BrandPrimary.copy(alpha = 0.7f),
+    secondary = BrandAccent,
+    tertiary = BrandPrimaryButton,
     surfaceTint = Color.Transparent,
 
     background = BackgroundDark,
@@ -52,15 +55,18 @@ private val DarkColorScheme = androidx.compose.material3.darkColorScheme(
     surface = SurfaceDark,
     onSurface = TextPrimaryDark,
 
+    surfaceVariant = SurfaceVariantDark,
     onSurfaceVariant = TextSecondaryDark,
 
     outline = TextDisabledDark,
-    outlineVariant = SurfaceVariantDark,
+    outlineVariant = SurfaceSubtleDark,
 
     error = ErrorRed,
     onError = Color.White,
 
-    surfaceContainer = SurfaceDark
+    surfaceContainer = SurfaceDark,
+    surfaceContainerHigh = SurfaceSubtleDark,
+    surfaceContainerLow = SurfaceVariantDark
 )
 
 val MaterialTheme.spacing: Dimensions
@@ -83,6 +89,18 @@ fun TenliAIoTTheme(content: @Composable () -> Unit) {
         DarkColorScheme
     } else {
         LightColorScheme
+    }
+
+    val view = androidx.compose.ui.platform.LocalView.current
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            val window = (view.context as? android.app.Activity)?.window
+            if (window != null) {
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                insetsController.isAppearanceLightStatusBars = !useDarkTheme
+                insetsController.isAppearanceLightNavigationBars = !useDarkTheme
+            }
+        }
     }
 
     CompositionLocalProvider(

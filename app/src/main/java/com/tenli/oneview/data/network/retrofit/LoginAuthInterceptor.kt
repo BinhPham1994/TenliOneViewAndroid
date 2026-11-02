@@ -13,8 +13,9 @@ class LoginAuthInterceptor : Interceptor {
         var request = chain.request()
         val builder = request.newBuilder()
 
-        // Replace Host with dynamic domain from UserSession
-        if (UserSession.domain.isNotEmpty()) {
+        // Replace Host with dynamic domain from UserSession only if request uses the default placeholder baseUrl
+        val defaultHost = BuildConfig.DOMAIN_CLOUD.toHttpUrlOrNull()?.host
+        if (UserSession.domain.isNotEmpty() && (defaultHost == null || request.url.host == defaultHost)) {
             val domainUrl = UserSession.domain.toHttpUrlOrNull()
             if (domainUrl != null) {
                 var newPath = request.url.encodedPath
@@ -35,11 +36,13 @@ class LoginAuthInterceptor : Interceptor {
             }
         }
 
-        // Apply correct Authorization Header
-        if (request.url.encodedPath.contains("LogIn", ignoreCase = true)) {
-            builder.header("Authorization", Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET))
-        } else if (UserSession.accessToken.isNotEmpty()) {
-            builder.header("Authorization", "Bearer ${UserSession.accessToken}")
+        // Apply correct Authorization Header if not already explicitly provided by @Header("Authorization")
+        if (request.header("Authorization") == null) {
+            if (request.url.encodedPath.contains("LogIn", ignoreCase = true)) {
+                builder.header("Authorization", Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET))
+            } else if (UserSession.accessToken.isNotEmpty()) {
+                builder.header("Authorization", "Bearer ${UserSession.accessToken}")
+            }
         }
 
         return chain.proceed(builder.build())

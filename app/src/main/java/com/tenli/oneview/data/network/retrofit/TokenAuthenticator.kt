@@ -9,6 +9,7 @@ import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.ui.utils.AppKeys
 import okhttp3.Authenticator
 import okhttp3.Credentials
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -33,9 +34,23 @@ class TokenAuthenticator : Authenticator {
     }
 
     override fun authenticate(route: Route?, response: Response): Request? {
-        // Không retry cho request login — tránh vòng lặp vô hạn
-        if (response.request.url.encodedPath.contains("LogIn", ignoreCase = true) ||
-            response.request.url.encodedPath.contains("LogOut", ignoreCase = true)) {
+        val reqUrl = response.request.url
+        val path = reqUrl.encodedPath
+
+        // Đồng bộ với isAuthBypassUrl trong api.ts của PWA:
+        // Không retry re-login cho LogIn, LogOut, notification-tokens hoặc host ngoài (AI/VMS service riêng dùng apiKey)
+        if (path.contains("LogIn", ignoreCase = true) ||
+            path.contains("LogOut", ignoreCase = true) ||
+            path.contains("/notification-tokens", ignoreCase = true)
+        ) {
+            return null
+        }
+
+        val currentDomainHost = UserSession.domain.toHttpUrlOrNull()?.host
+        val defaultDomainHost = BuildConfig.DOMAIN_CLOUD.toHttpUrlOrNull()?.host
+        val isMainBackendHost = (currentDomainHost != null && reqUrl.host == currentDomainHost) ||
+                (defaultDomainHost != null && reqUrl.host == defaultDomainHost)
+        if (!isMainBackendHost) {
             return null
         }
 

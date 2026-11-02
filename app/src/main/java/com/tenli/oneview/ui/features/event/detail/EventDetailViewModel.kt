@@ -9,22 +9,47 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.network.api.BsApi
 import com.tenli.oneview.data.network.api.EventApi
 import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.model.network.AIServiceModel
+import com.tenli.oneview.model.network.BsProfileGroupModel
+import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
+import com.tenli.oneview.model.network.Confirm
+import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.ParamPlateModel
+import com.tenli.oneview.ui.utils.AiTypeHelper
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+
+enum class JourneyPeriod(val code: String, val labelVi: String, val labelEn: String) {
+    TODAY("1d", "Hôm nay", "Today"),
+    YESTERDAY("2d", "Hôm qua", "Yesterday"),
+    LAST_7_DAYS("7d", "7 ngày qua", "Last 7 days")
+}
 
 data class EventDetailUiState(
     val baseEvent: EventData? = null,
     val event: EventData? = null,
     val camera: CameraModel? = null,
+    val cameraList: List<CameraModel> = emptyList(),
     val relatedEvents: List<EventData> = emptyList(),
+    val isJourneyLoading: Boolean = false,
+    val selectedJourneyPeriod: JourneyPeriod = JourneyPeriod.TODAY,
+    val showRelatedPlates: Boolean = false,
+    val relatedPlatesLoading: Boolean = false,
     val licensePlateEvents: List<EventData> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
@@ -33,7 +58,9 @@ data class EventDetailUiState(
     val originalVideoEventPositionMs: Long? = null,
     val originalVideoLoading: Boolean = false,
     val originalVideoError: String? = null,
-    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList()
+    val aiServices: List<AIServiceModel> = emptyList(),
+    val profileList: List<BsProfileModel> = emptyList(),
+    val profileGroupList: List<BsProfileGroupModel> = emptyList()
 )
 
 class EventDetailViewModel(
@@ -43,6 +70,7 @@ class EventDetailViewModel(
 
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
+    private val bsApi = LoginAuthClient.create(BsApi::class.java)
 
     private val _uiState = MutableStateFlow(EventDetailUiState())
     val uiState: StateFlow<EventDetailUiState> = _uiState.asStateFlow()
@@ -55,7 +83,6 @@ class EventDetailViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                // Find event in cache across all cache files
                 var foundEvent: EventData? = null
                 var cameraList: List<CameraModel> = emptyList()
 
@@ -66,7 +93,6 @@ class EventDetailViewModel(
                 }
 
                 if (foundEvent == null) {
-                    // Try fetching from API directly
                     val response = eventApi.getDataList(lastId = eventId + 1, count = 1)
                     if (response.isSuccessful) {
                         val events = response.body() ?: emptyList()
@@ -81,28 +107,43 @@ class EventDetailViewModel(
                     return@launch
                 }
 
-                if (cameraList.isEmpty()) {
-                    val camResponse = vmsApi.getCameraList()
-                    if (camResponse.isSuccessful) {
-                        cameraList = camResponse.body() ?: emptyList()
+                coroutineScope {
+                    val camDeferred = async {
+                        if (cameraList.isEmpty()) {
+                            runCatching { vmsApi.getCameraList() }.getOrNull()?.body() ?: emptyList()
+                        } else cameraList
+                    }
+                    val aiSvcDeferred = async {
+                        runCatching { eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                    }
+                    val profilesDeferred = async {
+                        runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                    }
+                    val groupsDeferred = async {
+                        runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                    }
+
+                    cameraList = camDeferred.await()
+                    val aiServices = aiSvcDeferred.await()
+                    val profiles = profilesDeferred.await()
+                    val groups = groupsDeferred.await()
+
+                    val camera = resolveCameraForEvent(foundEvent!!, cameraList)
+
+                    _uiState.update {
+                        it.copy(
+                            baseEvent = foundEvent,
+                            event = foundEvent,
+                            camera = camera,
+                            cameraList = cameraList,
+                            aiServices = aiServices,
+                            profileList = profiles,
+                            profileGroupList = groups,
+                            isLoading = false
+                        )
                     }
                 }
 
-                val camera = cameraList.find { it.extra?.uuid == foundEvent?.data?.cameraUUID }
-
-                val aiServiceResponse = eventApi.getAIServiceList()
-                val aiServices = if (aiServiceResponse.isSuccessful) aiServiceResponse.body() ?: emptyList() else emptyList()
-
-                _uiState.update { 
-                    it.copy(
-                        baseEvent = foundEvent,
-                        event = foundEvent,
-                        camera = camera,
-                        aiServices = aiServices,
-                        isLoading = false
-                    )
-                }
-                
                 loadRelatedEvents()
 
             } catch (e: Exception) {
@@ -112,92 +153,302 @@ class EventDetailViewModel(
         }
     }
 
+    private fun resolveCameraForEvent(event: EventData, cameras: List<CameraModel>): CameraModel? {
+        val camUuid = event.data?.cameraUUID ?: event.data?.cameraUuidLower
+        if (!camUuid.isNullOrBlank()) {
+            cameras.find { it.extra?.uuid == camUuid }?.let { return it }
+        }
+        if (event.originId > 0) {
+            cameras.find { it.id == event.originId }?.let { return it }
+        }
+        return null
+    }
+
     fun selectEvent(event: EventData) {
-        _uiState.update { 
+        val cam = resolveCameraForEvent(event, _uiState.value.cameraList) ?: _uiState.value.camera
+        _uiState.update {
             it.copy(
                 event = event,
+                camera = cam,
                 originalVideoUrl = null,
                 originalVideoLoading = false,
                 originalVideoError = null
-            ) 
+            )
         }
     }
 
     fun selectBaseEvent(event: EventData) {
-        _uiState.update { 
+        val cam = resolveCameraForEvent(event, _uiState.value.cameraList) ?: _uiState.value.camera
+        _uiState.update {
             it.copy(
-                baseEvent = event,
                 event = event,
+                camera = cam,
                 originalVideoUrl = null,
                 originalVideoLoading = false,
                 originalVideoError = null
-            ) 
+            )
         }
+        // Only refetch if event is not already inside current relatedEvents list
+        val alreadyInHistory = _uiState.value.relatedEvents.any { it.id == event.id }
+        if (!alreadyInHistory) {
+            _uiState.update { it.copy(baseEvent = event) }
+            loadRelatedEvents()
+        }
+    }
+
+    fun setJourneyPeriod(period: JourneyPeriod) {
+        if (_uiState.value.selectedJourneyPeriod == period) return
+        _uiState.update { it.copy(selectedJourneyPeriod = period) }
         loadRelatedEvents()
     }
 
+    private fun getJourneyTimeRange(period: JourneyPeriod): Pair<Long, Long> {
+        val cal = Calendar.getInstance()
+        val nowSec = cal.timeInMillis / 1000
+        return when (period) {
+            JourneyPeriod.TODAY -> {
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                Pair(cal.timeInMillis / 1000, nowSec)
+            }
+            JourneyPeriod.YESTERDAY -> {
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                val endYesterday = (cal.timeInMillis / 1000) - 1
+                cal.add(Calendar.DAY_OF_YEAR, -1)
+                val startYesterday = cal.timeInMillis / 1000
+                Pair(startYesterday, endYesterday)
+            }
+            JourneyPeriod.LAST_7_DAYS -> {
+                cal.add(Calendar.DAY_OF_YEAR, -6)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                cal.set(Calendar.SECOND, 0)
+                cal.set(Calendar.MILLISECOND, 0)
+                Pair(cal.timeInMillis / 1000, nowSec)
+            }
+        }
+    }
+
+    /**
+     * Khớp hoàn toàn với useRelatedEvents.ts trong PWA:
+     * 1. LPR / Plate -> gọi searchAIData (/Data/api/DataSearch)
+     * 2. Face -> gọi getFaceDataByProfileUUID (/Data/api/FaceData/{uuid}) hoặc getDataList nếu stranger
+     * 3. Uniform -> gọi bsApi.getUniformData (/ts/api/v1/e/uniform/get-data)
+     * 4. Các module AI khác -> gọi getDataList (/Data/api/Data) theo cameraUUID & type
+     */
     fun loadRelatedEvents() {
+        val targetEvent = _uiState.value.event ?: _uiState.value.baseEvent ?: return
+        val period = _uiState.value.selectedJourneyPeriod
         viewModelScope.launch {
-            _uiState.value.baseEvent?.let { event ->
-                event.data?.cameraUUID?.let { uuid ->
-                    fetchRelatedEvents(uuid, event.time, event.serviceId, event.type)
+            _uiState.update { it.copy(isJourneyLoading = true) }
+            try {
+                val (fromTime, toTime) = getJourneyTimeRange(period)
+                val typeLower = targetEvent.type.lowercase()
+                val evData = targetEvent.data
+                val serviceId = targetEvent.serviceId.takeIf { it > 0 }
+                val cameraUUID = evData?.cameraUUID ?: evData?.cameraUuidLower
+
+                var fetched: List<EventData> = emptyList()
+
+                if (typeLower == "sensor-license-plate" || typeLower.contains("plate") || typeLower.contains("lpr") || !evData?.plate?.plate.isNullOrBlank()) {
+                    val plate = (evData?.plate?.plate ?: evData?.plate?.number ?: targetEvent.plate)?.trim()
+                    if (!plate.isNullOrBlank()) {
+                        val searchItems = listOf(
+                            DataSearchPlateModel(
+                                type = "plate",
+                                confidence = 0.5,
+                                param = ParamPlateModel(value = plate)
+                            )
+                        )
+                        val res = runCatching {
+                            eventApi.searchAIData(
+                                from = fromTime,
+                                to = toTime,
+                                serviceId = serviceId,
+                                count = 100,
+                                fast = "yes",
+                                searchItems = searchItems
+                            )
+                        }.getOrNull()
+                        if (res?.isSuccessful == true) {
+                            fetched = res.body() ?: emptyList()
+                        }
+                    }
+                } else if (AiTypeHelper.isFaceEvent(targetEvent)) {
+                    var profileUuid = (evData?.face?.profileUUID
+                        ?: evData?.face?.profileUUIDUpper
+                        ?: evData?.profileUUID
+                        ?: evData?.profileUUIDUpper)?.trim().orEmpty()
+
+                    if (profileUuid.isEmpty()) {
+                        val profileId = evData?.face?.profileId ?: evData?.profileId
+                        if (profileId != null) {
+                            profileUuid = _uiState.value.profileList.find { it.id == profileId }?.uuid?.trim().orEmpty()
+                        }
+                    }
+                    if (profileUuid.isEmpty() && !AiTypeHelper.isStranger(targetEvent)) {
+                        val rawName = evData?.face?.name ?: evData?.name ?: targetEvent.name
+                        if (!rawName.isNullOrBlank()) {
+                            profileUuid = _uiState.value.profileList.find {
+                                it.name.trim().equals(rawName.trim(), ignoreCase = true)
+                            }?.uuid?.trim().orEmpty()
+                        }
+                    }
+
+                    if (profileUuid.isNotEmpty()) {
+                        val res = runCatching {
+                            eventApi.getFaceDataByProfileUUID(
+                                profileUUID = profileUuid,
+                                count = 50,
+                                from = fromTime,
+                                to = toTime,
+                                serviceId = serviceId
+                            )
+                        }.getOrNull()
+                        if (res?.isSuccessful == true) {
+                            fetched = res.body() ?: emptyList()
+                        }
+                    } else {
+                        val res = runCatching {
+                            eventApi.getDataList(
+                                count = 50,
+                                serviceId = serviceId,
+                                type = targetEvent.type.ifBlank { "sensor-face-unknown-camera" },
+                                from = fromTime,
+                                to = toTime,
+                                cameraUUID = cameraUUID
+                            )
+                        }.getOrNull()
+                        if (res?.isSuccessful == true) {
+                            fetched = res.body() ?: emptyList()
+                        }
+                    }
+                } else if (typeLower.contains("uniform")) {
+                    var profileUuid = (evData?.face?.profileUUID
+                        ?: evData?.face?.profileUUIDUpper
+                        ?: evData?.profileUUID
+                        ?: evData?.profileUUIDUpper)?.trim().orEmpty()
+
+                    if (profileUuid.isEmpty()) {
+                        val profileId = evData?.face?.profileId ?: evData?.profileId
+                        if (profileId != null) {
+                            profileUuid = _uiState.value.profileList.find { it.id == profileId }?.uuid?.trim().orEmpty()
+                        }
+                    }
+
+                    val params = mutableMapOf(
+                        "isConfirmed" to "1",
+                        "order" to "desc",
+                        "count" to "50",
+                        "eventType" to "sensor-uniform-camera",
+                        "from" to fromTime.toString(),
+                        "to" to toTime.toString()
+                    )
+                    if (profileUuid.isNotEmpty()) {
+                        params["profileUUID"] = profileUuid
+                        params["onlyProfileUnknown"] = "0"
+                    } else {
+                        params["onlyProfileUnknown"] = "1"
+                    }
+                    val res = runCatching { bsApi.getUniformData(params) }.getOrNull()
+                    if (res?.isSuccessful == true) {
+                        fetched = res.body() ?: emptyList()
+                    }
+                } else {
+                    val res = runCatching {
+                        eventApi.getDataList(
+                            count = 50,
+                            serviceId = serviceId,
+                            type = targetEvent.type,
+                            from = fromTime,
+                            to = toTime,
+                            cameraUUID = cameraUUID
+                        )
+                    }.getOrNull()
+                    if (res?.isSuccessful == true) {
+                        fetched = res.body() ?: emptyList()
+                    }
                 }
-                fetchLicensePlateEvents(event.time, event.data?.cameraUUID)
+
+                // Lọc theo cameraUUID đối với các module AI thông thường (như useRelatedEvents.ts dòng 278-292)
+                var filtered = fetched.filter { AiTypeHelper.isAiTypeEnabled(it.type) || it.type == targetEvent.type }
+                if (!typeLower.contains("plate") && !typeLower.contains("lpr") && !AiTypeHelper.isFaceEvent(targetEvent) && !typeLower.contains("uniform")) {
+                    if (!cameraUUID.isNullOrBlank()) {
+                        filtered = filtered.filter { item ->
+                            val cId = item.data?.cameraUUID ?: item.data?.cameraUuidLower
+                            cId.isNullOrBlank() || cId == cameraUUID
+                        }
+                    }
+                }
+
+                val sorted = filtered.sortedByDescending { it.time }
+                _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
+            } catch (e: Exception) {
+                Log.e("EventDetailVM", "Error fetching related events", e)
+                _uiState.update { it.copy(isJourneyLoading = false) }
             }
         }
     }
 
-    private suspend fun fetchRelatedEvents(cameraUUID: String, eventTime: Double, serviceId: Int?, type: String?) {
-        try {
-            // Lấy khoảng thời gian trong cùng ngày của sự kiện
-            val calendar = java.util.Calendar.getInstance()
-            calendar.timeInMillis = (eventTime * 1000).toLong()
-            calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-            calendar.set(java.util.Calendar.MINUTE, 0)
-            calendar.set(java.util.Calendar.SECOND, 0)
-            calendar.set(java.util.Calendar.MILLISECOND, 0)
-            val fromTime = calendar.timeInMillis / 1000
-
-            calendar.set(java.util.Calendar.HOUR_OF_DAY, 23)
-            calendar.set(java.util.Calendar.MINUTE, 59)
-            calendar.set(java.util.Calendar.SECOND, 59)
-            val toTime = calendar.timeInMillis / 1000
-
-            val response = eventApi.getDataList(count = 20, from = fromTime, to = toTime, cameraUUID = cameraUUID, serviceId = serviceId, type = type)
-            if (response.isSuccessful) {
-                val events = response.body() ?: emptyList()
-                _uiState.update { it.copy(relatedEvents = events) }
-            }
-        } catch (e: Exception) {
-            Log.e("EventDetailVM", "Error fetching related events", e)
+    fun toggleRelatedLicensePlates() {
+        if (_uiState.value.showRelatedPlates) {
+            closeRelatedLicensePlates()
+        } else {
+            val currentEv = _uiState.value.event ?: return
+            _uiState.update { it.copy(showRelatedPlates = true, relatedPlatesLoading = true, licensePlateEvents = emptyList()) }
+            fetchLicensePlateEvents(currentEv.time, currentEv.data?.cameraUUID ?: currentEv.data?.cameraUuidLower)
         }
     }
 
-    private suspend fun fetchLicensePlateEvents(eventTime: Double, cameraUUID: String?) {
-        try {
-            val fromTime = (eventTime - 10).toLong()
-            val toTime = (eventTime + 10).toLong()
-
-            val response = eventApi.getDataList(
-                count = 20,
-                from = fromTime,
-                to = toTime,
-                cameraUUID = cameraUUID,
-                type = "sensor-license-plate"
+    fun closeRelatedLicensePlates() {
+        val base = _uiState.value.baseEvent
+        val curr = _uiState.value.event
+        _uiState.update {
+            it.copy(
+                showRelatedPlates = false,
+                relatedPlatesLoading = false,
+                licensePlateEvents = emptyList(),
+                event = if (base != null && curr != null && base.id != curr.id) base else curr
             )
-            if (response.isSuccessful) {
-                val events = response.body() ?: emptyList()
-                _uiState.update { it.copy(licensePlateEvents = events) }
+        }
+    }
+
+    private fun fetchLicensePlateEvents(eventTime: Double, cameraUUID: String?) {
+        viewModelScope.launch {
+            try {
+                val timeSec = if (eventTime > 1e11) (eventTime / 1000).toLong() else eventTime.toLong()
+                val fromTime = timeSec - 15
+                val toTime = timeSec + 15
+
+                val response = eventApi.getDataList(
+                    count = 20,
+                    from = fromTime,
+                    to = toTime,
+                    cameraUUID = cameraUUID,
+                    type = "sensor-license-plate"
+                )
+                if (response.isSuccessful) {
+                    val events = response.body() ?: emptyList()
+                    _uiState.update { it.copy(licensePlateEvents = events, relatedPlatesLoading = false) }
+                } else {
+                    _uiState.update { it.copy(relatedPlatesLoading = false) }
+                }
+            } catch (e: Exception) {
+                Log.e("EventDetailVM", "Error fetching license plate events", e)
+                _uiState.update { it.copy(relatedPlatesLoading = false) }
             }
-        } catch (e: Exception) {
-            Log.e("EventDetailVM", "Error fetching license plate events", e)
         }
     }
 
     fun loadOriginalVideo() {
         val event = _uiState.value.event ?: return
         val camera = _uiState.value.camera ?: return
-        
+
         if (_uiState.value.originalVideoUrl != null || _uiState.value.originalVideoLoading) {
             return
         }
@@ -205,13 +456,13 @@ class EventDetailViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(originalVideoLoading = true, originalVideoError = null) }
             try {
-                val eventTimeMs = (event.time * 1000).toLong()
+                val eventTimeMs = if (event.time < 10000000000.0) (event.time * 1000).toLong() else event.time.toLong()
                 val fromMs = eventTimeMs - 61 * 1000
                 val toMs = eventTimeMs
 
-                val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", java.util.Locale.getDefault())
-                val fromDate = dateFormat.format(java.util.Date(fromMs))
-                val toDate = dateFormat.format(java.util.Date(toMs))
+                val dateFormat = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", Locale.getDefault())
+                val fromDate = dateFormat.format(Date(fromMs))
+                val toDate = dateFormat.format(Date(toMs))
 
                 val response = vmsApi.getVideoList(
                     camera = camera.id,
@@ -223,11 +474,11 @@ class EventDetailViewModel(
                     val videos = response.body()
                     if (!videos.isNullOrEmpty() && videos.first().videoLink.isNotEmpty()) {
                         val videoItem = videos.first()
-                        
+
                         val videoStartMs = dateFormat.parse(videoItem.time)?.time ?: 0L
                         val diffSeconds = (eventTimeMs - videoStartMs) / 1000
-                        val seekSeconds = java.lang.Math.max(0, java.lang.Math.min(61, diffSeconds - 10))
-                        
+                        val seekSeconds = Math.max(0L, Math.min(61L, diffSeconds - 10L))
+
                         _uiState.update {
                             it.copy(
                                 originalVideoUrl = videoItem.videoLink,
@@ -267,7 +518,7 @@ class EventDetailViewModel(
     fun reportEventAsFalse(eventId: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
         viewModelScope.launch {
             try {
-                val response = eventApi.verifyEvent(eventId, com.tenli.oneview.model.network.Confirm(false))
+                val response = eventApi.verifyEvent(eventId, Confirm(false))
                 if (response.isSuccessful) {
                     com.tenli.oneview.util.EventBus.emitEventReportedFalse(eventId)
                     onSuccess()

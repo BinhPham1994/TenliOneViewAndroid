@@ -37,5 +37,6 @@ data class CameraInfo(
 data class ReportPayload(
     val system: JsonElement? = null,
     val storage: List<StorageStatusModel>? = null,
-    val camera: List<CameraInfo>? = null
+    val camera: List<CameraInfo>? = null,
+    val data: ReportPayload? = null
 )

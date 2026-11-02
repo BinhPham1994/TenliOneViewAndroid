@@ -1,14 +1,29 @@
 package com.tenli.oneview.ui.features.event.detail
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,452 +35,536 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material.icons.outlined.LocationOn
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.window.Popup
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
+import coil.compose.SubcomposeAsyncImage
+import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.model.network.BsProfileGroupModel
+import com.tenli.oneview.model.network.BsProfileModel
+import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
-import com.tenli.oneview.ui.features.home.RecentEventItem
+import com.tenli.oneview.ui.component.MobileEventCard
+import com.tenli.oneview.ui.component.VideoFrameImage
+import com.tenli.oneview.ui.component.VideoPlayer
+import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.isUuidString
+import com.tenli.oneview.ui.component.rememberIsDarkTheme
+import com.tenli.oneview.ui.features.home.findAllBoxes
+import com.tenli.oneview.ui.features.home.getEventCropUrls
 import com.tenli.oneview.ui.features.home.getEventImageUrl
+import com.tenli.oneview.ui.features.home.getEventVideoUrl
+import com.tenli.oneview.ui.theme.BackgroundDark
+import com.tenli.oneview.ui.theme.BackgroundLight
+import com.tenli.oneview.ui.theme.BrandAccent
 import com.tenli.oneview.ui.theme.BrandPrimary
+import com.tenli.oneview.ui.theme.ErrorRed
+import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.SurfaceDark
+import com.tenli.oneview.ui.theme.SurfaceLight
+import com.tenli.oneview.ui.theme.SurfaceVariant
+import com.tenli.oneview.ui.theme.SurfaceVariantDark
+import com.tenli.oneview.ui.theme.TextPrimary
+import com.tenli.oneview.ui.theme.TextPrimaryDark
+import com.tenli.oneview.ui.theme.TextSecondary
+import com.tenli.oneview.ui.theme.TextSecondaryDark
+import com.tenli.oneview.ui.theme.TextTitleLight
+import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.ui.utils.LocaleManager
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import kotlin.math.roundToInt
 
-enum class EventMediaTab(val title: String) {
-    ORIGINAL_VIDEO("Video gốc"),
-    EVENT_IMAGE("Ảnh sự kiện"),
-    EVENT_VIDEO("Video sự kiện")
+enum class EventMediaTab(val titleVi: String, val titleEn: String) {
+    ORIGINAL_VIDEO("Video gốc", "Original video"),
+    EVENT_IMAGE("Ảnh sự kiện", "Event photo"),
+    EVENT_VIDEO("Video sự kiện", "Event video")
 }
 
-enum class EventHistoryTab(val title: String) {
-    HISTORY("Lịch sử nhận diện"),
-    LICENSE_PLATE("Biển số liên quan"),
-    ACTION("Hành động")
-}
-
-
-@OptIn(ExperimentalMaterial3Api::class, androidx.compose.animation.ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventDetailScreen(
     eventId: Int,
     onBack: () -> Unit,
-    viewModel: EventDetailViewModel = viewModel(factory = EventDetailViewModel.provideFactory(eventId))
+    onSwipeDismissed: () -> Unit = onBack,
+    viewModel: EventDetailViewModel = viewModel(
+        key = "event_detail_$eventId",
+        factory = EventDetailViewModel.provideFactory(eventId)
+    )
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var selectedTab by remember { mutableStateOf(EventMediaTab.EVENT_IMAGE) }
-    var selectedHistoryTab by remember { mutableStateOf(EventHistoryTab.HISTORY) }
-    var showMetadataSheet by remember { mutableStateOf(false) }
-    var expandedCropUrl by remember { mutableStateOf<String?>(null) }
-    var showConfirmReportDialog by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    var showContent by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        showContent = true
+    androidx.activity.compose.BackHandler {
+        onBack()
     }
-    val contentAlpha by animateFloatAsState(
-        targetValue = if (showContent) 1f else 0f,
-        animationSpec = tween(durationMillis = 200) 
-    )
-    val offsetY by animateDpAsState(
-        targetValue = if (showContent) 0.dp else (-50).dp,
-        animationSpec = tween(durationMillis = 300)
-    )
 
-    val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
-    val isExiting = animatedVisibilityScope?.transition?.targetState == androidx.compose.animation.EnterExitState.PostExit
-    val finalAlpha = if (isExiting) 0f else contentAlpha
-    val instantAlpha = if (isExiting) 0f else 1f
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val isEn = remember { LocaleManager.getLocale(context).startsWith("en") }
+    val isDark = rememberIsDarkTheme()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-    Scaffold(
-        containerColor = if (isExiting) Color.Transparent else MaterialTheme.colorScheme.background
-    ) { innerPadding ->
-        if (uiState.isLoading) {
+    var selectedTab by remember(eventId) { mutableStateOf(EventMediaTab.EVENT_IMAGE) }
+    var expandedCropUrl by remember(eventId) { mutableStateOf<String?>(null) }
+    var showConfirmReportDialog by remember(eventId) { mutableStateOf(false) }
+    var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
+
+    val listState = rememberLazyListState()
+
+    // Drag-to-dismiss vertical offset (matching PWA bottom-sheet swipe down to dismiss)
+    val sheetOffsetY = remember(eventId) { Animatable(0f) }
+    val dismissThresholdPx = remember(density) { with(density) { 110.dp.toPx() } }
+    val screenHeightPx = remember(density) { with(density) { 950.dp.toPx() } }
+
+    fun triggerSmoothDismiss() {
+        scope.launch {
+            sheetOffsetY.animateTo(
+                targetValue = screenHeightPx,
+                animationSpec = tween(
+                    durationMillis = 300,
+                    easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+                )
+            )
+            onSwipeDismissed()
+        }
+    }
+
+    // Nested scroll connection so pulling down when LazyColumn is at the top drags the sheet down to close
+    val nestedScrollConnection = remember(listState, eventId) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                // If sheet is currently dragged down and user scrolls up, consume it to push sheet back up first
+                if (sheetOffsetY.value > 0f && available.y < 0f) {
+                    val consumed = available.y.coerceAtLeast(-sheetOffsetY.value)
+                    scope.launch {
+                        sheetOffsetY.snapTo((sheetOffsetY.value + consumed).coerceAtLeast(0f))
+                    }
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                // When LazyColumn is at top and user pulls down with finger
+                if (source == NestedScrollSource.UserInput && available.y > 0f) {
+                    val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 4
+                    if (isAtTop) {
+                        scope.launch {
+                            sheetOffsetY.snapTo((sheetOffsetY.value + available.y * 0.85f).coerceAtLeast(0f))
+                        }
+                        return Offset(0f, available.y)
+                    }
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (sheetOffsetY.value > 0f) {
+                    if (sheetOffsetY.value >= dismissThresholdPx || (sheetOffsetY.value >= dismissThresholdPx * 0.55f && available.y > 900f)) {
+                        triggerSmoothDismiss()
+                    } else {
+                        sheetOffsetY.animateTo(
+                            targetValue = 0f,
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                        )
+                    }
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
+    val pageBgColor = if (isDark) BackgroundDark else BackgroundLight
+    val cardBgColor = if (isDark) SurfaceDark else SurfaceLight
+    val labelTextColor = if (isDark) Color(0xFF94A3B8) else TextSecondary
+    val valueTextColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A)
+    val sectionHeaderColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+    val dragProgress = (sheetOffsetY.value / screenHeightPx).coerceIn(0f, 1f)
+    val scrimAlpha = 0.45f * (1f - dragProgress)
+    val sheetShape = if (sheetOffsetY.value > 2f) {
+        RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    } else {
+        RectangleShape
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = scrimAlpha))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .offset { IntOffset(0, sheetOffsetY.value.roundToInt()) }
+                .clip(sheetShape)
+                .background(pageBgColor)
+        ) {
+            if (uiState.isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = BrandPrimary)
+                WaveDotsLoading()
             }
         } else if (uiState.error != null || uiState.event == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CommonEmptyState(text = uiState.error ?: "Không tìm thấy sự kiện")
+                CommonEmptyState(text = uiState.error ?: if (isEn) "Event not found" else "Không tìm thấy sự kiện")
+                // Close button even on error state
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 12.dp, end = 14.dp)
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color.White.copy(alpha = 0.12f) else Color.Black.copy(alpha = 0.08f))
+                        .clickable { onBack() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = LucideIcons.X,
+                        contentDescription = "Close",
+                        tint = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         } else {
             val event = uiState.event!!
+            val baseEvent = uiState.baseEvent
             val camera = uiState.camera
+            val aiService = uiState.aiServices.find { it.id == event.serviceId }
+
+            val aiTaskTitle = remember(event, isEn) {
+                resolvePwaAiTaskTitle(event, isEn)
+            }
+
+            val locationText = remember(camera, event, aiService) {
+                val rawCam = camera?.name?.takeIf { it.isNotBlank() && !isUuidString(it) }
+                    ?: event.data?.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
+                    ?: event.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
+                    ?: ""
+                val rawSvc = aiService?.name?.trim().orEmpty()
+                when {
+                    rawCam.isNotEmpty() && rawSvc.isNotEmpty() -> "$rawCam - $rawSvc"
+                    rawCam.isNotEmpty() -> rawCam
+                    rawSvc.isNotEmpty() -> rawSvc
+                    else -> "---"
+                }
+            }
+
+            val (formattedTime, formattedDate) = remember(event.time, isEn) {
+                formatPwaEventTimeAndDate(event.time, isEn)
+            }
+
+            val cropUrls = remember(event) { getEventCropUrls(event) }
+
+            val plateNumber = remember(event) {
+                (event.data?.plate?.plate
+                    ?: event.data?.plate?.number
+                    ?: event.data?.vehicle?.plate
+                    ?: event.plate)?.trim().orEmpty()
+            }
+
+            val isPlateBlacklist = remember(event) {
+                event.data?.plate?.isBlacklist == true || event.data?.plate?.isBlacklistSnake == true
+            }
+
+            val canShowRelatedPlates = remember(event, plateNumber) {
+                isVehicleRelatedEvent(event, plateNumber)
+            }
+
+            val cameraMap = remember(uiState.cameraList) {
+                uiState.cameraList
+                    .filter { it.extra?.uuid != null }
+                    .associate { it.extra!!.uuid!! to it.name }
+            }
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .statusBarsPadding()
             ) {
-                // Card Tiêu đề & Thông tin
-                val baseEvent = uiState.baseEvent
-                val plateText = event.data?.plate?.plate ?: (if (event.type.contains("plate", ignoreCase = true)) event.data?.value else null)
-                val aiService = uiState.aiServices.find { it.id == event.serviceId }
-                val aiServiceName = aiService?.name
-
-                Surface(
+                // =========================================================================
+                // 1. PINNED TOP SECTION (.media-header-pinned-section in BaseAiEventDetailModal.vue)
+                //    Supports swipe-down to dismiss & horizontal swipe to switch media tab
+                // =========================================================================
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 12.dp)
-                        .alpha(instantAlpha),
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        // Row 1: Camera Name & Time
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = camera?.name ?: "Camera không xác định",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 2,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                                if (!aiServiceName.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Outlined.LocationOn,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = aiServiceName,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(horizontalAlignment = Alignment.End) {
-                                val timeStr = formatDateTime(event.time)
-                                val parts = timeStr.split(" ")
-                                if (parts.size >= 2) {
-                                    Text(
-                                        text = parts[0],
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = parts.drop(1).joinToString(" "),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                } else {
-                                    Text(
-                                        text = timeStr,
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(
-                            thickness = 0.5.dp,
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                        )
-
-                        // Row 2: Event Type & Extra Actions
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Nhãn sự kiện - Nền nhạt chữ đậm
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = com.tenli.oneview.ui.utils.AiTypeHelper.getAiColor(event)
-                            ) {
-                                Text(
-                                    text = com.tenli.oneview.ui.utils.AiTypeHelper.getEventName(event).uppercase(),
-                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color.White,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.weight(1f).padding(start = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                // Right: Crop Images
-                                val cropUrls = com.tenli.oneview.ui.features.home.getEventCropUrls(event)
-                                if (cropUrls.isNotEmpty()) {
-                                    androidx.compose.foundation.layout.Row(
-                                        modifier = Modifier
-                                            .weight(1f, fill = false)
-                                            .horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        cropUrls.forEach { url ->
-                                            coil.compose.SubcomposeAsyncImage(
-                                                model = url,
-                                                contentDescription = "Crop Image"
-                                            ) {
-                                                val currentPainter = painter
-                                                val state = currentPainter.state
-                                                if (state is coil.compose.AsyncImagePainter.State.Success) {
-                                                    Box {
-                                                        androidx.compose.foundation.Image(
-                                                            painter = currentPainter,
-                                                            contentDescription = "Crop Image",
-                                                            modifier = Modifier
-                                                                .height(36.dp)
-                                                                .widthIn(max = 100.dp)
-                                                                .clip(RoundedCornerShape(6.dp))
-                                                                .background(Color.Black.copy(alpha = 0.5f))
-                                                                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
-                                                                .clickable { expandedCropUrl = if (expandedCropUrl == url) null else url },
-                                                            contentScale = ContentScale.Fit
-                                                        )
-                                                        
-                                                        if (expandedCropUrl == url) {
-                                                            androidx.compose.ui.window.Popup(
-                                                                alignment = Alignment.Center,
-                                                                onDismissRequest = { expandedCropUrl = null }
-                                                            ) {
-                                                                val intrinsicSize = currentPainter.intrinsicSize
-                                                                val isSizeValid = intrinsicSize != androidx.compose.ui.geometry.Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
-                                                                val imgModifier = if (isSizeValid) {
-                                                                    val ratio = intrinsicSize.width / intrinsicSize.height
-                                                                    Modifier
-                                                                        .widthIn(max = 360.dp)
-                                                                        .heightIn(max = 132.dp)
-                                                                        .aspectRatio(ratio, matchHeightConstraintsFirst = false)
-                                                                } else {
-                                                                    Modifier
-                                                                        .height(132.dp)
-                                                                        .widthIn(max = 360.dp)
-                                                                }
-
-                                                                androidx.compose.foundation.Image(
-                                                                    painter = currentPainter,
-                                                                    contentDescription = "Expanded Crop Image",
-                                                                    modifier = imgModifier
-                                                                        .clip(RoundedCornerShape(12.dp))
-                                                                        .background(Color.Black.copy(alpha = 0.8f))
-                                                                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                                                                        .clickable { expandedCropUrl = null },
-                                                                    contentScale = ContentScale.Fit
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                } else {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .height(36.dp)
-                                                            .width(50.dp)
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(Color.Gray.copy(alpha = 0.3f))
-                                                    )
-                                                }
-                                            }
+                        .background(pageBgColor)
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onVerticalDrag = { _, dragAmount ->
+                                    val next = (sheetOffsetY.value + dragAmount).coerceAtLeast(0f)
+                                    scope.launch { sheetOffsetY.snapTo(next) }
+                                },
+                                onDragEnd = {
+                                    if (sheetOffsetY.value >= dismissThresholdPx * 0.8f) {
+                                        triggerSmoothDismiss()
+                                    } else {
+                                        scope.launch {
+                                            sheetOffsetY.animateTo(
+                                                0f,
+                                                spring(stiffness = Spring.StiffnessMediumLow)
+                                            )
                                         }
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                }
-
-                                if (!plateText.isNullOrEmpty()) {
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer
-                                    ) {
-                                        Text(
-                                            text = plateText,
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                },
+                                onDragCancel = {
+                                    scope.launch {
+                                        sheetOffsetY.animateTo(
+                                            0f,
+                                            spring(stiffness = Spring.StiffnessMediumLow)
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(8.dp))
                                 }
+                            )
+                        }
+                ) {
+                    // Header: Centered AI Task Title + Top-right Circular X Button (.dashboard-header)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp, bottom = 6.dp, start = 14.dp, end = 14.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 38.dp)
+                                .align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = aiTaskTitle,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
 
-                                if (baseEvent != null && event.id != baseEvent.id) {
-                                    androidx.compose.material3.TextButton(
-                                        onClick = {
+                            if (baseEvent != null && baseEvent.id != event.id) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(BrandPrimary)
+                                        .clickable {
                                             viewModel.selectEvent(baseEvent)
                                             selectedTab = EventMediaTab.EVENT_IMAGE
                                             expandedCropUrl = null
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                        modifier = Modifier.height(30.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Default.ArrowBack,
-                                            contentDescription = "Reset",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Về sự kiện gốc", 
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                                        }
+                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.ArrowLeft,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = if (isEn) "Back to original" else "Về sự kiện gốc",
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
                                 }
                             }
                         }
 
-                        // Media Tabs & Crop Images
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // Circular Close Button (.ant-modal-close)
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isDark) Color.White.copy(alpha = 0.12f)
+                                    else Color.Black.copy(alpha = 0.08f)
+                                )
+                                .clickable { onBack() },
+                            contentAlignment = Alignment.Center
                         ) {
-                    // Left: Media Tabs
+                            Icon(
+                                imageVector = LucideIcons.X,
+                                contentDescription = "Close",
+                                tint = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+
+                    // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list)
+                    val tabsTrackBg = if (isDark) Color.White.copy(alpha = 0.08f) else SurfaceLight
+                    val activePillBg = if (isDark) SurfaceVariantDark else SurfaceVariant
+                    val activeTabTextColor = if (isDark) BrandAccent else BrandAccent
+                    val inactiveTabTextColor = Color(0xFF64748B)
+
                     Row(
                         modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 12.dp)
                             .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            .background(tabsTrackBg)
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         EventMediaTab.values().forEach { tab ->
                             val isSelected = selectedTab == tab
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable { selectedTab = tab }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .then(
+                                        if (isSelected) {
+                                            Modifier
+                                                .shadow(
+                                                    elevation = 2.dp,
+                                                    shape = RoundedCornerShape(9.dp),
+                                                    ambientColor = Color.Black.copy(alpha = 0.12f),
+                                                    spotColor = Color.Black.copy(alpha = 0.12f)
+                                                )
+                                                .clip(RoundedCornerShape(9.dp))
+                                                .background(activePillBg)
+                                        } else {
+                                            Modifier.clip(RoundedCornerShape(9.dp))
+                                        }
+                                    )
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        selectedTab = tab
+                                    }
+                                    .padding(horizontal = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = tab.title,
-                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 11.sp,
+                                    text = if (isEn) tab.titleEn else tab.titleVi,
+                                    color = if (isSelected) activeTabTextColor else inactiveTabTextColor,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    fontSize = 13.sp,
                                     maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
 
-                }
-                    }
-                }
-
-                // Media Viewer
-                    val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
-                    val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
-                    
-                    var boxModifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .zIndex(1f)
-                        .pointerInput(Unit) {
-                            var totalDrag = 0f
-                            detectVerticalDragGestures(
-                                onVerticalDrag = { change, dragAmount ->
-                                    totalDrag += dragAmount
-                                },
-                                onDragEnd = {
-                                    if (totalDrag > 100f) {
-                                        onBack()
-                                    }
-                                    totalDrag = 0f
-                                },
-                                onDragCancel = {
-                                    totalDrag = 0f
-                                }
-                            )
-                        }
-                        
-                    if (sharedTransitionScope != null && animatedVisibilityScope != null) {
-                        with(sharedTransitionScope) {
-                            boxModifier = boxModifier.sharedElement(
-                                sharedContentState = rememberSharedContentState(key = "event_image_${eventId}"),
-                                animatedVisibilityScope = animatedVisibilityScope
-                            )
-                        }
-                    }
-
+                    // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
+                    // Also supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
                     Box(
-                        modifier = boxModifier,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .background(Color.Black)
+                            .pointerInput(selectedTab) {
+                                var totalHorizontalDrag = 0f
+                                detectHorizontalDragGestures(
+                                    onHorizontalDrag = { _, dragAmount ->
+                                        totalHorizontalDrag += dragAmount
+                                    },
+                                    onDragEnd = {
+                                        val tabs = EventMediaTab.values()
+                                        val curIdx = tabs.indexOf(selectedTab)
+                                        if (totalHorizontalDrag < -80f && curIdx < tabs.lastIndex) {
+                                            selectedTab = tabs[curIdx + 1]
+                                        } else if (totalHorizontalDrag > 80f && curIdx > 0) {
+                                            selectedTab = tabs[curIdx - 1]
+                                        }
+                                        totalHorizontalDrag = 0f
+                                    },
+                                    onDragCancel = {
+                                        totalHorizontalDrag = 0f
+                                    }
+                                )
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.Transparent))
                         when (selectedTab) {
                             EventMediaTab.EVENT_IMAGE -> {
                                 val imageUrl = getEventImageUrl(event)
                                 if (imageUrl != null) {
-                                    val eventBoxes = com.tenli.oneview.ui.features.home.findAllBoxes(event)
-                                    val palette = listOf(
-                                        Color(0xFFff4d4f), // Red
-                                        Color(0xFF38dd0f), // Neon Green
-                                        Color(0xFF1890ff), // Blue
-                                        Color(0xFFfaad14), // Gold
-                                        Color(0xFF13c2c2), // Cyan
-                                        Color(0xFFeb2f96)  // Magenta
-                                    )
+                                    val eventBoxes = remember(event) { findAllBoxes(event) }
+                                    val palette = remember {
+                                        listOf(
+                                            Color(0xFFFF4D4F),
+                                            Color(0xFF38DD0F),
+                                            Color(0xFF1890FF),
+                                            Color(0xFFFAAD14),
+                                            Color(0xFF13C2C2),
+                                            Color(0xFFEB2F96)
+                                        )
+                                    }
 
                                     AsyncImage(
                                         model = imageUrl,
@@ -499,15 +598,19 @@ fun EventDetailScreen(
                                         contentScale = ContentScale.FillBounds
                                     )
                                 } else {
-                                    Text("Không có ảnh", color = Color.White)
+                                    CommonEmptyState(
+                                        text = if (isEn) "No image" else "Không có ảnh",
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
                             }
+
                             EventMediaTab.ORIGINAL_VIDEO -> {
-                                LaunchedEffect(Unit) {
+                                LaunchedEffect(event.id) {
                                     viewModel.loadOriginalVideo()
                                 }
-                                
-                                val eventBoxes = com.tenli.oneview.ui.features.home.findAllBoxes(event)
+
+                                val eventBoxes = remember(event) { findAllBoxes(event) }
                                 val mainBox = eventBoxes.firstOrNull()
                                 var pivotX = 0.5f
                                 var pivotY = 0.5f
@@ -527,353 +630,1355 @@ fun EventDetailScreen(
                                 )
 
                                 if (uiState.originalVideoLoading) {
-                                    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface), contentAlignment = Alignment.Center) {
-                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        val fallbackImg = getEventImageUrl(event)
+                                        if (fallbackImg != null) {
+                                            AsyncImage(
+                                                model = fallbackImg,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        CircularProgressIndicator(color = BrandPrimary)
                                     }
                                 } else if (uiState.originalVideoError != null) {
                                     CommonEmptyState(
-                                        text = uiState.originalVideoError ?: "Lỗi tải video",
-                                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                                        text = uiState.originalVideoError ?: "Video không khả dụng",
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 } else {
                                     val videoUrl = uiState.originalVideoUrl
                                     if (videoUrl != null) {
-                                        Box(modifier = Modifier
-                                            .fillMaxSize()
-                                            .clip(androidx.compose.ui.graphics.RectangleShape)
-                                        ) {
-                                            Box(modifier = Modifier
+                                        Box(
+                                            modifier = Modifier
                                                 .fillMaxSize()
-                                                .graphicsLayer {
-                                                    scaleX = scale
-                                                    scaleY = scale
-                                                    transformOrigin = TransformOrigin(pivotX, pivotY)
-                                                }
+                                                .clip(RectangleShape)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .graphicsLayer {
+                                                        scaleX = scale
+                                                        scaleY = scale
+                                                        transformOrigin = TransformOrigin(pivotX, pivotY)
+                                                    }
                                             ) {
-                                                com.tenli.oneview.ui.component.VideoPlayer(
+                                                VideoPlayer(
                                                     videoUrl = videoUrl,
                                                     thumbnailUrl = null,
-                                                    deviceKey = com.tenli.oneview.data.local.UserSession.accessToken,
+                                                    deviceKey = UserSession.accessToken,
                                                     initialSeekPositionMs = uiState.originalVideoSeekTimeMs,
                                                     onTimeUpdate = { currentMs ->
                                                         val seekTimeMs = uiState.originalVideoSeekTimeMs ?: return@VideoPlayer
-                                                        if (currentMs in seekTimeMs..(seekTimeMs + 10000)) {
-                                                            showEventEffect = true
-                                                        } else {
-                                                            showEventEffect = false
-                                                        }
+                                                        showEventEffect = currentMs in seekTimeMs..(seekTimeMs + 10000)
                                                     }
                                                 )
 
-                                                androidx.compose.foundation.layout.Spacer(modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .drawWithContent {
-                                                        if (showEventEffect && mainBox != null && mainBox.size == 4) {
-                                                            val overlayAlpha = 0.7f
-                                                            val padding = 12f * density
-                                                            
-                                                            val minX = mainBox[0].toFloat()
-                                                            val minY = mainBox[1].toFloat()
-                                                            val maxX = mainBox[2].toFloat()
-                                                            val maxY = mainBox[3].toFloat()
-                                                            
-                                                            val boxW = (maxX - minX) * size.width
-                                                            val boxH = (maxY - minY) * size.height
-                                                            val boxX = minX * size.width
-                                                            val boxY = minY * size.height
-                                                            
-                                                            val cutX = (boxX - padding).coerceAtLeast(0f)
-                                                            val cutY = (boxY - padding).coerceAtLeast(0f)
-                                                            val cutW = (boxX + boxW + padding).coerceAtMost(size.width) - cutX
-                                                            val cutH = (boxY + boxH + padding).coerceAtMost(size.height) - cutY
-                                                            
-                                                            val darkColor = Color.Black.copy(alpha = overlayAlpha)
-                                                            drawRect(darkColor, Offset(0f, 0f), Size(size.width, cutY))
-                                                            drawRect(darkColor, Offset(0f, cutY + cutH), Size(size.width, size.height - (cutY + cutH)))
-                                                            drawRect(darkColor, Offset(0f, cutY), Size(cutX, cutH))
-                                                            drawRect(darkColor, Offset(cutX + cutW, cutY), Size(size.width - (cutX + cutW), cutH))
-                                                            
-                                                            drawRect(Color.Red, Offset(cutX, cutY), Size(cutW, cutH), style = Stroke(width = 4f))
+                                                Spacer(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .drawWithContent {
+                                                            if (showEventEffect && mainBox != null && mainBox.size == 4) {
+                                                                val overlayAlpha = 0.7f
+                                                                val padding = 12f * this.density
+
+                                                                val minX = mainBox[0].toFloat()
+                                                                val minY = mainBox[1].toFloat()
+                                                                val maxX = mainBox[2].toFloat()
+                                                                val maxY = mainBox[3].toFloat()
+
+                                                                val boxW = (maxX - minX) * size.width
+                                                                val boxH = (maxY - minY) * size.height
+                                                                val boxX = minX * size.width
+                                                                val boxY = minY * size.height
+
+                                                                val cutX = (boxX - padding).coerceAtLeast(0f)
+                                                                val cutY = (boxY - padding).coerceAtLeast(0f)
+                                                                val cutW = (boxX + boxW + padding).coerceAtMost(size.width) - cutX
+                                                                val cutH = (boxY + boxH + padding).coerceAtMost(size.height) - cutY
+
+                                                                val darkColor = Color.Black.copy(alpha = overlayAlpha)
+                                                                drawRect(darkColor, Offset(0f, 0f), Size(size.width, cutY))
+                                                                drawRect(darkColor, Offset(0f, cutY + cutH), Size(size.width, size.height - (cutY + cutH)))
+                                                                drawRect(darkColor, Offset(0f, cutY), Size(cutX, cutH))
+                                                                drawRect(darkColor, Offset(cutX + cutW, cutY), Size(size.width - (cutX + cutW), cutH))
+
+                                                                drawRect(Color.Red, Offset(cutX, cutY), Size(cutW, cutH), style = Stroke(width = 4f))
+                                                            }
                                                         }
-                                                    }
                                                 )
                                             }
                                         }
                                     } else {
                                         CommonEmptyState(
-                                            text = "Chưa có dữ liệu",
+                                            text = if (isEn) "No video data" else "Chưa có dữ liệu",
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
                                 }
                             }
+
                             EventMediaTab.EVENT_VIDEO -> {
-                                val videoUrl = com.tenli.oneview.ui.features.home.getEventVideoUrl(event)
+                                val videoUrl = getEventVideoUrl(event)
                                 if (videoUrl != null) {
-                                    com.tenli.oneview.ui.component.VideoPlayer(
+                                    VideoPlayer(
                                         videoUrl = videoUrl,
-                                        thumbnailUrl = com.tenli.oneview.ui.features.home.getEventImageUrl(event),
-                                        deviceKey = com.tenli.oneview.data.local.UserSession.accessToken
+                                        thumbnailUrl = getEventImageUrl(event),
+                                        deviceKey = UserSession.accessToken
                                     )
                                 } else {
                                     CommonEmptyState(
-                                        text = "Không có video sự kiện",
-                                        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                                        text = if (isEn) "No event video" else "Không có video sự kiện",
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
-                            else -> {
-                                CommonEmptyState(
-                                    text = "Chưa hỗ trợ",
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
                         }
-
-
                     }
 
-                Box(
+                    Spacer(modifier = Modifier.height(6.dp))
+                }
+
+                // =========================================================================
+                // 2. SCROLLABLE BOTTOM CONTAINER (.event-info-scroll-container in PWA)
+                //    Contains:
+                //    - THÔNG TIN SỰ KIỆN + .event-data-board card
+                //    - BIỂN SỐ LIÊN QUAN (when toggled via barcode button)
+                //    - LỊCH SỬ XUẤT HIỆN + Period Select + MobileEventCard list + End message
+                // =========================================================================
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(horizontal = 10.dp)
-                        .padding(top = 16.dp)
+                        .nestedScroll(nestedScrollConnection),
+                    contentPadding = PaddingValues(bottom = 36.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .offset(y = offsetY)
-                            .alpha(finalAlpha)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface),
-                        verticalArrangement = Arrangement.spacedBy(0.dp)
-                    ) {
-
-
-                // Tabs Lịch sử & Biển số
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 8.dp)
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        EventHistoryTab.values().forEach { tab ->
-                            val isSelected = selectedHistoryTab == tab
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
-                                    .clickable { selectedHistoryTab = tab }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = tab.title,
-                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 11.sp,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                                )
-                            }
-                        }
+                    // Section Title: THÔNG TIN SỰ KIỆN
+                    item(key = "section_event_info_header") {
+                        Text(
+                            text = if (isEn) "EVENT INFORMATION" else "THÔNG TIN SỰ KIỆN",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.6.sp,
+                            color = sectionHeaderColor,
+                            modifier = Modifier.padding(start = 24.dp, end = 14.dp, top = 10.dp, bottom = 6.dp)
+                        )
                     }
 
-                if (selectedHistoryTab == EventHistoryTab.ACTION) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    ) {
-                        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                            columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                    // Card: .event-data-board
+                    item(key = "section_event_data_board") {
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            item {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(56.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(MaterialTheme.colorScheme.error)
-                                            .clickable { showConfirmReportDialog = true },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "!",
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.ExtraBold)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Báo cáo sai",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    val currentEventsList = if (selectedHistoryTab == EventHistoryTab.HISTORY) {
-                        uiState.relatedEvents
-                    } else {
-                        uiState.licensePlateEvents
-                    }
-
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp)
-                    ) {
-                        if (currentEventsList.isEmpty()) {
-                            item {
-                                CommonEmptyState(
-                                    text = "Không có sự kiện liên quan",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 32.dp)
-                                )
-                            }
-                        } else {
-                            items(items = currentEventsList) { relatedEvent ->
-                                val cameraName = camera?.name ?: "Camera"
-                                val aiServiceName = uiState.aiServices.find { it.id == relatedEvent.serviceId }?.name ?: "Unknown Service"
-                                Box(modifier = Modifier) {
-                                    RecentEventItem(
-                                        event = relatedEvent,
-                                        cameraName = cameraName,
-                                        aiServiceName = aiServiceName,
-                                        isSelected = relatedEvent.id == event.id,
-                                        enableSharedElement = false,
-                                        onClick = { 
-                                            if (selectedHistoryTab == EventHistoryTab.HISTORY) {
-                                                viewModel.selectBaseEvent(relatedEvent)
-                                            } else {
-                                                viewModel.selectEvent(relatedEvent)
-                                            }
-                                            selectedTab = EventMediaTab.EVENT_IMAGE
-                                            expandedCropUrl = null
-                                        }
-                                    )
-                                } // end Box
-                            } // end items
-                        } // end else
-                    } // end LazyColumn
-                }
-                    } // end inner Column
-                    
-                    // Overlay Bottom Sheet (inside Box)
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showMetadataSheet,
-                        enter = androidx.compose.animation.slideInVertically(initialOffsetY = { it }),
-                        exit = androidx.compose.animation.slideOutVertically(targetOffsetY = { it }),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize(),
-                            color = MaterialTheme.colorScheme.surface,
+                                .padding(horizontal = 10.dp)
+                                .padding(bottom = 14.dp),
+                            color = cardBgColor,
+                            shape = RoundedCornerShape(16.dp)
                         ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                                verticalArrangement = Arrangement.spacedBy(24.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
+                                // Module-specific Extra Data rows matching PWA frames:
+                                val typeLower = event.type.lowercase()
+
+                                // 1. Biển số xe (if present)
+                                if (plateNumber.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "License plate" else "Biển số xe",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            PlateBadgePill(
+                                                plate = plateNumber,
+                                                isBlacklist = isPlateBlacklist
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(26.dp)
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9))
+                                                    .clickable {
+                                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                        clipboard?.setPrimaryClip(ClipData.newPlainText("plate", plateNumber))
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (isEn) "Copied: $plateNumber" else "Đã sao chép biển số: $plateNumber",
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = LucideIcons.Copy,
+                                                    contentDescription = "Copy plate",
+                                                    tint = labelTextColor,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 2. Face Recognition: Định danh + Nhóm (FaceEventDetailFrame.vue)
+                                if (AiTypeHelper.isFaceEvent(event)) {
+                                    val isStranger = AiTypeHelper.isStranger(event)
+                                    val profileName = remember(event, uiState.profileList, isEn) {
+                                        resolveFaceProfileDisplayName(event, uiState.profileList, isEn)
+                                    }
+                                    val (groupName, groupColor) = remember(event, uiState.profileList, uiState.profileGroupList, isEn) {
+                                        resolveFaceGroupNameAndColor(event, uiState.profileList, uiState.profileGroupList, isEn)
+                                    }
+
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Identity" else "Định danh",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        if (!isStranger && profileName != "---" && profileName != "Người lạ" && profileName != "Stranger") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(groupColor)
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = profileName,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = profileName,
+                                                color = valueTextColor,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Group" else "Nhóm",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = groupName,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                // 3. Uniform Detection: Định danh + Trang phục (UniformEventDetailFrame.vue)
+                                if (typeLower.contains("uniform") || typeLower.contains("clothing")) {
+                                    val personName = remember(event, uiState.profileList, isEn) {
+                                        val name = AiTypeHelper.extractFacePersonName(event, isEn)
+                                        if (name.isNotBlank() && name != "Người lạ" && name != "Stranger") name
+                                        else if (isEn) "Unidentified" else "Chưa định danh"
+                                    }
+                                    val isIdentified = personName != "Chưa định danh" && personName != "Unidentified"
+                                    val uniformLabel = remember(event, isEn) {
+                                        AiTypeHelper.extractUniformLabel(event, isEn)
+                                    }
+                                    val uniformColor = remember(event) { AiTypeHelper.getAiColor(event) }
+
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Identity" else "Định danh",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        if (isIdentified) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(uniformColor)
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = personName,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        } else {
+                                            Text(
+                                                text = personName,
+                                                color = labelTextColor,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+
+                                    if (uniformLabel.isNotBlank() && uniformLabel != "-") {
+                                        EventInfoDataRow(
+                                            label = if (isEn) "Uniform" else "Trang phục",
+                                            labelColor = labelTextColor
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(uniformColor)
+                                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = uniformLabel,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 4. Fire & Smoke: Loại cảnh báo (FireEventDetailFrame.vue)
+                                if (typeLower.contains("fire") || typeLower.contains("smoke")) {
+                                    val isSmoke = typeLower.contains("smoke") && !typeLower.contains("fire")
+                                    val alertLabel = if (isSmoke) {
+                                        if (isEn) "Smoke detected" else "Phát hiện khói"
+                                    } else {
+                                        if (isEn) "Fire detected" else "Phát hiện lửa"
+                                    }
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Alert type" else "Loại cảnh báo",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = alertLabel,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                // 5. Crowd Detection: Số lượng người / Ngưỡng cảnh báo (CrowdEventDetailFrame.vue)
+                                if (typeLower.contains("crowd")) {
+                                    val countVal = event.data?.count ?: event.data?.peopleCount ?: event.data?.crowdCount
+                                    val countStr = if (countVal != null) {
+                                        "$countVal ${if (isEn) "people" else "người"}"
+                                    } else {
+                                        if (isEn) "High density" else "Mật độ cao"
+                                    }
+                                    EventInfoDataRow(
+                                        label = if (isEn) "People count" else "Số lượng người",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = countStr,
+                                            color = Color(0xFF10B981),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    val thVal = event.data?.threshold ?: event.data?.crowdThreshold
+                                    if (thVal != null) {
+                                        EventInfoDataRow(
+                                            label = if (isEn) "Threshold" else "Ngưỡng cảnh báo",
+                                            labelColor = labelTextColor
+                                        ) {
+                                            Text(
+                                                text = "> $thVal ${if (isEn) "people" else "người"}",
+                                                color = valueTextColor,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // 6. Vehicle Attributes (Loại phương tiện, Màu xe, Hãng xe, Tốc độ)
+                                val vehicleType = remember(event, aiTaskTitle) { resolveVehicleTypeLabel(event, aiTaskTitle) }
+                                val vehicleColor = remember(event) { resolveVehicleColorLabel(event) }
+                                val vehicleBrand = remember(event) {
+                                    (event.data?.vehicle?.brand ?: event.data?.brand ?: event.data?.vehicleBrand)?.trim().orEmpty()
+                                }
+                                val vehicleSpeed = remember(event) {
+                                    val s = event.data?.vehicle?.speed ?: event.data?.speed ?: event.data?.vehicleSpeed
+                                    if (s != null && s.toString().isNotBlank()) "${s} km/h" else ""
+                                }
+
+                                if (vehicleType.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Vehicle type" else "Loại phương tiện",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = vehicleType,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                if (vehicleColor.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Vehicle color" else "Màu xe",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = vehicleColor,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                if (vehicleBrand.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Brand" else "Hãng xe",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = vehicleBrand,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                if (vehicleSpeed.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Speed" else "Tốc độ",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = vehicleSpeed,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                // 7. Khu vực (Zone) if present
+                                val zoneName = (event.data?.zoneName ?: event.data?.zone)?.trim().orEmpty()
+                                if (zoneName.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Zone" else "Khu vực",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Text(
+                                            text = zoneName,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+
+                                // 8. Thời gian (.time-data-item)
+                                EventInfoDataRow(
+                                    label = if (isEn) "Time" else "Thời gian",
+                                    labelColor = labelTextColor
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = formattedTime,
+                                            color = valueTextColor,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        if (formattedDate.isNotEmpty()) {
+                                            Text(
+                                                text = formattedDate,
+                                                color = labelTextColor,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // 9. Vị trí (.location-data-item)
+                                EventInfoDataRow(
+                                    label = if (isEn) "Location" else "Vị trí",
+                                    labelColor = labelTextColor
+                                ) {
+                                    Text(
+                                        text = locationText,
+                                        color = valueTextColor,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = TextAlign.End,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.widthIn(max = 230.dp)
+                                    )
+                                }
+
+                                // 10. Ảnh minh chứng (.crop-data-item)
+                                if (cropUrls.isNotEmpty()) {
+                                    EventInfoDataRow(
+                                        label = if (isEn) "Target photo" else "Ảnh minh chứng",
+                                        labelColor = labelTextColor
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            cropUrls.forEach { url ->
+                                                SubcomposeAsyncImage(
+                                                    model = url,
+                                                    contentDescription = "Evidence Crop"
+                                                ) {
+                                                    val currentPainter = painter
+                                                    val state = currentPainter.state
+                                                    if (state is AsyncImagePainter.State.Success) {
+                                                        Box {
+                                                            androidx.compose.foundation.Image(
+                                                                painter = currentPainter,
+                                                                contentDescription = "Evidence Crop",
+                                                                modifier = Modifier
+                                                                    .size(48.dp)
+                                                                    .clip(RoundedCornerShape(8.dp))
+                                                                    .background(if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                                                                    .border(
+                                                                        width = 1.5.dp,
+                                                                        color = if (isDark) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.1f),
+                                                                        shape = RoundedCornerShape(8.dp)
+                                                                    )
+                                                                    .clickable {
+                                                                        expandedCropUrl = if (expandedCropUrl == url) null else url
+                                                                    },
+                                                                contentScale = ContentScale.Crop
+                                                            )
+
+                                                            if (expandedCropUrl == url) {
+                                                                Popup(
+                                                                    alignment = Alignment.Center,
+                                                                    onDismissRequest = { expandedCropUrl = null }
+                                                                ) {
+                                                                    val intrinsicSize = currentPainter.intrinsicSize
+                                                                    val isSizeValid = intrinsicSize != Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
+                                                                    val imgModifier = if (isSizeValid) {
+                                                                        val ratio = intrinsicSize.width / intrinsicSize.height
+                                                                        Modifier
+                                                                            .widthIn(max = 280.dp)
+                                                                            .heightIn(max = 180.dp)
+                                                                            .aspectRatio(ratio, matchHeightConstraintsFirst = false)
+                                                                    } else {
+                                                                        Modifier.size(156.dp)
+                                                                    }
+
+                                                                    androidx.compose.foundation.Image(
+                                                                        painter = currentPainter,
+                                                                        contentDescription = "Zoomed Crop",
+                                                                        modifier = imgModifier
+                                                                            .shadow(16.dp, RoundedCornerShape(12.dp))
+                                                                            .clip(RoundedCornerShape(12.dp))
+                                                                            .background(Color(0xFF0F172A))
+                                                                            .clickable { expandedCropUrl = null },
+                                                                        contentScale = ContentScale.Fit
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(48.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 11. Hành động (.action-data-item)
+                                EventInfoDataRow(
+                                    label = if (isEn) "Actions" else "Hành động",
+                                    labelColor = labelTextColor
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Download Image Button (.download-btn)
+                                        PwaActionButton(
+                                            icon = LucideIcons.Download,
+                                            tint = if (isDark) Color(0xFF38BDF8) else Color(0xFF0284C7),
+                                            bgColor = if (isDark) Color(0xFF0284C7).copy(alpha = 0.16f) else Color(0xFFE0F2FE),
+                                            onClick = {
+                                                val imgUrl = getEventImageUrl(event) ?: cropUrls.firstOrNull()
+                                                if (!imgUrl.isNullOrBlank()) {
+                                                    runCatching {
+                                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imgUrl)))
+                                                    }
+                                                } else {
+                                                    Toast.makeText(
+                                                        context,
+                                                        if (isEn) "No image available" else "Không có hình ảnh để tải về",
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        )
+
+                                        // Share Event Button (.share-btn)
+                                        PwaActionButton(
+                                            icon = LucideIcons.Share2,
+                                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
+                                            bgColor = if (isDark) Color(0xFF10B981).copy(alpha = 0.16f) else Color(0xFFD1FAE5),
+                                            onClick = {
+                                                val imgUrl = getEventImageUrl(event).orEmpty()
+                                                val shareText = buildString {
+                                                    appendLine("[Sự kiện AI] $aiTaskTitle")
+                                                    appendLine("Vị trí: $locationText")
+                                                    appendLine("Thời gian: $formattedTime $formattedDate")
+                                                    if (imgUrl.isNotEmpty()) appendLine("Hình ảnh: $imgUrl")
+                                                }
+                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, "[Sự kiện AI] $aiTaskTitle")
+                                                    putExtra(Intent.EXTRA_TEXT, shareText)
+                                                }
+                                                context.startActivity(Intent.createChooser(sendIntent, if (isEn) "Share event" else "Chia sẻ sự kiện"))
+                                            }
+                                        )
+
+                                        // Related License Plates Toggle Button (.lpr-btn)
+                                        if (canShowRelatedPlates) {
+                                            PwaActionButton(
+                                                icon = LucideIcons.Barcode,
+                                                tint = if (uiState.showRelatedPlates) Color.White else if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706),
+                                                bgColor = if (uiState.showRelatedPlates) Color(0xFFD97706) else if (isDark) Color(0xFFF59E0B).copy(alpha = 0.16f) else Color(0xFFFEF3C7),
+                                                onClick = {
+                                                    viewModel.toggleRelatedLicensePlates()
+                                                }
+                                            )
+                                        }
+
+                                        // Report Wrong Event Button (.report-btn)
+                                        PwaActionButton(
+                                            icon = LucideIcons.AlertTriangle,
+                                            tint = ErrorRed,
+                                            bgColor = if (isDark) ErrorRed.copy(alpha = 0.16f) else Color(0xFFFEE2E2),
+                                            onClick = {
+                                                showConfirmReportDialog = true
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // =====================================================================
+                    // Optional Section: BIỂN SỐ LIÊN QUAN (.related-plates-section in PWA)
+                    // =====================================================================
+                    if (uiState.showRelatedPlates) {
+                        item(key = "section_related_plates") {
+                            Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 24.dp, end = 14.dp, top = 2.dp, bottom = 6.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Thông tin sự kiện", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
-                                    IconButton(onClick = { showMetadataSheet = false }) {
-                                        Icon(imageVector = androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Close")
+                                    Text(
+                                        text = if (isEn) "RELATED LICENSE PLATES" else "BIỂN SỐ LIÊN QUAN",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.6.sp,
+                                        color = sectionHeaderColor
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(24.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { viewModel.closeRelatedLicensePlates() },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = LucideIcons.X,
+                                            contentDescription = "Close related plates",
+                                            tint = sectionHeaderColor,
+                                            modifier = Modifier.size(15.dp)
+                                        )
                                     }
                                 }
-                                
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
+
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp)
+                                        .padding(bottom = 14.dp),
+                                    color = cardBgColor,
+                                    shape = RoundedCornerShape(16.dp)
                                 ) {
-                                    Column {
-                                        Text("ID SỰ KIỆN", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text("#${uiState.event?.id}", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                    Column {
-                                        Text("THỜI GIAN", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        Text(uiState.event?.time?.let { formatDateTime(it) } ?: "", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                }
-                                
-                                Column {
-                                    Text("HÀNH ĐỘNG", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = Color(0xFF10B981),
-                                            modifier = Modifier.clickable { /* action */ }
+                                    if (uiState.relatedPlatesLoading) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(110.dp),
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Icon(
-                                                imageVector = androidx.compose.material.icons.Icons.Default.Search,
-                                                contentDescription = "Action",
-                                                modifier = Modifier.padding(12.dp).size(24.dp),
-                                                tint = Color.White
+                                            WaveDotsLoading()
+                                        }
+                                    } else if (uiState.licensePlateEvents.isEmpty()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 24.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CommonEmptyState(
+                                                text = if (isEn) "No related license plates found" else "Không tìm thấy biển số liên quan"
                                             )
+                                        }
+                                    } else {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .horizontalScroll(rememberScrollState())
+                                                .padding(12.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            uiState.licensePlateEvents.forEach { plateEv ->
+                                                val isPlateActive = plateEv.id == event.id
+                                                val pText = plateEv.data?.plate?.plate ?: plateEv.data?.plate?.number ?: "---"
+                                                val pBlack = plateEv.data?.plate?.isBlacklist == true || plateEv.data?.plate?.isBlacklistSnake == true
+                                                val pTime = formatTimeOnly(plateEv.time)
+                                                val snap = AiTypeHelper.getFullImageUrl(plateEv, UserSession.domain)
+                                                    .ifEmpty { AiTypeHelper.getSnapshotUrl(plateEv, UserSession.domain) }
+
+                                                Column(
+                                                    modifier = Modifier
+                                                        .width(148.dp)
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(
+                                                            if (isPlateActive) {
+                                                                if (isDark) Color(0xFF1B2E4B) else Color(0xFFE8F3FF)
+                                                            } else {
+                                                                if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+                                                            }
+                                                        )
+                                                        .border(
+                                                            width = if (isPlateActive) 1.5.dp else 1.dp,
+                                                            color = if (isPlateActive) BrandAccent else if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0),
+                                                            shape = RoundedCornerShape(10.dp)
+                                                        )
+                                                        .clickable {
+                                                            viewModel.selectEvent(plateEv)
+                                                            selectedTab = EventMediaTab.EVENT_IMAGE
+                                                            expandedCropUrl = null
+                                                        }
+                                                        .padding(8.dp),
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    VideoFrameImage(
+                                                        url = snap.ifEmpty { null },
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .aspectRatio(16f / 9f)
+                                                            .clip(RoundedCornerShape(6.dp)),
+                                                        contentScale = ContentScale.Crop
+                                                    )
+                                                    PlateBadgePill(plate = pText, isBlacklist = pBlack)
+                                                    Text(
+                                                        text = pTime,
+                                                        fontSize = 11.sp,
+                                                        color = labelTextColor,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                } // end wrapper Box
-        } // end outer Column
-    } // end else
-    } // end Scaffold
-    
+
+                    // =====================================================================
+                    // 3. LỊCH SỬ XUẤT HIỆN (.mobile-history-sidebar in PWA)
+                    // =====================================================================
+                    item(key = "section_history_header_and_filter") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                        ) {
+                            Text(
+                                text = if (isEn) "APPEARANCE HISTORY" else "LỊCH SỬ XUẤT HIỆN",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp,
+                                color = sectionHeaderColor,
+                                modifier = Modifier.padding(start = 14.dp, top = 2.dp, bottom = 8.dp)
+                            )
+
+                            // Period Filter Dropdown (.journey-filter-compact BaseSelect with clock icon)
+                            Box(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(cardBgColor)
+                                        .clickable { showPeriodMenu = true }
+                                        .padding(horizontal = 14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = LucideIcons.Clock,
+                                            contentDescription = null,
+                                            tint = sectionHeaderColor,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = if (isEn) uiState.selectedJourneyPeriod.labelEn else uiState.selectedJourneyPeriod.labelVi,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (isDark) TextPrimaryDark else TextPrimary
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = LucideIcons.ChevronDown,
+                                        contentDescription = null,
+                                        tint = sectionHeaderColor,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showPeriodMenu,
+                                    onDismissRequest = { showPeriodMenu = false },
+                                    modifier = Modifier
+                                        .background(cardBgColor)
+                                ) {
+                                    JourneyPeriod.values().forEach { period ->
+                                        val isPeriodSelected = uiState.selectedJourneyPeriod == period
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = if (isEn) period.labelEn else period.labelVi,
+                                                        fontWeight = if (isPeriodSelected) FontWeight.Bold else FontWeight.Normal,
+                                                        color = if (isPeriodSelected) BrandAccent else if (isDark) TextPrimaryDark else TextPrimary
+                                                    )
+                                                    if (isPeriodSelected) {
+                                                        Spacer(modifier = Modifier.width(12.dp))
+                                                        Icon(
+                                                            imageVector = LucideIcons.Check,
+                                                            contentDescription = null,
+                                                            tint = BrandAccent,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                showPeriodMenu = false
+                                                viewModel.setJourneyPeriod(period)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // History List Content
+                    if (uiState.isJourneyLoading) {
+                        item(key = "section_history_loading") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(180.dp)
+                                    .padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                WaveDotsLoading()
+                            }
+                        }
+                    } else if (uiState.relatedEvents.isEmpty()) {
+                        item(key = "section_history_empty") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp)
+                                    .height(160.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .background(cardBgColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CommonEmptyState(
+                                    text = if (isEn) "No related events" else "Không có dữ liệu"
+                                )
+                            }
+                        }
+                    } else {
+                        itemsIndexed(
+                            items = uiState.relatedEvents,
+                            key = { idx, relEv -> "hist_${idx}_${relEv.serviceId}_${relEv.id}_${relEv.time}" }
+                        ) { _, relEv ->
+                            val isActive = relEv.id == event.id
+                            val camUuid = relEv.data?.cameraUUID ?: relEv.data?.cameraUuidLower
+                            val relCamName = (if (camUuid != null) cameraMap[camUuid] else null)
+                                ?: camera?.name
+                                ?: "Camera"
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                // Highlighted background matching .mobile-history-card-item.is-active (#e8f3ff in light, #1b2e4b in dark)
+                                if (isActive) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (isDark) Color(0xFF1B2E4B) else Color(0xFFE8F3FF))
+                                    ) {
+                                        MobileEventCard(
+                                            event = relEv,
+                                            cameraName = relCamName,
+                                            isListView = true,
+                                            isSelected = true,
+                                            enableSharedElement = false,
+                                            onClick = {
+                                                viewModel.selectBaseEvent(relEv)
+                                                selectedTab = EventMediaTab.EVENT_IMAGE
+                                                expandedCropUrl = null
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    MobileEventCard(
+                                        event = relEv,
+                                        cameraName = relCamName,
+                                        isListView = true,
+                                        isSelected = false,
+                                        enableSharedElement = false,
+                                        onClick = {
+                                            viewModel.selectBaseEvent(relEv)
+                                            selectedTab = EventMediaTab.EVENT_IMAGE
+                                            expandedCropUrl = null
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // End of history message (.mobile-history-end-message in PWA)
+                        item(key = "section_history_end_msg") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 30.dp, vertical = 18.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                HorizontalDivider(
+                                    modifier = Modifier.width(48.dp),
+                                    thickness = 1.dp,
+                                    color = sectionHeaderColor.copy(alpha = 0.25f)
+                                )
+                                Text(
+                                    text = if (isEn) "All events displayed" else "Đã hiển thị tất cả sự kiện",
+                                    fontSize = 12.sp,
+                                    color = sectionHeaderColor.copy(alpha = 0.75f),
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                )
+                                HorizontalDivider(
+                                    modifier = Modifier.width(48.dp),
+                                    thickness = 1.dp,
+                                    color = sectionHeaderColor.copy(alpha = 0.25f)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
     if (showConfirmReportDialog) {
-        com.tenli.oneview.ui.component.AppConfirmDialog(
-            title = "Báo cáo sự kiện",
-            message = "Bạn có chắc chắn muốn báo cáo sự kiện này là sai?",
-            confirmText = "Báo cáo",
-            cancelText = "Hủy",
+        AppConfirmDialog(
+            title = if (isEn) "Report wrong event" else "Báo cáo sự kiện",
+            message = if (isEn) "Are you sure you want to report this event as false?" else "Bạn có chắc chắn muốn báo cáo sự kiện này là sai?",
+            confirmText = if (isEn) "Report" else "Báo cáo",
+            cancelText = if (isEn) "Cancel" else "Hủy",
             onDismiss = { showConfirmReportDialog = false },
             onConfirm = {
                 showConfirmReportDialog = false
+                val targetId = uiState.event?.id ?: eventId
                 viewModel.reportEventAsFalse(
-                    eventId = eventId,
+                    eventId = targetId,
                     onSuccess = {
+                        Toast.makeText(
+                            context,
+                            if (isEn) "Reported successfully" else "Đã báo cáo sự kiện sai",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         onBack()
                     },
-                    onError = {
-                        // Optional: Show error toast
+                    onError = { errMsg ->
+                        Toast.makeText(context, errMsg, Toast.LENGTH_SHORT).show()
                     }
                 )
             }
         )
     }
+}
 
-    androidx.activity.compose.BackHandler(enabled = showMetadataSheet) {
-        showMetadataSheet = false
+@Composable
+private fun EventInfoDataRow(
+    label: String,
+    labelColor: Color,
+    content: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 32.dp)
+            .padding(vertical = 5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            color = labelColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Box(contentAlignment = Alignment.CenterEnd) {
+            content()
+        }
     }
-} // end EventDetailScreen
+}
 
-private fun formatDateTime(timestamp: Double): String {
-    val sdf = java.text.SimpleDateFormat("HH:mm:ss dd/MM", java.util.Locale.getDefault())
-    val timeMillis = if (timestamp < 100000000000.0) (timestamp * 1000).toLong() else timestamp.toLong()
-    return sdf.format(java.util.Date(timeMillis))
+@Composable
+private fun PwaActionButton(
+    icon: ImageVector,
+    tint: Color,
+    bgColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(17.dp)
+        )
+    }
+}
+
+@Composable
+private fun PlateBadgePill(
+    plate: String,
+    isBlacklist: Boolean
+) {
+    val bgColor = if (isBlacklist) Color(0xFFEF4444) else Color(0xFF1E293B)
+    val borderColor = if (isBlacklist) Color(0xFFF87171) else Color(0xFF475569)
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(5.dp))
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = plate,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.8.sp
+        )
+    }
+}
+
+/**
+ * Matches `aiTaskName` in `BaseAiEventDetailModal.vue` lines 1323-1422.
+ */
+private fun resolvePwaAiTaskTitle(event: EventData, isEn: Boolean): String {
+    val rawType = event.type.trim()
+    val tStr = rawType.lowercase()
+
+    if (AiTypeHelper.isFaceEvent(event)) {
+        return if (isEn) "Face recognition" else "Nhận diện khuôn mặt"
+    }
+    if (tStr.contains("lpr") || tStr.contains("plate") || tStr.contains("license") || event.data?.plate != null) {
+        return if (isEn) "License plate recognition" else "Nhận diện biển số xe"
+    }
+    if (tStr.contains("fire") || tStr.contains("smoke")) {
+        return if (isEn) "Fire & smoke detection" else "Phát hiện cháy / khói"
+    }
+    if (tStr.contains("crowd")) {
+        return if (isEn) "Crowd detection" else "Phát hiện đám đông"
+    }
+    if (tStr.contains("uniform") || tStr.contains("clothing")) {
+        return if (isEn) "Uniform monitoring" else "Giám sát đồng phục"
+    }
+    if (tStr.contains("vehicle") || tStr.contains("object-end")) {
+        return if (isEn) "Vehicle recognition" else "Nhận diện phương tiện"
+    }
+    if (tStr.contains("helmet")) {
+        return if (isEn) "No helmet detection" else "Phát hiện không đội mũ bảo hiểm"
+    }
+    if (tStr.contains("parking")) {
+        return if (isEn) "Illegal parking" else "Dừng đỗ sai quy định"
+    }
+    if (tStr.contains("wrong_way") || tStr.contains("crossing")) {
+        return if (isEn) "Wrong-way driving" else "Đi ngược chiều"
+    }
+    if (tStr.contains("person") || tStr.contains("intrusion")) {
+        return if (isEn) "Intrusion detection" else "Phát hiện xâm nhập"
+    }
+    if (tStr.contains("sidewalk") || tStr.contains("encroachment")) {
+        return if (isEn) "Sidewalk encroachment" else "Lấn chiếm vỉa hè"
+    }
+    if (tStr.contains("garbage") || tStr.contains("littering")) {
+        return if (isEn) "Littering detection" else "Phát hiện xả rác"
+    }
+    if (tStr.contains("fall")) {
+        return if (isEn) "Fall detection" else "Phát hiện té ngã"
+    }
+    if (tStr.contains("smoking") || tStr.contains("pose")) {
+        return if (isEn) "Smoking detection" else "Phát hiện hút thuốc"
+    }
+    if (tStr.contains("phone")) {
+        return if (isEn) "Phone usage" else "Sử dụng điện thoại"
+    }
+    if (tStr.contains("violence")) {
+        return if (isEn) "Violent behavior" else "Hành vi bạo lực"
+    }
+    if (tStr.contains("no_mask") || tStr.contains("masked") || tStr.contains("mask")) {
+        return if (isEn) "No mask violation" else "Không đeo khẩu trang"
+    }
+    if (tStr.contains("gloves") || tStr.contains("glove")) {
+        return if (isEn) "No gloves violation" else "Không đeo găng tay"
+    }
+    if (tStr.contains("hairnet")) {
+        return if (isEn) "No safety cap" else "Không đội mũ bảo hộ"
+    }
+    if (tStr.contains("construction")) {
+        return if (isEn) "Construction detection" else "Phát hiện thi công"
+    }
+
+    return AiTypeHelper.getTypeName(rawType, isEn)
+}
+
+/**
+ * Matches `formattedTimeObj` in `BaseAiEventDetailModal.vue` lines 3035-3046:
+ * `{ time: 'HH:mm:ss', date: 'Hôm nay' | 'DD/MM/YYYY' }`
+ */
+private fun formatPwaEventTimeAndDate(timestamp: Double, isEn: Boolean): Pair<String, String> {
+    if (timestamp <= 0) return Pair("--", "")
+    val timeMs = if (timestamp < 100000000000.0) (timestamp * 1000).toLong() else timestamp.toLong()
+    val date = Date(timeMs)
+    val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    val dateFmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+
+    val calNow = Calendar.getInstance()
+    val calEv = Calendar.getInstance().apply { timeInMillis = timeMs }
+    val isToday = calNow.get(Calendar.YEAR) == calEv.get(Calendar.YEAR) &&
+        calNow.get(Calendar.DAY_OF_YEAR) == calEv.get(Calendar.DAY_OF_YEAR)
+
+    val dateStr = if (isToday) {
+        if (isEn) "Today" else "Hôm nay"
+    } else {
+        dateFmt.format(date)
+    }
+    return Pair(timeFmt.format(date), dateStr)
+}
+
+private fun formatTimeOnly(timestamp: Double): String {
+    if (timestamp <= 0) return "--:--:--"
+    val timeMs = if (timestamp < 100000000000.0) (timestamp * 1000).toLong() else timestamp.toLong()
+    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timeMs))
+}
+
+private fun isVehicleRelatedEvent(event: EventData, plateNumber: String): Boolean {
+    if (plateNumber.isNotEmpty()) return true
+    if (AiTypeHelper.isFaceEvent(event)) return false
+    val d = event.data
+    if (d?.plate != null || d?.vehicle != null) return true
+    val t = event.type.lowercase()
+    val nonVehicleKeywords = listOf(
+        "uniform", "clothing", "fire", "smoke", "crowd", "face", "attendance",
+        "fall", "smoking", "phone", "violence", "gloves", "hairnet", "mask",
+        "garbage", "littering", "intrusion", "person", "heatmap", "construction"
+    )
+    if (nonVehicleKeywords.any { t.contains(it) }) return false
+    val vehicleKeywords = listOf(
+        "license-plate", "lpr", "plate", "vehicle", "object-end", "parking",
+        "crossing-tracking", "wrong_way", "wrong-way", "traffic", "helmet",
+        "sidewalk", "encroachment"
+    )
+    return vehicleKeywords.any { t.contains(it) }
+}
+
+private fun resolveVehicleTypeLabel(event: EventData, taskTitle: String): String {
+    val d = event.data ?: return ""
+    val rawType = (d.vehicle?.type ?: d.vehicleTypeSnake ?: d.vehicleType ?: d.plate?.vehicleType)?.trim().orEmpty()
+    if (rawType.isEmpty()) return ""
+    val lower = rawType.lowercase()
+    if (lower.startsWith("sensor-") || lower.contains("sensor") || lower == "vehicle" || lower == "phương tiện" || lower == "nhận diện phương tiện") {
+        return ""
+    }
+    if (taskTitle.isNotEmpty() && (lower == taskTitle.lowercase() || taskTitle.lowercase().contains(lower))) {
+        return ""
+    }
+    val map = mapOf(
+        "car" to "Ô tô",
+        "truck" to "Xe tải",
+        "bus" to "Xe khách / Xe buýt",
+        "motorbike" to "Xe máy",
+        "motorcycle" to "Xe máy",
+        "bicycle" to "Xe đạp",
+        "bike" to "Xe máy",
+        "van" to "Xe bán tải / Van",
+        "container" to "Xe container",
+        "suv" to "Xe SUV",
+        "sedan" to "Xe Sedan"
+    )
+    return map[lower] ?: rawType
+}
+
+private fun resolveVehicleColorLabel(event: EventData): String {
+    val d = event.data ?: return ""
+    val raw = (d.vehicle?.color ?: d.color ?: d.vehicleColor)?.trim().orEmpty()
+    if (raw.isEmpty()) return ""
+    val lower = raw.lowercase()
+    val map = mapOf(
+        "white" to "Trắng",
+        "black" to "Đen",
+        "red" to "Đỏ",
+        "blue" to "Xanh dương",
+        "green" to "Xanh lá",
+        "yellow" to "Vàng",
+        "silver" to "Bạc",
+        "grey" to "Xám",
+        "gray" to "Xám",
+        "white_silver" to "Trắng bạc"
+    )
+    return map[lower] ?: raw
+}
+
+private fun resolveFaceProfileDisplayName(
+    event: EventData,
+    profiles: List<BsProfileModel>,
+    isEn: Boolean
+): String {
+    if (AiTypeHelper.isStranger(event)) {
+        return if (isEn) "Stranger" else "Người lạ"
+    }
+    val d = event.data
+    val directName = AiTypeHelper.extractFacePersonName(event, isEn)
+    val profileUuid = (d?.face?.profileUUID ?: d?.face?.profileUUIDUpper ?: d?.profileUUID ?: d?.profileUUIDUpper)?.trim()
+    val profileId = d?.face?.profileId ?: d?.profileId
+
+    val matchedProfile = when {
+        !profileUuid.isNullOrBlank() -> profiles.find { it.uuid.equals(profileUuid, ignoreCase = true) }
+        profileId != null -> profiles.find { it.id == profileId }
+        directName.isNotBlank() -> profiles.find { it.name.trim().equals(directName.trim(), ignoreCase = true) }
+        else -> null
+    }
+
+    val baseName = matchedProfile?.name?.takeIf { it.isNotBlank() }
+        ?: directName.takeIf { it.isNotBlank() }
+        ?: (if (isEn) "Stranger" else "Người lạ")
+
+    val idCode = (d?.idCode ?: d?.idCodeSnake ?: matchedProfile?.idCode ?: matchedProfile?.idCodeSnake)?.trim().orEmpty()
+    if (idCode.isNotEmpty() && baseName != "Người lạ" && baseName != "Stranger" && !baseName.contains(idCode)) {
+        return "$baseName ($idCode)"
+    }
+    return baseName
+}
+
+private fun resolveFaceGroupNameAndColor(
+    event: EventData,
+    profiles: List<BsProfileModel>,
+    groups: List<BsProfileGroupModel>,
+    isEn: Boolean
+): Pair<String, Color> {
+    if (AiTypeHelper.isStranger(event)) {
+        return Pair(if (isEn) "Stranger" else "Người lạ", Color(0xFFDC2626))
+    }
+    val d = event.data
+    val directGroupName = (d?.face?.groupName ?: d?.groupName)?.trim().orEmpty()
+    val directGroupColor = d?.face?.groupColor ?: d?.face?.groupColorSnake ?: d?.groupColor ?: d?.groupColorSnake ?: event.groupColor
+
+    val profileUuid = (d?.face?.profileUUID ?: d?.face?.profileUUIDUpper ?: d?.profileUUID ?: d?.profileUUIDUpper)?.trim()
+    val profileId = d?.face?.profileId ?: d?.profileId
+    val directName = AiTypeHelper.extractFacePersonName(event, isEn)
+
+    val matchedProfile = when {
+        !profileUuid.isNullOrBlank() -> profiles.find { it.uuid.equals(profileUuid, ignoreCase = true) }
+        profileId != null -> profiles.find { it.id == profileId }
+        directName.isNotBlank() -> profiles.find { it.name.trim().equals(directName.trim(), ignoreCase = true) }
+        else -> null
+    }
+
+    val profileGroup = matchedProfile?.groups?.firstOrNull()
+        ?: matchedProfile?.groupIds?.firstOrNull()?.let { gId -> groups.find { it.id == gId } }
+        ?: (d?.face?.groupId ?: d?.groupId ?: event.groupId)?.let { gKey ->
+            groups.find { it.uuid == gKey || it.id?.toString() == gKey }
+        }
+
+    val resolvedGroupName = when {
+        directGroupName.isNotEmpty() && directGroupName != "---" -> directGroupName
+        !matchedProfile?.groupName.isNullOrBlank() -> matchedProfile!!.groupName!!
+        !matchedProfile?.groupNameSnake.isNullOrBlank() -> matchedProfile!!.groupNameSnake!!
+        !profileGroup?.name.isNullOrBlank() -> profileGroup!!.name
+        else -> "---"
+    }
+
+    val colorHex = directGroupColor
+        ?: matchedProfile?.groupColor
+        ?: matchedProfile?.groupColorSnake
+        ?: profileGroup?.config?.ui?.color
+        ?: profileGroup?.config?.ui?.background
+
+    val resolvedColor = AiTypeHelper.parseHexColor(colorHex) ?: Color(0xFF0980EE)
+    return Pair(resolvedGroupName, resolvedColor)
 }

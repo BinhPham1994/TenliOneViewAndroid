@@ -91,6 +91,9 @@ data class BsProfileModel(
     val id: Int? = null,
     val uuid: String? = null,
     val name: String,
+    val idCode: String? = null,
+    @SerializedName("id_code")
+    val idCodeSnake: String? = null,
     val description: String? = null,
     val avatar: String? = null,
     @SerializedName("other_info")
@@ -102,7 +105,13 @@ data class BsProfileModel(
     val config: BsProfileConfig? = null,
     val groups: List<BsProfileGroupModel>? = null,
     @SerializedName("group_ids")
-    val groupIds: List<Int>? = null
+    val groupIds: List<Int>? = null,
+    val groupColor: String? = null,
+    @SerializedName("group_color")
+    val groupColorSnake: String? = null,
+    val groupName: String? = null,
+    @SerializedName("group_name")
+    val groupNameSnake: String? = null
 )
 
 // ==================== Image Profile ====================
@@ -323,4 +332,425 @@ data class FoodModel(
     val id: Int,
     val userId: Int,
     val extra: FoodTraceability
+)
+
+// ==================== VMS Event Count By Camera & Type ====================
+
+data class VmsEventCountByCameraAndTypeModel(
+    val eventType: String,
+    val cameraUUID: String,
+    val count: Int
+)
+
+// ==================== Attendance & Shift & Holiday ====================
+
+data class AttendanceAssignmentModel(
+    val id: Int? = null,
+    @SerializedName("target_type")
+    val targetType: String,
+    @SerializedName("target_group_uuid")
+    val targetGroupUuid: String? = null,
+    @SerializedName("target_profile_uuid")
+    val targetProfileUuid: String? = null,
+    @SerializedName("shift_uuid")
+    val shiftUuid: String,
+    @SerializedName("valid_from")
+    val validFrom: String? = null,
+    @SerializedName("valid_to")
+    val validTo: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
+    @SerializedName("shift_name")
+    val shiftName: String? = null,
+    @SerializedName("shift_code")
+    val shiftCode: String? = null,
+    @SerializedName("shift_id")
+    val shiftId: Int? = null
+)
+
+data class ShiftModel(
+    val id: Int? = null,
+    val uuid: String? = null,
+    val code: String,
+    val name: String,
+    val description: String? = null,
+    @SerializedName("start_time")
+    val startTime: String,
+    @SerializedName("end_time")
+    val endTime: String,
+    @SerializedName("start_work")
+    val startWork: String,
+    @SerializedName("end_work")
+    val endWork: String,
+    @SerializedName("day_of_week_from")
+    val dayOfWeekFrom: Int? = null,
+    @SerializedName("day_of_week_to")
+    val dayOfWeekTo: Int? = null,
+    @SerializedName("week_modulus")
+    val weekModulus: Int? = null,
+    @SerializedName("week_remainder")
+    val weekRemainder: Int? = null,
+    @SerializedName("check_mode")
+    val checkMode: String? = null,
+    @SerializedName("valid_from")
+    val validFrom: String? = null,
+    @SerializedName("valid_to")
+    val validTo: String? = null,
+    @SerializedName("extra_config")
+    val extraConfig: Any? = null,
+    @SerializedName("days_of_week")
+    val daysOfWeek: String? = null,
+    @SerializedName("days_mask")
+    val daysMask: Int? = null,
+    @SerializedName("specific_days")
+    val specificDays: List<Int>? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+)
+
+data class HolidayModel(
+    val id: Int? = null,
+    val uuid: String? = null,
+    val name: String,
+    @SerializedName("holiday_date")
+    val holidayDate: String,
+    @SerializedName("is_yearly_recurring")
+    val isYearlyRecurring: Any? = null,
+    val description: String? = null,
+    @SerializedName("extra_info")
+    val extraInfo: Any? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+)
+
+data class FaceRecognitionCountByTimeModel(
+    val time: Double,
+    val date: String,
+    val hour: Int,
+    val evalue: Int,
+    val pvalue: Int
+)
+
+data class AttendanceDataModel(
+    val id: Int,
+    @SerializedName("service_id")
+    val serviceId: Int,
+    @SerializedName("origin_id")
+    val originId: Int,
+    @SerializedName("camera_uuid")
+    val cameraUuid: String,
+    val image: String,
+    val video: String,
+    @SerializedName("profile_name")
+    val profileName: String,
+    @SerializedName("profile_uuid")
+    val profileUuid: String,
+    @SerializedName("face_crop_image")
+    val faceCropImage: String? = null,
+    @SerializedName("container_id")
+    val containerId: String? = null,
+    val time: Double,
+    @SerializedName("shift_date")
+    val shiftDate: String,
+    @SerializedName("time_in_day")
+    val timeInDay: String,
+    @SerializedName("day_of_week")
+    val dayOfWeek: Int,
+    @SerializedName("week_of_year")
+    val weekOfYear: Int,
+    val tz: String,
+    @SerializedName("shift_code")
+    val shiftCode: String,
+    @SerializedName("shift_start_time_work")
+    val shiftStartTimeWork: String,
+    @SerializedName("shift_end_time_work")
+    val shiftEndTimeWork: String,
+    @SerializedName("arrival_time")
+    val arrivalTime: Double,
+    @SerializedName("departure_time")
+    val departureTime: Double,
+    @SerializedName("max_start_time")
+    val maxStartTime: Double,
+    @SerializedName("min_end_time")
+    val minEndTime: Double,
+    @SerializedName("is_arrival")
+    val isArrival: Int,
+    @SerializedName("is_departure")
+    val isDeparture: Int,
+    @SerializedName("arrival_late_time")
+    val arrivalLateTime: Double,
+    @SerializedName("departure_early_time")
+    val departureEarlyTime: Double
+)
+
+data class EventProfileGroupCountRecursive(
+    val count: Int,
+    @SerializedName("min_time")
+    val minTime: Double? = null,
+    @SerializedName("max_time")
+    val maxTime: Double? = null
+)
+
+data class EventProfileGroupCountModel(
+    @SerializedName("group_id")
+    val groupId: Int,
+    @SerializedName("group_uuid")
+    val groupUuid: String,
+    @SerializedName("group_name")
+    val groupName: String,
+    @SerializedName("group_parent_uuid")
+    val groupParentUuid: String? = null,
+    val count: Int,
+    @SerializedName("min_time")
+    val minTime: Double? = null,
+    @SerializedName("max_time")
+    val maxTime: Double? = null,
+    val recursive: EventProfileGroupCountRecursive? = null
+)
+
+data class ProfileShiftConfigModel(
+    val profileUUID: String,
+    val shiftCode: String
+)
+
+// ==================== Event Config & Notification Settings ====================
+
+data class EventConfigNotification(
+    val enabled: Boolean? = null
+)
+
+data class EventConfigGroupModel(
+    val key: String,
+    val source: String? = null,
+    val features: List<String>? = null,
+    val notification: EventConfigNotification? = null
+)
+
+data class EventConfigModel(
+    val key: String,
+    val target: String? = null,
+    val device: Map<String, Any>? = null,
+    val display: Map<String, Any>? = null,
+    val content: Map<String, Any>? = null,
+    val notification: Map<String, Any>? = null,
+    val level: Int? = null,
+    val media: Map<String, Any>? = null,
+    val data: Any? = null,
+    val confirmAble: Boolean? = null,
+    val reportMode: String? = null,
+    val viewMode: String? = null,
+    val values: Map<String, Any>? = null,
+    val eventTypeGroup: String? = null,
+    val source: String? = null
+)
+
+data class UserNotificationGlobalSetting(
+    var enabled: Boolean = true,
+    @SerializedName("pause_until")
+    var pauseUntil: Any? = null
+)
+
+data class UserNotificationAlarmMode(
+    var default: String? = "push"
+)
+
+data class UserNotificationDetailSetting(
+    var enabled: Boolean? = true,
+    var alarmMode: UserNotificationAlarmMode? = null
+)
+
+data class UserNotificationItemSetting(
+    var notification: UserNotificationDetailSetting? = null
+)
+
+data class UserNotificationOverrides(
+    @SerializedName("event_type_groups")
+    var eventTypeGroups: MutableMap<String, UserNotificationItemSetting>? = mutableMapOf(),
+    @SerializedName("event_types")
+    var eventTypes: MutableMap<String, UserNotificationItemSetting>? = mutableMapOf()
+)
+
+data class UserNotificationSettingsModel(
+    var global: UserNotificationGlobalSetting = UserNotificationGlobalSetting(),
+    var overrides: UserNotificationOverrides = UserNotificationOverrides(),
+    @SerializedName("global_scripts")
+    var globalScripts: List<Any>? = null
+)
+
+data class FirebaseConfigModel(
+    val apiKey: String? = null,
+    val projectId: String? = null,
+    val authDomain: String? = null,
+    val messagingSenderId: String? = null,
+    val appId: String? = null,
+    val storageBucket: String? = null,
+    val measurementId: String? = null,
+    val vapidKey: String? = null
+)
+
+data class PublicConfigModel(
+    val timezone: String? = null,
+    val locale: String? = null,
+    val organizationName: String? = null,
+    val organizationCode: String? = null,
+    val basePath: String? = null,
+    val publicUrl: String? = null,
+    val apiVersion: String? = null,
+    val buildVersion: String? = null,
+    val serverBuildTime: String? = null,
+    val commitHash: String? = null,
+    val buildDescription: String? = null,
+    val redirectShortPath: String? = null,
+    val firebase: FirebaseConfigModel? = null
+)
+
+data class NotificationTokenRegisterModel(
+    val token: String,
+    val type: String = "android",
+    val status: Int? = 1,
+    @SerializedName("client_id")
+    val clientId: String? = null
+)
+
+data class OneviewConfigModel(
+    val profile: Map<String, Any>? = null,
+    val attendance: Map<String, Any>? = null,
+    val uniform: Map<String, Any>? = null
+)
+
+// ==================== Uniform Config & Labels ====================
+
+data class UniformConfigModel(
+    val id: Int? = null,
+    val uuid: String? = null,
+    val code: String,
+    val name: String,
+    val description: String? = null,
+    @SerializedName("check_mode")
+    val checkMode: String? = null,
+    @SerializedName("valid_from")
+    val validFrom: String? = null,
+    @SerializedName("valid_to")
+    val validTo: String? = null,
+    val rules: Map<String, Any>? = null,
+    @SerializedName("extra_config")
+    val extraConfig: Map<String, Any>? = null,
+    @SerializedName("extra_info")
+    val extraInfo: Any? = null,
+    @SerializedName("is_active")
+    val isActive: Any? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+)
+
+data class UniformLabelUiConfig(
+    val color: String? = null
+)
+
+data class UniformLabelExtraConfig(
+    val ui: UniformLabelUiConfig? = null,
+    @SerializedName("gallery_images")
+    val galleryImages: List<String>? = null
+)
+
+data class UniformLabelModel(
+    val id: Int,
+    val uuid: String,
+    val code: String,
+    val name: String,
+    @SerializedName("category_key")
+    val categoryKey: String,
+    @SerializedName("image_uuid")
+    val imageUuid: String? = null,
+    val description: String? = null,
+    val priority: Int? = null,
+    @SerializedName("is_active")
+    val isActive: Any? = null,
+    @SerializedName("extra_config")
+    val extraConfig: UniformLabelExtraConfig? = null,
+    @SerializedName("extra_info")
+    val extraInfo: Any? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
+    @SerializedName("category_name")
+    val categoryName: String? = null,
+    @SerializedName("category_uuid")
+    val categoryUuid: String? = null
+)
+
+data class UniformAssignmentModel(
+    val id: Int? = null,
+    val uuid: String? = null,
+    val code: String? = null,
+    val name: String,
+    val description: String? = null,
+    @SerializedName("config_uuid")
+    val configUuid: String,
+    @SerializedName("config_name")
+    val configName: String? = null,
+    @SerializedName("config_code")
+    val configCode: String? = null,
+    @SerializedName("uniform_config_id")
+    val uniformConfigId: Int? = null,
+    @SerializedName("target_type")
+    val targetType: String,
+    @SerializedName("target_values")
+    val targetValues: List<String> = emptyList(),
+    @SerializedName("zone_type")
+    val zoneType: String? = null,
+    @SerializedName("zone_values")
+    val zoneValues: Any? = null,
+    @SerializedName("shift_uuids")
+    val shiftUuids: List<String>? = null,
+    val priority: Int? = null,
+    @SerializedName("is_active")
+    val isActive: Any? = null,
+    @SerializedName("empty_action")
+    val emptyAction: String? = null,
+    @SerializedName("valid_from")
+    val validFrom: String? = null,
+    @SerializedName("valid_to")
+    val validTo: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null
+)
+
+data class UniformEvaluationInfo(
+    @SerializedName("is_violation")
+    val isViolation: Boolean = false,
+    @SerializedName("config_code")
+    val configCode: String? = null,
+    @SerializedName("assignment_uuid")
+    val assignmentUuid: String? = null,
+    @SerializedName("matched_shift_code")
+    val matchedShiftCode: String? = null,
+    @SerializedName("matched_scope")
+    val matchedScope: String? = null,
+    @SerializedName("valid_labels")
+    val validLabels: List<String>? = null
+)
+
+data class UniformComplianceEvaluationItem(
+    val id: Any,
+    val serviceId: Any,
+    val originId: Any? = null,
+    val cameraId: Any? = null,
+    val type: String,
+    val time: Double,
+    val isConfirmed: Boolean = true,
+    val data: EventDataDetail? = null,
+    @SerializedName("uniform_evaluation")
+    val uniformEvaluation: UniformEvaluationInfo? = null
 )

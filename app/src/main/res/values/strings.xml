@@ -90,7 +90,7 @@
     <string name="forgot_pass_new_pass_desc">Mật khẩu nên có ít nhất 8 ký tự bao gồm chữ và số.</string>
 
     <string name="tab_home">Trang chủ</string>
-    <string name="tab_monitor">Giám sát</string>
+    <string name="tab_monitor">Trực tiếp</string>
     <string name="tab_event">Sự kiện</string>
     <string name="tab_setting">Cài đặt</string>
 

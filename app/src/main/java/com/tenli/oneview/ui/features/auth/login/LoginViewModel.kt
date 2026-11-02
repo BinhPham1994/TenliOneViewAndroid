@@ -30,7 +30,27 @@ class LoginViewModel(
     private val dispatcherProvider: DispatcherProvider
 ) : AndroidViewModel(application) {
 
+    private val _uiState = MutableStateFlow(LoginUiState())
+    val uiState = _uiState.asStateFlow()
+    private val _event = MutableSharedFlow<LoginEvent>()
+    val event = _event.asSharedFlow()
+
+    private var notifyToken: String = ""
+
     init {
+        val savedDomain = GlobalData.preferences.getString("DOMAIN_KEY", "") ?: ""
+        val savedUser = GlobalData.preferences.getString(AppKeys.USERNAME_KEY, "") ?: ""
+        val savedPass = GlobalData.preferences.getString(AppKeys.PASSWORD_KEY, "") ?: ""
+        if (savedDomain.isNotEmpty() || savedUser.isNotEmpty()) {
+            _uiState.update {
+                it.copy(
+                    domain = savedDomain,
+                    email = savedUser,
+                    password = savedPass,
+                    isLoginActive = savedDomain.isNotEmpty() && savedUser.isNotEmpty() && savedPass.isNotEmpty()
+                )
+            }
+        }
         viewModelScope.launch {
             try {
                 notifyToken = FirebaseMessaging.getInstance().token.await()
@@ -40,15 +60,19 @@ class LoginViewModel(
     }
 
     fun onDomainChanged(domain: String) {
-        _uiState.update { it.copy(domain = domain, isLoginActive = domain.isNotEmpty() && it.email.isNotEmpty() && it.password.isNotEmpty()) }
+        _uiState.update { it.copy(domain = domain, errorMessage = null, isLoginActive = domain.isNotEmpty() && it.email.isNotEmpty() && it.password.isNotEmpty()) }
     }
 
     fun onEmailChanged(email: String) {
-        _uiState.update { it.copy(email = email, isLoginActive = it.domain.isNotEmpty() && email.isNotEmpty() && it.password.isNotEmpty()) }
+        _uiState.update { it.copy(email = email, errorMessage = null, isLoginActive = it.domain.isNotEmpty() && email.isNotEmpty() && it.password.isNotEmpty()) }
     }
 
     fun onPasswordChanged(pass: String) {
-        _uiState.update { it.copy(password = pass, isLoginActive = pass.isNotEmpty() && it.email.isNotEmpty() && it.domain.isNotEmpty()) }
+        _uiState.update { it.copy(password = pass, errorMessage = null, isLoginActive = pass.isNotEmpty() && it.email.isNotEmpty() && it.domain.isNotEmpty()) }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(errorMessage = null) }
     }
 
     fun toggleShowPassword() {
@@ -56,25 +80,30 @@ class LoginViewModel(
     }
 
     fun login() {
-        val email = _uiState.value.email
-        val domain = _uiState.value.domain
+        val email = _uiState.value.email.trim()
+        val domain = _uiState.value.domain.trim()
+        val password = _uiState.value.password
         
-        // Removed email validation because VMS username might not be an email
-        if (email.isEmpty()) {
-            viewModelScope.launch { _event.emit(LoginEvent.ShowError("Tài khoản không được để trống")) }
+        if (domain.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Vui lòng nhập domain dự án") }
             return
         }
         
-        if (domain.isEmpty()) {
-            viewModelScope.launch { _event.emit(LoginEvent.ShowError("Domain không được để trống")) }
+        if (email.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Vui lòng nhập tên đăng nhập") }
+            return
+        }
+
+        if (password.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Vui lòng nhập mật khẩu") }
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true) }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             val request = com.tenli.oneview.model.network.LogInModel(
                 username = email,
-                password = _uiState.value.password
+                password = password
             )
             try {
                 val result = authRepository.loginVms(domain, request)
@@ -84,31 +113,33 @@ class LoginViewModel(
                         handleLoginSuccess(loginData, domain)
                         _event.emit(LoginEvent.LoginSuccess)
                     } else {
-                        _event.emit(LoginEvent.ShowError("Dữ liệu phản hồi rỗng"))
+                        _uiState.update { it.copy(errorMessage = "Dữ liệu phản hồi rỗng") }
                     }
                 } else {
                     val exception = result.exceptionOrNull()
                     val errorMsg = exception?.message ?: "Unknown error"
                     
-                    if (errorMsg.contains("failed with code 401") || errorMsg.contains("failed with code 400")) {
-                        _event.emit(LoginEvent.ShowError("Thông tin tài khoản hoặc mật khẩu không chính xác."))
+                    val msg = if (errorMsg.contains("failed with code 401") || errorMsg.contains("failed with code 400") || errorMsg.contains("Failed to authenticate")) {
+                        "Thông tin đăng nhập không chính xác"
                     } else if (exception is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
-                        _event.emit(LoginEvent.ShowError("Không thể kết nối máy chủ. Vui lòng kiểm tra lại Domain dự án hoặc mạng."))
+                        "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
                     } else if (exception is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
-                        _event.emit(LoginEvent.ShowError("Kết nối mạng quá hạn, vui lòng thử lại."))
+                        "Kết nối mạng quá hạn, vui lòng thử lại."
                     } else {
-                        _event.emit(LoginEvent.ShowError("Đã có lỗi xảy ra. Vui lòng thử lại sau."))
+                        "Thông tin đăng nhập không chính xác"
                     }
+                    _uiState.update { it.copy(errorMessage = msg) }
                 }
             } catch (e: Exception) {
                 val errorMsg = e.message ?: ""
-                if (e is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
-                    _event.emit(LoginEvent.ShowError("Không thể kết nối máy chủ. Vui lòng kiểm tra lại Domain dự án hoặc mạng."))
+                val msg = if (e is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
+                    "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
                 } else if (e is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
-                    _event.emit(LoginEvent.ShowError("Kết nối mạng quá hạn, vui lòng thử lại."))
+                    "Kết nối mạng quá hạn, vui lòng thử lại."
                 } else {
-                    _event.emit(LoginEvent.ShowError("Đã có lỗi xảy ra. Vui lòng thử lại sau."))
+                    "Có lỗi xảy ra, vui lòng thử lại sau."
                 }
+                _uiState.update { it.copy(errorMessage = msg) }
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -116,13 +147,6 @@ class LoginViewModel(
     }
 
     // Removed Google login logic
-
-    private val _uiState = MutableStateFlow(LoginUiState())
-    val uiState = _uiState.asStateFlow()
-    private val _event = MutableSharedFlow<LoginEvent>()
-    val event = _event.asSharedFlow()
-
-    private var notifyToken: String = ""
 
     private fun handleLoginSuccess(loginData: LoginResponseData, domain: String) {
         val formattedDomain = if (!domain.startsWith("http://") && !domain.startsWith("https://")) "http://$domain" else domain

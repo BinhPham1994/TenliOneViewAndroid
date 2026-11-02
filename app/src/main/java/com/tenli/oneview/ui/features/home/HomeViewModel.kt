@@ -9,7 +9,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.CachedHomeData
+import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.data.network.api.AiApi
 import com.tenli.oneview.data.network.api.BsApi
 import com.tenli.oneview.data.network.api.EventApi
 import com.tenli.oneview.data.network.api.VmsApi
@@ -20,6 +22,7 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByCameraModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,9 +52,12 @@ data class HomeUiState(
     val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
     val cameraStatusMap: Map<String, String> = emptyMap(),
+    val recordStatusMap: Map<String, String> = emptyMap(),
+    val runningAiTasks: Int = 0,
+    val totalAiTasks: Int = 0,
+    val isListView: Boolean = true,
     val error: String? = null
 )
-
 
 @OptIn(FlowPreview::class)
 class HomeViewModel(
@@ -62,13 +68,34 @@ class HomeViewModel(
     private val bsApi = LoginAuthClient.create(BsApi::class.java)
     private val eventApi = LoginAuthClient.create(EventApi::class.java)
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
+    private val aiApi = LoginAuthClient.create(AiApi::class.java)
 
-    private val _uiState = MutableStateFlow(HomeUiState())
+    private val _uiState = MutableStateFlow(
+        HomeUiState(
+            isListView = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
+        )
+    )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     init {
         fetchDashboardData()
         listenToWebSocket()
+        webSocketManager.connectAllReports()
+    }
+
+    fun toggleViewMode() {
+        val nextIsList = !_uiState.value.isListView
+        GlobalData.preferences.edit()
+            .putString("mobile_event_view_mode", if (nextIsList) "list" else "grid")
+            .apply()
+        _uiState.update { it.copy(isListView = nextIsList) }
+    }
+
+    fun syncViewModeFromPrefs() {
+        val savedIsList = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
+        if (_uiState.value.isListView != savedIsList) {
+            _uiState.update { it.copy(isListView = savedIsList) }
+        }
     }
 
     private fun listenToWebSocket() {
@@ -77,8 +104,7 @@ class HomeViewModel(
             webSocketManager.notifyEvent
                 .debounce(600L)
                 .collect { _ ->
-                    Log.d("HomeViewModel", "notifyEvent debounced → filter=${_uiState.value.selectedFilter}")
-                    // Chỉ cập nhật nếu đang ở filter TODAY
+                    Log.d("HomeViewModel", "notifyEvent debounced -> filter=${_uiState.value.selectedFilter}")
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
                         fetchRecentEvents()
                     }
@@ -87,6 +113,11 @@ class HomeViewModel(
         viewModelScope.launch {
             webSocketManager.cameraStatusMap.collect { statusMap ->
                 _uiState.update { it.copy(cameraStatusMap = statusMap) }
+            }
+        }
+        viewModelScope.launch {
+            webSocketManager.recordStatusMap.collect { recMap ->
+                _uiState.update { it.copy(recordStatusMap = recMap) }
             }
         }
         viewModelScope.launch {
@@ -100,6 +131,54 @@ class HomeViewModel(
         }
     }
 
+    /**
+     * Khớp hoàn toàn với MobileHomePage.vue:
+     * Fetch theo batch 50 sự kiện (tối đa 3 lần), lọc các loại AI được bật (AiTypeHelper.isAiTypeEnabled),
+     * loại trùng ID và chỉ giữ đúng 5 sự kiện mới nhất (permittedEvents.slice(0, 5)).
+     */
+    private suspend fun fetchPermittedRecentEvents(
+        fromSec: Long,
+        toSec: Long,
+        serviceId: Int?
+    ): List<EventData> {
+        val permitted = mutableListOf<EventData>()
+        val seenIds = mutableSetOf<Int>()
+        var lastId: Int? = null
+        val batchSize = 50
+        var attempts = 0
+        val maxAttempts = 3
+
+        while (permitted.size < 5 && attempts < maxAttempts) {
+            attempts++
+            val resp = runCatching {
+                eventApi.getDataList(
+                    count = batchSize,
+                    lastId = lastId,
+                    from = fromSec,
+                    to = toSec,
+                    serviceId = serviceId
+                )
+            }.getOrNull()
+
+            if (resp == null || !resp.isSuccessful) break
+            val data = resp.body() ?: emptyList()
+            if (data.isEmpty()) break
+
+            for (ev in data) {
+                if (AiTypeHelper.isAiTypeEnabled(ev.type) && !seenIds.contains(ev.id)) {
+                    seenIds.add(ev.id)
+                    permitted.add(ev)
+                    if (permitted.size >= 5) break
+                }
+            }
+
+            if (data.size < batchSize) break
+            lastId = data.last().id
+        }
+
+        return permitted.take(5)
+    }
+
     private fun fetchRecentEvents() {
         viewModelScope.launch {
             try {
@@ -111,17 +190,15 @@ class HomeViewModel(
                 calendar.set(Calendar.MILLISECOND, 0)
                 val fromTime = calendar.timeInMillis
 
-                val recentResponse = eventApi.getDataList(
-                    count = 5,
-                    from = fromTime / 1000,
-                    to = toTime / 1000,
+                val newEvents = fetchPermittedRecentEvents(
+                    fromSec = fromTime / 1000,
+                    toSec = toTime / 1000,
                     serviceId = _uiState.value.selectedServiceId
                 )
-                if (recentResponse.isSuccessful) {
-                    val newEvents = recentResponse.body() ?: emptyList()
+                if (newEvents.isNotEmpty()) {
                     _uiState.update { state ->
-                        // Hợp nhất (merge) để tránh trùng lặp
                         val merged = (newEvents + state.recentEvents)
+                            .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
                             .distinctBy { it.id }
                             .take(5)
                         state.copy(recentEvents = merged)
@@ -145,11 +222,20 @@ class HomeViewModel(
         fetchDashboardData()
     }
 
+    fun applyFilters(filter: TimeFilter, serviceId: Int?) {
+        if (_uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
+        _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId) }
+        fetchDashboardData()
+    }
+
+    fun resetFilters() {
+        applyFilters(TimeFilter.TODAY, null)
+    }
+
     fun fetchDashboardData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            
-            // Try to load from cache first
+
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
             val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
@@ -163,6 +249,8 @@ class HomeViewModel(
                         cameraList = cachedData.cameraList,
                         aiServices = cachedData.aiServices,
                         recentEvents = cachedData.recentEvents
+                            .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
+                            .take(5)
                     )
                 }
             }
@@ -171,7 +259,7 @@ class HomeViewModel(
                 val calendar = Calendar.getInstance()
                 val toTime: Long
                 val fromTime: Long
-                
+
                 when (filter) {
                     TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
@@ -202,7 +290,6 @@ class HomeViewModel(
                     }
                 }
 
-                // Lấy dữ liệu Overview
                 val overviewResponse = bsApi.getVmsCountOverview(
                     serviceId = _uiState.value.selectedServiceId?.toString() ?: "-1",
                     fromTime = fromTime,
@@ -212,7 +299,6 @@ class HomeViewModel(
                     overviewResponse.body() ?: emptyList()
                 } else emptyList()
 
-                // Phân bố sự kiện theo thời gian
                 val overTimeResponse = bsApi.getVmsEventStatsOverTime(
                     fromTime = fromTime,
                     toTime = toTime,
@@ -222,7 +308,6 @@ class HomeViewModel(
                     overTimeResponse.body() ?: emptyList()
                 } else emptyList()
 
-                // Phân bố sự kiện theo bài AI
                 val byTypeResponse = bsApi.getVmsEventCountByType(
                     fromTime = fromTime,
                     toTime = toTime,
@@ -232,7 +317,6 @@ class HomeViewModel(
                     byTypeResponse.body() ?: emptyList()
                 } else emptyList()
 
-                // Phân bố sự kiện theo camera
                 val byCameraResponse = bsApi.getVmsEventCountByCamera(
                     fromTime = fromTime,
                     toTime = toTime,
@@ -242,33 +326,69 @@ class HomeViewModel(
                     byCameraResponse.body() ?: emptyList()
                 } else emptyList()
 
-                // Sự kiện gần đây
-                val recentResponse = eventApi.getDataList(
-                    count = 5,
-                    from = fromTime / 1000,
-                    to = toTime / 1000,
+                val recentEvents = fetchPermittedRecentEvents(
+                    fromSec = fromTime / 1000,
+                    toSec = toTime / 1000,
                     serviceId = _uiState.value.selectedServiceId
                 )
-                val recentEvents = if (recentResponse.isSuccessful) {
-                    recentResponse.body() ?: emptyList()
-                } else emptyList()
 
-                // Danh sách Camera
                 val cameraResponse = vmsApi.getCameraList()
                 val cameraList = if (cameraResponse.isSuccessful) {
                     cameraResponse.body() ?: emptyList()
                 } else emptyList()
 
-                // Danh sách dịch vụ AI
                 val aiServiceResponse = eventApi.getAIServiceList()
                 val aiServices = if (aiServiceResponse.isSuccessful) {
                     aiServiceResponse.body() ?: emptyList()
                 } else emptyList()
 
+                // Compute running AI tasks & total AI tasks matching MobileHomePage.vue
+                var runningTasks = 0
+                var totalTasks = 0
+                try {
+                    val targetServices = if (serviceId != null) {
+                        aiServices.filter { it.id == serviceId }
+                    } else {
+                        aiServices
+                    }
+                    if (targetServices.isEmpty()) {
+                        val monResp = aiApi.getMonitorList()
+                        if (monResp.isSuccessful) {
+                            val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                            totalTasks = monitors.size
+                            runningTasks = monitors.count { it.enabled }
+                        }
+                    } else {
+                        for (srv in targetServices) {
+                            val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
+                            val monResp = if (host.isNotBlank() && srv.id != 0) {
+                                aiApi.getMonitorListExt(
+                                    url = "$host/api/Monitor",
+                                    authHeader = "Bearer ${srv.apiKey}"
+                                )
+                            } else {
+                                aiApi.getMonitorList()
+                            }
+                            if (monResp.isSuccessful) {
+                                val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                                totalTasks += monitors.size
+                                runningTasks += monitors.count { it.enabled }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("HomeViewModel", "Fallback monitor count from overviewStats", e)
+                }
+                if (totalTasks == 0) {
+                    val overviewMonitorCount = overviewStats
+                        .find { it.label == "monitor-count" && it.tag == "all" }
+                        ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+                    totalTasks = overviewMonitorCount
+                    runningTasks = overviewMonitorCount
+                }
+
                 var errorMsg: String? = null
                 if (!overviewResponse.isSuccessful) errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
-                else if (!overTimeResponse.isSuccessful) errorMsg = "Lỗi Biểu đồ Thời gian: ${overTimeResponse.code()}"
-                else if (!recentResponse.isSuccessful) errorMsg = "Lỗi Sự kiện: ${recentResponse.code()}"
 
                 _uiState.update {
                     it.copy(
@@ -280,11 +400,12 @@ class HomeViewModel(
                         cameraList = cameraList,
                         aiServices = aiServices,
                         recentEvents = recentEvents,
+                        runningAiTasks = runningTasks,
+                        totalAiTasks = totalTasks,
                         error = errorMsg
                     )
                 }
 
-                // Save fresh data to cache
                 if (errorMsg == null) {
                     val newCachedData = CachedHomeData(
                         overviewStats = overviewStats,
@@ -297,7 +418,6 @@ class HomeViewModel(
                     )
                     HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
                 }
-
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error fetching data", e)
                 _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }

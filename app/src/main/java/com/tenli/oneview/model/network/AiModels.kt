@@ -94,9 +94,13 @@ data class Profile(
     val id: Int,
     val name: String,
     val uuid: String,
-    val numFace: Int,
-    val lastFaceId: Int,
+    val numFace: Int = 0,
+    val lastFaceId: Int = 0,
     val idCode: String? = null,
     val department: String? = null,
     val position: String? = null
+)
+
+data class PauseAlarmRequest(
+    val pauseTime: Long? = null
 )

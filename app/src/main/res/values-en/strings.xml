@@ -90,7 +90,7 @@
     <string name="forgot_pass_new_pass_desc">Password should have at least 8 characters including letters and numbers.</string>
 
     <string name="tab_home">Home</string>
-    <string name="tab_monitor">Monitor</string>
+    <string name="tab_monitor">Live</string>
     <string name="tab_event">Events</string>
     <string name="tab_setting">Settings</string>
 

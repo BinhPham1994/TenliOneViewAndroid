@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.CachedMonitorData
+import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
@@ -36,7 +37,7 @@ data class SelectedCamera(
     val streamUrl: String,
     val videoCodecTag: String = "",
     val retryCount: Int = 0,
-    val streamType: String = "LIVE", // "LIVE", "EVENT", "PLAYBACK"
+    val streamType: String = "LIVE",
     val fallbackImageUrl: String = "",
     val vmsName: String = ""
 )
@@ -48,7 +49,9 @@ enum class MonitorTab {
 data class MonitorUiState(
     val isLoading: Boolean = false,
     val treeData: List<CameraTreeNode> = emptyList(),
-    val selectedCameras: List<SelectedCamera?> = List(1) { null },
+    val gridSize: Int = 1, // 1 (1x1) or 4 (2x2)
+    val searchQuery: String = "",
+    val selectedCameras: List<SelectedCamera?> = List(4) { null },
     val expandedNodes: Set<String> = emptySet(),
     val error: String? = null,
     val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
@@ -59,9 +62,9 @@ data class MonitorUiState(
     val isPaginating: Boolean = false,
     val hasMoreEvents: Boolean = true,
     val hasMorePlaybacks: Boolean = true,
-    val cameraStatusMap: Map<String, String> = emptyMap()
+    val cameraStatusMap: Map<String, String> = emptyMap(),
+    val recordStatusMap: Map<String, String> = emptyMap()
 )
-
 
 class MonitorViewModel(application: Application) : AndroidViewModel(application) {
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
@@ -71,12 +74,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
 
     init {
-        val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+        val prefs = GlobalData.preferences
         val savedNodes = prefs.getStringSet("saved_expanded_nodes", emptySet()) ?: emptySet()
-        _uiState.update { it.copy(expandedNodes = savedNodes) }
+        val savedGridSize = prefs.getInt("saved_monitor_grid_size", 1).let { if (it == 4) 4 else 1 }
+        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = savedGridSize) }
 
         loadData()
-        
+
         viewModelScope.launch {
             val app = application as com.tenli.oneview.TenliApp
             val wsManager = app.container.webSocketManager
@@ -84,6 +88,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update { it.copy(cameraStatusMap = statusMap) }
             }
         }
+        viewModelScope.launch {
+            val app = application as com.tenli.oneview.TenliApp
+            val wsManager = app.container.webSocketManager
+            wsManager.recordStatusMap.collect { recMap ->
+                _uiState.update { it.copy(recordStatusMap = recMap) }
+            }
+        }
+    }
+
+    fun setGridSize(size: Int) {
+        val normalized = if (size == 4) 4 else 1
+        if (_uiState.value.gridSize == normalized) return
+        GlobalData.preferences.edit().putInt("saved_monitor_grid_size", normalized).apply()
+        _uiState.update { it.copy(gridSize = normalized) }
+    }
+
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
     }
 
     private fun buildTree(
@@ -183,16 +205,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return prunedTree.toList()
     }
 
+    private fun ensureDefaultExpandedNodes(tree: List<CameraTreeNode>) {
+        if (_uiState.value.expandedNodes.isEmpty() && tree.isNotEmpty()) {
+            val defaults = tree.map { it.key }.toSet()
+            _uiState.update { it.copy(expandedNodes = defaults) }
+        }
+    }
+
     private fun loadData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
-            
+
             val cachedData = MonitorCacheManager.getMonitorData(getApplication())
             if (cachedData != null && cachedData.vmsList.isNotEmpty()) {
                 val finalTree = buildTree(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
                 _uiState.update { it.copy(treeData = finalTree) }
-                
-                val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                ensureDefaultExpandedNodes(finalTree)
+
+                val prefs = GlobalData.preferences
                 val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
                 var targetCamera: CameraModel? = null
 
@@ -225,8 +255,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
 
                     _uiState.update { it.copy(isLoading = false, treeData = finalTree, aiServices = aiServices) }
+                    ensureDefaultExpandedNodes(finalTree)
 
-                    val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                    val prefs = GlobalData.preferences
                     val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
                     var targetCamera: CameraModel? = null
 
@@ -278,11 +309,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 newExpanded.add(nodeId)
             }
-            
-            // Save to SharedPreferences
-            val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+
+            val prefs = GlobalData.preferences
             prefs.edit().putStringSet("saved_expanded_nodes", newExpanded).apply()
-            
+
             state.copy(expandedNodes = newExpanded)
         }
     }
@@ -296,33 +326,73 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return ""
     }
 
-    fun addCamera(camera: CameraModel, slotIndex: Int) {
+    /**
+     * Matches MobileLivePage.vue's handleSelectCamera behavior:
+     * - In 1x1 mode: puts the selected camera into slot 0.
+     * - In 2x2 mode: if already playing in an active slot, removes it; otherwise puts it into the first empty slot (0..3),
+     *   or shows a warning if all 4 slots are full.
+     */
+    fun selectCameraFromTree(camera: CameraModel) {
         val currentState = _uiState.value
-        
-        if (slotIndex != 0) return
+        val maxSlots = currentState.gridSize
+        val activeIdx = (0 until maxSlots).indexOfFirst { idx ->
+            currentState.selectedCameras.getOrNull(idx)?.camera?.id == camera.id
+        }
 
-        val existing = currentState.selectedCameras.find { it?.camera?.id == camera.id }
-        if (existing != null && existing.streamUrl.startsWith("ws")) {
+        if (maxSlots == 1) {
+            if (activeIdx == 0 && currentState.selectedCameras[0]?.streamUrl?.isNotEmpty() == true) {
+                return
+            }
+            addCamera(camera, 0)
+        } else {
+            if (activeIdx != -1) {
+                removeCamera(activeIdx)
+                return
+            }
+            val emptySlot = (0 until maxSlots).firstOrNull { idx ->
+                currentState.selectedCameras.getOrNull(idx) == null
+            }
+            if (emptySlot != null) {
+                addCamera(camera, emptySlot)
+            } else {
+                _uiState.update {
+                    it.copy(error = "Đã đạt giới hạn hiển thị tối đa ($maxSlots camera)")
+                }
+            }
+        }
+    }
+
+    fun addCamera(camera: CameraModel, slotIndex: Int) {
+        if (slotIndex !in 0..3) return
+        val currentState = _uiState.value
+
+        val existing = currentState.selectedCameras.getOrNull(slotIndex)
+        if (existing?.camera?.id == camera.id && existing.streamUrl.startsWith("ws")) {
             return
         }
 
-        val prefs = com.tenli.oneview.data.local.GlobalData.preferences
-        prefs.edit().putInt("saved_monitor_camera_id", camera.id).apply()
+        if (slotIndex == 0) {
+            val prefs = GlobalData.preferences
+            prefs.edit().putInt("saved_monitor_camera_id", camera.id).apply()
+        }
 
         val vmsName = getVmsNameForCamera(camera.vmsId)
 
         val updatedCameras = currentState.selectedCameras.toMutableList()
+        while (updatedCameras.size < 4) updatedCameras.add(null)
         updatedCameras[slotIndex] = SelectedCamera(camera, "", vmsName = vmsName)
 
         _uiState.update { it.copy(selectedCameras = updatedCameras) }
 
         fetchLiveStreamUrl(camera.id, slotIndex)
-        fetchListData()
+        if (slotIndex == 0) {
+            fetchListData()
+        }
     }
 
     fun playVideo(videoUrl: String, streamType: String, fallbackImageUrl: String = "") {
         if (videoUrl.isBlank()) return
-        
+
         _uiState.update { state ->
             val cameras = state.selectedCameras.toMutableList()
             val currentSelection = cameras[0]
@@ -332,25 +402,20 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     val domain = com.tenli.oneview.data.local.UserSession.domain.trimEnd('/')
                     fullUrl = "$domain$fullUrl"
                 }
-                
+
                 cameras[0] = currentSelection.copy(streamUrl = fullUrl, streamType = streamType, fallbackImageUrl = fallbackImageUrl)
             }
             state.copy(selectedCameras = cameras)
         }
     }
 
-    /**
-     * Called when returning to the Monitor tab or resuming from background,
-     * since WebSocket sessions expire when the screen is not visible.
-     */
     fun refreshActiveStreams() {
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         var hasActive = false
 
         cameras.forEachIndexed { index, selectedCamera ->
-            if (selectedCamera != null) {
-                android.util.Log.d("MonitorVM", "refreshActiveStreams: clearing slot $index for camera ${selectedCamera.camera.id}")
+            if (selectedCamera != null && index < currentState.gridSize) {
                 cameras[index] = selectedCamera.copy(streamUrl = "")
                 hasActive = true
             }
@@ -359,9 +424,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (hasActive) {
             _uiState.update { it.copy(selectedCameras = cameras) }
 
-            // Re-fetch fresh stream URLs for each camera
             currentState.selectedCameras.forEachIndexed { index, selectedCamera ->
-                if (selectedCamera != null) {
+                if (selectedCamera != null && index < currentState.gridSize) {
                     fetchLiveStreamUrl(selectedCamera.camera.id, index)
                 }
             }
@@ -371,7 +435,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private fun fetchLiveStreamUrl(cameraId: Int, slotIndex: Int) {
         viewModelScope.launch {
             try {
-                // We construct a LiveStreamModel. Some fields might not be required for the request
                 val requestModel = LiveStreamModel(
                     cameraId = cameraId,
                     channel = 1,
@@ -381,7 +444,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     videoCodecTag = ""
                 )
                 val response = vmsApi.createLiveStream(requestModel)
-                android.util.Log.d("MonitorVM", "fetchLiveStreamUrl: camera=$cameraId slot=$slotIndex response=${response.code()}")
                 if (response.isSuccessful) {
                     val liveStreamModel = response.body()
                     if (liveStreamModel != null) {
@@ -392,10 +454,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         }
                         if (streamUrl.startsWith("http://")) streamUrl = streamUrl.replaceFirst("http://", "ws://")
                         if (streamUrl.startsWith("https://")) streamUrl = streamUrl.replaceFirst("https://", "wss://")
-                        
+
                         _uiState.update { state ->
                             val cameras = state.selectedCameras.toMutableList()
-                            val currentSelection = cameras[slotIndex]
+                            val currentSelection = cameras.getOrNull(slotIndex)
                             if (currentSelection != null && currentSelection.camera.id == cameraId) {
                                 cameras[slotIndex] = currentSelection.copy(
                                     streamUrl = streamUrl,
@@ -403,8 +465,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                                     retryCount = 0,
                                     streamType = "LIVE"
                                 )
-                            } else {
-                                android.util.Log.w("MonitorVM", "fetchLiveStreamUrl: camera id mismatch at slot $slotIndex. Expected=$cameraId, found=${currentSelection?.camera?.id}")
                             }
                             state.copy(
                                 selectedCameras = cameras,
@@ -413,10 +473,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         }
                     }
                 } else {
-                    retryCameraStream(slotIndex) // Retry on API failure too
+                    retryCameraStream(slotIndex)
                 }
             } catch (e: Exception) {
-                retryCameraStream(slotIndex) // Retry on network failure
+                retryCameraStream(slotIndex)
             }
         }
     }
@@ -425,24 +485,21 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         val currentSelection = cameras.getOrNull(slotIndex) ?: return
-        if (currentSelection != null) {
-            cameras[slotIndex] = currentSelection.copy(retryCount = 0)
-            _uiState.update { it.copy(selectedCameras = cameras) }
-        }
+        cameras[slotIndex] = currentSelection.copy(retryCount = 0)
+        _uiState.update { it.copy(selectedCameras = cameras) }
     }
 
     fun removeCamera(slotIndex: Int) {
-        if (slotIndex != 0) return
+        if (slotIndex !in 0..3) return
         _uiState.update { state ->
             val cameras = state.selectedCameras.toMutableList()
             cameras[slotIndex] = null
-            
-            // Clear saved preference if the first slot is removed
+
             if (slotIndex == 0) {
-                val prefs = com.tenli.oneview.data.local.GlobalData.preferences
+                val prefs = GlobalData.preferences
                 prefs.edit().remove("saved_monitor_camera_id").apply()
             }
-            
+
             state.copy(selectedCameras = cameras)
         }
     }
@@ -451,9 +508,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         val currentSelection = cameras.getOrNull(slotIndex) ?: return
-        
-        if (currentSelection == null || currentSelection.retryCount >= 5) {
-            if (currentSelection?.retryCount == 5) {
+
+        if (currentSelection.retryCount >= 5) {
+            if (currentSelection.retryCount == 5) {
                 cameras[slotIndex] = currentSelection.copy(
                     retryCount = 6,
                     streamUrl = "error://failed"
@@ -463,14 +520,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        // Increment retry count and clear URL to show loading
         cameras[slotIndex] = currentSelection.copy(
             streamUrl = "",
             retryCount = currentSelection.retryCount + 1
         )
         _uiState.update { it.copy(selectedCameras = cameras) }
 
-        // Exponential backoff like the web client
         viewModelScope.launch {
             val delayMs = Math.min(1000 * Math.pow(2.0, currentSelection.retryCount.toDouble()).toLong(), 10000L)
             kotlinx.coroutines.delay(delayMs)
@@ -494,13 +549,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private fun fetchListData() {
         val selectedCam = _uiState.value.selectedCameras.firstOrNull()?.camera ?: return
-        
+
         viewModelScope.launch {
             try {
                 val calendar = java.util.Calendar.getInstance()
                 val toTime: Long
                 val fromTime: Long
-                
+
                 when (_uiState.value.selectedTimeFilter) {
                     TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
@@ -585,7 +640,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val calendar = java.util.Calendar.getInstance()
                 val toTime: Long
                 val fromTime: Long
-                
+
                 when (currentState.selectedTimeFilter) {
                     TimeFilter.TODAY -> {
                         toTime = calendar.timeInMillis
@@ -629,12 +684,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         )
                         if (response.isSuccessful) {
                             val newEvents = response.body() ?: emptyList()
-                            _uiState.update { 
+                            _uiState.update {
                                 it.copy(
                                     events = it.events + newEvents,
                                     hasMoreEvents = newEvents.size == 20,
                                     isPaginating = false
-                                ) 
+                                )
                             }
                         } else {
                             _uiState.update { it.copy(isPaginating = false) }
@@ -646,11 +701,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
                     sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
                     val fromStr = sdf.format(java.util.Date(fromTime))
-                    // For playback, we use the time of the last item as `to` time
                     val lastVideoTimeStr = currentState.playbacks.last().time
-                    // However time string from api is often without 'Z', we need to pass what API expects.
-                    // Just pass it directly as toStr, or reformat. We'll pass it directly as `to` parameter
-                    
+
                     val response = vmsApi.getVideoList(
                         camera = selectedCam.id,
                         count = 20,
@@ -659,12 +711,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     )
                     if (response.isSuccessful) {
                         val newPlaybacks = response.body() ?: emptyList()
-                        _uiState.update { 
+                        _uiState.update {
                             it.copy(
                                 playbacks = it.playbacks + newPlaybacks,
                                 hasMorePlaybacks = newPlaybacks.size == 20,
                                 isPaginating = false
-                            ) 
+                            )
                         }
                     } else {
                         _uiState.update { it.copy(isPaginating = false) }

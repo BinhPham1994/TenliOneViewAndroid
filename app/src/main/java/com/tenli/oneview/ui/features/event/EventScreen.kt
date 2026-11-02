@@ -4,17 +4,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,17 +27,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.tenli.oneview.ui.component.AiServiceFilterDropdown
-import com.tenli.oneview.ui.component.AiTaskFilterDropdown
+import com.tenli.oneview.R
 import com.tenli.oneview.ui.component.CommonEmptyState
-import com.tenli.oneview.ui.component.TimeFilterDropdown
-import com.tenli.oneview.ui.features.home.RecentEventItem
+import com.tenli.oneview.ui.component.MobileEventCard
+import com.tenli.oneview.ui.component.MobileFilterBottomSheet
+import com.tenli.oneview.ui.component.MobileTopActionButton
+import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.MobileViewToggleButton
+import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.theme.LucideIcons
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventScreen(
     viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory),
@@ -40,12 +50,47 @@ fun EventScreen(
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     var isRefreshing by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.syncViewModeFromPrefs()
+    }
 
     LaunchedEffect(uiState.isLoading) {
         if (!uiState.isLoading) {
             isRefreshing = false
+        }
+    }
+
+    val hasActiveFilter = uiState.selectedServiceId != null ||
+        uiState.selectedFilter != TimeFilter.TODAY ||
+        uiState.selectedCameraUuid != null ||
+        uiState.selectedAiType != null
+
+    val cameraMap = remember(uiState.cameraList) {
+        uiState.cameraList.mapNotNull { cam ->
+            val uuid = cam.extra?.uuid
+            if (!uuid.isNullOrBlank()) uuid to cam.name else null
+        }.toMap()
+    }
+
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 1 && lastVisibleIndex >= totalItems - 5
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore, uiState.events.size, uiState.hasMore, uiState.isLoading, uiState.isPaginating) {
+        if ((shouldLoadMore || uiState.events.size in 1..12) &&
+            uiState.hasMore &&
+            !uiState.isLoading &&
+            !uiState.isPaginating
+        ) {
+            viewModel.loadMoreEvents()
         }
     }
 
@@ -54,112 +99,130 @@ fun EventScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Filters
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            item {
-                TimeFilterDropdown(
-                    selectedFilter = uiState.selectedFilter,
-                    onFilterSelected = { viewModel.applyFilters(it, uiState.selectedServiceId, uiState.selectedAiType) }
+        // Sticky Mobile Top Bar matching .mobile-top-bar (position: sticky; top: 0; z-index: 50):
+        // Left: View Mode Toggle Button, Center: "Sự kiện", Right: Filter Action Button
+        MobileTopBar(
+            title = stringResource(id = R.string.tab_event),
+            leftAction = {
+                MobileViewToggleButton(
+                    isListView = uiState.isListView,
+                    onToggle = { viewModel.toggleViewMode() }
+                )
+            },
+            rightAction = {
+                MobileTopActionButton(
+                    icon = LucideIcons.ListFilter,
+                    contentDescription = "Bộ lọc",
+                    hasActiveDot = hasActiveFilter,
+                    onClick = { showFilterSheet = true }
                 )
             }
-            item {
-                AiServiceFilterDropdown(
-                    services = uiState.aiServices,
-                    selectedServiceId = uiState.selectedServiceId,
-                    onServiceSelected = { viewModel.applyFilters(uiState.selectedFilter, it, uiState.selectedAiType) }
-                )
-            }
-            item {
-                AiTaskFilterDropdown(
-                    selectedAiType = uiState.selectedAiType,
-                    onAiTypeSelected = { viewModel.applyFilters(uiState.selectedFilter, uiState.selectedServiceId, it) }
-                )
-            }
-        }
+        )
 
-        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+        PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = {
                 isRefreshing = true
                 viewModel.fetchInitialData()
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
         ) {
-            if (uiState.isLoading && uiState.events.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    com.tenli.oneview.ui.component.WaveDotsLoading()
-                }
-            } else if (uiState.events.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CommonEmptyState(text = "Chưa có sự kiện nào")
-                }
-            } else {
-                val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
-                    uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
-                }
-                val serviceMap = androidx.compose.runtime.remember(uiState.aiServices) {
-                    uiState.aiServices.associateBy({ it.id }, { it.name })
-                }
-                
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surface),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(8.dp),
-                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
-                ) {
-                    items(items = uiState.events, key = { it.id }) { event ->
+            LazyColumn(
+                state = listState,
+                userScrollEnabled = true,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 2.dp, bottom = 130.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (uiState.isLoading && uiState.events.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(360.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            WaveDotsLoading()
+                        }
+                    }
+                } else if (uiState.events.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                                .height(320.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CommonEmptyState(text = "Không tìm thấy sự kiện nào")
+                        }
+                    }
+                } else {
+                    itemsIndexed(
+                        items = uiState.events,
+                        key = { index, event -> "ev_${index}_${event.serviceId}_${event.id}_${event.time}" }
+                    ) { _, event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
-                        val aiServiceName = serviceMap[event.serviceId] ?: "Unknown Service"
-                        
-                        RecentEventItem(
-                            event = event,
-                            cameraName = cameraName,
-                            aiServiceName = aiServiceName,
-                            onClick = {
-                                onEventClick(event.id)
-                            }
-                        )
+                        Box(modifier = Modifier.padding(horizontal = 10.dp)) {
+                            MobileEventCard(
+                                event = event,
+                                cameraName = cameraName,
+                                isListView = uiState.isListView,
+                                enableSharedElement = false,
+                                onClick = { onEventClick(event.id) }
+                            )
+                        }
                     }
 
-                    if (uiState.hasMore && !uiState.isLoading) {
+                    if (uiState.isPaginating || (uiState.hasMore && !uiState.isLoading)) {
                         item {
-                            LaunchedEffect(uiState.events.size) {
-                                viewModel.loadMoreEvents()
-                            }
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 6.dp)
+                                CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp
+                                )
                             }
                         }
                     }
                 }
             }
-
-
         }
+    }
+
+    if (showFilterSheet) {
+        MobileFilterBottomSheet(
+            showScope = true,
+            showTime = true,
+            showCamera = true,
+            showEventType = true,
+            aiServices = uiState.aiServices,
+            cameras = uiState.cameraList,
+            selectedServiceId = uiState.selectedServiceId,
+            selectedTimeFilter = uiState.selectedFilter,
+            selectedCameraUuid = uiState.selectedCameraUuid,
+            selectedAiType = uiState.selectedAiType,
+            onApply = { serviceId, timeFilter, cameraUuid, aiType ->
+                viewModel.applyFilters(
+                    filter = timeFilter,
+                    serviceId = serviceId,
+                    aiType = aiType,
+                    cameraUuid = cameraUuid
+                )
+            },
+            onReset = {
+                viewModel.resetFilters()
+            },
+            onDismiss = { showFilterSheet = false }
+        )
     }
 }

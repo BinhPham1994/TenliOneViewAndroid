@@ -41,9 +41,13 @@ class WebSocketManager(
     private val _cameraStatusMap = MutableStateFlow<Map<String, String>>(emptyMap())
     val cameraStatusMap: StateFlow<Map<String, String>> = _cameraStatusMap.asStateFlow()
 
-    // Status label map matching web (for internal processing if needed)
+    private val _recordStatusMap = MutableStateFlow<Map<String, String>>(emptyMap())
+    val recordStatusMap: StateFlow<Map<String, String>> = _recordStatusMap.asStateFlow()
+
+    // Status label map matching web useReportHandler.ts
     private val captureStatusLabelMap = mutableMapOf<String, StatusLabel>()
     private val recordStatusLabelMap = mutableMapOf<String, StatusLabel>()
+    private val captureRedLatchMap = mutableMapOf<String, Boolean>()
 
     data class StatusLabel(val color: String, val label: String)
 
@@ -55,17 +59,16 @@ class WebSocketManager(
             Log.d("WebSocketManager", "Notify already connected, skipping")
             return
         }
-        
+
         notifyClient = WebSocketNotifyClient(client, gson) { data ->
             Log.d("WebSocketManager", "Received notify event/channel: ${data.topic}")
-            if (data.topic == "ai-data") {
-                scope.launch { 
+            if (data.topic == "ai-data" || data.topic == "event") {
+                scope.launch {
                     _notifyEvent.emit(data)
-                    Log.d("WebSocketManager", "Emitted ai-data to notifyEvent flow")
                 }
             }
         }
-        
+
         val protocolUrl = baseUrl.trimEnd('/').replaceFirst("http", "ws")
         val wsUrl = "$protocolUrl/ws/Notify"
         Log.d("WebSocketManager", "Connecting Notify WebSocket to: $wsUrl")
@@ -87,9 +90,8 @@ class WebSocketManager(
                     val vmsList = response.body() ?: emptyList()
                     val ids = mutableListOf(0) // local VMS
                     ids.addAll(vmsList.map { it.id })
-                    connectReports(ids)
+                    connectReports(ids.distinct())
                 } else {
-                    // Fallback to just 0
                     connectReports(listOf(0))
                 }
             } catch (e: Exception) {
@@ -104,7 +106,7 @@ class WebSocketManager(
      */
     private fun connectReports(vmsIds: List<Int>) {
         val currentIds = reportClients.keys.toList()
-        
+
         // Disconnect removed VMS IDs
         currentIds.forEach { id ->
             if (!vmsIds.contains(id)) {
@@ -136,8 +138,9 @@ class WebSocketManager(
     }
 
     private fun handleReportPayload(payload: ReportPayload, vmsId: Int) {
+        val actual = payload.data ?: payload
         // Update Storage Status
-        payload.storage?.let { storageList ->
+        actual.storage?.let { storageList ->
             _storageStatusMap.update { currentMap ->
                 val newMap = currentMap.toMutableMap()
                 storageList.forEach { s ->
@@ -148,51 +151,81 @@ class WebSocketManager(
         }
 
         // Update Camera Status
-        payload.camera?.let { cameraList ->
+        actual.camera?.let { cameraList ->
             handleCameraReport(cameraList, vmsId)
         }
     }
 
+    /**
+     * Khớp hoàn toàn với useReportHandler.ts của PWA:
+     * - captureState = cam.main?.state ?: cam.sub?.state
+     * - recordState = cam.recorder?.state
+     * - captureStatus.color ("green" | "orange" | "red") lưu vào cameraStatusMap
+     * - recordStatus.color ("green" | "orange" | "red") lưu vào recordStatusMap
+     */
     private fun handleCameraReport(items: List<CameraInfo>, vmsId: Int) {
-        _cameraStatusMap.update { currentMap ->
-            val newMap = currentMap.toMutableMap()
-            
-            for (cam in items) {
-                if (cam.main == null && cam.recorder == null) continue
-                
-                val key = "cam-$vmsId-${cam.id}"
-                val captureStatus = getCaptureStatus(cam.main?.state, key)
-                val recordStatus = getRecordStatus(cam.recorder?.state)
+        val nextCamMap = _cameraStatusMap.value.toMutableMap()
+        val nextRecMap = _recordStatusMap.value.toMutableMap()
 
-                captureStatusLabelMap[key] = captureStatus
-                recordStatusLabelMap[key] = recordStatus
+        for (cam in items) {
+            if (cam.main == null && cam.sub == null && cam.recorder == null) continue
 
-                if (captureStatus.color == "red" || recordStatus.color == "red") {
-                    newMap[key] = "red"
-                } else {
-                    newMap[key] = "green"
-                }
+            val key = "cam-$vmsId-${cam.id}"
+            val captureState = cam.main?.state ?: cam.sub?.state
+            val captureStatus = getCaptureStatus(captureState, key)
+            val recordStatus = getRecordStatus(cam.recorder?.state, key)
+
+            captureStatusLabelMap[key] = captureStatus
+            recordStatusLabelMap[key] = recordStatus
+
+            nextCamMap[key] = captureStatus.color
+            nextRecMap[key] = recordStatus.color
+
+            if (vmsId == 0) {
+                nextCamMap["cam-${cam.id}"] = captureStatus.color
+                nextRecMap["cam-${cam.id}"] = recordStatus.color
             }
-            newMap
+        }
+
+        if (nextCamMap != _cameraStatusMap.value) {
+            _cameraStatusMap.value = nextCamMap
+        }
+        if (nextRecMap != _recordStatusMap.value) {
+            _recordStatusMap.value = nextRecMap
         }
     }
 
     private fun getCaptureStatus(state: String?, key: String): StatusLabel {
         if (state == null) {
-            return captureStatusLabelMap[key] ?: StatusLabel("green", "Disconnected")
+            return captureStatusLabelMap[key] ?: StatusLabel("orange", "Disconnected")
         }
         return when (state) {
-            "connected" -> StatusLabel("green", "Connected")
-            "error" -> StatusLabel("red", "Connection Error")
-            else -> StatusLabel("green", "Disconnected")
+            "connected" -> {
+                captureRedLatchMap.remove(key)
+                StatusLabel("green", "Connected")
+            }
+            "error" -> {
+                captureRedLatchMap[key] = true
+                StatusLabel("red", "Connection Error")
+            }
+            else -> {
+                if (captureRedLatchMap[key] == true) {
+                    StatusLabel("red", "Connection Error")
+                } else {
+                    StatusLabel("orange", "Disconnected")
+                }
+            }
         }
     }
 
-    private fun getRecordStatus(state: String?): StatusLabel {
+    private fun getRecordStatus(state: String?, key: String): StatusLabel {
+        if (state == null) {
+            return recordStatusLabelMap[key] ?: StatusLabel("orange", "Not Recording")
+        }
         return when (state) {
             "recording" -> StatusLabel("green", "Recording")
             "error" -> StatusLabel("red", "Record Error")
-            else -> StatusLabel("green", "Not Recording")
+            else -> StatusLabel("orange", "Not Recording")
         }
     }
 
@@ -202,13 +235,15 @@ class WebSocketManager(
     fun disconnectAll() {
         notifyClient?.disconnect()
         notifyClient = null
-        
+
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()
 
         _storageStatusMap.value = emptyMap()
         _cameraStatusMap.value = emptyMap()
+        _recordStatusMap.value = emptyMap()
         captureStatusLabelMap.clear()
         recordStatusLabelMap.clear()
+        captureRedLatchMap.clear()
     }
 }

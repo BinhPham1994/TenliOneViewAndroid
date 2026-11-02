@@ -5,6 +5,7 @@ import android.content.pm.ActivityInfo
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,40 +17,25 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Storage
-import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,20 +44,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
-import com.tenli.oneview.ui.component.TimeFilterDropdown
+import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.VideoPlayer
-import com.tenli.oneview.ui.theme.BrandPrimary
+import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.theme.BrandAccent
+import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.ThemeManager
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -84,59 +79,21 @@ fun MonitorScreen(
     onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showBottomSheet by remember { mutableStateOf(false) }
-    var activeSlotIndex by remember { mutableIntStateOf(-1) }
     val context = LocalContext.current
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
     val activity = LocalContext.current as? Activity
+    val coroutineScope = rememberCoroutineScope()
+
+    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+    val isSystemDark = isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        0 -> false
+        1 -> true
+        else -> isSystemDark
+    }
 
     LaunchedEffect(fullscreenIndex) {
         onFullscreenChange(fullscreenIndex != null)
-    }
-
-    val coroutineScope = rememberCoroutineScope()
-    
-    val cameraItems = remember(uiState.selectedCameras.size) {
-        List(uiState.selectedCameras.size) { index ->
-            movableContentOf { selectedCam: SelectedCamera? ->
-                if (selectedCam != null) {
-                    CameraGridItem(
-                        selectedCamera = selectedCam,
-                        onClick = {
-                            activeSlotIndex = index
-                            showBottomSheet = true
-                        },
-                        onRetryClick = { viewModel.retryCameraStream(index) },
-                        onSuccess = { viewModel.resetRetryCount(index) },
-                        onFullscreenClick = {
-                            if (fullscreenIndex == index) {
-                                coroutineScope.launch {
-                                    // Trigger orientation change FIRST so system captures a non-black screenshot
-                                    activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                    val window = activity?.window
-                                    val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
-                                    insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                                    
-                                    kotlinx.coroutines.delay(150)
-                                    fullscreenIndex = null
-                                }
-                            } else {
-                                fullscreenIndex = index
-                            }
-                        },
-                        onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, index) },
-                        isFullscreen = fullscreenIndex == index
-                    )
-                } else {
-                    EmptyGridItem(
-                        onClick = {
-                            activeSlotIndex = index
-                            showBottomSheet = true
-                        }
-                    )
-                }
-            }
-        }
     }
 
     LaunchedEffect(uiState.error) {
@@ -146,9 +103,8 @@ fun MonitorScreen(
         }
     }
 
-    // Re-fetch stream URLs when returning from background or switching tabs
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner) {
         var isFirstResume = true
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
@@ -165,397 +121,284 @@ fun MonitorScreen(
         }
     }
 
+    val activeCameraIds = remember(uiState.selectedCameras, uiState.gridSize) {
+        (0 until uiState.gridSize).mapNotNull { idx ->
+            uiState.selectedCameras.getOrNull(idx)?.camera?.id
+        }.toSet()
+    }
+
+    val filteredTree = remember(uiState.treeData, uiState.searchQuery) {
+        val query = uiState.searchQuery.trim().lowercase()
+        if (query.isEmpty()) {
+            uiState.treeData
+        } else {
+            filterTreeNodes(uiState.treeData, query)
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
         ) {
-        // Header
-        val selectedCam = uiState.selectedCameras.firstOrNull()
-        val headerText = selectedCam?.camera?.name ?: "Giám sát"
-        val vmsName = selectedCam?.vmsName?.takeIf { it.isNotBlank() }
-        
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .clickable {
-                    activeSlotIndex = 0
-                    showBottomSheet = true
-                }
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .height(36.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Videocam,
-                    contentDescription = null,
-                    tint = BrandPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = headerText,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                Icon(
-                    imageVector = Icons.Default.ArrowDropDown,
-                    contentDescription = "Chọn Camera",
-                    tint = MaterialTheme.colorScheme.onBackground
-                )
-            }
-            
-            if (vmsName != null) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Row(
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Storage,
-                        contentDescription = null,
-                        tint = BrandPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = vmsName,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
-                    )
-                }
-            }
-        }
+            // Mobile Top Bar matching MobileLivePage.vue
+            MobileTopBar(
+                title = stringResource(id = R.string.tab_monitor)
+            )
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-        ) {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(1),
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+            // 16:9 Live Video Player Container (supports 1x1 and 2x2 grid)
+            // Full-bleed edge-to-edge matching .mobile-live-container (margin-left: -10px; margin-right: -10px; border-radius: 0)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color(0xFF0A0A0A))
             ) {
-                items(uiState.selectedCameras.size) { index ->
-                    if (fullscreenIndex == index) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.Black)
+                if (uiState.gridSize == 1) {
+                    val selectedCam = uiState.selectedCameras.getOrNull(0)
+                    if (fullscreenIndex == 0) {
+                        Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                    } else if (selectedCam != null) {
+                        CameraGridItem(
+                            selectedCamera = selectedCam,
+                            onClick = {},
+                            onRetryClick = { viewModel.retryCameraStream(0) },
+                            onSuccess = { viewModel.resetRetryCount(0) },
+                            onFullscreenClick = { fullscreenIndex = 0 },
+                            onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, 0) },
+                            onRemoveClick = { viewModel.removeCamera(0) },
+                            isFullscreen = false,
+                            isCompact = false
                         )
                     } else {
-                        cameraItems[index](uiState.selectedCameras[index])
+                        EmptyGridItem(onClick = {}, isCompact = false)
+                    }
+                } else {
+                    // 2x2 Grid
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        for (row in 0..1) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                for (col in 0..1) {
+                                    val slotIdx = row * 2 + col
+                                    val selectedCam = uiState.selectedCameras.getOrNull(slotIdx)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxHeight()
+                                            .background(Color.Black)
+                                    ) {
+                                        if (fullscreenIndex == slotIdx) {
+                                            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                                        } else if (selectedCam != null) {
+                                            CameraGridItem(
+                                                selectedCamera = selectedCam,
+                                                onClick = {},
+                                                onRetryClick = { viewModel.retryCameraStream(slotIdx) },
+                                                onSuccess = { viewModel.resetRetryCount(slotIdx) },
+                                                onFullscreenClick = { fullscreenIndex = slotIdx },
+                                                onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, slotIdx) },
+                                                onRemoveClick = { viewModel.removeCamera(slotIdx) },
+                                                isFullscreen = false,
+                                                isCompact = true
+                                            )
+                                        } else {
+                                            EmptyGridItem(onClick = {}, isCompact = true)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
 
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(horizontal = 10.dp)
-                .padding(top = 16.dp)
-        ) {
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Embedded Camera Tree Card matching MobileLivePage.vue (.mobile-camera-tree-wrapper)
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 10.dp)
+                    .padding(bottom = 86.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
             ) {
-        // --- Header Row: Tabs (Left) and Time Filter (Right) ---
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            val isEvents = uiState.selectedTab == MonitorTab.EVENTS
-            
-            // Tabs Segmented Control
-            Row(
-                modifier = Modifier
-                    .padding(4.dp)
-            ) {
-                Box(
+                // Top Row: Search Bar (left) + Grid Selector 1 / 4 (right)
+                val controlBg = if (isDark) Color(0xFF242F41) else Color(0xFFEDF0F5)
+                val mutedText = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+                Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .clickable { viewModel.setTab(MonitorTab.EVENTS) }
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        "Sự kiện",
-                        color = if (isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (isEvents) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 14.sp
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (!isEvents) MaterialTheme.colorScheme.primary else Color.Transparent)
-                        .clickable { viewModel.setTab(MonitorTab.PLAYBACK) }
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "Playback",
-                        color = if (!isEvents) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (!isEvents) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-
-            // Time Filter Dropdown
-            // TimeFilterDropdown instead of MonitorTimeFilterDropdown
-            TimeFilterDropdown(
-                selectedFilter = uiState.selectedTimeFilter,
-                onFilterSelected = { viewModel.setTimeFilter(it) }
-            )
-        }
-
-        // --- Danh sách (Events / Playbacks) ---
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
-            val isEmpty = if (uiState.selectedTab == MonitorTab.EVENTS) uiState.events.isEmpty() else uiState.playbacks.isEmpty()
-            
-            if (uiState.isLoading && isEmpty) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    com.tenli.oneview.ui.component.WaveDotsLoading()
-                }
-            } else if (isEmpty) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    com.tenli.oneview.ui.component.CommonEmptyState(
-                        text = "Không có dữ liệu"
-                    )
-                }
-            } else {
-                androidx.compose.foundation.lazy.LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .fillMaxSize(),
-                    contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    if (uiState.selectedTab == MonitorTab.EVENTS) {
-                        val currentCamera = uiState.selectedCameras.firstOrNull()?.camera
-                        val cameraName = currentCamera?.name ?: "Camera"
-                        val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
-                        items(items = uiState.events, key = { it.id }) { event ->
-                            val videoUrl = event.data?.video ?: ""
-                            val dummyUrl = "error://no-video?id=${event.id}"
-                            val isSelected = currentStreamUrl.isNotEmpty() && 
-                                (if (videoUrl.isNotEmpty()) currentStreamUrl.endsWith(videoUrl) else currentStreamUrl == dummyUrl)
-
-                            val aiServiceName = uiState.aiServices.find { it.id == event.serviceId }?.name ?: "Unknown Service"
-
-                            com.tenli.oneview.ui.features.home.RecentEventItem(
-                                event = event,
-                                cameraName = cameraName,
-                                aiServiceName = aiServiceName,
-                                isSelected = isSelected,
-                                onClick = { 
-                                    onEventClick(event.id)
-                                }
-                            )
-                        }
-                        if (uiState.hasMoreEvents && uiState.events.isNotEmpty()) {
-                            item {
-                                LaunchedEffect(Unit) {
-                                    viewModel.loadMoreData()
-                                }
-                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    if (uiState.isPaginating) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 6.dp)
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        val currentCameraName = uiState.selectedCameras.firstOrNull()?.camera?.name ?: "Camera"
-                        val currentStreamUrl = uiState.selectedCameras.firstOrNull()?.streamUrl ?: ""
-                        items(items = uiState.playbacks, key = { it.videoLink }) { playback ->
-                            val isSelected = currentStreamUrl.isNotEmpty() && playback.videoLink.isNotEmpty() && currentStreamUrl.endsWith(playback.videoLink)
-                            PlaybackItemView(
-                                playback = playback, 
-                                cameraName = currentCameraName,
-                                isSelected = isSelected,
-                                onClick = { 
-                                    onPlaybackClick(playback.videoLink, playback.time, playback.imageLink, currentCameraName)
-                                }
-                            )
-                        }
-                        if (uiState.hasMorePlaybacks && uiState.playbacks.isNotEmpty()) {
-                            item {
-                                LaunchedEffect(Unit) {
-                                    viewModel.loadMoreData()
-                                }
-                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    if (uiState.isPaginating) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 6.dp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            } // Close List Box
-            } // Close inner Column
-        } // Close outer Box
-        }
-
-
-
-        if (showBottomSheet) {
-            Dialog(
-                onDismissRequest = { showBottomSheet = false },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false
-                )
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                            onClick = { showBottomSheet = false }
-                        ),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    Surface(
+                    // Search Input
+                    Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .fillMaxHeight(0.8f)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null,
-                                onClick = {} // Chặn click xuyên qua box để không bị đóng khi bấm nhầm
-                            ),
-                        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                        color = MaterialTheme.colorScheme.surface
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(controlBg)
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .navigationBarsPadding()
-                                .padding(16.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
+                        Icon(
+                            imageVector = LucideIcons.Search,
+                            contentDescription = "Tìm camera",
+                            tint = mutedText,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            if (uiState.searchQuery.isEmpty()) {
                                 Text(
-                                    text = "Chọn Camera",
-                                    style = MaterialTheme.typography.titleLarge
+                                    text = "Tìm camera...",
+                                    color = mutedText,
+                                    fontSize = 13.sp
                                 )
-                                IconButton(onClick = { showBottomSheet = false }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Đóng")
-                                }
                             }
+                            BasicTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 13.sp
+                                ),
+                                cursorBrush = SolidColor(BrandAccent),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        if (uiState.searchQuery.isNotEmpty()) {
+                            Icon(
+                                imageVector = LucideIcons.X,
+                                contentDescription = "Xóa",
+                                tint = mutedText,
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { viewModel.setSearchQuery("") }
+                            )
+                        }
+                    }
 
-                            if (uiState.isLoading) {
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(strokeWidth = 6.dp)
+                    // Grid Selector (1x1 / 2x2) matching .mobile-grid-selector ("1" and "4")
+                    Row(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(controlBg)
+                            .padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        GridOptionButton(
+                            label = "1",
+                            isSelected = uiState.gridSize == 1,
+                            isDark = isDark,
+                            onClick = { viewModel.setGridSize(1) }
+                        )
+                        GridOptionButton(
+                            label = "4",
+                            isSelected = uiState.gridSize == 4,
+                            isDark = isDark,
+                            onClick = { viewModel.setGridSize(4) }
+                        )
+                    }
+                }
+
+                // Camera Tree List
+                if (uiState.isLoading && uiState.treeData.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        WaveDotsLoading()
+                    }
+                } else if (filteredTree.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CommonEmptyState(text = "Không có camera nào")
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(items = filteredTree, key = { it.key }) { node ->
+                            CameraTreeNodeView(
+                                node = node,
+                                depth = 0,
+                                expandedNodes = if (uiState.searchQuery.isNotBlank()) {
+                                    collectAllNodeKeys(filteredTree)
+                                } else {
+                                    uiState.expandedNodes
+                                },
+                                cameraStatusMap = uiState.cameraStatusMap,
+                                recordStatusMap = uiState.recordStatusMap,
+                                activeCameraIds = activeCameraIds,
+                                onToggleExpand = { viewModel.toggleNodeExpansion(it) },
+                                onCameraClick = { camera ->
+                                    viewModel.selectCameraFromTree(camera)
                                 }
-                            } else {
-                                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                    items(items = uiState.treeData, key = { it.key }) { node ->
-                                        CameraTreeNodeView(
-                                            node = node,
-                                            depth = 0,
-                                            expandedNodes = uiState.expandedNodes,
-                                            cameraStatusMap = uiState.cameraStatusMap,
-                                            onToggleExpand = { viewModel.toggleNodeExpansion(it) },
-                                            onCameraClick = { camera ->
-                                                if (activeSlotIndex in 0..3) {
-                                                    viewModel.addCamera(camera, activeSlotIndex)
-                                                }
-                                                showBottomSheet = false
-                                            }
-                                        )
-                                    }
-                                }
-                            }
+                            )
                         }
                     }
                 }
             }
         }
-        } // End of Column
 
-        // Fullscreen overlay
+        // Fullscreen Overlay
         if (fullscreenIndex != null) {
             val index = fullscreenIndex!!
-            val selectedCam = uiState.selectedCameras[index]
-            
+            val selectedCam = uiState.selectedCameras.getOrNull(index)
+
             if (selectedCam != null) {
                 DisposableEffect(Unit) {
                     val originalOrientation = activity?.requestedOrientation
                     activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                    
+
                     val window = activity?.window
                     val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
-                    
+
                     if (insetsController != null) {
                         insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                         insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                     }
-                    
+
                     onDispose {
                         activity?.requestedOrientation = originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
                     }
                 }
-                
+
                 androidx.activity.compose.BackHandler {
                     coroutineScope.launch {
-                        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         val window = activity?.window
                         val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
                         insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
-                        
+
                         kotlinx.coroutines.delay(150)
                         fullscreenIndex = null
                     }
                 }
-                
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -563,16 +406,116 @@ fun MonitorScreen(
                         .clickable(
                             interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                             indication = null,
-                            onClick = {} // Block clicks from passing through
+                            onClick = {}
                         )
                 ) {
-                    cameraItems[index](selectedCam)
+                    CameraGridItem(
+                        selectedCamera = selectedCam,
+                        onClick = {},
+                        onRetryClick = { viewModel.retryCameraStream(index) },
+                        onSuccess = { viewModel.resetRetryCount(index) },
+                        onFullscreenClick = {
+                            coroutineScope.launch {
+                                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                val window = activity?.window
+                                val insetsController = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+                                insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+
+                                kotlinx.coroutines.delay(150)
+                                fullscreenIndex = null
+                            }
+                        },
+                        onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, index) },
+                        onRemoveClick = {
+                            fullscreenIndex = null
+                            viewModel.removeCamera(index)
+                        },
+                        isFullscreen = true,
+                        isCompact = false
+                    )
                 }
             } else {
                 fullscreenIndex = null
             }
         }
-    } // End of root Box
+    }
+}
+
+@Composable
+private fun GridOptionButton(
+    label: String,
+    isSelected: Boolean,
+    isDark: Boolean,
+    onClick: () -> Unit
+) {
+    val bgColor = if (isSelected) BrandAccent else Color.Transparent
+    val contentColor = if (isSelected) {
+        Color.White
+    } else if (isDark) {
+        Color(0xFF94A3B8)
+    } else {
+        Color(0xFF64748B)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxHeight()
+            .width(30.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = contentColor,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+private fun filterTreeNodes(nodes: List<CameraTreeNode>, query: String): List<CameraTreeNode> {
+    val result = mutableListOf<CameraTreeNode>()
+    for (node in nodes) {
+        when (node) {
+            is CameraTreeNode.CameraLeaf -> {
+                if (node.camera.name.lowercase().contains(query)) {
+                    result.add(node)
+                }
+            }
+            is CameraTreeNode.GroupNode -> {
+                if (node.group.name.lowercase().contains(query)) {
+                    result.add(node)
+                } else {
+                    val filteredChildren = filterTreeNodes(node.children, query)
+                    if (filteredChildren.isNotEmpty()) {
+                        result.add(node.copy(children = filteredChildren.toMutableList()))
+                    }
+                }
+            }
+            is CameraTreeNode.VMSNode -> {
+                val filteredChildren = filterTreeNodes(node.children, query)
+                if (filteredChildren.isNotEmpty()) {
+                    result.add(node.copy(children = filteredChildren.toMutableList()))
+                }
+            }
+        }
+    }
+    return result
+}
+
+private fun collectAllNodeKeys(nodes: List<CameraTreeNode>): Set<String> {
+    val keys = mutableSetOf<String>()
+    fun walk(list: List<CameraTreeNode>) {
+        for (n in list) {
+            keys.add(n.key)
+            if (n is CameraTreeNode.VMSNode) walk(n.children)
+            if (n is CameraTreeNode.GroupNode) walk(n.children)
+        }
+    }
+    walk(nodes)
+    return keys
 }
 
 @Composable
@@ -583,14 +526,15 @@ fun CameraGridItem(
     onSuccess: () -> Unit,
     onFullscreenClick: () -> Unit,
     onBackToLiveClick: () -> Unit,
-    isFullscreen: Boolean = false
+    onRemoveClick: () -> Unit = {},
+    isFullscreen: Boolean = false,
+    isCompact: Boolean = false
 ) {
     val deviceKey = UserSession.accessToken
-    val camera = selectedCamera.camera
     var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
-    
+
     var shouldRenderPlayer by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
     LaunchedEffect(selectedCamera.streamUrl) {
         if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
@@ -601,38 +545,34 @@ fun CameraGridItem(
 
     Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .then(if (isFullscreen) Modifier.fillMaxHeight() else Modifier.aspectRatio(16f / 9f))
-            .clip(RoundedCornerShape(0.dp))
+            .fillMaxSize()
             .background(Color.Black)
     ) {
         if (shouldRenderPlayer && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
-                // WebSocket stream - use native ExoPlayer with forced FragmentedMp4Extractor
                 com.tenli.oneview.ui.component.LiveStreamPlayer(
                     wsUrl = selectedCamera.streamUrl,
                     videoCodecTag = selectedCamera.videoCodecTag.ifEmpty { "hvc1.1.6.L90" },
-                    onPlayingChange = { 
-                        isLiveViewPlaying = it 
+                    onPlayingChange = {
+                        isLiveViewPlaying = it
                         if (it) {
                             onSuccess()
                         }
                     },
-                    onErrorChange = { isError -> 
-                        isLiveViewError = isError 
+                    onErrorChange = { isError ->
+                        isLiveViewError = isError
                         if (isError) {
                             onRetryClick()
                         }
                     }
                 )
             } else {
-                // HTTP stream - use ExoPlayer
                 VideoPlayer(
                     videoUrl = selectedCamera.streamUrl,
                     thumbnailUrl = null,
                     deviceKey = deviceKey,
-                    onPlayingChange = { 
-                        isLiveViewPlaying = it 
+                    onPlayingChange = {
+                        isLiveViewPlaying = it
                         if (it) {
                             onSuccess()
                         }
@@ -647,12 +587,10 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface),
+                    .background(Color(0xFF0A0A0A)),
                 contentAlignment = Alignment.Center
             ) {
-                com.tenli.oneview.ui.component.WaveDotsLoading(
-                    dotColor = MaterialTheme.colorScheme.primary
-                )
+                WaveDotsLoading(dotColor = BrandAccent)
             }
         }
 
@@ -661,116 +599,76 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface),
+                    .background(Color(0xFF0A0A0A)),
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = when {
-                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có video cho sự kiện này"
-                    selectedCamera.streamUrl.startsWith("error://failed") -> "Lỗi không xem được camera"
+                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có video"
+                    selectedCamera.streamUrl.startsWith("error://failed") -> "Lỗi kết nối camera"
                     else -> "Lỗi tải video"
                 }
-
-                if (selectedCamera.fallbackImageUrl.isNotEmpty()) {
-                    com.tenli.oneview.ui.component.VideoFrameImage(
-                        url = selectedCamera.fallbackImageUrl,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        errorContent = {
-                            Box(
-                                modifier = Modifier
-                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
-                            }
-                        }
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        com.tenli.oneview.ui.component.CommonEmptyState(text = errorMsg)
-                    }
-                }
+                CommonEmptyState(text = errorMsg)
             }
         }
 
-        // Stream Type Indicator Overlay (LIVE, EVENT, PLAYBACK)
-        if (selectedCamera.streamUrl.isNotEmpty() && (isLiveViewPlaying || selectedCamera.streamType != "LIVE")) {
-            val badgeText = selectedCamera.streamType
-            val badgeColor = when (selectedCamera.streamType) {
-                "LIVE" -> Color.Red
-                "EVENT" -> Color(0xFFF59E0B) // Orange
-                "PLAYBACK" -> Color(0xFF3B82F6) // Blue
-                else -> Color.Gray
-            }
-            Row(
+        // Camera Name + LIVE badge at Top-Left
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(if (isCompact) 4.dp else 8.dp)
+                .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .background(badgeColor, androidx.compose.foundation.shape.CircleShape)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = badgeText,
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                )
-            }
+                    .size(6.dp)
+                    .background(Color(0xFFEF4444), CircleShape)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = selectedCamera.camera.name,
+                color = Color.White,
+                fontSize = if (isCompact) 10.sp else 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        
-        // Back to Live button
-        if (selectedCamera.streamType != "LIVE") {
-            Row(
+
+        // Close / Remove Camera Button at Top-Right (when not fullscreen)
+        if (!isFullscreen) {
+            Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .clickable { onBackToLiveClick() }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(if (isCompact) 4.dp else 8.dp)
+                    .size(if (isCompact) 22.dp else 26.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.55f))
+                    .clickable { onRemoveClick() },
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Videocam,
-                    contentDescription = null,
+                    imageVector = LucideIcons.X,
+                    contentDescription = "Đóng camera",
                     tint = Color.White,
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "Về xem Live",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    modifier = Modifier.size(if (isCompact) 13.dp else 15.dp)
                 )
             }
         }
 
-        // Fullscreen button at Bottom Right
+        // Fullscreen Button at Bottom-Right
         IconButton(
             onClick = onFullscreenClick,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(48.dp)
+                .size(if (isCompact) 32.dp else 42.dp)
         ) {
             Icon(
-                imageVector = if (isFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
                 contentDescription = "Toàn màn hình",
                 tint = Color.White,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(if (isCompact) 18.dp else 24.dp)
             )
         }
     }
@@ -782,10 +680,12 @@ fun CameraTreeNodeView(
     depth: Int,
     expandedNodes: Set<String>,
     cameraStatusMap: Map<String, String>,
+    recordStatusMap: Map<String, String> = emptyMap(),
+    activeCameraIds: Set<Int> = emptySet(),
     onToggleExpand: (String) -> Unit,
     onCameraClick: (CameraModel) -> Unit
 ) {
-    val paddingStart = 16.dp + (depth * 16).dp
+    val paddingStart = 6.dp + (depth * 14).dp
 
     when (node) {
         is CameraTreeNode.VMSNode -> {
@@ -793,18 +693,45 @@ fun CameraTreeNodeView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
                     .clickable { onToggleExpand(node.key) }
-                    .padding(vertical = 8.dp)
+                    .padding(vertical = 8.dp, horizontal = 4.dp)
                     .padding(start = paddingStart),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
-                Text(node.vms.name, style = MaterialTheme.typography.bodyLarge)
+                Icon(
+                    imageVector = if (isExpanded) LucideIcons.ChevronDown else LucideIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+                Icon(
+                    imageVector = LucideIcons.Server,
+                    contentDescription = null,
+                    tint = BrandAccent,
+                    modifier = Modifier
+                        .padding(horizontal = 6.dp)
+                        .size(16.dp)
+                )
+                Text(
+                    text = node.vms.name,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
             if (isExpanded) {
                 node.children.forEach { child ->
-                    CameraTreeNodeView(child, depth + 1, expandedNodes, cameraStatusMap, onToggleExpand, onCameraClick)
+                    CameraTreeNodeView(
+                        node = child,
+                        depth = depth + 1,
+                        expandedNodes = expandedNodes,
+                        cameraStatusMap = cameraStatusMap,
+                        recordStatusMap = recordStatusMap,
+                        activeCameraIds = activeCameraIds,
+                        onToggleExpand = onToggleExpand,
+                        onCameraClick = onCameraClick
+                    )
                 }
             }
         }
@@ -813,57 +740,135 @@ fun CameraTreeNodeView(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
                     .clickable { onToggleExpand(node.key) }
-                    .padding(vertical = 8.dp)
+                    .padding(vertical = 7.dp, horizontal = 4.dp)
                     .padding(start = paddingStart),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp))
-                Text(node.group.name, style = MaterialTheme.typography.bodyMedium)
+                Icon(
+                    imageVector = if (isExpanded) LucideIcons.ChevronDown else LucideIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+                Icon(
+                    imageVector = LucideIcons.Folder,
+                    contentDescription = null,
+                    tint = Color(0xFFF59E0B),
+                    modifier = Modifier
+                        .padding(horizontal = 6.dp)
+                        .size(16.dp)
+                )
+                Text(
+                    text = node.group.name,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
             if (isExpanded) {
                 node.children.forEach { child ->
-                    CameraTreeNodeView(child, depth + 1, expandedNodes, cameraStatusMap, onToggleExpand, onCameraClick)
+                    CameraTreeNodeView(
+                        node = child,
+                        depth = depth + 1,
+                        expandedNodes = expandedNodes,
+                        cameraStatusMap = cameraStatusMap,
+                        recordStatusMap = recordStatusMap,
+                        activeCameraIds = activeCameraIds,
+                        onToggleExpand = onToggleExpand,
+                        onCameraClick = onCameraClick
+                    )
                 }
             }
         }
         is CameraTreeNode.CameraLeaf -> {
-            val statusColor = when (cameraStatusMap[node.key]) {
-                "red" -> Color(0xFFEF4444)
-                else -> Color(0xFF10B981) // Mặc định xanh nếu không phải đỏ
+            val wsStatus = cameraStatusMap[node.key]
+            val issues = node.camera.extra?.latestReport?.issues ?: emptyList()
+            val isOfflineFromIssues = issues.contains("loi_ket_noi") || issues.contains("mat_ket_noi")
+            val isOffline = when {
+                wsStatus == "red" || wsStatus == "offline" -> true
+                wsStatus == "green" || wsStatus == "orange" -> false
+                else -> isOfflineFromIssues || node.camera.extra?.status == "red" || node.camera.extra?.status == "offline"
             }
+            val statusColor = if (isOffline) Color(0xFFEF4444) else Color(0xFF10B981)
+            val isSelected = activeCameraIds.contains(node.camera.id)
+            val recordStatus = recordStatusMap[node.key]
+                ?: node.camera.extra?.recordStatus
+                ?: if (node.camera.enableRecord) "green" else null
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(
+                        if (isSelected) BrandAccent.copy(alpha = 0.14f) else Color.Transparent
+                    )
                     .clickable { onCameraClick(node.camera) }
                     .padding(vertical = 8.dp)
-                    .padding(start = paddingStart + 24.dp, end = 16.dp), // Extra padding to align with folder content
+                    .padding(start = paddingStart + 20.dp, end = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.Default.Videocam, contentDescription = null, tint = statusColor, modifier = Modifier.padding(end = 8.dp))
-                Text(node.camera.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Icon(
+                    imageVector = LucideIcons.Video,
+                    contentDescription = null,
+                    tint = statusColor,
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(16.dp)
+                )
+                Text(
+                    text = node.camera.name,
+                    fontSize = 13.5.sp,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isSelected) BrandAccent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!recordStatus.isNullOrBlank()) {
+                    val recColor = when (recordStatus) {
+                        "green" -> Color(0xFF10B981)
+                        "yellow", "orange" -> Color(0xFFF59E0B)
+                        "red" -> Color(0xFFEF4444)
+                        else -> Color.Transparent
+                    }
+                    if (recColor != Color.Transparent) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(recColor, CircleShape)
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun EmptyGridItem(onClick: () -> Unit) {
-    Box(
+fun EmptyGridItem(onClick: () -> Unit, isCompact: Boolean = false) {
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surface)
+            .fillMaxSize()
+            .background(Color(0xFF0A0A0A))
             .clickable { onClick() },
-        contentAlignment = Alignment.Center
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Outlined.Videocam,
+            imageVector = LucideIcons.Video,
             contentDescription = "Chọn Camera",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            modifier = Modifier.size(56.dp)
+            tint = Color.White.copy(alpha = 0.35f),
+            modifier = Modifier.size(if (isCompact) 26.dp else 40.dp)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "Chọn camera bên dưới",
+            color = Color.White.copy(alpha = 0.45f),
+            fontSize = if (isCompact) 11.sp else 13.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }
@@ -872,8 +877,7 @@ fun EmptyGridItem(onClick: () -> Unit) {
 fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, cameraName: String, isSelected: Boolean = false, onClick: () -> Unit) {
     val formattedTime = remember(playback.time) {
         var parsedDate: java.util.Date? = null
-        
-        // Try parsing as numeric timestamp first (like event time)
+
         val numericTime = playback.time.toDoubleOrNull()
         if (numericTime != null && numericTime > 0) {
             val timeMillis = if (numericTime < 100000000000.0) (numericTime * 1000).toLong() else numericTime.toLong()
@@ -886,7 +890,7 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()),
                 java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", java.util.Locale.getDefault())
             )
-            
+
             for (f in formatters) {
                 try {
                     parsedDate = f.parse(playback.time)
@@ -896,7 +900,7 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
                 }
             }
         }
-        
+
         val outputFormatter = java.text.SimpleDateFormat("HH:mm:ss dd/MM/yyyy", java.util.Locale.getDefault())
         parsedDate?.let { outputFormatter.format(it) } ?: playback.time
     }
@@ -938,18 +942,18 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = cameraName,
-                color = Color.Black,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 maxLines = 1,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             val timeAnnotatedString = remember(formattedTime) {
-                androidx.compose.ui.text.buildAnnotatedString {
+                buildAnnotatedString {
                     val parts = formattedTime.split(" ")
                     if (parts.size == 2) {
-                        withStyle(style = androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.SemiBold, color = Color.DarkGray)) {
+                        withStyle(style = SpanStyle(fontWeight = FontWeight.SemiBold)) {
                             append(parts[0])
                         }
                         append(" ")
@@ -961,7 +965,7 @@ fun PlaybackItemView(playback: com.tenli.oneview.model.network.VideoModel, camer
             }
             Text(
                 text = timeAnnotatedString,
-                color = Color.Gray,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
             Spacer(modifier = Modifier.height(6.dp))

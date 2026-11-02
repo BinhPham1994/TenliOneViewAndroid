@@ -1,5 +1,7 @@
 package com.tenli.oneview.model.network
 
+import com.google.gson.annotations.SerializedName
+
 data class VMSServiceModel(
     val id: Int,
     val name: String,
@@ -28,13 +30,48 @@ data class UserGroupModel(
     val name: String
 )
 
+data class VisualMonitoringFeatures(
+    val overview: Boolean? = null,
+    val monitoring: Boolean? = null,
+    val playback: Boolean? = null,
+    val map: Boolean? = null,
+    val floorPlan: Boolean? = null,
+    val config: Boolean? = null,
+    val vmsConfig: Boolean? = null,
+    val storageConfig: Boolean? = null,
+    val dataSharing: Boolean? = null
+)
+
+data class AiConfigFeatures(
+    val overview: Boolean? = null,
+    val management: Boolean? = null,
+    val serviceConfig: Boolean? = null
+)
+
+data class OperationsFeatures(
+    val dashboard: Boolean? = null,
+    val smartSearch: Boolean? = null
+)
+
+data class SectionPermission<T>(
+    val enabled: Boolean? = null,
+    val features: T? = null
+)
+
 data class UserPermissions(
     val isAdmin: Boolean? = null,
     val allowSettings: Boolean? = null,
+    val allowPeripheralDevices: Boolean? = null,
+    val allowOnvifControl: Boolean? = null,
+    val visualMonitoring: SectionPermission<VisualMonitoringFeatures>? = null,
+    val aiConfig: SectionPermission<AiConfigFeatures>? = null,
+    val operations: SectionPermission<OperationsFeatures>? = null,
     val allowEditCamera: Boolean? = null,
     val allowConfigAI: Boolean? = null,
+    val allowSmartSearch: Boolean? = null,
     val cameras: CameraPermissions? = null,
     val aiEvents: AiEventPermissions? = null,
+    val events: AiEventPermissions? = null,
     val modules: List<String>? = null
 )
 
@@ -114,14 +151,40 @@ data class CameraOnvifModel(
     val mac: String,
     val brand: String? = null,
     val username: String? = null,
-    val password: String? = null
+    val password: String? = null,
+    val channelIndex: Int? = null,
+    val isChannel: Boolean? = null
+)
+
+data class CameraGeoConfig(
+    val mountType: String? = null, // 'fixed' | 'ptz'
+    val mountHeight: Double? = null,
+    val azimuth: Double? = null,
+    val tilt: Double? = null,
+    val hfov: Double? = null,
+    val vfov: Double? = null,
+    val hfovTele: Double? = null,
+    val panMinDeg: Double? = null,
+    val panMaxDeg: Double? = null,
+    val tiltMinDeg: Double? = null,
+    val tiltMaxDeg: Double? = null,
+    val tiltOffset: Double? = null
+)
+
+data class CameraLatestReport(
+    val issues: List<String>? = null
 )
 
 data class CameraExtra(
     val location: Location? = null,
     val cameraOnvif: CameraOnvifModel? = null,
     val permanentLink: Boolean? = null,
-    val uuid: String? = null
+    val uuid: String? = null,
+    val status: String? = null,
+    val recordStatus: String? = null,
+    val recording: Boolean? = null,
+    val geo: CameraGeoConfig? = null,
+    val latestReport: CameraLatestReport? = null
 )
 
 data class CameraModel(
@@ -153,18 +216,53 @@ data class CameraInGroupModel(
 data class LiveStreamModel(
     val cameraId: Int,
     val channel: Int,
-    val link: String,
-    val videoCodec: String,
-    val audioCodec: String,
-    val videoCodecTag: String
+    val link: String = "",
+    val videoCodec: String = "",
+    val audioCodec: String = "",
+    val videoCodecTag: String = ""
+)
+
+data class RecordStreamRequest(
+    val id: String? = null,
+    val rtsp: String? = null
+)
+
+data class RecordStreamModel(
+    val id: String,
+    val rtsp: String? = null,
+    val state: String = "connecting", // 'connecting' | 'connected' | 'error'
+    val link: String? = null,
+    val fallbackLinks: List<String>? = null,
+    val videoCodecTag: String? = null
 )
 
 data class VideoModel(
     val time: String,
     val videoLink: String,
-    val imageLink: String,
-    val thumbnailLink: String,
-    val isLoaded: Boolean? = null
+    val fallbackLinks: List<String>? = null,
+    val imageLink: String = "",
+    val thumbnailLink: String = "",
+    val isLoaded: Boolean? = null,
+    val sourceType: String? = null, // 'vms' | 'nvr'
+    val duration: Double? = null
+)
+
+data class DeviceDiscoveryModel(
+    val xml: String
+)
+
+data class DeviceServiceRequest(
+    @SerializedName("addr", alternate = ["url"])
+    val addr: String,
+    val username: String = "",
+    val password: String = "",
+    val xml: String
+) {
+    val url: String get() = addr
+}
+
+data class DeviceServiceResponse(
+    val xml: String? = null
 )
 
 data class PermanentLinkModel(

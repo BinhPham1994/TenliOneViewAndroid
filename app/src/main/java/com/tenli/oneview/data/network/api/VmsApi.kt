@@ -9,12 +9,19 @@ import com.tenli.oneview.model.network.CameraInGroupModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.CameraViewModel
 import com.tenli.oneview.model.network.ChangePasswordModel
+import com.tenli.oneview.model.network.DeviceDiscoveryModel
+import com.tenli.oneview.model.network.DeviceServiceRequest
+import com.tenli.oneview.model.network.DeviceServiceResponse
 import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.model.network.LogOutModel
 import com.tenli.oneview.model.network.PermanentLinkModel
+import com.tenli.oneview.model.network.RecordStreamModel
+import com.tenli.oneview.model.network.RecordStreamRequest
 import com.tenli.oneview.model.network.ReportLinkModel
 import com.tenli.oneview.model.network.ResetPasswordModel
+import com.tenli.oneview.model.network.SOAPModel
+import com.tenli.oneview.model.network.SOAPResponseModel
 import com.tenli.oneview.model.network.StorageModel
 import com.tenli.oneview.model.network.StorageStatusModel
 import com.tenli.oneview.model.network.SystemSettingModel
@@ -29,6 +36,7 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
@@ -178,10 +186,27 @@ interface VmsApi {
     @DELETE("VMS/api/CameraInGroup/{id}")
     suspend fun deleteCameraInGroup(@Path("id") id: Int): Response<Unit>
 
-    // ==================== Live Stream ====================
+    // ==================== Live Stream & Record Stream ====================
 
     @POST("VMS/api/LiveStream")
     suspend fun createLiveStream(@Body model: LiveStreamModel): Response<LiveStreamModel>
+
+    @POST("VMS/api/RecordStream")
+    suspend fun createRecordStream(@Body model: RecordStreamRequest): Response<RecordStreamModel>
+
+    // ==================== ONVIF Device Discovery & Device Service ====================
+
+    @POST("VMS/api/DeviceDiscovery")
+    suspend fun deviceDiscovery(@Body body: Map<String, Any> = emptyMap()): Response<List<Map<String, Any>>>
+
+    @POST("VMS/api/DeviceDiscovery")
+    suspend fun deviceDiscoveryXml(@Body model: DeviceDiscoveryModel): Response<List<DeviceDiscoveryModel>>
+
+    @POST("VMS/api/DeviceService")
+    suspend fun deviceService(@Body request: DeviceServiceRequest): Response<DeviceServiceResponse>
+
+    @POST("VMS/api/DeviceService")
+    suspend fun deviceServiceSoap(@Body model: SOAPModel): Response<SOAPResponseModel>
 
     // ==================== Video ====================
 
@@ -191,6 +216,11 @@ interface VmsApi {
         @Query("count") count: Int? = null,
         @Query("from") from: String? = null,
         @Query("to") to: String? = null
+    ): Response<List<VideoModel>>
+
+    @GET("VMS/api/VideoList")
+    suspend fun getAllVideoList(
+        @Query("count") count: Int = 500
     ): Response<List<VideoModel>>
 
     // ==================== Permanent Link ====================
@@ -242,13 +272,25 @@ interface VmsApi {
 
     /** Restart service với URL tùy chỉnh (tương đương restartServiceExt trên web) */
     @POST
-    suspend fun restartServiceExt(@Url url: String, @Body command: Map<String, String>): Response<Unit>
+    suspend fun restartServiceExt(
+        @Url url: String,
+        @Body command: Map<String, String>,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<Unit>
 
     // ==================== Storage Status (External Host) ====================
 
     /** StorageStatus dùng host riêng của VMS service (tương đương getExt trên web) */
     @GET
-    suspend fun getStorageStatus(@Url url: String): Response<StorageStatusModel>
+    suspend fun getStorageStatus(
+        @Url url: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<StorageStatusModel>
+
+    @GET("VMS/api/StorageStatus/{storageId}")
+    suspend fun getStorageStatusById(
+        @Path("storageId") storageId: Int
+    ): Response<StorageStatusModel>
 
     // ==================== Auth ====================
 

@@ -1,49 +1,65 @@
 package com.tenli.oneview.ui.features.home
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.VerifiedUser
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
-import com.tenli.oneview.ui.component.AiServiceFilterDropdown
-import com.tenli.oneview.ui.component.TimeFilterDropdown
+import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.MobileEventCard
+import com.tenli.oneview.ui.component.MobileFilterBottomSheet
+import com.tenli.oneview.ui.component.MobileTopActionButton
+import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.MobileViewToggleButton
+import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
@@ -51,307 +67,364 @@ fun HomeScreen(
     onEventClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var isRefreshing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
 
-    androidx.compose.runtime.LaunchedEffect(uiState.isLoading) {
+    LaunchedEffect(Unit) {
+        viewModel.syncViewModeFromPrefs()
+    }
+
+    LaunchedEffect(uiState.isLoading) {
         if (!uiState.isLoading) {
             isRefreshing = false
         }
     }
 
+    val hasActiveFilter = uiState.selectedServiceId != null || uiState.selectedFilter != TimeFilter.TODAY
+
+    val cameraMap = remember(uiState.cameraList) {
+        uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
+    }
+
+    // Strictly take at most 5 recent events matching permittedEvents.slice(0, 5)
+    val recentFiveEvents = remember(uiState.recentEvents) {
+        uiState.recentEvents.take(5)
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Header
-        Row(
+        // Sticky Mobile Header Bar matching .mobile-top-bar (position: sticky; top: 0; z-index: 50)
+        MobileTopBar(
+            title = stringResource(id = R.string.tab_home),
+            rightAction = {
+                MobileTopActionButton(
+                    icon = LucideIcons.ListFilter,
+                    contentDescription = "Bộ lọc",
+                    hasActiveDot = hasActiveFilter,
+                    onClick = { showFilterSheet = true }
+                )
+            }
+        )
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                viewModel.fetchDashboardData()
+            },
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .padding(horizontal = 10.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically
+                .weight(1f)
         ) {
-            AiServiceFilterDropdown(
-                services = uiState.aiServices,
-                selectedServiceId = uiState.selectedServiceId,
-                onServiceSelected = { viewModel.setServiceFilter(it) }
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            TimeFilterDropdown(
-                selectedFilter = uiState.selectedFilter,
-                onFilterSelected = { viewModel.setTimeFilter(it) }
-            )
-        }
-
-        androidx.compose.foundation.layout.BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-            val lazyColumnHeight = maxHeight
-            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    isRefreshing = true
-                    viewModel.fetchDashboardData()
-                },
-                modifier = Modifier.fillMaxSize()
-            ) {
-                LazyColumn(
+            LazyColumn(
                 state = listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 10.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                userScrollEnabled = true,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 2.dp, bottom = 130.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-
-        // 4 Thẻ thống kê
-        item {
-            // Lấy giá trị từ Overview
-            fun Any?.formatCount(): String {
-                val num = (this as? Number)?.toLong() ?: this?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
-                return java.text.NumberFormat.getNumberInstance(java.util.Locale("vi", "VN")).format(num)
-            }
-
-            val totalEvents = uiState.overviewStats.find { it.label == "event-count" && it.tag == "all" }?.count.formatCount()
-            val totalCamerasNum = uiState.overviewStats.find { it.label == "camera-count" && it.tag == "all" }?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
-            val totalCameras = totalCamerasNum.formatCount()
-            val totalAI = uiState.overviewStats.find { it.label == "monitor-count" && it.tag == "all" }?.count.formatCount()
-            val systemStatus = "An toàn" // Default mock as per requirement
-
-            val onlineCamerasCount = androidx.compose.runtime.remember(uiState.cameraList, uiState.cameraStatusMap) {
-                var count = 0L
-                uiState.cameraList.forEach { cam ->
-                    val key = "cam-${cam.vmsId}-${if (cam.vmsId == 0) cam.id else cam.cameraId}"
-                    val status = uiState.cameraStatusMap[key]
-                    if (status != "red") {
-                        count++
-                    }
-                }
-                count
-            }
-            val offlineCamerasCount = (totalCamerasNum - onlineCamerasCount).coerceAtLeast(0L)
-
-            LazyRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp)
-            ) {
+                // 2x2 Stat Grid matching MobileHomePage.vue
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatCard(
-                            title = "Tổng sự kiện",
-                            value = totalEvents,
-                            iconColor = Color(0xFFF97316),
-                            icon = androidx.compose.material.icons.Icons.Default.Notifications,
-                            modifier = Modifier.width(160.dp)
-                        )
-                        StatCard(
-                            title = "Tiến trình AI",
-                            value = totalAI,
-                            iconColor = Color(0xFF3B82F6),
-                            icon = androidx.compose.material.icons.Icons.Default.Memory,
-                            modifier = Modifier.width(160.dp)
-                        )
-                    }
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatCard(
-                            title = "Tổng camera",
-                            value = totalCameras,
-                            iconColor = Color(0xFF0EA5E9),
-                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
-                            modifier = Modifier.width(160.dp)
-                        )
-                        StatCard(
-                            title = "Trạng thái",
-                            value = systemStatus,
-                            iconColor = Color(0xFF13C2C2),
-                            icon = androidx.compose.material.icons.Icons.Default.VerifiedUser,
-                            modifier = Modifier.width(160.dp)
-                        )
-                    }
-                }
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatCard(
-                            title = "Camera Online",
-                            value = onlineCamerasCount.formatCount(),
-                            iconColor = Color(0xFF52C41A),
-                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
-                            modifier = Modifier.width(160.dp)
-                        )
-                        StatCard(
-                            title = "Camera Offline",
-                            value = offlineCamerasCount.formatCount(),
-                            iconColor = Color(0xFFEF4444),
-                            icon = androidx.compose.material.icons.Icons.Default.Videocam,
-                            modifier = Modifier.width(160.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Biểu đồ: Sự kiện theo thời gian và bài AI (Cuộn ngang)
-        item {
-            val isMultiDay = uiState.selectedFilter == TimeFilter.LAST_7_DAYS || uiState.selectedFilter == TimeFilter.LAST_30_DAYS
-            val overTimeData = uiState.eventsOverTime.map {
-                val label = if (isMultiDay) {
-                    val dateParts = it.date.split("T").first().split("-")
-                    if (dateParts.size >= 3) "${dateParts[2]}/${dateParts[1]}" else it.date
-                } else {
-                    "${it.hour}h"
-                }
-                Pair(label, it.value.toFloatOrNull() ?: 0f)
-            }
-            
-            val byTypeData = uiState.eventsByType
-                .filter { 
-                    !it.type.contains("online", ignoreCase = true) && 
-                    !it.type.contains("offline", ignoreCase = true) &&
-                    !it.type.contains("security-enable", ignoreCase = true) &&
-                    !it.type.contains("security-disable", ignoreCase = true)
-                }
-                .map {
-                    Pair(AiTypeHelper.getTypeName(it.type), it.count.toFloat())
-                }
-                .sortedByDescending { it.second }
-
-            val byCameraData = uiState.eventsByCamera
-                .map {
-                    val cameraName = uiState.cameraList.find { cam -> cam.extra?.uuid == it.cameraUUID }?.name 
-                                     ?: it.cameraUUID.take(6).let { uuidStr -> "Camera $uuidStr" }
-                    Pair(cameraName, it.count.toFloat())
-                }
-                .sortedByDescending { it.second }
-                .take(10)
-
-            val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-
-            val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { 3 })
-            
-            val currentTitle = when (pagerState.currentPage) {
-                0 -> "Phân bố sự kiện theo thời gian"
-                1 -> "Phân bố sự kiện theo bài AI"
-                else -> "Phân bố sự kiện theo camera"
-            }
-            SectionTitle(currentTitle)
-            
-            androidx.compose.foundation.pager.HorizontalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxWidth(),
-                pageSize = androidx.compose.foundation.pager.PageSize.Fixed(configuration.screenWidthDp.dp - 48.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-                pageSpacing = 8.dp
-            ) { page ->
-                when (page) {
-                    0 -> {
-                        HomeLineChart(
-                            data = overTimeData,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .padding(8.dp)
-                        )
-                    }
-                    1 -> {
-                        HomeHorizontalBarChart(
-                            data = byTypeData,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .padding(8.dp)
-                        )
-                    }
-                    2 -> {
-                        HomeHorizontalBarChart(
-                            data = byCameraData,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(16f / 9f)
-                                .background(MaterialTheme.colorScheme.surface, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                                .padding(8.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Danh sách sự kiện gần đây
-        item {
-            Column {
-                SectionTitle("Sự kiện gần đây")
-                
-                if (uiState.recentEvents.isEmpty()) {
-                    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
-                    val screenWidth = configuration.screenWidthDp.dp
-                    
-                    val pagerEndPadding = screenWidth * 0.06f
-                    val chartWidth = screenWidth - 32.dp - pagerEndPadding
-                    val chartHeight = chartWidth * 9f / 16f
-                    
-                    val statWidth = (screenWidth - 40.dp) / 2f
-                    val statHeight = statWidth * 9f / 16f
-                    val statsHeight = statHeight * 2 + 8.dp
-                    
-                    // Tổng chiều cao các thành phần: Biểu đồ + Thống kê + Paddings/Titles(~100dp)
-                    val emptyHeight = (lazyColumnHeight - chartHeight - statsHeight - 100.dp).coerceAtLeast(150.dp)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(emptyHeight)
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        com.tenli.oneview.ui.component.CommonEmptyState(
-                            text = "Chưa có sự kiện nào"
-                        )
-                    }
-                } else {
-                    androidx.compose.foundation.layout.Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val cameraMap = androidx.compose.runtime.remember(uiState.cameraList) {
-                            uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
+                    // Total detections matching MobileHomePage.vue totalDetectionsCount (no thousand dot formatting)
+                    val totalEventsNum = remember(uiState.eventsByType, uiState.overviewStats) {
+                        val sumByType = uiState.eventsByType
+                            .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                            .sumOf { it.count.toString().toDoubleOrNull()?.toLong() ?: 0L }
+                        if (sumByType > 0L) {
+                            sumByType
+                        } else {
+                            uiState.overviewStats
+                                .find { it.label == "event-count" && it.tag == "all" }
+                                ?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
                         }
-                        val serviceMap = androidx.compose.runtime.remember(uiState.aiServices) {
-                            uiState.aiServices.associateBy({ it.id }, { it.name })
-                        }
-                        uiState.recentEvents.forEachIndexed { index, event ->
-                            val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
-                            val aiServiceName = serviceMap[event.serviceId] ?: "Unknown Service"
-                            RecentEventItem(event, cameraName, aiServiceName) {
-                                onEventClick(event.id.toString())
+                    }
+                    val totalEventsStr = totalEventsNum.toString()
+
+                    val totalCamerasFromOverview = uiState.overviewStats
+                        .find { it.label == "camera-count" && it.tag == "all" }
+                        ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+                    val totalCameras = if (uiState.cameraList.isNotEmpty()) uiState.cameraList.size else totalCamerasFromOverview
+
+                    // Online cameras matching MobileHomePage.vue onlineCamerasCount
+                    val onlineCameras = remember(uiState.cameraList, uiState.cameraStatusMap, totalCameras) {
+                        if (uiState.cameraList.isEmpty()) {
+                            totalCameras
+                        } else {
+                            uiState.cameraList.count { cam ->
+                                val wsStatus = uiState.cameraStatusMap["cam-0-${cam.id}"]
+                                    ?: uiState.cameraStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                                    ?: uiState.cameraStatusMap["cam-${cam.vmsId}-${cam.id}"]
+                                    ?: uiState.cameraStatusMap["cam-${cam.id}"]
+
+                                when (wsStatus) {
+                                    "green" -> true
+                                    "red", "orange" -> false
+                                    else -> {
+                                        val issues = cam.extra?.latestReport?.issues
+                                        if (issues != null) {
+                                            !issues.contains("loi_ket_noi") && !issues.contains("mat_ket_noi")
+                                        } else {
+                                            val legacyStatus = cam.extra?.status
+                                            legacyStatus != "red" && legacyStatus != "offline"
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
+
+                    // Recording cameras matching MobileHomePage.vue recordingCamerasCount
+                    val recordingCameras = remember(uiState.cameraList, uiState.recordStatusMap) {
+                        uiState.cameraList.count { cam ->
+                            val wsRecStatus = uiState.recordStatusMap["cam-0-${cam.id}"]
+                                ?: uiState.recordStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                                ?: uiState.recordStatusMap["cam-${cam.vmsId}-${cam.id}"]
+                                ?: uiState.recordStatusMap["cam-${cam.id}"]
+
+                            if (wsRecStatus != null) {
+                                wsRecStatus == "green"
+                            } else {
+                                cam.enableRecord ||
+                                    cam.extra?.recording == true ||
+                                    cam.extra?.recordStatus == "green"
+                            }
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.padding(horizontal = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            MobileStatCard(
+                                label = "TỔNG SỰ KIỆN",
+                                mainValue = totalEventsStr,
+                                subValue = null,
+                                accentColor = Color(0xFF0980EE),
+                                iconGradient = listOf(Color(0xFF0D8BF2), Color(0xFF0284C7)),
+                                icon = LucideIcons.Shield,
+                                modifier = Modifier.weight(1f)
+                            )
+                            MobileStatCard(
+                                label = "CAMERA HOẠT ĐỘNG",
+                                mainValue = onlineCameras.toString(),
+                                subValue = "/$totalCameras",
+                                accentColor = Color(0xFF10B981),
+                                iconGradient = listOf(Color(0xFF10B981), Color(0xFF059669)),
+                                icon = LucideIcons.Video,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            MobileStatCard(
+                                label = "BÀI AI ĐANG CHẠY",
+                                mainValue = uiState.runningAiTasks.toString(),
+                                subValue = "/${uiState.totalAiTasks}",
+                                accentColor = Color(0xFFA855F7),
+                                iconGradient = listOf(Color(0xFFA855F7), Color(0xFF9333EA)),
+                                icon = LucideIcons.Settings,
+                                modifier = Modifier.weight(1f)
+                            )
+                            MobileStatCard(
+                                label = "CAMERA GHI HÌNH",
+                                mainValue = recordingCameras.toString(),
+                                subValue = "/$totalCameras",
+                                accentColor = Color(0xFF0EA5E9),
+                                iconGradient = listOf(Color(0xFF0EA5E9), Color(0xFF0284C7)),
+                                icon = LucideIcons.Disc,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                // Section Header: Sự kiện gần đây + View Mode Toggle Button
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp)
+                            .padding(top = 6.dp, bottom = 0.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Sự kiện gần đây",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        MobileViewToggleButton(
+                            isListView = uiState.isListView,
+                            onToggle = { viewModel.toggleViewMode() }
+                        )
+                    }
+                }
+
+                // Recent Events List (strictly max 5 events) / Empty / Loading
+                if (uiState.isLoading && recentFiveEvents.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .height(220.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            WaveDotsLoading()
+                        }
+                    }
+                } else if (recentFiveEvents.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp)
+                                .height(220.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surface),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CommonEmptyState(text = "Không có sự kiện nào trong khoảng thời gian này")
+                        }
+                    }
+                } else {
+                    itemsIndexed(
+                        items = recentFiveEvents,
+                        key = { index, event -> "home_ev_${index}_${event.serviceId}_${event.id}_${event.time}" }
+                    ) { _, event ->
+                        val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
+                        Box(modifier = Modifier.padding(horizontal = 10.dp)) {
+                            MobileEventCard(
+                                event = event,
+                                cameraName = cameraName,
+                                isListView = uiState.isListView,
+                                enableSharedElement = false,
+                                onClick = { onEventClick(event.id.toString()) }
+                            )
+                        }
+                    }
                 }
             }
         }
-    } // End of LazyColumn
+    }
 
+    if (showFilterSheet) {
+        MobileFilterBottomSheet(
+            showScope = true,
+            showTime = true,
+            showCamera = false,
+            showEventType = false,
+            aiServices = uiState.aiServices,
+            cameras = uiState.cameraList,
+            selectedServiceId = uiState.selectedServiceId,
+            selectedTimeFilter = uiState.selectedFilter,
+            selectedCameraUuid = null,
+            selectedAiType = null,
+            onApply = { serviceId, timeFilter, _, _ ->
+                viewModel.applyFilters(timeFilter, serviceId)
+            },
+            onReset = {
+                viewModel.resetFilters()
+            },
+            onDismiss = { showFilterSheet = false }
+        )
+    }
+}
 
-            } // End of PullToRefreshBox
-        } // End of BoxWithConstraints
-    } // End of Column
-} // End of HomeScreen
+/**
+ * Thẻ thống kê dọc căn giữa giống hệt PWA MobileHomePage.vue (.stat-card):
+ * - Icon squircle 40x40dp bo góc 12dp ở trên cùng
+ * - Nhãn chữ in hoa (UPPERCASE) ở giữa
+ * - Số liệu chữ đậm có màu tương ứng ở dưới cùng
+ */
+@Composable
+fun MobileStatCard(
+    label: String,
+    mainValue: String,
+    subValue: String? = null,
+    accentColor: Color,
+    iconGradient: List<Color> = listOf(accentColor, accentColor),
+    icon: ImageVector,
+    modifier: Modifier = Modifier
+) {
+    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+    val isSystemDark = isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        0 -> false
+        1 -> true
+        else -> isSystemDark
+    }
+    val labelColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF334155)
+    val fullValue = if (!subValue.isNullOrEmpty()) "$mainValue$subValue" else mainValue
+
+    Column(
+        modifier = modifier
+            .shadow(
+                elevation = if (isDark) 0.dp else 1.dp,
+                shape = RoundedCornerShape(12.dp),
+                ambientColor = Color.Black.copy(alpha = 0.03f),
+                spotColor = Color.Black.copy(alpha = 0.04f)
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(vertical = 16.dp, horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Brush.linearGradient(iconGradient)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = Color.White,
+                modifier = Modifier.size(21.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = label.uppercase(),
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = labelColor,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            letterSpacing = 0.2.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = fullValue,
+            color = accentColor,
+            fontSize = 27.sp,
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
 
 @Composable
 fun SectionTitle(title: String) {
     Text(
         text = title,
         color = MaterialTheme.colorScheme.onBackground,
-        fontSize = 18.sp,
+        fontSize = 16.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier.padding(bottom = 8.dp)
     )
@@ -359,119 +432,22 @@ fun SectionTitle(title: String) {
 
 @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
-fun RecentEventItem(event: EventData, cameraName: String, aiServiceName: String? = null, isSelected: Boolean = false, enableSharedElement: Boolean = true, onClick: () -> Unit) {
-    androidx.compose.foundation.layout.Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 4.dp), // Ảnh sát mép 4dp, chữ cách lề phải 4dp
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-            val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
-            val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
-            
-                var imageModifier = Modifier
-                    .width(140.dp)
-                    .aspectRatio(16f / 9f)
-                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                
-            if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
-                with(sharedTransitionScope) {
-                    imageModifier = imageModifier.sharedElement(
-                        sharedContentState = rememberSharedContentState(key = "event_image_${event.id}"),
-                        animatedVisibilityScope = animatedVisibilityScope
-                    )
-                }
-            }
-
-            val imageUrl = androidx.compose.runtime.remember(event.data?.image, event.data?.cropImage, event.data?.containerId) {
-                getEventImageUrl(event)
-            }
-            
-            com.tenli.oneview.ui.component.VideoFrameImage(
-                url = imageUrl,
-                modifier = imageModifier,
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                val (timePart, datePart) = androidx.compose.runtime.remember(event.time) {
-                    val timeStr = formatEventTime(event.time)
-                    val parts = timeStr.split(" ")
-                    Pair(
-                        if (parts.isNotEmpty()) parts[0] else "",
-                        if (parts.size > 1) parts[1] else ""
-                    )
-                }
-                
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = cameraName,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = timePart,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.sp
-                    )
-                }
-                
-                Spacer(modifier = Modifier.height(2.dp))
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!aiServiceName.isNullOrBlank()) {
-                        Text(
-                            text = aiServiceName,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
-                    if (datePart.isNotEmpty()) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = datePart,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-                
-                Spacer(modifier = Modifier.height(6.dp))
-                val aiColor = androidx.compose.runtime.remember(event.serviceId, event.type) { AiTypeHelper.getAiColor(event) }
-                val eventName = androidx.compose.runtime.remember(event.serviceId, event.type) { AiTypeHelper.getEventName(event) }
-                Text(
-                    text = eventName,
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .background(color = aiColor, shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-            }
-    }
+fun RecentEventItem(
+    event: EventData,
+    cameraName: String,
+    aiServiceName: String? = null,
+    isSelected: Boolean = false,
+    enableSharedElement: Boolean = true,
+    onClick: () -> Unit
+) {
+    MobileEventCard(
+        event = event,
+        cameraName = cameraName,
+        isListView = true,
+        isSelected = isSelected,
+        enableSharedElement = enableSharedElement,
+        onClick = onClick
+    )
 }
 
 private val eventTimeFormat = object : ThreadLocal<SimpleDateFormat>() {
@@ -482,7 +458,6 @@ private val eventTimeFormat = object : ThreadLocal<SimpleDateFormat>() {
 
 private fun formatEventTime(time: Double?): String {
     if (time == null || time == 0.0) return "N/A"
-    // API returns time in seconds as Double
     val timeMillis = if (time < 100000000000.0) (time * 1000).toLong() else time.toLong()
     return eventTimeFormat.get()!!.format(Date(timeMillis))
 }
@@ -496,10 +471,8 @@ fun findAllBoxes(event: EventData): List<List<Float>> {
         }
     }
 
-    // Root level boxes
     addBox(event.data?.box)
 
-    // Nested AI model boxes
     val d = event.data
     addBox(d?.uniform?.cropBox)
     addBox(d?.face?.cropBox)
@@ -507,13 +480,10 @@ fun findAllBoxes(event: EventData): List<List<Float>> {
     addBox(d?.attribute?.cropBox)
     addBox(d?.objectData?.cropBox)
 
-    // Array of boxes
     d?.boxes?.forEach { item ->
         addBox(item.box)
     }
 
-
-    // Deduplicate
     return boxes.distinctBy { it.joinToString(",") }
 }
 
