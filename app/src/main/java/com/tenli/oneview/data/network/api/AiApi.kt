@@ -297,6 +297,9 @@ interface AiApi {
     @GET("api/FaceEnroll/{cameraId}")
     suspend fun faceEnroll(@Path("cameraId") cameraId: Int): Response<List<String>>
 
+    @GET("api/FaceEnroll/{cameraId}")
+    suspend fun faceEnroll(@Path("cameraId") cameraId: String): Response<List<String>>
+
     @GET
     suspend fun faceEnrollExt(
         @Url url: String,

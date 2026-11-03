@@ -3,10 +3,9 @@ package com.tenli.oneview.ui.component
 
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -18,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -38,13 +36,16 @@ fun VideoPlayer(
     thumbnailUrl: String?,
     deviceKey: String,
     initialSeekPositionMs: Long? = null,
+    errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {},
     onTimeUpdate: (Long) -> Unit = {}
 ) {
-    var isError by remember { mutableStateOf(false) }
+    var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
-    var isVideoReady by remember { mutableStateOf(false) }
+    var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
+    val isDark = rememberIsDarkTheme()
+    val containerBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
 
     val exoPlayer = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
@@ -103,7 +104,11 @@ fun VideoPlayer(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(containerBg)
+    ) {
         AndroidView(factory = { ctx ->
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
@@ -119,14 +124,35 @@ fun VideoPlayer(
             (view as? PlayerView)?.player = null
         }, modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = if (isVideoReady) 1f else 0f })
+            .graphicsLayer { alpha = if (isVideoReady && !isError) 1f else 0f })
 
-        if (!isVideoReady) {
-            SafeAsyncImage(thumbnailUrl, deviceKey)
-            if (!isError) {
-                Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    CircularProgressIndicator(modifier = Modifier.size(40.dp), color = Color.White.copy(alpha = 0.5f))
+        if (isError) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(containerBg),
+                contentAlignment = Alignment.Center
+            ) {
+                CommonEmptyState(
+                    text = errorText,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        } else if (!isVideoReady) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(containerBg),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!thumbnailUrl.isNullOrBlank()) {
+                    SafeAsyncImage(
+                        url = thumbnailUrl,
+                        deviceKey = deviceKey,
+                        showLoading = false
+                    )
                 }
+                WaveDotsLoading()
             }
         }
     }

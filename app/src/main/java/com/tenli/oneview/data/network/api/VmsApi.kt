@@ -32,6 +32,7 @@ import com.tenli.oneview.model.network.UserModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoLinkModel
 import com.tenli.oneview.model.network.VideoModel
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
@@ -41,6 +42,7 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
 import retrofit2.http.Url
 
 interface VmsApi {
@@ -96,7 +98,10 @@ interface VmsApi {
     suspend fun getUser(@Path("id") id: Int): Response<UserModel>
 
     @GET
-    suspend fun getUserExt(@Url url: String): Response<UserModel>
+    suspend fun getUserExt(
+        @Url url: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<UserModel>
 
     @POST("VMS/api/User")
     suspend fun createUser(@Body model: UserModel): Response<UserModel>
@@ -142,7 +147,11 @@ interface VmsApi {
 
     /** AuthToken với URL tùy chỉnh (tương đương postExt trên web) */
     @POST
-    suspend fun getAuthTokenExt(@Url url: String, @Body request: AuthTokenRequest): Response<AuthTokenModel>
+    suspend fun getAuthTokenExt(
+        @Url url: String,
+        @Body request: AuthTokenRequest,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<AuthTokenModel>
 
     // ==================== Camera Group ====================
 
@@ -220,8 +229,16 @@ interface VmsApi {
 
     @GET("VMS/api/VideoList")
     suspend fun getAllVideoList(
-        @Query("count") count: Int = 500
+        @Query("count") count: Int? = null
     ): Response<List<VideoModel>>
+
+    /** Tải file/video/ảnh nhị phân với token tùy chỉnh (tương đương api.getExtBinary trên web) */
+    @Streaming
+    @GET
+    suspend fun getExtBinary(
+        @Url url: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<ResponseBody>
 
     // ==================== Permanent Link ====================
 

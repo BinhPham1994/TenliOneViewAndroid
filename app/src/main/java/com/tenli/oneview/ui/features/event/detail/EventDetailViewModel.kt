@@ -72,7 +72,32 @@ class EventDetailViewModel(
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
     private val bsApi = LoginAuthClient.create(BsApi::class.java)
 
-    private val _uiState = MutableStateFlow(EventDetailUiState())
+    private val _uiState: MutableStateFlow<EventDetailUiState> = run {
+        val initialEvent = EventCacheManager.getEventInMemory(eventId)
+        val initialCameras = EventCacheManager.getCamerasInMemory()
+        val initialAiServices = EventCacheManager.getAiServicesInMemory()
+        val initialProfiles = EventCacheManager.getProfilesInMemory()
+        val initialGroups = EventCacheManager.getProfileGroupsInMemory()
+        val initialRelated = EventCacheManager.getRelatedEventsInMemory(eventId, JourneyPeriod.TODAY.code)
+        val initialCamera = if (initialEvent != null) {
+            resolveCameraForEvent(initialEvent, initialCameras)
+        } else null
+
+        MutableStateFlow(
+            EventDetailUiState(
+                baseEvent = initialEvent,
+                event = initialEvent,
+                camera = initialCamera,
+                cameraList = initialCameras,
+                aiServices = initialAiServices,
+                profileList = initialProfiles,
+                profileGroupList = initialGroups,
+                relatedEvents = initialRelated ?: emptyList(),
+                isLoading = initialEvent == null,
+                isJourneyLoading = initialRelated == null
+            )
+        )
+    }
     val uiState: StateFlow<EventDetailUiState> = _uiState.asStateFlow()
 
     init {
@@ -81,32 +106,60 @@ class EventDetailViewModel(
 
     private fun loadEventDetails() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
             try {
-                var foundEvent: EventData? = null
-                var cameraList: List<CameraModel> = emptyList()
-
-                val cacheResult = EventCacheManager.findEventById(getApplication(), eventId)
-                if (cacheResult != null) {
-                    foundEvent = cacheResult.first
-                    cameraList = cacheResult.second
-                }
+                var foundEvent = _uiState.value.event
+                var cameraList = _uiState.value.cameraList
 
                 if (foundEvent == null) {
-                    val response = eventApi.getDataList(lastId = eventId + 1, count = 1)
-                    if (response.isSuccessful) {
-                        val events = response.body() ?: emptyList()
-                        if (events.isNotEmpty() && events.first().id == eventId) {
-                            foundEvent = events.first()
+                    _uiState.update { it.copy(isLoading = true, error = null) }
+
+                    val cacheResult = EventCacheManager.findEventById(getApplication(), eventId)
+                    if (cacheResult != null) {
+                        foundEvent = cacheResult.first
+                        if (cacheResult.second.isNotEmpty()) {
+                            cameraList = cacheResult.second
                         }
+                    }
+
+                    if (foundEvent == null) {
+                        val response = eventApi.getDataList(lastId = eventId + 1, count = 1)
+                        if (response.isSuccessful) {
+                            val events = response.body() ?: emptyList()
+                            if (events.isNotEmpty() && events.first().id == eventId) {
+                                foundEvent = events.first()
+                            }
+                        }
+                    }
+
+                    if (foundEvent == null) {
+                        _uiState.update { it.copy(isLoading = false, isJourneyLoading = false, error = "Không tìm thấy sự kiện") }
+                        return@launch
+                    }
+
+                    // Hiển thị ngay lập tức thông tin sự kiện vừa tìm thấy, không đợi các API phụ trợ
+                    val resolvedCam = resolveCameraForEvent(foundEvent, cameraList)
+                    _uiState.update {
+                        it.copy(
+                            baseEvent = foundEvent,
+                            event = foundEvent,
+                            camera = resolvedCam,
+                            cameraList = cameraList,
+                            isLoading = false,
+                            isJourneyLoading = true
+                        )
                     }
                 }
 
-                if (foundEvent == null) {
-                    _uiState.update { it.copy(isLoading = false, error = "Không tìm thấy sự kiện") }
-                    return@launch
+                // Gọi API lấy danh sách Lịch sử xuất hiện (Sự kiện liên quan) ở phần dưới màn hình
+                // Nếu là sự kiện Khuôn mặt / Đồng phục cần đối chiếu profileList mà chưa có trong RAM thì tải profileList trước
+                val needProfilesForRelated = (AiTypeHelper.isFaceEvent(foundEvent) || foundEvent.type.lowercase().contains("uniform")) &&
+                    _uiState.value.profileList.isEmpty()
+
+                if (!needProfilesForRelated) {
+                    loadRelatedEvents()
                 }
 
+                // Tải ngầm các metadata phụ trợ nếu chưa có sẵn trong bộ nhớ (không bật isLoading toàn màn hình)
                 coroutineScope {
                     val camDeferred = async {
                         if (cameraList.isEmpty()) {
@@ -114,41 +167,65 @@ class EventDetailViewModel(
                         } else cameraList
                     }
                     val aiSvcDeferred = async {
-                        runCatching { eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                        if (_uiState.value.aiServices.isEmpty()) {
+                            runCatching { eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                        } else _uiState.value.aiServices
                     }
                     val profilesDeferred = async {
-                        runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                        if (_uiState.value.profileList.isEmpty()) {
+                            runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                        } else _uiState.value.profileList
                     }
                     val groupsDeferred = async {
-                        runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                        if (_uiState.value.profileGroupList.isEmpty()) {
+                            runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                        } else _uiState.value.profileGroupList
                     }
 
-                    cameraList = camDeferred.await()
-                    val aiServices = aiSvcDeferred.await()
-                    val profiles = profilesDeferred.await()
-                    val groups = groupsDeferred.await()
+                    val finalCameras = camDeferred.await()
+                    val finalAiServices = aiSvcDeferred.await()
+                    val finalProfiles = profilesDeferred.await()
+                    val finalGroups = groupsDeferred.await()
 
-                    val camera = resolveCameraForEvent(foundEvent!!, cameraList)
+                    EventCacheManager.cacheInMemory(
+                        events = listOf(foundEvent),
+                        cameras = finalCameras,
+                        aiServices = finalAiServices
+                    )
+                    EventCacheManager.saveProfilesCache(
+                        context = getApplication(),
+                        profiles = finalProfiles,
+                        groups = finalGroups
+                    )
+
+                    val currentEv = _uiState.value.event ?: foundEvent
+                    val camera = resolveCameraForEvent(currentEv, finalCameras)
 
                     _uiState.update {
                         it.copy(
-                            baseEvent = foundEvent,
-                            event = foundEvent,
-                            camera = camera,
-                            cameraList = cameraList,
-                            aiServices = aiServices,
-                            profileList = profiles,
-                            profileGroupList = groups,
+                            camera = camera ?: it.camera,
+                            cameraList = finalCameras,
+                            aiServices = finalAiServices,
+                            profileList = finalProfiles,
+                            profileGroupList = finalGroups,
                             isLoading = false
                         )
                     }
                 }
 
-                loadRelatedEvents()
+                if (needProfilesForRelated) {
+                    loadRelatedEvents()
+                }
 
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error loading event", e)
-                _uiState.update { it.copy(isLoading = false, error = e.localizedMessage) }
+                _uiState.update { state ->
+                    if (state.event != null) {
+                        state.copy(isLoading = false, isJourneyLoading = false)
+                    } else {
+                        state.copy(isLoading = false, isJourneyLoading = false, error = e.localizedMessage)
+                    }
+                }
             }
         }
     }
@@ -244,8 +321,14 @@ class EventDetailViewModel(
     fun loadRelatedEvents() {
         val targetEvent = _uiState.value.event ?: _uiState.value.baseEvent ?: return
         val period = _uiState.value.selectedJourneyPeriod
+        val cachedRelated = EventCacheManager.getRelatedEventsInMemory(targetEvent.id, period.code)
+
         viewModelScope.launch {
-            _uiState.update { it.copy(isJourneyLoading = true) }
+            if (cachedRelated != null) {
+                _uiState.update { it.copy(relatedEvents = cachedRelated, isJourneyLoading = false) }
+            } else {
+                _uiState.update { it.copy(isJourneyLoading = true) }
+            }
             try {
                 val (fromTime, toTime) = getJourneyTimeRange(period)
                 val typeLower = targetEvent.type.lowercase()
@@ -387,6 +470,7 @@ class EventDetailViewModel(
                 }
 
                 val sorted = filtered.sortedByDescending { it.time }
+                EventCacheManager.cacheRelatedEventsInMemory(targetEvent.id, period.code, sorted)
                 _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error fetching related events", e)

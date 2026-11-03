@@ -26,7 +26,34 @@ data class Dimensions(
     
     // Borders
     val borderThin: Dp = 0.5.dp,
-    val borderMedium: Dp = 1.dp
-)
+    val borderMedium: Dp = 1.dp,
+
+    // Screen scale factor (1.0f at 365dp baseline)
+    val scaleFactor: Float = 1f
+) {
+    companion object {
+        fun scaled(scale: Float): Dimensions {
+            val s = scale.coerceIn(0.95f, 1.15f)
+            return Dimensions(
+                extraSmall = (4f * s).dp,
+                small = (8f * s).dp,
+                medium = (16f * s).dp,
+                large = (24f * s).dp,
+                extraLarge = (32f * s).dp,
+                paddingScreen = (16f * s).dp,
+                iconSmall = (16f * s).dp,
+                iconMedium = (24f * s).dp,
+                iconLarge = (32f * s).dp,
+                iconExtraLarge = (48f * s).dp,
+                radiusSmall = (8f * s).dp,
+                radiusMedium = (16f * s).dp,
+                radiusLarge = (24f * s).dp,
+                borderThin = 0.5.dp,
+                borderMedium = 1.dp,
+                scaleFactor = s
+            )
+        }
+    }
+}
 
 val LocalSpacing = compositionLocalOf { Dimensions() }

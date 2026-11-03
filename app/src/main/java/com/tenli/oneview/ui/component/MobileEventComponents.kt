@@ -122,7 +122,7 @@ fun MobileTopBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(48.dp)
             .background(bgColor)
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center
@@ -136,7 +136,7 @@ fun MobileTopBar(
         Text(
             text = title,
             color = titleColor,
-            fontSize = 18.sp,
+            fontSize = 18.5.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -229,41 +229,42 @@ fun MobileEventCard(
     val isEn = remember { LocaleManager.getLocale(context).startsWith("en") }
     val isDark = rememberIsDarkTheme()
     val domain = UserSession.domain
+    val eventKey = "${event.serviceId}_${event.id}_${event.time}"
 
-    val resolvedCameraName: String = remember(event, cameraName) {
+    val resolvedCameraName: String = remember(eventKey, cameraName) {
         val fromProp = cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
         val fromData = event.data?.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
         val fromRoot = event.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
         fromProp ?: fromData ?: fromRoot ?: ""
     }
 
-    val snapshotUrl = remember(event, domain) {
+    val snapshotUrl = remember(eventKey, domain) {
         val faceUrl = AiTypeHelper.getFaceCropUrl(event, domain)
         val snapUrl = AiTypeHelper.getSnapshotUrl(event, domain)
         val fullUrl = AiTypeHelper.getFullImageUrl(event, domain)
         (faceUrl ?: snapUrl.ifEmpty { fullUrl }).ifEmpty { null }
     }
 
-    val fullImageUrl = remember(event, domain) {
+    val fullImageUrl = remember(eventKey, domain) {
         val fullUrl = AiTypeHelper.getFullImageUrl(event, domain)
         val snapUrl = AiTypeHelper.getSnapshotUrl(event, domain)
         fullUrl.ifEmpty { snapUrl }.ifEmpty { null }
     }
 
-    val faceCropUrl = remember(event, domain, fullImageUrl) {
+    val faceCropUrl = remember(eventKey, domain, fullImageUrl) {
         val crop = AiTypeHelper.getFaceCropUrl(event, domain)
         if (!crop.isNullOrBlank() && crop != fullImageUrl) crop else null
     }
 
-    val sentenceParts = remember(event, resolvedCameraName, isEn) {
+    val sentenceParts = remember(eventKey, resolvedCameraName, isEn) {
         AiTypeHelper.getEventSentenceParts(event, resolvedCameraName, isEn)
     }
 
-    val badgeLabel = remember(event, isEn) {
+    val badgeLabel = remember(eventKey, isEn) {
         AiTypeHelper.getEventBadgeLabel(event, isEn)
     }
 
-    val badgeColor = remember(event) {
+    val badgeColor = remember(eventKey) {
         AiTypeHelper.getAiColor(event)
     }
 
@@ -314,7 +315,9 @@ fun MobileEventCard(
             VideoFrameImage(
                 url = snapshotUrl,
                 modifier = thumbModifier,
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                targetWidthPx = 420,
+                targetHeightPx = 236
             )
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -322,10 +325,10 @@ fun MobileEventCard(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .height(88.dp),
+                    .heightIn(min = 88.dp),
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.5.dp)) {
                     // Line 1: Prefix (e.g., "Phát hiện khuôn mặt", "Phát hiện vi phạm")
                     if (sentenceParts.prefix.isNotEmpty()) {
                         Text(
@@ -344,7 +347,7 @@ fun MobileEventCard(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(sentenceParts.color)
-                                .padding(horizontal = 7.dp, vertical = 1.5.dp)
+                                .padding(horizontal = 7.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = sentenceParts.subject,
@@ -378,7 +381,7 @@ fun MobileEventCard(
 
                     Text(
                         text = suffixAnnotated,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -388,7 +391,7 @@ fun MobileEventCard(
                 Text(
                     text = relativeTime,
                     color = timeAgoColor,
-                    fontSize = 12.sp,
+                    fontSize = 12.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -399,7 +402,7 @@ fun MobileEventCard(
         val (formattedTime, formattedDate) = remember(event.time, isEn) {
             formatGridEventTimeAndDate(event.time, isEn)
         }
-        val boxes = remember(event) { findAllBoxes(event) }
+        val boxes = remember(eventKey) { findAllBoxes(event) }
 
         var cardModifier = Modifier
             .fillMaxWidth()
@@ -447,32 +450,37 @@ fun MobileEventCard(
                             }
                         }
                     },
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                targetWidthPx = 800,
+                targetHeightPx = 450
             )
 
             // Face crop overlay on TopEnd (72x90dp)
             if (faceCropUrl != null) {
-                SubcomposeAsyncImage(
-                    model = faceCropUrl,
+                val faceCropRequest = remember(faceCropUrl) {
+                    coil.request.ImageRequest.Builder(context)
+                        .data(faceCropUrl)
+                        .size(160, 200)
+                        .precision(coil.size.Precision.INEXACT)
+                        .allowHardware(true)
+                        .crossfade(false)
+                        .memoryCacheKey("${faceCropUrl}_160x200")
+                        .diskCacheKey(faceCropUrl)
+                        .build()
+                }
+                coil.compose.AsyncImage(
+                    model = faceCropRequest,
                     contentDescription = "Face Crop",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(5.dp)
-                ) {
-                    if (painter.state is AsyncImagePainter.State.Success) {
-                        androidx.compose.foundation.Image(
-                            painter = painter,
-                            contentDescription = "Face Crop",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .width(72.dp)
-                                .height(90.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.Black.copy(alpha = 0.45f))
-                                .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                        )
-                    }
-                }
+                        .width(72.dp)
+                        .height(90.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                )
             }
 
             // Bottom gradient overlay
@@ -509,7 +517,7 @@ fun MobileEventCard(
                             Text(
                                 text = badgeLabel,
                                 color = Color.White,
-                                fontSize = 12.sp,
+                                fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -519,7 +527,7 @@ fun MobileEventCard(
                             Text(
                                 text = resolvedCameraName,
                                 color = Color.White,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -536,13 +544,13 @@ fun MobileEventCard(
                         Text(
                             text = formattedTime,
                             color = Color.White,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
                             text = formattedDate,
                             color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 11.sp
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -661,7 +669,7 @@ fun MobileFilterBottomSheet(
                     Text(
                         text = if (isEn && title == "Bộ lọc") "Filter" else title,
                         color = textColor,
-                        fontSize = 17.sp,
+                        fontSize = 17.5.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.align(Alignment.Center)
                     )
@@ -783,7 +791,7 @@ fun MobileFilterBottomSheet(
                     ) {
                         Text(
                             text = if (isEn) "Reset" else "Đặt lại",
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Medium
                         )
                     }
@@ -805,7 +813,7 @@ fun MobileFilterBottomSheet(
                     ) {
                         Text(
                             text = if (isEn) "Apply" else "Áp dụng",
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -930,7 +938,7 @@ private fun FilterCellRow(
         Text(
             text = label,
             color = textColor,
-            fontSize = 14.sp,
+            fontSize = 14.5.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -990,7 +998,7 @@ private fun <K> OptionPickerDialog(
                             Text(
                                 text = label,
                                 color = if (isSelected) BrandAccent else textColor,
-                                fontSize = 14.sp,
+                                fontSize = 14.5.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 modifier = Modifier.weight(1f)
                             )

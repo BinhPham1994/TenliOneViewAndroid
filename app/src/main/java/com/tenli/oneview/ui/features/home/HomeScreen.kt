@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -127,7 +127,7 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // 2x2 Stat Grid matching MobileHomePage.vue
-                item {
+                item(key = "home_stat_grid", contentType = "stat_grid") {
                     // Total detections matching MobileHomePage.vue totalDetectionsCount (no thousand dot formatting)
                     val totalEventsNum = remember(uiState.eventsByType, uiState.overviewStats) {
                         val sumByType = uiState.eventsByType
@@ -248,7 +248,7 @@ fun HomeScreen(
                 }
 
                 // Section Header: Sự kiện gần đây + View Mode Toggle Button
-                item {
+                item(key = "home_recent_header", contentType = "header") {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -259,7 +259,7 @@ fun HomeScreen(
                     ) {
                         Text(
                             text = "Sự kiện gần đây",
-                            fontSize = 17.sp,
+                            fontSize = 17.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
@@ -298,10 +298,11 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(
+                    items(
                         items = recentFiveEvents,
-                        key = { index, event -> "home_ev_${index}_${event.serviceId}_${event.id}_${event.time}" }
-                    ) { _, event ->
+                        key = { event -> "home_ev_${event.serviceId}_${event.id}_${event.time}" },
+                        contentType = { "event_card" }
+                    ) { event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
                         Box(modifier = Modifier.padding(horizontal = 10.dp)) {
                             MobileEventCard(
@@ -309,7 +310,14 @@ fun HomeScreen(
                                 cameraName = cameraName,
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
-                                onClick = { onEventClick(event.id.toString()) }
+                                onClick = {
+                                    com.tenli.oneview.data.local.EventCacheManager.cacheClickedEvent(
+                                        event = event,
+                                        cameras = uiState.cameraList,
+                                        aiServices = uiState.aiServices
+                                    )
+                                    onEventClick(event.id.toString())
+                                }
                             )
                         }
                     }
@@ -398,7 +406,7 @@ fun MobileStatCard(
         Spacer(modifier = Modifier.height(10.dp))
         Text(
             text = label.uppercase(),
-            fontSize = 12.5.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = labelColor,
             textAlign = TextAlign.Center,
@@ -410,7 +418,7 @@ fun MobileStatCard(
         Text(
             text = fullValue,
             color = accentColor,
-            fontSize = 27.sp,
+            fontSize = 28.sp,
             fontWeight = FontWeight.ExtraBold,
             textAlign = TextAlign.Center,
             maxLines = 1,

@@ -23,16 +23,13 @@ class LoginAuthInterceptor : Interceptor {
                     newPath = newPath.removePrefix("/api/v1")
                 }
 
-                val newUrlStr = "${domainUrl.scheme}://${domainUrl.host}:${domainUrl.port}$newPath"
-                val parsedUrl = newUrlStr.toHttpUrlOrNull()
-                
-                if (parsedUrl != null) {
-                    val urlBuilder = parsedUrl.newBuilder()
-                    for (i in 0 until request.url.querySize) {
-                        urlBuilder.addQueryParameter(request.url.queryParameterName(i), request.url.queryParameterValue(i))
-                    }
-                    builder.url(urlBuilder.build())
-                }
+                val updatedUrl = request.url.newBuilder()
+                    .scheme(domainUrl.scheme)
+                    .host(domainUrl.host)
+                    .port(domainUrl.port)
+                    .encodedPath(newPath)
+                    .build()
+                builder.url(updatedUrl)
             }
         }
 

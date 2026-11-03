@@ -72,15 +72,15 @@ data class ProfileGroupEntry(
 data class ProfileGroup(
     val id: Int,
     val name: String,
-    val uuid: String,
-    val type: String,
-    val info: String,
-    val parentUUID: String,
-    var data: ProfileGroupData?
+    val uuid: String = "",
+    val type: String = "",
+    val info: String = "",
+    val parentUUID: String = "",
+    var data: ProfileGroupData? = null
 )
 
 data class ProfileGroupData(
-    val color: String
+    val color: String = "#1677ff"
 )
 
 // ==================== Profile ====================

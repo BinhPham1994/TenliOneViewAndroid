@@ -11,12 +11,19 @@ object LocaleManager {
     private const val PREFS_NAME = "tenli_language_settings"
     private const val KEY_LANG = "selected_language"
 
+    @Volatile
+    private var cachedLocale: String? = null
+
     fun getLocale(context: Context): String {
+        cachedLocale?.let { return it }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getString(KEY_LANG, "vi") ?: "vi"
+        val lang = prefs.getString(KEY_LANG, "vi") ?: "vi"
+        cachedLocale = lang
+        return lang
     }
 
     fun setLocale(context: Context, languageCode: String) {
+        cachedLocale = languageCode
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit { putString(KEY_LANG, languageCode) }
 

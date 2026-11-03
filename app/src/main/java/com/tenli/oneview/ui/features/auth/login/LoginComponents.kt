@@ -112,7 +112,7 @@ fun LoginInputField(
             .onFocusChanged { isFocused = it.isFocused },
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             color = textColor,
-            fontSize = 14.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Normal
         ),
         visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
@@ -148,7 +148,7 @@ fun LoginInputField(
                         Text(
                             text = label,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Normal
                             ),
                             color = placeholderColor,

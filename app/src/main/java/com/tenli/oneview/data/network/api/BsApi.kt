@@ -17,6 +17,7 @@ import com.tenli.oneview.model.network.HolidayModel
 import com.tenli.oneview.model.network.ImageProfileModel
 import com.tenli.oneview.model.network.NotificationTokenRegisterModel
 import com.tenli.oneview.model.network.OneviewConfigModel
+import com.tenli.oneview.model.network.PlateGroupModel
 import com.tenli.oneview.model.network.PlateModel
 import com.tenli.oneview.model.network.ProfileShiftConfigModel
 import com.tenli.oneview.model.network.PublicConfigModel
@@ -37,10 +38,12 @@ import com.tenli.oneview.model.network.VmsEventCountByCameraModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
 import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.Multipart
 import retrofit2.http.POST
 import retrofit2.http.PUT
@@ -48,13 +51,17 @@ import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.QueryMap
+import retrofit2.http.Streaming
+import retrofit2.http.Url
 
 interface BsApi {
 
     // ==================== Plate ====================
 
     @GET("ts/api/v1/plates")
-    suspend fun getPlateList(): Response<List<PlateModel>>
+    suspend fun getPlateList(
+        @Query("withGroups") withGroups: Boolean = true
+    ): Response<List<PlateModel>>
 
     @POST("ts/api/v1/plates/create")
     suspend fun createPlate(@Body model: PlateModel): Response<PlateModel>
@@ -64,6 +71,34 @@ interface BsApi {
 
     @DELETE("ts/api/v1/plates/delete/{id}")
     suspend fun deletePlate(@Path("id") id: Int): Response<Unit>
+
+    // ==================== Plate Group ====================
+
+    @GET("ts/api/v1/plate-groups")
+    suspend fun getPlateGroupList(
+        @Query("mode") mode: String = "detail"
+    ): Response<List<PlateGroupModel>>
+
+    @POST("ts/api/v1/plate-groups")
+    suspend fun createPlateGroup(@Body model: PlateGroupModel): Response<PlateGroupModel>
+
+    @PUT("ts/api/v1/plate-groups/{id}")
+    suspend fun updatePlateGroup(
+        @Path("id") id: Int,
+        @Body model: PlateGroupModel
+    ): Response<PlateGroupModel>
+
+    @PUT("ts/api/v1/plate-groups/{id}")
+    suspend fun updatePlateGroup(
+        @Path("id") idOrUuid: String,
+        @Body model: PlateGroupModel
+    ): Response<PlateGroupModel>
+
+    @DELETE("ts/api/v1/plate-groups/{id}")
+    suspend fun deletePlateGroup(@Path("id") id: Int): Response<Unit>
+
+    @DELETE("ts/api/v1/plate-groups/{id}")
+    suspend fun deletePlateGroup(@Path("id") idOrUuid: String): Response<Unit>
 
     // ==================== Contact ====================
 
@@ -225,8 +260,19 @@ interface BsApi {
     @GET("ts/api/v1/tasks/history/{historyId}")
     suspend fun getTaskHistory(@Path("historyId") historyId: Int): Response<Map<String, Any>>
 
+    @GET("ts/api/v1/tasks/history/{historyId}")
+    suspend fun getTaskHistory(@Path("historyId") historyId: String): Response<Map<String, Any>>
+
     @POST("ts/api/v1/files/link")
     suspend fun createFileLink(@Body body: Map<String, Any>): Response<Map<String, Any>>
+
+    /** Tải file nhị phân (ví dụ file Excel export hồ sơ từ downloadUrl) — tương đương api.getExtBinary trên web */
+    @Streaming
+    @GET
+    suspend fun downloadFileExt(
+        @Url url: String,
+        @Header("Authorization") authHeader: String? = null
+    ): Response<ResponseBody>
 
     // ==================== Attendance & Shifts & Holidays ====================
 
@@ -239,8 +285,14 @@ interface BsApi {
     @PUT("ts/api/v1/attendance/shifts/{id}")
     suspend fun updateShift(@Path("id") id: Int, @Body model: ShiftModel): Response<ShiftModel>
 
+    @PUT("ts/api/v1/attendance/shifts/{id}")
+    suspend fun updateShift(@Path("id") idOrUuid: String, @Body model: ShiftModel): Response<ShiftModel>
+
     @DELETE("ts/api/v1/attendance/shifts/{id}")
     suspend fun deleteShift(@Path("id") id: Int): Response<Unit>
+
+    @DELETE("ts/api/v1/attendance/shifts/{id}")
+    suspend fun deleteShift(@Path("id") idOrUuid: String): Response<Unit>
 
     @GET("ts/api/v1/attendance/holidays")
     suspend fun getHolidayList(): Response<List<HolidayModel>>
@@ -251,8 +303,14 @@ interface BsApi {
     @PUT("ts/api/v1/attendance/holidays/{id}")
     suspend fun updateHoliday(@Path("id") id: Int, @Body model: HolidayModel): Response<HolidayModel>
 
+    @PUT("ts/api/v1/attendance/holidays/{id}")
+    suspend fun updateHoliday(@Path("id") idOrUuid: String, @Body model: HolidayModel): Response<HolidayModel>
+
     @DELETE("ts/api/v1/attendance/holidays/{id}")
     suspend fun deleteHoliday(@Path("id") id: Int): Response<Unit>
+
+    @DELETE("ts/api/v1/attendance/holidays/{id}")
+    suspend fun deleteHoliday(@Path("id") idOrUuid: String): Response<Unit>
 
     @GET("ts/api/v1/attendance/assignments")
     suspend fun getAttendanceAssignmentList(): Response<List<AttendanceAssignmentModel>>
@@ -263,8 +321,14 @@ interface BsApi {
     @PUT("ts/api/v1/attendance/assignments/{id}")
     suspend fun updateAttendanceAssignment(@Path("id") id: Int, @Body model: AttendanceAssignmentModel): Response<AttendanceAssignmentModel>
 
+    @PUT("ts/api/v1/attendance/assignments/{id}")
+    suspend fun updateAttendanceAssignment(@Path("id") idOrUuid: String, @Body model: AttendanceAssignmentModel): Response<AttendanceAssignmentModel>
+
     @DELETE("ts/api/v1/attendance/assignments/{id}")
     suspend fun deleteAttendanceAssignment(@Path("id") id: Int): Response<Unit>
+
+    @DELETE("ts/api/v1/attendance/assignments/{id}")
+    suspend fun deleteAttendanceAssignment(@Path("id") idOrUuid: String): Response<Unit>
 
     @GET("ts/api/v1/e/attendance/dataWithShift")
     suspend fun getAttendanceDataWithShift(
@@ -306,7 +370,8 @@ interface BsApi {
 
     @GET("ts/api/v1/e/uniform/get-data")
     suspend fun getUniformData(
-        @QueryMap params: Map<String, String> = emptyMap()
+        @QueryMap params: Map<String, String> = emptyMap(),
+        @Query("excludeUniformLabel") excludeUniformLabel: List<String>? = null
     ): Response<List<EventData>>
 
     @GET("ts/api/v1/e/uniform/complianceEvaluation")

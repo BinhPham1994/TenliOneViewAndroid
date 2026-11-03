@@ -80,6 +80,12 @@ interface EventApi {
         @Body model: UpdateEventTimeModel
     ): Response<Any>
 
+    @PUT("Data/api/Data/updatetime/{eventId}")
+    suspend fun updateEventTime(
+        @Path("eventId") eventId: String,
+        @Body model: UpdateEventTimeModel
+    ): Response<Any>
+
     // ==================== Data Search ====================
 
     @POST("Data/api/DataSearch")
@@ -96,6 +102,9 @@ interface EventApi {
 
     @POST("Data/api/Data/confirm/{id}")
     suspend fun verifyEvent(@Path("id") id: Int, @Body confirm: Confirm): Response<Unit>
+
+    @POST("Data/api/Data/confirm/{id}")
+    suspend fun verifyEvent(@Path("id") id: String, @Body confirm: Confirm): Response<Unit>
 
     // ==================== Rule ====================
 

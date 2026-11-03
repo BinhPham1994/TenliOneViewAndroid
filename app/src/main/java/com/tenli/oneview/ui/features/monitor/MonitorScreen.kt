@@ -3,6 +3,10 @@ package com.tenli.oneview.ui.features.monitor
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -29,7 +33,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
@@ -74,6 +78,7 @@ import kotlinx.coroutines.launch
 fun MonitorScreen(
     viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
     listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    isTabActive: Boolean = true,
     onEventClick: (Int) -> Unit = {},
     onPlaybackClick: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> },
     onFullscreenChange: (Boolean) -> Unit = {}
@@ -90,6 +95,19 @@ fun MonitorScreen(
         0 -> false
         1 -> true
         else -> isSystemDark
+    }
+
+    var wasDeactivated by remember { mutableStateOf(false) }
+    LaunchedEffect(isTabActive) {
+        if (!isTabActive) {
+            wasDeactivated = true
+            if (fullscreenIndex != null) {
+                fullscreenIndex = null
+            }
+        } else if (wasDeactivated) {
+            wasDeactivated = false
+            viewModel.refreshActiveStreams()
+        }
     }
 
     LaunchedEffect(fullscreenIndex) {
@@ -148,23 +166,29 @@ fun MonitorScreen(
             )
 
             // 16:9 Live Video Player Container (supports 1x1 and 2x2 grid)
-            // Full-bleed edge-to-edge matching .mobile-live-container (margin-left: -10px; margin-right: -10px; border-radius: 0)
+            // Đồng bộ màu nền theo theme từ MobileLivePage.vue & LiveVideoView.vue (--color-input-bg / --color-card-bg)
+            val liveContainerBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
+            val gridDividerBg = if (isDark) Color(0xFF2E3A4E) else Color(0xFFD5DCE6)
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
-                    .background(Color(0xFF0A0A0A))
+                    .background(if (uiState.gridSize == 4) gridDividerBg else liveContainerBg)
             ) {
                 if (uiState.gridSize == 1) {
                     val selectedCam = uiState.selectedCameras.getOrNull(0)
                     if (fullscreenIndex == 0) {
-                        Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                        Box(modifier = Modifier.fillMaxSize().background(liveContainerBg))
                     } else if (selectedCam != null) {
                         CameraGridItem(
                             selectedCamera = selectedCam,
+                            isTabActive = isTabActive,
+                            isDark = isDark,
                             onClick = {},
                             onRetryClick = { viewModel.retryCameraStream(0) },
                             onSuccess = { viewModel.resetRetryCount(0) },
+                            onSnapshotError = { viewModel.onSnapshotLoadError(0) },
                             onFullscreenClick = { fullscreenIndex = 0 },
                             onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, 0) },
                             onRemoveClick = { viewModel.removeCamera(0) },
@@ -172,20 +196,20 @@ fun MonitorScreen(
                             isCompact = false
                         )
                     } else {
-                        EmptyGridItem(onClick = {}, isCompact = false)
+                        EmptyGridItem(onClick = {}, isCompact = false, isDark = isDark)
                     }
                 } else {
-                    // 2x2 Grid
+                    // 2x2 Grid (1.dp gap matching .mobile-grid-2x2 in MobileLivePage.vue)
                     Column(
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(1.dp)
                     ) {
                         for (row in 0..1) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                horizontalArrangement = Arrangement.spacedBy(1.dp)
                             ) {
                                 for (col in 0..1) {
                                     val slotIdx = row * 2 + col
@@ -194,16 +218,19 @@ fun MonitorScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .fillMaxHeight()
-                                            .background(Color.Black)
+                                            .background(liveContainerBg)
                                     ) {
                                         if (fullscreenIndex == slotIdx) {
-                                            Box(modifier = Modifier.fillMaxSize().background(Color.Black))
+                                            Box(modifier = Modifier.fillMaxSize().background(liveContainerBg))
                                         } else if (selectedCam != null) {
                                             CameraGridItem(
                                                 selectedCamera = selectedCam,
+                                                isTabActive = isTabActive,
+                                                isDark = isDark,
                                                 onClick = {},
                                                 onRetryClick = { viewModel.retryCameraStream(slotIdx) },
                                                 onSuccess = { viewModel.resetRetryCount(slotIdx) },
+                                                onSnapshotError = { viewModel.onSnapshotLoadError(slotIdx) },
                                                 onFullscreenClick = { fullscreenIndex = slotIdx },
                                                 onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, slotIdx) },
                                                 onRemoveClick = { viewModel.removeCamera(slotIdx) },
@@ -211,7 +238,7 @@ fun MonitorScreen(
                                                 isCompact = true
                                             )
                                         } else {
-                                            EmptyGridItem(onClick = {}, isCompact = true)
+                                            EmptyGridItem(onClick = {}, isCompact = true, isDark = isDark)
                                         }
                                     }
                                 }
@@ -249,7 +276,7 @@ fun MonitorScreen(
                     Row(
                         modifier = Modifier
                             .weight(1f)
-                            .height(36.dp)
+                            .height(38.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(controlBg)
                             .padding(horizontal = 10.dp),
@@ -267,7 +294,7 @@ fun MonitorScreen(
                                 Text(
                                     text = "Tìm camera...",
                                     color = mutedText,
-                                    fontSize = 13.sp
+                                    fontSize = 14.sp
                                 )
                             }
                             BasicTextField(
@@ -276,7 +303,7 @@ fun MonitorScreen(
                                 singleLine = true,
                                 textStyle = TextStyle(
                                     color = MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 13.sp
+                                    fontSize = 14.sp
                                 ),
                                 cursorBrush = SolidColor(BrandAccent),
                                 modifier = Modifier.fillMaxWidth()
@@ -297,7 +324,7 @@ fun MonitorScreen(
                     // Grid Selector (1x1 / 2x2) matching .mobile-grid-selector ("1" and "4")
                     Row(
                         modifier = Modifier
-                            .height(36.dp)
+                            .height(38.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .background(controlBg)
                             .padding(3.dp),
@@ -411,9 +438,11 @@ fun MonitorScreen(
                 ) {
                     CameraGridItem(
                         selectedCamera = selectedCam,
+                        isDark = isDark,
                         onClick = {},
                         onRetryClick = { viewModel.retryCameraStream(index) },
                         onSuccess = { viewModel.resetRetryCount(index) },
+                        onSnapshotError = { viewModel.onSnapshotLoadError(index) },
                         onFullscreenClick = {
                             coroutineScope.launch {
                                 activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
@@ -469,7 +498,7 @@ private fun GridOptionButton(
         Text(
             text = label,
             color = contentColor,
-            fontSize = 13.sp,
+            fontSize = 14.sp,
             fontWeight = FontWeight.Bold
         )
     }
@@ -521,9 +550,12 @@ private fun collectAllNodeKeys(nodes: List<CameraTreeNode>): Set<String> {
 @Composable
 fun CameraGridItem(
     selectedCamera: SelectedCamera,
+    isTabActive: Boolean = true,
+    isDark: Boolean = true,
     onClick: () -> Unit,
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
+    onSnapshotError: () -> Unit = {},
     onFullscreenClick: () -> Unit,
     onBackToLiveClick: () -> Unit,
     onRemoveClick: () -> Unit = {},
@@ -531,28 +563,36 @@ fun CameraGridItem(
     isCompact: Boolean = false
 ) {
     val deviceKey = UserSession.accessToken
-    var isLiveViewPlaying by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
-    var isLiveViewError by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
+    var isLiveViewPlaying by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
+    var isLiveViewError by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
+    var snapshotFailed by remember(selectedCamera.camera.id, selectedCamera.fallbackImageUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
 
-    var shouldRenderPlayer by remember(selectedCamera.streamUrl) { mutableStateOf(false) }
-    LaunchedEffect(selectedCamera.streamUrl) {
-        if (selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
-            kotlinx.coroutines.delay(350)
-            shouldRenderPlayer = true
-        }
+    // Đồng bộ màu nền container của LiveVideoView.vue (.base, .loading, .unsupported):
+    // Chỉ dùng nền đen khi đang phát video thực tế hoặc ở chế độ toàn màn hình; khi đang tải/lỗi dùng màu surface theo theme.
+    val surfaceBg = when {
+        isFullscreen || isLiveViewPlaying -> Color.Black
+        isDark -> Color(0xFF1E293B)
+        else -> Color(0xFFE8ECF2)
     }
+
+    val canPlayStream = isTabActive &&
+        selectedCamera.streamUrl.isNotEmpty() &&
+        !selectedCamera.streamUrl.startsWith("error://")
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(surfaceBg)
     ) {
-        if (shouldRenderPlayer && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://")) {
+        if (canPlayStream) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
                 com.tenli.oneview.ui.component.LiveStreamPlayer(
                     wsUrl = selectedCamera.streamUrl,
                     videoCodecTag = selectedCamera.videoCodecTag.ifEmpty { "hvc1.1.6.L90" },
+                    cameraId = selectedCamera.camera.id,
+                    altCameraId = selectedCamera.camera.cameraId,
+                    showInternalOverlay = false,
                     onPlayingChange = {
                         isLiveViewPlaying = it
                         if (it) {
@@ -582,28 +622,53 @@ fun CameraGridItem(
             }
         }
 
-        // Loading Overlay
-        if (selectedCamera.streamUrl.isEmpty() || (!isLiveViewPlaying && !hasError && selectedCamera.streamUrl.isNotEmpty() && !selectedCamera.streamUrl.startsWith("error://"))) {
+        // Cached Snapshot Preview + Loading Overlay (đồng bộ .cached-snapshot-preview và fade-snapshot 0.35s trong LiveVideoView.vue)
+        val isLoadingStream = !isLiveViewPlaying && !hasError
+        AnimatedVisibility(
+            visible = isLoadingStream,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(350)),
+            modifier = Modifier.fillMaxSize()
+        ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF0A0A0A)),
+                    .background(if (isFullscreen) Color.Black else if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)),
                 contentAlignment = Alignment.Center
             ) {
+                if (selectedCamera.fallbackImageUrl.isNotEmpty() && !snapshotFailed) {
+                    coil.compose.AsyncImage(
+                        model = selectedCamera.fallbackImageUrl,
+                        contentDescription = selectedCamera.camera.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        onError = {
+                            snapshotFailed = true
+                            onSnapshotError()
+                        }
+                    )
+                    // Lớp phủ mờ nhẹ giúp 3 chấm loading luôn nổi bật trên nền ảnh snapshot sáng
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.16f))
+                    )
+                }
                 WaveDotsLoading(dotColor = BrandAccent)
             }
         }
 
-        // Error Overlay
+        // Error Overlay (chạm để thử tải lại luồng live giống reloadStream trong LiveVideoView.vue)
         if (hasError) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF0A0A0A)),
+                    .background(if (isFullscreen) Color.Black else if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2))
+                    .clickable { onBackToLiveClick() },
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = when {
-                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có video"
+                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có tín hiệu"
                     selectedCamera.streamUrl.startsWith("error://failed") -> "Lỗi kết nối camera"
                     else -> "Lỗi tải video"
                 }
@@ -629,7 +694,7 @@ fun CameraGridItem(
             Text(
                 text = selectedCamera.camera.name,
                 color = Color.White,
-                fontSize = if (isCompact) 10.sp else 11.sp,
+                fontSize = if (isCompact) 11.sp else 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -657,18 +722,22 @@ fun CameraGridItem(
             }
         }
 
-        // Fullscreen Button at Bottom-Right
-        IconButton(
-            onClick = onFullscreenClick,
+        // Fullscreen Button at Bottom-Right (có nền pill bán trong suốt giống .fullscreen-btn trong LiveVideoView.vue)
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(if (isCompact) 32.dp else 42.dp)
+                .padding(if (isCompact) 4.dp else 8.dp)
+                .size(if (isCompact) 24.dp else 30.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.Black.copy(alpha = 0.50f))
+                .clickable { onFullscreenClick() },
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
                 contentDescription = "Toàn màn hình",
                 tint = Color.White,
-                modifier = Modifier.size(if (isCompact) 18.dp else 24.dp)
+                modifier = Modifier.size(if (isCompact) 14.dp else 16.dp)
             )
         }
     }
@@ -715,7 +784,7 @@ fun CameraTreeNodeView(
                 )
                 Text(
                     text = node.vms.name,
-                    fontSize = 14.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -762,7 +831,7 @@ fun CameraTreeNodeView(
                 )
                 Text(
                     text = node.group.name,
-                    fontSize = 13.5.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -819,7 +888,7 @@ fun CameraTreeNodeView(
                 )
                 Text(
                     text = node.camera.name,
-                    fontSize = 13.5.sp,
+                    fontSize = 14.sp,
                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                     color = if (isSelected) BrandAccent else MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -848,11 +917,14 @@ fun CameraTreeNodeView(
 }
 
 @Composable
-fun EmptyGridItem(onClick: () -> Unit, isCompact: Boolean = false) {
+fun EmptyGridItem(onClick: () -> Unit, isCompact: Boolean = false, isDark: Boolean = true) {
+    val bgColor = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
+    val contentColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A))
+            .background(bgColor)
             .clickable { onClick() },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -860,14 +932,14 @@ fun EmptyGridItem(onClick: () -> Unit, isCompact: Boolean = false) {
         Icon(
             imageVector = LucideIcons.Video,
             contentDescription = "Chọn Camera",
-            tint = Color.White.copy(alpha = 0.35f),
+            tint = contentColor.copy(alpha = 0.65f),
             modifier = Modifier.size(if (isCompact) 26.dp else 40.dp)
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = "Chọn camera bên dưới",
-            color = Color.White.copy(alpha = 0.45f),
-            fontSize = if (isCompact) 11.sp else 13.sp,
+            color = contentColor.copy(alpha = 0.8f),
+            fontSize = if (isCompact) 12.sp else 14.sp,
             fontWeight = FontWeight.Medium
         )
     }

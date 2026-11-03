@@ -14,6 +14,15 @@ val compactLineHeightStyle = LineHeightStyle(
 val defaultPlatformStyle = PlatformTextStyle(includeFontPadding = false)
 
 val AppTypography = Typography(
+    headlineLarge = TextStyle(
+        fontWeight = FontWeight.ExtraBold, fontSize = 28.sp, lineHeight = 34.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+    ),
+    headlineMedium = TextStyle(
+        fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 30.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+    ),
+    headlineSmall = TextStyle(
+        fontWeight = FontWeight.Bold, fontSize = 20.sp, lineHeight = 26.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+    ),
     titleLarge = TextStyle(
         fontWeight = FontWeight.Bold, fontSize = 20.sp, lineHeight = 26.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
@@ -21,21 +30,24 @@ val AppTypography = Typography(
         fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 24.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     titleSmall = TextStyle(
-        fontWeight = FontWeight.Bold, fontSize = 16.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodyLarge = TextStyle(
         fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodyMedium = TextStyle(
-        fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 18.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodySmall = TextStyle(
-        fontWeight = FontWeight.Normal, fontSize = 12.sp, lineHeight = 16.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Normal, fontSize = 13.5.sp, lineHeight = 18.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     labelLarge = TextStyle(
         fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     labelMedium = TextStyle(
-        fontWeight = FontWeight.Medium, fontSize = 13.sp, lineHeight = 16.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Medium, fontSize = 13.5.sp, lineHeight = 18.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+    ),
+    labelSmall = TextStyle(
+        fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     )
 )

@@ -31,19 +31,23 @@ class WebSocketDataSource(
 
     override fun open(dataSpec: DataSpec): Long {
         this.dataSpec = dataSpec
-        var urlStr = dataSpec.uri.toString()
+        var urlStr = dataSpec.uri.toString().trim()
         if (urlStr.startsWith("http://")) urlStr = urlStr.replaceFirst("http://", "ws://")
         if (urlStr.startsWith("https://")) urlStr = urlStr.replaceFirst("https://", "wss://")
         
         Log.d("WebSocketDataSource", "Connecting to WebSocket: $urlStr")
-        val uri = java.net.URI(urlStr)
-        val scheme = if (uri.scheme == "wss") "https" else "http"
-        val origin = "$scheme://${uri.host}${if (uri.port != -1) ":${uri.port}" else ""}"
+        val uri = runCatching { java.net.URI(urlStr) }.getOrNull()
+        val scheme = if (uri?.scheme == "wss") "https" else "http"
+        val host = uri?.host ?: ""
+        val port = uri?.port ?: -1
+        val origin = if (host.isNotEmpty()) "$scheme://$host${if (port != -1) ":$port" else ""}" else ""
         
         val requestBuilder = Request.Builder()
             .url(urlStr)
-            .addHeader("Origin", origin)
             .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36")
+        if (origin.isNotEmpty()) {
+            requestBuilder.addHeader("Origin", origin)
+        }
         
         val request = requestBuilder.build()
         dataQueue.clear()
@@ -87,12 +91,12 @@ class WebSocketDataSource(
 
         while (currentBuffer == null || currentBufferPosition >= currentBuffer!!.size) {
             try {
-                currentBuffer = dataQueue.poll(5, java.util.concurrent.TimeUnit.SECONDS)
+                currentBuffer = dataQueue.poll(15, java.util.concurrent.TimeUnit.SECONDS)
                 if (currentBuffer == null) {
                     if (!isOpen) {
                         return C.RESULT_END_OF_INPUT
                     } else {
-                        throw IOException("WebSocket read timeout (no data received for 5s)")
+                        throw IOException("WebSocket read timeout (no data received for 15s)")
                     }
                 }
                 currentBufferPosition = 0

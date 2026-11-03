@@ -41,6 +41,11 @@ object VideoFrameCache {
             return bitmap.byteCount / 1024
         }
     }
+
+    // Shared OkHttpClient for range requests instead of allocating per frame
+    val rangeHttpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder().build()
+    }
     
     // Track URLs that are confirmed to be videos (failed as images)
     val knownVideoUrls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
@@ -52,8 +57,11 @@ fun VideoFrameImage(
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     cacheKey: String? = null,
+    targetWidthPx: Int = 480,
+    targetHeightPx: Int = 270,
     errorContent: @Composable (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     val effectiveKey = cacheKey ?: url ?: ""
     
     // Automatically fallback if we already know this URL is a video
@@ -62,33 +70,44 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
-        var imageState by remember(url) { mutableStateOf<coil.compose.AsyncImagePainter.State>(coil.compose.AsyncImagePainter.State.Empty) }
-        
-        Box(modifier = modifier) {
-            coil.compose.AsyncImage(
-                model = url,
-                contentDescription = "Event Image",
-                contentScale = contentScale,
-                modifier = Modifier.fillMaxSize(),
-                onState = { state ->
-                    imageState = state
-                    if (state is coil.compose.AsyncImagePainter.State.Error) {
+        val imageRequest = remember(url, targetWidthPx, targetHeightPx) {
+            if (url.isNullOrBlank()) {
+                null
+            } else {
+                coil.request.ImageRequest.Builder(context)
+                    .data(url)
+                    .size(targetWidthPx, targetHeightPx)
+                    .precision(coil.size.Precision.INEXACT)
+                    .allowHardware(true)
+                    .crossfade(false)
+                    .memoryCacheKey("${url}_${targetWidthPx}x${targetHeightPx}")
+                    .diskCacheKey(url)
+                    .build()
+            }
+        }
+
+        Box(
+            modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            if (imageRequest != null) {
+                coil.compose.AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "Event Image",
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = {
                         if (effectiveKey.isNotEmpty()) {
                             VideoFrameCache.knownVideoUrls.add(effectiveKey)
                         }
                         isVideoFallback = true
                     }
-                }
-            )
-            if (imageState is coil.compose.AsyncImagePainter.State.Loading || imageState is coil.compose.AsyncImagePainter.State.Empty) {
-                LoadingPlaceholder(Modifier.fillMaxSize())
+                )
             }
         }
     } else {
         // Here we handle the video frame extraction
         var bitmap by remember(effectiveKey) { mutableStateOf<Bitmap?>(if (effectiveKey.isNotEmpty()) VideoFrameCache.cache.get(effectiveKey) else null) }
         var hasError by remember(effectiveKey) { mutableStateOf(false) }
-        val context = LocalContext.current
 
         LaunchedEffect(effectiveKey, url) {
             if (url == null || effectiveKey.isEmpty()) {
@@ -132,12 +151,11 @@ fun VideoFrameImage(
 
 @Composable
 private fun LoadingPlaceholder(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator(
-            color = Color.LightGray,
-            modifier = Modifier.size(24.dp)
-        )
-    }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+    )
 }
 
 @Composable
@@ -157,7 +175,7 @@ private suspend fun extractVideoFrameWithRange(context: Context, url: String): B
     val retriever = MediaMetadataRetriever()
     try {
         val token = com.tenli.oneview.data.local.UserSession.accessToken
-        val client = OkHttpClient.Builder().build()
+        val client = VideoFrameCache.rangeHttpClient
         val requestBuilder = Request.Builder()
             .url(url)
             .header("Range", "bytes=0-2097152") // First 2MB

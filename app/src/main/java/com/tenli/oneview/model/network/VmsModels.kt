@@ -1,7 +1,9 @@
 package com.tenli.oneview.model.network
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
+@Immutable
 data class VMSServiceModel(
     val id: Int,
     val name: String,
@@ -147,13 +149,21 @@ data class Location(
 
 data class CameraOnvifModel(
     val ip: String,
-    val model: String,
-    val mac: String,
+    val port: Any? = null,
+    val model: String = "",
+    val name: String? = null,
+    val mac: String = "",
     val brand: String? = null,
+    val authenticated: Boolean? = null,
+    val rtspLinks: List<String>? = null,
     val username: String? = null,
     val password: String? = null,
     val channelIndex: Int? = null,
-    val isChannel: Boolean? = null
+    val isChannel: Boolean? = null,
+    val isNVRNode: Boolean? = null,
+    val mainRtsp: String? = null,
+    val subRtsp: String? = null,
+    val hardwareId: String? = null
 )
 
 data class CameraGeoConfig(
@@ -175,6 +185,7 @@ data class CameraLatestReport(
     val issues: List<String>? = null
 )
 
+@Immutable
 data class CameraExtra(
     val location: Location? = null,
     val cameraOnvif: CameraOnvifModel? = null,
@@ -187,6 +198,7 @@ data class CameraExtra(
     val latestReport: CameraLatestReport? = null
 )
 
+@Immutable
 data class CameraModel(
     val id: Int,
     val name: String,
@@ -262,7 +274,8 @@ data class DeviceServiceRequest(
 }
 
 data class DeviceServiceResponse(
-    val xml: String? = null
+    val xml: String? = null,
+    val status: Int? = null
 )
 
 data class PermanentLinkModel(

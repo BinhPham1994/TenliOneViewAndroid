@@ -6,16 +6,10 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -87,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -106,6 +102,8 @@ import com.tenli.oneview.ui.theme.ErrorRed
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.LocaleManager
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -115,6 +113,13 @@ private val OrderedMainTabs = listOf(
     MainTab.Monitor,
     MainTab.Setting
 )
+
+// Exact cubic-bezier curves from tenli-oneview MobileLayout.vue:
+// .mobile-tab-slide-*-leave-active: transform 0.09s cubic-bezier(0.35, 0, 0.7, 0.2), opacity 0.08s ease-out
+// .mobile-tab-slide-*-enter-active: transform 0.21s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.16s ease-out
+private val TabLeaveTransformEasing = CubicBezierEasing(0.35f, 0f, 0.7f, 0.2f)
+private val TabEnterTransformEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val TabOpacityEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
 
 @Composable
 fun MainScreen(
@@ -139,10 +144,18 @@ fun MainScreen(
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
-    val isHomeScrolled by remember { derivedStateOf { homeListState.firstVisibleItemIndex > 0 } }
-    val isMonitorScrolled by remember { derivedStateOf { monitorState.firstVisibleItemIndex > 0 } }
-    val isEventScrolled by remember { derivedStateOf { eventListState.firstVisibleItemIndex > 0 } }
-    val isSettingScrolled by remember { derivedStateOf { settingListState.firstVisibleItemIndex > 0 } }
+    val isHomeScrolled by remember {
+        derivedStateOf { homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0 }
+    }
+    val isMonitorScrolled by remember {
+        derivedStateOf { monitorState.firstVisibleItemIndex > 0 || monitorState.firstVisibleItemScrollOffset > 0 }
+    }
+    val isEventScrolled by remember {
+        derivedStateOf { eventListState.firstVisibleItemIndex > 0 || eventListState.firstVisibleItemScrollOffset > 0 }
+    }
+    val isSettingScrolled by remember {
+        derivedStateOf { settingListState.firstVisibleItemIndex > 0 || settingListState.firstVisibleItemScrollOffset > 0 }
+    }
 
     val isCurrentTabScrolled = when (uiState.currentTab) {
         MainTab.Home -> isHomeScrolled
@@ -151,9 +164,82 @@ fun MainScreen(
         MainTab.Setting -> isSettingScrolled
     }
 
+    // Keep-Alive (<keep-alive>) state + sequential mode="out-in" GPU animation state matching MobileLayout.vue
+    val homeViewModel: com.tenli.oneview.ui.features.home.HomeViewModel = viewModel(
+        factory = com.tenli.oneview.ui.features.home.HomeViewModel.Factory
+    )
+    val eventViewModel: com.tenli.oneview.ui.features.event.EventViewModel = viewModel(
+        factory = com.tenli.oneview.ui.features.event.EventViewModel.Factory
+    )
+    var displayedTab by remember { mutableStateOf(uiState.currentTab) }
+    val tabOffsetFraction = remember { Animatable(0f) }
+    val tabAlpha = remember { Animatable(1f) }
+
     LaunchedEffect(uiState.currentTab) {
-        if (uiState.currentTab != MainTab.Monitor) {
+        val targetTab = uiState.currentTab
+        if (targetTab != MainTab.Monitor) {
             showBottomBar = true
+        }
+
+        if (targetTab == displayedTab) {
+            coroutineScope {
+                launch {
+                    tabOffsetFraction.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 210, easing = TabEnterTransformEasing)
+                    )
+                }
+                launch {
+                    tabAlpha.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 160, easing = TabOpacityEaseOut)
+                    )
+                }
+            }
+            return@LaunchedEffect
+        }
+
+        val fromIdx = OrderedMainTabs.indexOf(displayedTab)
+        val toIdx = OrderedMainTabs.indexOf(targetTab)
+        val isForward = toIdx >= fromIdx
+
+        // Phase 1 (mode="out-in" Leave): Outgoing tab quickly slides out (-24% / +24%) and fades out in 90ms
+        val leaveTargetOffset = if (isForward) -0.24f else 0.24f
+        coroutineScope {
+            launch {
+                tabOffsetFraction.animateTo(
+                    targetValue = leaveTargetOffset,
+                    animationSpec = tween(durationMillis = 90, easing = TabLeaveTransformEasing)
+                )
+            }
+            launch {
+                tabAlpha.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 80, easing = TabOpacityEaseOut)
+                )
+            }
+        }
+
+        // Swap active tab while opacity == 0 (no overlap / no double header or vertical seam)
+        displayedTab = targetTab
+        val enterStartOffset = if (isForward) 0.35f else -0.35f
+        tabOffsetFraction.snapTo(enterStartOffset)
+        tabAlpha.snapTo(0f)
+
+        // Phase 2 (mode="out-in" Enter): Incoming tab smoothly decelerates (+35% / -35% -> 0%) in 210ms
+        coroutineScope {
+            launch {
+                tabOffsetFraction.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 210, easing = TabEnterTransformEasing)
+                )
+            }
+            launch {
+                tabAlpha.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 160, easing = TabOpacityEaseOut)
+                )
+            }
         }
     }
 
@@ -169,6 +255,26 @@ fun MainScreen(
     val currentTabState by rememberUpdatedState(uiState.currentTab)
     val showBottomBarState by rememberUpdatedState(showBottomBar)
 
+    val scrollTabToTop: (MainTab) -> Unit = { targetTab ->
+        scope.launch {
+            val targetListState = when (targetTab) {
+                MainTab.Home -> homeListState
+                MainTab.Monitor -> monitorState
+                MainTab.Event -> eventListState
+                MainTab.Setting -> settingListState
+            }
+            if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
+                try {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                } catch (_: Exception) {}
+                if (targetListState.firstVisibleItemIndex > 12) {
+                    targetListState.scrollToItem(8)
+                }
+                targetListState.animateScrollToItem(0, 0)
+            }
+        }
+    }
+
     val switchToTab: (MainTab, Boolean) -> Unit = { targetTab, withHaptic ->
         if (targetTab != currentTabState) {
             showBottomBar = true
@@ -178,7 +284,14 @@ fun MainScreen(
                 } catch (_: Exception) {}
             }
             viewModel.onTabSelected(targetTab)
+        } else {
+            scrollTabToTop(targetTab)
         }
+    }
+
+    // Khi đang ở tab khác Trang chủ (Sự kiện, Trực tiếp, Cài đặt), ấn Back sẽ quay về tab Trang chủ trước
+    androidx.activity.compose.BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar) {
+        switchToTab(MainTab.Home, false)
     }
 
     val edgeBufferPx = remember(density) { with(density) { 20.dp.toPx() } }
@@ -212,6 +325,7 @@ fun MainScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(top = innerPadding.calculateTopPadding())
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -304,47 +418,22 @@ fun MainScreen(
                     }
                 }
         ) {
-            AnimatedContent(
-                targetState = uiState.currentTab,
-                modifier = Modifier.fillMaxSize(),
-                transitionSpec = {
-                    val fromIdx = OrderedMainTabs.indexOf(initialState)
-                    val toIdx = OrderedMainTabs.indexOf(targetState)
-                    val isForward = toIdx >= fromIdx
-
-                    // Matching MobileLayout.vue .mobile-tab-slide-left / .mobile-tab-slide-right
-                    val enterSlide = slideInHorizontally(
-                        animationSpec = tween(
-                            durationMillis = 220,
-                            easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                        ),
-                        initialOffsetX = { fullWidth ->
-                            if (isForward) (fullWidth * 0.35f).toInt() else -(fullWidth * 0.35f).toInt()
-                        }
-                    ) + fadeIn(
-                        animationSpec = tween(durationMillis = 170)
-                    )
-
-                    val exitSlide = slideOutHorizontally(
-                        animationSpec = tween(
-                            durationMillis = 120,
-                            easing = CubicBezierEasing(0.35f, 0f, 0.7f, 0.2f)
-                        ),
-                        targetOffsetX = { fullWidth ->
-                            if (isForward) -(fullWidth * 0.24f).toInt() else (fullWidth * 0.24f).toInt()
-                        }
-                    ) + fadeOut(
-                        animationSpec = tween(durationMillis = 100)
-                    )
-
-                    (enterSlide togetherWith exitSlide).using(SizeTransform(clip = false))
-                },
-                label = "mainTabSwipeTransition"
-            ) { tab ->
-                saveableStateHolder.SaveableStateProvider(key = tab.route) {
-                    when (tab) {
+            // Keep-Alive (<keep-alive>) Tab Container + Hardware-Accelerated mode="out-in" Transition
+            // Only compose displayedTab in the layout tree so inactive tabs (e.g. Monitor live player) never steal frame time during scroll
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(1f)
+                    .graphicsLayer {
+                        translationX = tabOffsetFraction.value * size.width
+                        alpha = tabAlpha.value
+                    }
+            ) {
+                saveableStateHolder.SaveableStateProvider(key = displayedTab.route) {
+                    when (displayedTab) {
                         MainTab.Home -> {
                             HomeScreen(
+                                viewModel = homeViewModel,
                                 listState = homeListState,
                                 onEventClick = { eventId ->
                                     val id = eventId.toIntOrNull()
@@ -357,6 +446,7 @@ fun MainScreen(
 
                         MainTab.Event -> {
                             com.tenli.oneview.ui.features.event.EventScreen(
+                                viewModel = eventViewModel,
                                 listState = eventListState,
                                 onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
                             )
@@ -365,6 +455,7 @@ fun MainScreen(
                         MainTab.Monitor -> {
                             com.tenli.oneview.ui.features.monitor.MonitorScreen(
                                 listState = monitorState,
+                                isTabActive = (uiState.currentTab == MainTab.Monitor),
                                 onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
                                 onPlaybackClick = { videoLink, time, imageLink, cameraName ->
                                     onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
@@ -388,7 +479,9 @@ fun MainScreen(
 
             if (uiState.isBottomBarVisible && showBottomBar) {
                 Box(
-                    modifier = Modifier.align(Alignment.BottomCenter)
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .zIndex(10f)
                 ) {
                     MainBottomNavigation(
                         currentTab = uiState.currentTab,
@@ -396,19 +489,8 @@ fun MainScreen(
                         onTabClick = { tab ->
                             switchToTab(tab, false)
                         },
-                        onScrollToTop = {
-                            scope.launch {
-                                val currentState = when (uiState.currentTab) {
-                                    MainTab.Home -> homeListState
-                                    MainTab.Monitor -> monitorState
-                                    MainTab.Event -> eventListState
-                                    MainTab.Setting -> settingListState
-                                }
-                                if (currentState.firstVisibleItemIndex > 15) {
-                                    currentState.scrollToItem(10)
-                                }
-                                currentState.animateScrollToItem(0)
-                            }
+                        onScrollToTop = { tab ->
+                            scrollTabToTop(tab)
                         }
                     )
                 }
@@ -508,7 +590,7 @@ fun SettingScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = userName,
-                            fontSize = 15.sp,
+                            fontSize = 15.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = textColor,
                             maxLines = 1
@@ -542,7 +624,7 @@ fun SettingScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = stringResource(id = R.string.setting_support),
-                            fontSize = 15.sp,
+                            fontSize = 15.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = textColor,
                             maxLines = 1
@@ -557,7 +639,7 @@ fun SettingScreen(
                 Text(
                     text = stringResource(id = R.string.setting_general),
                     modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     color = sectionColor,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -584,7 +666,7 @@ fun SettingScreen(
                 Text(
                     text = "Giao diện",
                     modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     color = sectionColor,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -619,7 +701,7 @@ fun SettingScreen(
                 Text(
                     text = stringResource(id = R.string.setting_account_title),
                     modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     color = sectionColor,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1037,7 +1119,9 @@ private fun MobileNotificationConfigSheet(
         hasOsPermission = granted
     }
 
-    var isLoading by remember { mutableStateOf(true) }
+    // Hiển thị ngay lập tức trạng thái từ cache SharedPreferences (0ms), chỉ hiện loading nếu chưa từng lưu cache
+    val hasCachedPref = remember { GlobalData.preferences.contains("push_notifications_enabled") }
+    var isLoading by remember { mutableStateOf(!hasCachedPref) }
     var isSaving by remember { mutableStateOf(false) }
     var pushEnabled by remember {
         mutableStateOf(GlobalData.preferences.getBoolean("push_notifications_enabled", true))
@@ -1499,7 +1583,7 @@ fun ModernSettingItem(
             Spacer(modifier = Modifier.width(14.dp))
             Text(
                 text = title,
-                fontSize = 15.sp,
+                fontSize = 15.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = titleColor,
                 modifier = Modifier.weight(1f)
@@ -1507,7 +1591,7 @@ fun ModernSettingItem(
             if (valueText != null) {
                 Text(
                     text = valueText,
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                     modifier = Modifier.padding(end = 6.dp)
                 )

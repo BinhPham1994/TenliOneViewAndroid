@@ -25,6 +25,7 @@ import com.tenli.oneview.di.DefaultAppContainer
 import com.tenli.oneview.service.KeepAliveService
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 class TenliApp : Application(), ImageLoaderFactory {
@@ -32,7 +33,37 @@ class TenliApp : Application(), ImageLoaderFactory {
     lateinit var container: AppContainer
 
     override fun newImageLoader(): ImageLoader {
+        val imageHttpClient = okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                val req = chain.request()
+                val token = com.tenli.oneview.data.local.UserSession.accessToken
+                val path = req.url.encodedPath
+                val domainHost = runCatching {
+                    java.net.URI(com.tenli.oneview.data.local.UserSession.domain.trim()).host
+                }.getOrNull()
+                val needsAuth = token.isNotEmpty() && req.header("Authorization") == null && (
+                    (domainHost != null && req.url.host.equals(domainHost, ignoreCase = true)) ||
+                    path.contains("/files/download/") ||
+                    path.contains("/Data/") ||
+                    path.contains("/VMS/") ||
+                    path.contains("/api/") ||
+                    path.contains("/ts/api/")
+                )
+                val finalReq = if (needsAuth) {
+                    req.newBuilder()
+                        .header("Authorization", "Bearer $token")
+                        .build()
+                } else {
+                    req
+                }
+                chain.proceed(finalReq)
+            }
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+
         return ImageLoader.Builder(this)
+            .okHttpClient(imageHttpClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.25)
@@ -41,7 +72,7 @@ class TenliApp : Application(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(this.cacheDir.resolve("image_cache"))
-                    .maxSizePercent(0.02)
+                    .maxSizeBytes(150L * 1024 * 1024) // 150 MB disk cache cho ảnh sự kiện & snapshot camera
                     .build()
             }
             .crossfade(true)
@@ -59,6 +90,13 @@ class TenliApp : Application(), ImageLoaderFactory {
         GlobalData.apply {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
             gson = GsonBuilder().serializeNulls().create()
+        }
+        // Pre-warm dữ liệu cache từ ổ đĩa lên RAM ngay khi khởi tạo tiến trình ứng dụng
+        // để cả 3 màn hình chính (Trang chủ, Sự kiện, Trực tiếp) và Chi tiết sự kiện có dữ liệu 0ms ở frame đầu tiên
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
+            runCatching { com.tenli.oneview.data.local.HomeCacheManager.preloadDefaultCache(this@TenliApp) }
+            runCatching { com.tenli.oneview.data.local.EventCacheManager.preloadDefaultCache(this@TenliApp) }
+            runCatching { com.tenli.oneview.data.local.MonitorCacheManager.preloadDefaultCache(this@TenliApp) }
         }
         startKeepAliveService(this)
         setupBackgroundWorkers()

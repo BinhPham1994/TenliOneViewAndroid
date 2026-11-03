@@ -25,6 +25,8 @@ import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -71,9 +73,33 @@ class HomeViewModel(
     private val aiApi = LoginAuthClient.create(AiApi::class.java)
 
     private val _uiState = MutableStateFlow(
-        HomeUiState(
-            isListView = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
-        )
+        run {
+            val isList = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
+            val memCached = HomeCacheManager.getHomeDataInMemory(TimeFilter.TODAY, null)
+            if (memCached != null) {
+                HomeUiState(
+                    isLoading = false,
+                    isListView = isList,
+                    overviewStats = memCached.overviewStats,
+                    eventsOverTime = memCached.eventsOverTime,
+                    eventsByType = memCached.eventsByType,
+                    eventsByCamera = memCached.eventsByCamera,
+                    cameraList = memCached.cameraList.ifEmpty { com.tenli.oneview.data.local.EventCacheManager.getCamerasInMemory() },
+                    aiServices = memCached.aiServices.ifEmpty { com.tenli.oneview.data.local.EventCacheManager.getAiServicesInMemory() },
+                    recentEvents = memCached.recentEvents
+                        .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
+                        .take(5),
+                    runningAiTasks = memCached.runningAiTasks,
+                    totalAiTasks = memCached.totalAiTasks
+                )
+            } else {
+                HomeUiState(
+                    isListView = isList,
+                    cameraList = com.tenli.oneview.data.local.EventCacheManager.getCamerasInMemory(),
+                    aiServices = com.tenli.oneview.data.local.EventCacheManager.getAiServicesInMemory()
+                )
+            }
+        }
     )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
@@ -111,14 +137,18 @@ class HomeViewModel(
                 }
         }
         viewModelScope.launch {
-            webSocketManager.cameraStatusMap.collect { statusMap ->
-                _uiState.update { it.copy(cameraStatusMap = statusMap) }
-            }
+            webSocketManager.cameraStatusMap
+                .debounce(800L)
+                .collect { statusMap ->
+                    _uiState.update { it.copy(cameraStatusMap = statusMap) }
+                }
         }
         viewModelScope.launch {
-            webSocketManager.recordStatusMap.collect { recMap ->
-                _uiState.update { it.copy(recordStatusMap = recMap) }
-            }
+            webSocketManager.recordStatusMap
+                .debounce(800L)
+                .collect { recMap ->
+                    _uiState.update { it.copy(recordStatusMap = recMap) }
+                }
         }
         viewModelScope.launch {
             com.tenli.oneview.util.EventBus.eventReportedFalse.collect { eventId ->
@@ -196,6 +226,7 @@ class HomeViewModel(
                     serviceId = _uiState.value.selectedServiceId
                 )
                 if (newEvents.isNotEmpty()) {
+                    com.tenli.oneview.data.local.EventCacheManager.cacheInMemory(events = newEvents)
                     _uiState.update { state ->
                         val merged = (newEvents + state.recentEvents)
                             .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
@@ -234,25 +265,31 @@ class HomeViewModel(
 
     fun fetchDashboardData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
+
+            // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate)
             val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
             if (cachedData != null) {
                 _uiState.update {
                     it.copy(
+                        isLoading = false,
+                        error = null,
                         overviewStats = cachedData.overviewStats,
                         eventsOverTime = cachedData.eventsOverTime,
                         eventsByType = cachedData.eventsByType,
                         eventsByCamera = cachedData.eventsByCamera,
-                        cameraList = cachedData.cameraList,
-                        aiServices = cachedData.aiServices,
+                        cameraList = cachedData.cameraList.ifEmpty { it.cameraList },
+                        aiServices = cachedData.aiServices.ifEmpty { it.aiServices },
                         recentEvents = cachedData.recentEvents
                             .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
-                            .take(5)
+                            .take(5),
+                        runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else it.runningAiTasks,
+                        totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else it.totalAiTasks
                     )
                 }
+            } else {
+                _uiState.update { it.copy(isLoading = true, error = null) }
             }
 
             try {
@@ -290,137 +327,211 @@ class HomeViewModel(
                     }
                 }
 
-                val overviewResponse = bsApi.getVmsCountOverview(
-                    serviceId = _uiState.value.selectedServiceId?.toString() ?: "-1",
-                    fromTime = fromTime,
-                    toTime = toTime
-                )
-                val overviewStats = if (overviewResponse.isSuccessful) {
-                    overviewResponse.body() ?: emptyList()
-                } else emptyList()
-
-                val overTimeResponse = bsApi.getVmsEventStatsOverTime(
-                    fromTime = fromTime,
-                    toTime = toTime,
-                    serviceId = _uiState.value.selectedServiceId?.toString()
-                )
-                val eventsOverTime = if (overTimeResponse.isSuccessful) {
-                    overTimeResponse.body() ?: emptyList()
-                } else emptyList()
-
-                val byTypeResponse = bsApi.getVmsEventCountByType(
-                    fromTime = fromTime,
-                    toTime = toTime,
-                    serviceId = _uiState.value.selectedServiceId?.toString()
-                )
-                val eventsByType = if (byTypeResponse.isSuccessful) {
-                    byTypeResponse.body() ?: emptyList()
-                } else emptyList()
-
-                val byCameraResponse = bsApi.getVmsEventCountByCamera(
-                    fromTime = fromTime,
-                    toTime = toTime,
-                    serviceId = _uiState.value.selectedServiceId?.toString()
-                )
-                val eventsByCamera = if (byCameraResponse.isSuccessful) {
-                    byCameraResponse.body() ?: emptyList()
-                } else emptyList()
-
-                val recentEvents = fetchPermittedRecentEvents(
-                    fromSec = fromTime / 1000,
-                    toSec = toTime / 1000,
-                    serviceId = _uiState.value.selectedServiceId
-                )
-
-                val cameraResponse = vmsApi.getCameraList()
-                val cameraList = if (cameraResponse.isSuccessful) {
-                    cameraResponse.body() ?: emptyList()
-                } else emptyList()
-
-                val aiServiceResponse = eventApi.getAIServiceList()
-                val aiServices = if (aiServiceResponse.isSuccessful) {
-                    aiServiceResponse.body() ?: emptyList()
-                } else emptyList()
-
-                // Compute running AI tasks & total AI tasks matching MobileHomePage.vue
-                var runningTasks = 0
-                var totalTasks = 0
-                try {
-                    val targetServices = if (serviceId != null) {
-                        aiServices.filter { it.id == serviceId }
-                    } else {
-                        aiServices
+                // 2. Gọi song song tất cả các API Dashboard để rút ngắn thời gian phản hồi xuống 1 RTT duy nhất
+                coroutineScope {
+                    val serviceIdStr = serviceId?.toString()
+                    val overviewDeferred = async {
+                        runCatching {
+                            bsApi.getVmsCountOverview(
+                                serviceId = serviceIdStr ?: "-1",
+                                fromTime = fromTime,
+                                toTime = toTime
+                            )
+                        }.getOrNull()
                     }
-                    if (targetServices.isEmpty()) {
-                        val monResp = aiApi.getMonitorList()
-                        if (monResp.isSuccessful) {
-                            val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                            totalTasks = monitors.size
-                            runningTasks = monitors.count { it.enabled }
-                        }
-                    } else {
-                        for (srv in targetServices) {
-                            val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
-                            val monResp = if (host.isNotBlank() && srv.id != 0) {
-                                aiApi.getMonitorListExt(
-                                    url = "$host/api/Monitor",
-                                    authHeader = "Bearer ${srv.apiKey}"
-                                )
-                            } else {
-                                aiApi.getMonitorList()
+                    val overTimeDeferred = async {
+                        runCatching {
+                            bsApi.getVmsEventStatsOverTime(
+                                fromTime = fromTime,
+                                toTime = toTime,
+                                serviceId = serviceIdStr
+                            )
+                        }.getOrNull()
+                    }
+                    val byTypeDeferred = async {
+                        runCatching {
+                            bsApi.getVmsEventCountByType(
+                                fromTime = fromTime,
+                                toTime = toTime,
+                                serviceId = serviceIdStr
+                            )
+                        }.getOrNull()
+                    }
+                    val byCameraDeferred = async {
+                        runCatching {
+                            bsApi.getVmsEventCountByCamera(
+                                fromTime = fromTime,
+                                toTime = toTime,
+                                serviceId = serviceIdStr
+                            )
+                        }.getOrNull()
+                    }
+                    val recentEventsDeferred = async {
+                        fetchPermittedRecentEvents(
+                            fromSec = fromTime / 1000,
+                            toSec = toTime / 1000,
+                            serviceId = serviceId
+                        )
+                    }
+                    val cameraDeferred = async {
+                        runCatching { vmsApi.getCameraList() }.getOrNull()
+                    }
+                    val aiServiceDeferred = async {
+                        runCatching { eventApi.getAIServiceList() }.getOrNull()
+                    }
+
+                    // Pre-warm danh sách hồ sơ khuôn mặt trong nền nếu chưa có để màn Chi tiết sự kiện mở 0ms
+                    launch {
+                        if (com.tenli.oneview.data.local.EventCacheManager.getProfilesInMemory().isEmpty()) {
+                            val profiles = runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                            val groups = runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                            if (profiles.isNotEmpty() || groups.isNotEmpty()) {
+                                com.tenli.oneview.data.local.EventCacheManager.saveProfilesCache(getApplication(), profiles, groups)
                             }
+                        }
+                    }
+
+                    val overviewResponse = overviewDeferred.await()
+                    val overTimeResponse = overTimeDeferred.await()
+                    val byTypeResponse = byTypeDeferred.await()
+                    val byCameraResponse = byCameraDeferred.await()
+                    val recentEvents = recentEventsDeferred.await()
+                    val cameraResponse = cameraDeferred.await()
+                    val aiServiceResponse = aiServiceDeferred.await()
+
+                    val overviewStats = if (overviewResponse?.isSuccessful == true) {
+                        overviewResponse.body() ?: emptyList()
+                    } else _uiState.value.overviewStats
+
+                    val eventsOverTime = if (overTimeResponse?.isSuccessful == true) {
+                        overTimeResponse.body() ?: emptyList()
+                    } else _uiState.value.eventsOverTime
+
+                    val eventsByType = if (byTypeResponse?.isSuccessful == true) {
+                        byTypeResponse.body() ?: emptyList()
+                    } else _uiState.value.eventsByType
+
+                    val eventsByCamera = if (byCameraResponse?.isSuccessful == true) {
+                        byCameraResponse.body() ?: emptyList()
+                    } else _uiState.value.eventsByCamera
+
+                    val cameraList = if (cameraResponse?.isSuccessful == true) {
+                        cameraResponse.body() ?: emptyList()
+                    } else _uiState.value.cameraList
+
+                    val aiServices = if (aiServiceResponse?.isSuccessful == true) {
+                        aiServiceResponse.body() ?: emptyList()
+                    } else _uiState.value.aiServices
+
+                    // Compute running AI tasks & total AI tasks matching MobileHomePage.vue (song song trên các AI Service)
+                    var runningTasks = 0
+                    var totalTasks = 0
+                    try {
+                        val targetServices = if (serviceId != null) {
+                            aiServices.filter { it.id == serviceId }
+                        } else {
+                            aiServices
+                        }
+                        if (targetServices.isEmpty()) {
+                            val monResp = aiApi.getMonitorList()
                             if (monResp.isSuccessful) {
                                 val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                                totalTasks += monitors.size
-                                runningTasks += monitors.count { it.enabled }
+                                totalTasks = monitors.size
+                                runningTasks = monitors.count { it.enabled }
+                            }
+                        } else {
+                            val monitorResults = targetServices.map { srv ->
+                                async {
+                                    val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
+                                    runCatching {
+                                        if (host.isNotBlank() && srv.id != 0) {
+                                            aiApi.getMonitorListExt(
+                                                url = "$host/api/Monitor",
+                                                authHeader = "Bearer ${srv.apiKey}"
+                                            )
+                                        } else {
+                                            aiApi.getMonitorList()
+                                        }
+                                    }.getOrNull()
+                                }
+                            }.map { it.await() }
+
+                            for (monResp in monitorResults) {
+                                if (monResp != null && monResp.isSuccessful) {
+                                    val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                                    totalTasks += monitors.size
+                                    runningTasks += monitors.count { it.enabled }
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        Log.w("HomeViewModel", "Fallback monitor count from overviewStats", e)
                     }
-                } catch (e: Exception) {
-                    Log.w("HomeViewModel", "Fallback monitor count from overviewStats", e)
-                }
-                if (totalTasks == 0) {
-                    val overviewMonitorCount = overviewStats
-                        .find { it.label == "monitor-count" && it.tag == "all" }
-                        ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                    totalTasks = overviewMonitorCount
-                    runningTasks = overviewMonitorCount
-                }
+                    if (totalTasks == 0) {
+                        val overviewMonitorCount = overviewStats
+                            .find { it.label == "monitor-count" && it.tag == "all" }
+                            ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+                        totalTasks = overviewMonitorCount
+                        runningTasks = overviewMonitorCount
+                    }
 
-                var errorMsg: String? = null
-                if (!overviewResponse.isSuccessful) errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
+                    var errorMsg: String? = null
+                    if (overviewResponse != null && !overviewResponse.isSuccessful && cachedData == null) {
+                        errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
+                    }
 
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        overviewStats = overviewStats,
-                        eventsOverTime = eventsOverTime,
-                        eventsByType = eventsByType,
-                        eventsByCamera = eventsByCamera,
-                        cameraList = cameraList,
-                        aiServices = aiServices,
-                        recentEvents = recentEvents,
-                        runningAiTasks = runningTasks,
-                        totalAiTasks = totalTasks,
-                        error = errorMsg
+                    val finalRecentEvents = if (recentEvents.isNotEmpty() || cachedData == null) {
+                        recentEvents
+                    } else {
+                        _uiState.value.recentEvents
+                    }
+
+                    com.tenli.oneview.data.local.EventCacheManager.cacheInMemory(
+                        events = finalRecentEvents,
+                        cameras = cameraList,
+                        aiServices = aiServices
                     )
-                }
 
-                if (errorMsg == null) {
-                    val newCachedData = CachedHomeData(
-                        overviewStats = overviewStats,
-                        eventsOverTime = eventsOverTime,
-                        eventsByType = eventsByType,
-                        eventsByCamera = eventsByCamera,
-                        cameraList = cameraList,
-                        aiServices = aiServices,
-                        recentEvents = recentEvents
-                    )
-                    HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            overviewStats = overviewStats,
+                            eventsOverTime = eventsOverTime,
+                            eventsByType = eventsByType,
+                            eventsByCamera = eventsByCamera,
+                            cameraList = cameraList,
+                            aiServices = aiServices,
+                            recentEvents = finalRecentEvents,
+                            runningAiTasks = runningTasks,
+                            totalAiTasks = totalTasks,
+                            error = errorMsg
+                        )
+                    }
+
+                    if (overviewResponse?.isSuccessful == true) {
+                        val newCachedData = CachedHomeData(
+                            overviewStats = overviewStats,
+                            eventsOverTime = eventsOverTime,
+                            eventsByType = eventsByType,
+                            eventsByCamera = eventsByCamera,
+                            cameraList = cameraList,
+                            aiServices = aiServices,
+                            recentEvents = finalRecentEvents,
+                            runningAiTasks = runningTasks,
+                            totalAiTasks = totalTasks,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
+                    }
                 }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error fetching data", e)
-                _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = if (cachedData == null) e.toUserFriendlyMessage() else null
+                    )
+                }
             }
         }
     }

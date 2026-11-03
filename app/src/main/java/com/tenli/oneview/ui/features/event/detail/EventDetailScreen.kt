@@ -5,32 +5,42 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,6 +71,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -78,18 +90,19 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
@@ -136,6 +149,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class EventMediaTab(val titleVi: String, val titleEn: String) {
@@ -172,11 +186,21 @@ fun EventDetailScreen(
     var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+    val haptic = LocalHapticFeedback.current
+    val mediaTabs = remember { EventMediaTab.values() }
 
     // Drag-to-dismiss vertical offset (matching PWA bottom-sheet swipe down to dismiss)
     val sheetOffsetY = remember(eventId) { Animatable(0f) }
-    val dismissThresholdPx = remember(density) { with(density) { 110.dp.toPx() } }
     val screenHeightPx = remember(density) { with(density) { 950.dp.toPx() } }
+    val horizontalLockSlopPx = remember(density) { with(density) { 16.dp.toPx() } }
+    val preConsumeVerticalSlopPx = remember(density) { with(density) { 5.dp.toPx() } }
+    val verticalLockSlopPx = remember(density) { with(density) { 14.dp.toPx() } }
+    val videoControllerZoneHeightPx = remember(density) { with(density) { 50.dp.toPx() } }
+
+    var rootColumnTopY by remember(eventId) { mutableFloatStateOf(0f) }
+    var pinnedTopSectionBottomY by remember(eventId) { mutableFloatStateOf(0f) }
+    var dataBoardBottomY by remember(eventId) { mutableFloatStateOf(0f) }
+    var lastTabSwipeTimeMs by remember(eventId) { mutableLongStateOf(0L) }
 
     fun triggerSmoothDismiss() {
         scope.launch {
@@ -188,56 +212,6 @@ fun EventDetailScreen(
                 )
             )
             onSwipeDismissed()
-        }
-    }
-
-    // Nested scroll connection so pulling down when LazyColumn is at the top drags the sheet down to close
-    val nestedScrollConnection = remember(listState, eventId) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                // If sheet is currently dragged down and user scrolls up, consume it to push sheet back up first
-                if (sheetOffsetY.value > 0f && available.y < 0f) {
-                    val consumed = available.y.coerceAtLeast(-sheetOffsetY.value)
-                    scope.launch {
-                        sheetOffsetY.snapTo((sheetOffsetY.value + consumed).coerceAtLeast(0f))
-                    }
-                    return Offset(0f, consumed)
-                }
-                return Offset.Zero
-            }
-
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource
-            ): Offset {
-                // When LazyColumn is at top and user pulls down with finger
-                if (source == NestedScrollSource.UserInput && available.y > 0f) {
-                    val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset <= 4
-                    if (isAtTop) {
-                        scope.launch {
-                            sheetOffsetY.snapTo((sheetOffsetY.value + available.y * 0.85f).coerceAtLeast(0f))
-                        }
-                        return Offset(0f, available.y)
-                    }
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (sheetOffsetY.value > 0f) {
-                    if (sheetOffsetY.value >= dismissThresholdPx || (sheetOffsetY.value >= dismissThresholdPx * 0.55f && available.y > 900f)) {
-                        triggerSmoothDismiss()
-                    } else {
-                        sheetOffsetY.animateTo(
-                            targetValue = 0f,
-                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
-                        )
-                    }
-                    return available
-                }
-                return Velocity.Zero
-            }
         }
     }
 
@@ -349,6 +323,149 @@ fun EventDetailScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
+                    .onGloballyPositioned { coords ->
+                        rootColumnTopY = coords.positionInRoot().y
+                    }
+                    .pointerInput(eventId) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial
+                            )
+                            val startX = down.position.x
+                            val startY = down.position.y
+                            val downRootY = rootColumnTopY + startY
+                            val startTimeMs = SystemClock.uptimeMillis()
+
+                            val isInsidePinnedTop =
+                                pinnedTopSectionBottomY > 0f && downRootY <= pinnedTopSectionBottomY
+                            val isInsideVideoSeekbarZone =
+                                selectedTab != EventMediaTab.EVENT_IMAGE &&
+                                    pinnedTopSectionBottomY > 0f &&
+                                    downRootY in (pinnedTopSectionBottomY - videoControllerZoneHeightPx)..pinnedTopSectionBottomY
+                            val isDataBoardVisible =
+                                listState.layoutInfo.visibleItemsInfo.any {
+                                    it.key == "section_event_data_board" || it.key == "section_event_info_header"
+                                }
+                            val isInsideDataBoard =
+                                isDataBoardVisible &&
+                                    pinnedTopSectionBottomY > 0f &&
+                                    dataBoardBottomY > pinnedTopSectionBottomY &&
+                                    downRootY > pinnedTopSectionBottomY &&
+                                    downRootY <= dataBoardBottomY
+
+                            // Horizontal swipe to switch media tabs: works across the screen except the video player seekbar
+                            var canSwipeTab = !isInsideVideoSeekbarZone
+
+                            // Vertical swipe-down to dismiss:
+                            // - Allowed on Pinned Top Section (Header + Tabs + 16:9 Media area)
+                            // - Allowed on THÔNG TIN SỰ KIỆN section (header + .event-data-board card)
+                            // - NEVER allowed when touching inside LỊCH SỬ XUẤT HIỆN (related events list)
+                            var canSwipeDismiss = !isInsideVideoSeekbarZone && (isInsidePinnedTop || isInsideDataBoard)
+
+                            var lockedMode = 0 // 0 = NONE, 1 = HORIZONTAL_TAB, 2 = VERTICAL_DISMISS
+                            var lastDx = 0f
+                            var lastDy = 0f
+                            val pointerId = down.id
+
+                            while (true) {
+                                val ptrEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = ptrEvent.changes.firstOrNull { it.id == pointerId }
+                                    ?: ptrEvent.changes.firstOrNull()
+                                    ?: break
+                                if (!change.pressed) {
+                                    break
+                                }
+
+                                val dx = change.position.x - startX
+                                val dy = change.position.y - startY
+                                val absX = abs(dx)
+                                val absY = abs(dy)
+                                lastDx = dx
+                                lastDy = dy
+
+                                // If user drags finger upward (scrolling down the page), disable swipe-to-dismiss
+                                // so LazyColumn can scroll down to LỊCH SỬ XUẤT HIỆN normally
+                                if (lockedMode == 0 && dy < -preConsumeVerticalSlopPx) {
+                                    canSwipeDismiss = false
+                                }
+
+                                if (lockedMode == 0) {
+                                    if (canSwipeTab && absX > horizontalLockSlopPx && absX > absY * 1.3f) {
+                                        lockedMode = 1 // HORIZONTAL_TAB
+                                        canSwipeDismiss = false
+                                        change.consume()
+                                    } else if (canSwipeDismiss && dy > verticalLockSlopPx && dy > absX * 1.35f) {
+                                        lockedMode = 2 // VERTICAL_DISMISS
+                                        canSwipeTab = false
+                                        change.consume()
+                                        val dragOffset = ((dy - verticalLockSlopPx) * 0.9f).coerceAtLeast(0f)
+                                        scope.launch {
+                                            sheetOffsetY.snapTo(dragOffset)
+                                        }
+                                    } else if (canSwipeDismiss && dy > preConsumeVerticalSlopPx && dy > absX * 1.25f) {
+                                        // Pre-consume downward drag in Initial pass before LazyColumn's 8dp touchSlop
+                                        // on Main pass can intercept the gesture inside THÔNG TIN SỰ KIỆN
+                                        change.consume()
+                                    }
+                                } else if (lockedMode == 1) {
+                                    change.consume()
+                                } else if (lockedMode == 2) {
+                                    change.consume()
+                                    val dragOffset = ((dy - verticalLockSlopPx) * 0.9f).coerceAtLeast(0f)
+                                    scope.launch {
+                                        sheetOffsetY.snapTo(dragOffset)
+                                    }
+                                }
+                            }
+
+                            val elapsedMs = (SystemClock.uptimeMillis() - startTimeMs).coerceAtLeast(1L)
+
+                            if (lockedMode == 1) {
+                                val absXDp = with(density) { abs(lastDx).toDp().value }
+                                val isThresholdMet = absXDp >= 42f || (absXDp >= 26f && elapsedMs < 300L)
+                                val now = SystemClock.uptimeMillis()
+                                if (isThresholdMet && (now - lastTabSwipeTimeMs >= 250L)) {
+                                    lastTabSwipeTimeMs = now
+                                    val curIdx = mediaTabs.indexOf(selectedTab)
+                                    if (lastDx < 0f && curIdx < mediaTabs.lastIndex) {
+                                        try {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        } catch (_: Exception) {}
+                                        selectedTab = mediaTabs[curIdx + 1]
+                                    } else if (lastDx > 0f && curIdx > 0) {
+                                        try {
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        } catch (_: Exception) {}
+                                        selectedTab = mediaTabs[curIdx - 1]
+                                    }
+                                }
+                            } else if (lockedMode == 2) {
+                                val pulledDp = with(density) { sheetOffsetY.value.toDp().value }
+                                val totalDyDp = with(density) { lastDy.toDp().value }
+                                val velocityDpPerMs = totalDyDp / elapsedMs.toFloat()
+                                val shouldDismiss = pulledDp >= 85f ||
+                                    (pulledDp >= 42f && velocityDpPerMs >= 0.45f && elapsedMs < 400L)
+                                if (shouldDismiss) {
+                                    triggerSmoothDismiss()
+                                } else {
+                                    scope.launch {
+                                        sheetOffsetY.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                        )
+                                    }
+                                }
+                            } else if (sheetOffsetY.value > 0f) {
+                                scope.launch {
+                                    sheetOffsetY.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+                                    )
+                                }
+                            }
+                        }
+                    }
             ) {
                 // =========================================================================
                 // 1. PINNED TOP SECTION (.media-header-pinned-section in BaseAiEventDetailModal.vue)
@@ -358,33 +475,8 @@ fun EventDetailScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(pageBgColor)
-                        .pointerInput(Unit) {
-                            detectVerticalDragGestures(
-                                onVerticalDrag = { _, dragAmount ->
-                                    val next = (sheetOffsetY.value + dragAmount).coerceAtLeast(0f)
-                                    scope.launch { sheetOffsetY.snapTo(next) }
-                                },
-                                onDragEnd = {
-                                    if (sheetOffsetY.value >= dismissThresholdPx * 0.8f) {
-                                        triggerSmoothDismiss()
-                                    } else {
-                                        scope.launch {
-                                            sheetOffsetY.animateTo(
-                                                0f,
-                                                spring(stiffness = Spring.StiffnessMediumLow)
-                                            )
-                                        }
-                                    }
-                                },
-                                onDragCancel = {
-                                    scope.launch {
-                                        sheetOffsetY.animateTo(
-                                            0f,
-                                            spring(stiffness = Spring.StiffnessMediumLow)
-                                        )
-                                    }
-                                }
-                            )
+                        .onGloballyPositioned { coords ->
+                            pinnedTopSectionBottomY = coords.positionInRoot().y + coords.size.height
                         }
                 ) {
                     // Header: Centered AI Task Title + Top-right Circular X Button (.dashboard-header)
@@ -403,7 +495,7 @@ fun EventDetailScreen(
                         ) {
                             Text(
                                 text = aiTaskTitle,
-                                fontSize = 17.sp,
+                                fontSize = 17.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
                                 textAlign = TextAlign.Center,
@@ -463,97 +555,138 @@ fun EventDetailScreen(
                         }
                     }
 
-                    // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list)
+                    // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list) with Smooth Sliding Pill Indicator
                     val tabsTrackBg = if (isDark) Color.White.copy(alpha = 0.08f) else SurfaceLight
                     val activePillBg = if (isDark) SurfaceVariantDark else SurfaceVariant
                     val activeTabTextColor = if (isDark) BrandAccent else BrandAccent
                     val inactiveTabTextColor = Color(0xFF64748B)
+                    val selectedTabIndex = mediaTabs.indexOf(selectedTab).coerceAtLeast(0)
 
-                    Row(
+                    BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 10.dp, end = 10.dp, top = 6.dp, bottom = 12.dp)
+                            .height(42.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(tabsTrackBg)
-                            .padding(3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            .padding(3.dp)
                     ) {
-                        EventMediaTab.values().forEach { tab ->
-                            val isSelected = selectedTab == tab
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .then(
-                                        if (isSelected) {
-                                            Modifier
-                                                .shadow(
-                                                    elevation = 2.dp,
-                                                    shape = RoundedCornerShape(9.dp),
-                                                    ambientColor = Color.Black.copy(alpha = 0.12f),
-                                                    spotColor = Color.Black.copy(alpha = 0.12f)
-                                                )
-                                                .clip(RoundedCornerShape(9.dp))
-                                                .background(activePillBg)
-                                        } else {
-                                            Modifier.clip(RoundedCornerShape(9.dp))
-                                        }
-                                    )
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null
-                                    ) {
-                                        selectedTab = tab
-                                    }
-                                    .padding(horizontal = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = if (isEn) tab.titleEn else tab.titleVi,
-                                    color = if (isSelected) activeTabTextColor else inactiveTabTextColor,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                    fontSize = 13.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                        val segmentWidth = maxWidth / mediaTabs.size
+                        val pillOffset by animateDpAsState(
+                            targetValue = segmentWidth * selectedTabIndex,
+                            animationSpec = tween(
+                                durationMillis = 280,
+                                easing = CubicBezierEasing(0.18f, 0.9f, 0.3f, 1f)
+                            ),
+                            label = "mediaSegmentIndicator"
+                        )
+
+                        // Sliding Active Pill
+                        Box(
+                            modifier = Modifier
+                                .offset(x = pillOffset)
+                                .width(segmentWidth)
+                                .fillMaxHeight()
+                                .shadow(
+                                    elevation = 2.dp,
+                                    shape = RoundedCornerShape(9.dp),
+                                    ambientColor = Color.Black.copy(alpha = 0.12f),
+                                    spotColor = Color.Black.copy(alpha = 0.12f)
                                 )
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(activePillBg)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            mediaTabs.forEach { tab ->
+                                val isSelected = selectedTab == tab
+                                val tabTextColor by animateColorAsState(
+                                    targetValue = if (isSelected) activeTabTextColor else inactiveTabTextColor,
+                                    animationSpec = tween(durationMillis = 180),
+                                    label = "mediaTabTextColor"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) {
+                                            selectedTab = tab
+                                        }
+                                        .padding(horizontal = 4.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = if (isEn) tab.titleEn else tab.titleVi,
+                                        color = tabTextColor,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                        fontSize = 14.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
 
                     // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
-                    // Also supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
+                    // Supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
+                    val mediaViewportBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
-                            .background(Color.Black)
-                            .pointerInput(selectedTab) {
-                                var totalHorizontalDrag = 0f
-                                detectHorizontalDragGestures(
-                                    onHorizontalDrag = { _, dragAmount ->
-                                        totalHorizontalDrag += dragAmount
-                                    },
-                                    onDragEnd = {
-                                        val tabs = EventMediaTab.values()
-                                        val curIdx = tabs.indexOf(selectedTab)
-                                        if (totalHorizontalDrag < -80f && curIdx < tabs.lastIndex) {
-                                            selectedTab = tabs[curIdx + 1]
-                                        } else if (totalHorizontalDrag > 80f && curIdx > 0) {
-                                            selectedTab = tabs[curIdx - 1]
-                                        }
-                                        totalHorizontalDrag = 0f
-                                    },
-                                    onDragCancel = {
-                                        totalHorizontalDrag = 0f
-                                    }
-                                )
-                            },
+                            .background(mediaViewportBg),
                         contentAlignment = Alignment.Center
                     ) {
-                        when (selectedTab) {
+                        AnimatedContent(
+                            targetState = selectedTab,
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                val fromIdx = mediaTabs.indexOf(initialState)
+                                val toIdx = mediaTabs.indexOf(targetState)
+                                val isForward = toIdx >= fromIdx
+
+                                val enterSlide = slideInHorizontally(
+                                    animationSpec = tween(
+                                        durationMillis = 210,
+                                        delayMillis = 80,
+                                        easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                                    ),
+                                    initialOffsetX = { fullWidth ->
+                                        if (isForward) (fullWidth * 0.30f).toInt() else -(fullWidth * 0.30f).toInt()
+                                    }
+                                ) + fadeIn(
+                                    animationSpec = tween(durationMillis = 160, delayMillis = 80)
+                                )
+
+                                val exitSlide = slideOutHorizontally(
+                                    animationSpec = tween(
+                                        durationMillis = 85,
+                                        easing = CubicBezierEasing(0.35f, 0f, 0.7f, 0.2f)
+                                    ),
+                                    targetOffsetX = { fullWidth ->
+                                        if (isForward) -(fullWidth * 0.22f).toInt() else (fullWidth * 0.22f).toInt()
+                                    }
+                                ) + fadeOut(
+                                    animationSpec = tween(durationMillis = 80)
+                                )
+
+                                (enterSlide togetherWith exitSlide).using(SizeTransform(clip = true))
+                            },
+                            label = "mediaViewportTransition"
+                        ) { activeMediaTab ->
+                        when (activeMediaTab) {
                             EventMediaTab.EVENT_IMAGE -> {
                                 val imageUrl = getEventImageUrl(event)
-                                if (imageUrl != null) {
+                                var imageLoadError by remember(imageUrl) { mutableStateOf(false) }
+                                if (imageUrl != null && !imageLoadError) {
                                     val eventBoxes = remember(event) { findAllBoxes(event) }
                                     val palette = remember {
                                         listOf(
@@ -569,6 +702,7 @@ fun EventDetailScreen(
                                     AsyncImage(
                                         model = imageUrl,
                                         contentDescription = "Event Image",
+                                        onError = { imageLoadError = true },
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .drawWithContent {
@@ -631,7 +765,9 @@ fun EventDetailScreen(
 
                                 if (uiState.originalVideoLoading) {
                                     Box(
-                                        modifier = Modifier.fillMaxSize(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(mediaViewportBg),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         val fallbackImg = getEventImageUrl(event)
@@ -643,11 +779,11 @@ fun EventDetailScreen(
                                                 contentScale = ContentScale.Crop
                                             )
                                         }
-                                        CircularProgressIndicator(color = BrandPrimary)
+                                        WaveDotsLoading()
                                     }
                                 } else if (uiState.originalVideoError != null) {
                                     CommonEmptyState(
-                                        text = uiState.originalVideoError ?: "Video không khả dụng",
+                                        text = uiState.originalVideoError ?: if (isEn) "Original video unavailable" else "Video không khả dụng",
                                         modifier = Modifier.fillMaxSize()
                                     )
                                 } else {
@@ -672,6 +808,7 @@ fun EventDetailScreen(
                                                     thumbnailUrl = null,
                                                     deviceKey = UserSession.accessToken,
                                                     initialSeekPositionMs = uiState.originalVideoSeekTimeMs,
+                                                    errorText = if (isEn) "Original video unavailable" else "Video gốc không khả dụng",
                                                     onTimeUpdate = { currentMs ->
                                                         val seekTimeMs = uiState.originalVideoSeekTimeMs ?: return@VideoPlayer
                                                         showEventEffect = currentMs in seekTimeMs..(seekTimeMs + 10000)
@@ -728,7 +865,8 @@ fun EventDetailScreen(
                                     VideoPlayer(
                                         videoUrl = videoUrl,
                                         thumbnailUrl = getEventImageUrl(event),
-                                        deviceKey = UserSession.accessToken
+                                        deviceKey = UserSession.accessToken,
+                                        errorText = if (isEn) "No event video" else "Không có video sự kiện"
                                     )
                                 } else {
                                     CommonEmptyState(
@@ -737,6 +875,7 @@ fun EventDetailScreen(
                                     )
                                 }
                             }
+                        }
                         }
                     }
 
@@ -754,15 +893,14 @@ fun EventDetailScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f)
-                        .nestedScroll(nestedScrollConnection),
+                        .weight(1f),
                     contentPadding = PaddingValues(bottom = 36.dp)
                 ) {
                     // Section Title: THÔNG TIN SỰ KIỆN
                     item(key = "section_event_info_header") {
                         Text(
                             text = if (isEn) "EVENT INFORMATION" else "THÔNG TIN SỰ KIỆN",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.6.sp,
                             color = sectionHeaderColor,
@@ -776,7 +914,10 @@ fun EventDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp)
-                                .padding(bottom = 14.dp),
+                                .padding(bottom = 14.dp)
+                                .onGloballyPositioned { coords ->
+                                    dataBoardBottomY = coords.positionInRoot().y + coords.size.height
+                                },
                             color = cardBgColor,
                             shape = RoundedCornerShape(16.dp)
                         ) {
@@ -1301,7 +1442,7 @@ fun EventDetailScreen(
                                 ) {
                                     Text(
                                         text = if (isEn) "RELATED LICENSE PLATES" else "BIỂN SỐ LIÊN QUAN",
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 0.6.sp,
                                         color = sectionHeaderColor
@@ -1426,7 +1567,7 @@ fun EventDetailScreen(
                         ) {
                             Text(
                                 text = if (isEn) "APPEARANCE HISTORY" else "LỊCH SỬ XUẤT HIỆN",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.6.sp,
                                 color = sectionHeaderColor,
@@ -1458,7 +1599,7 @@ fun EventDetailScreen(
                                         )
                                         Text(
                                             text = if (isEn) uiState.selectedJourneyPeriod.labelEn else uiState.selectedJourneyPeriod.labelVi,
-                                            fontSize = 14.sp,
+                                            fontSize = 14.5.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = if (isDark) TextPrimaryDark else TextPrimary
                                         )
@@ -1545,7 +1686,8 @@ fun EventDetailScreen(
                     } else {
                         itemsIndexed(
                             items = uiState.relatedEvents,
-                            key = { idx, relEv -> "hist_${idx}_${relEv.serviceId}_${relEv.id}_${relEv.time}" }
+                            key = { idx, relEv -> "hist_${idx}_${relEv.serviceId}_${relEv.id}_${relEv.time}" },
+                            contentType = { _, _ -> "history_event_card" }
                         ) { _, relEv ->
                             val isActive = relEv.id == event.id
                             val camUuid = relEv.data?.cameraUUID ?: relEv.data?.cameraUuidLower
@@ -1612,7 +1754,7 @@ fun EventDetailScreen(
                                 )
                                 Text(
                                     text = if (isEn) "All events displayed" else "Đã hiển thị tất cả sự kiện",
-                                    fontSize = 12.sp,
+                                    fontSize = 12.5.sp,
                                     color = sectionHeaderColor.copy(alpha = 0.75f),
                                     modifier = Modifier.padding(horizontal = 12.dp)
                                 )
@@ -1676,7 +1818,7 @@ private fun EventInfoDataRow(
         Text(
             text = label,
             color = labelColor,
-            fontSize = 14.sp,
+            fontSize = 14.5.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1
         )
@@ -1729,7 +1871,7 @@ private fun PlateBadgePill(
         Text(
             text = plate,
             color = Color.White,
-            fontSize = 12.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.8.sp
         )

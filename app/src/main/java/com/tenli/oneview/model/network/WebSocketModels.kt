@@ -9,10 +9,14 @@ data class NotifyData(
     val event: String? = null,
     val channel: String? = null,
     val message: String? = null,
-    val data: JsonElement? = null
+    val data: JsonElement? = null,
+    val id: JsonElement? = null,
+    val serviceId: Int? = null,
+    val type: String? = null,
+    val time: Double? = null
 ) {
     val topic: String?
-        get() = event ?: channel
+        get() = event ?: channel ?: type
 }
 
 // ==================== WebSocket Report ====================

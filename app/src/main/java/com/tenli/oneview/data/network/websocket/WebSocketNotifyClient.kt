@@ -2,6 +2,7 @@ package com.tenli.oneview.data.network.websocket
 
 import android.util.Log
 import com.google.gson.Gson
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.NotifyData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,6 +16,9 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import java.net.URLEncoder
+import kotlin.math.min
+import kotlin.math.roundToLong
 
 class WebSocketNotifyClient(
     private val client: OkHttpClient,
@@ -28,8 +32,22 @@ class WebSocketNotifyClient(
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val reconnectDelay = 3000L
-    private val heartbeatInterval = 20000L
+    private var reconnectDelay = 3000L
+    private val heartbeatInterval = 15000L
+
+    private fun appendTokenToUrl(rawUrl: String): String {
+        val token = UserSession.accessToken
+        val base = rawUrl
+            .replace(Regex("([?&])token=[^&]*(&|$)")) { m ->
+                val p1 = m.groupValues[1]
+                val p2 = m.groupValues[2]
+                if (p2.isNotEmpty()) p1 else ""
+            }
+            .replace(Regex("[?&]$"), "")
+        if (token.isEmpty()) return base
+        val sep = if (base.contains("?")) "&" else "?"
+        return "$base${sep}token=${URLEncoder.encode(token, "UTF-8")}"
+    }
 
     fun connect(urlStr: String) {
         if (webSocket != null && isConnected) {
@@ -37,19 +55,21 @@ class WebSocketNotifyClient(
             return
         }
 
-        var protocolUrl = urlStr
+        var protocolUrl = urlStr.trim()
         if (protocolUrl.startsWith("http://")) protocolUrl = protocolUrl.replaceFirst("http://", "ws://")
         if (protocolUrl.startsWith("https://")) protocolUrl = protocolUrl.replaceFirst("https://", "wss://")
 
         this.url = protocolUrl
-        Log.d("WebSocketNotify", "Connecting to Notify: $url")
+        val resolvedUrl = appendTokenToUrl(protocolUrl)
+        Log.d("WebSocketNotify", "Connecting to Notify: $protocolUrl")
 
-        val request = Request.Builder().url(protocolUrl).build()
+        val request = Request.Builder().url(resolvedUrl).build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d("WebSocketNotify", "Connected")
                 isConnected = true
+                reconnectDelay = 3000L
                 reconnectJob?.cancel()
                 
                 // Subscribe to notify topic
@@ -130,8 +150,11 @@ class WebSocketNotifyClient(
     private fun scheduleReconnect() {
         if (reconnectJob?.isActive == true || url.isEmpty()) return
 
+        val currentDelay = reconnectDelay
+        reconnectDelay = min((reconnectDelay * 1.5).roundToLong(), 30000L)
+
         reconnectJob = scope.launch {
-            delay(reconnectDelay)
+            delay(currentDelay)
             connect(url)
         }
     }

@@ -53,9 +53,29 @@ class EventViewModel(
     private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
 
     private val _uiState = MutableStateFlow(
-        EventScreenUiState(
-            isListView = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
-        )
+        run {
+            val isList = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
+            val memCached = EventCacheManager.getEventDataInMemory(TimeFilter.TODAY, null, null, null)
+            if (memCached != null) {
+                val permitted = memCached.events
+                    .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                    .distinctBy { "${it.serviceId}_${it.id}_${it.time}" }
+                EventScreenUiState(
+                    isListView = isList,
+                    isLoading = false,
+                    events = permitted,
+                    cameraList = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() },
+                    aiServices = memCached.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() },
+                    hasMore = permitted.isNotEmpty()
+                )
+            } else {
+                EventScreenUiState(
+                    isListView = isList,
+                    cameraList = EventCacheManager.getCamerasInMemory(),
+                    aiServices = EventCacheManager.getAiServicesInMemory()
+                )
+            }
+        }
     )
     val uiState: StateFlow<EventScreenUiState> = _uiState.asStateFlow()
 
@@ -207,6 +227,7 @@ class EventViewModel(
                     val rawEvents = response.body() ?: emptyList()
                     val permittedNew = rawEvents.filter { AiTypeHelper.isAiTypeEnabled(it.type) }
                     if (permittedNew.isNotEmpty()) {
+                        EventCacheManager.cacheInMemory(events = permittedNew)
                         _uiState.update { state ->
                             val merged = (permittedNew + state.events)
                                 .distinctBy { eventUniqueKey(it) }
@@ -291,76 +312,120 @@ class EventViewModel(
     fun fetchInitialData() {
         viewModelScope.launch {
             lastFetchedRawId = null
-            _uiState.update { it.copy(isLoading = true, error = null, hasMore = true) }
-
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
             val cameraUuid = _uiState.value.selectedCameraUuid
             val aiType = _uiState.value.selectedAiType
 
-            if (cameraUuid == null) {
-                val cachedData = EventCacheManager.getEventData(getApplication(), filter, serviceId, aiType)
-                if (cachedData != null) {
-                    val permittedCached = cachedData.events
-                        .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                        .distinctBy { eventUniqueKey(it) }
-                    _uiState.update {
-                        it.copy(
-                            cameraList = cachedData.cameraList,
-                            events = permittedCached,
-                            hasMore = permittedCached.isNotEmpty()
-                        )
-                    }
+            // 1. Ưu tiên hiển thị ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate)
+            val cachedData = EventCacheManager.getEventData(
+                context = getApplication(),
+                filter = filter,
+                serviceId = serviceId,
+                aiType = aiType,
+                cameraUuid = cameraUuid
+            )
+            if (cachedData != null) {
+                val permittedCached = cachedData.events
+                    .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                    .distinctBy { eventUniqueKey(it) }
+                lastFetchedRawId = permittedCached.lastOrNull()?.id
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = null,
+                        cameraList = cachedData.cameraList.ifEmpty { it.cameraList },
+                        aiServices = cachedData.aiServices.ifEmpty { it.aiServices },
+                        events = permittedCached,
+                        hasMore = permittedCached.isNotEmpty()
+                    )
                 }
+            } else {
+                _uiState.update { it.copy(isLoading = true, error = null, hasMore = true) }
             }
 
             try {
                 kotlinx.coroutines.coroutineScope {
-                    val cameraDeferred = async { vmsApi.getCameraList() }
-                    val aiServiceDeferred = async { eventApi.getAIServiceList() }
+                    val cameraDeferred = async {
+                        runCatching { vmsApi.getCameraList() }.getOrNull()
+                    }
+                    val aiServiceDeferred = async {
+                        runCatching { eventApi.getAIServiceList() }.getOrNull()
+                    }
+                    val (from, to) = getTimeRange()
+                    val resolvedType = resolveApiEventType(aiType)
+                    val eventsDeferred = async {
+                        fetchPermittedEventBatch(
+                            startLastId = null,
+                            fromSec = from,
+                            toSec = to,
+                            serviceId = serviceId,
+                            cameraUuid = cameraUuid,
+                            resolvedType = resolvedType,
+                            targetCount = 20
+                        )
+                    }
 
                     val cameraResponse = cameraDeferred.await()
                     val aiServiceResponse = aiServiceDeferred.await()
+                    val (newEvents, nextLastId, hasMore) = eventsDeferred.await()
 
-                    val cameraList = if (cameraResponse.isSuccessful) {
+                    val cameraList = if (cameraResponse?.isSuccessful == true) {
                         cameraResponse.body() ?: emptyList()
                     } else _uiState.value.cameraList
 
-                    val aiServices = if (aiServiceResponse.isSuccessful) {
+                    val aiServices = if (aiServiceResponse?.isSuccessful == true) {
                         aiServiceResponse.body() ?: emptyList()
                     } else _uiState.value.aiServices
 
-                    val (from, to) = getTimeRange()
-                    val resolvedType = resolveApiEventType(aiType)
-                    val (newEvents, nextLastId, hasMore) = fetchPermittedEventBatch(
-                        startLastId = null,
-                        fromSec = from,
-                        toSec = to,
-                        serviceId = serviceId,
-                        cameraUuid = cameraUuid,
-                        resolvedType = resolvedType,
-                        targetCount = 20
+                    val finalEvents = if (newEvents.isNotEmpty() || cachedData == null) {
+                        lastFetchedRawId = nextLastId
+                        newEvents
+                    } else {
+                        _uiState.value.events
+                    }
+
+                    EventCacheManager.cacheInMemory(
+                        events = finalEvents,
+                        cameras = cameraList,
+                        aiServices = aiServices
                     )
-                    lastFetchedRawId = nextLastId
 
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             cameraList = cameraList,
                             aiServices = aiServices,
-                            events = newEvents,
+                            events = finalEvents,
                             hasMore = hasMore
                         )
                     }
 
-                    if (cameraUuid == null && newEvents.isNotEmpty() && cameraResponse.isSuccessful) {
-                        val freshCachedData = CachedEventData(events = newEvents, cameraList = cameraList)
-                        EventCacheManager.saveEventData(getApplication(), filter, serviceId, aiType, freshCachedData)
+                    if (newEvents.isNotEmpty()) {
+                        val freshCachedData = CachedEventData(
+                            events = newEvents,
+                            cameraList = cameraList,
+                            aiServices = aiServices,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        EventCacheManager.saveEventData(
+                            context = getApplication(),
+                            filter = filter,
+                            serviceId = serviceId,
+                            aiType = aiType,
+                            data = freshCachedData,
+                            cameraUuid = cameraUuid
+                        )
                     }
                 }
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error fetching initial events", e)
-                _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = if (cachedData == null) e.toUserFriendlyMessage() else null
+                    )
+                }
             }
         }
     }
@@ -385,6 +450,9 @@ class EventViewModel(
                     targetCount = 20
                 )
                 lastFetchedRawId = nextLastId
+                if (newEvents.isNotEmpty()) {
+                    EventCacheManager.cacheInMemory(events = newEvents)
+                }
 
                 _uiState.update {
                     it.copy(

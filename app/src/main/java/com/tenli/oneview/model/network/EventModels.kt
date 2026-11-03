@@ -1,9 +1,11 @@
 package com.tenli.oneview.model.network
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.annotations.SerializedName
 
 // ==================== AI Service ====================
 
+@Immutable
 data class AIServiceModel(
     val id: Int,
     val name: String,
@@ -18,6 +20,7 @@ data class AIServiceModel(
 
 // ==================== Event Data ====================
 
+@Immutable
 data class FaceData(
     val cropImage: String? = null,
     val similarity: Double = 0.0,
@@ -92,6 +95,7 @@ data class WeaponData(
     val cropBox: List<Double>? = null
 )
 
+@Immutable
 data class EventDataDetail(
     val type: String? = null,
     val image: String? = null,
@@ -170,6 +174,7 @@ data class EventDataDetail(
     val behavior: String? = null
 )
 
+@Immutable
 data class EventData(
     val id: Int,
     val serviceId: Int,
@@ -373,6 +378,84 @@ data class RuleModel(
     val id: Int,
     val name: String,
     val key: String? = null,
-    val enabled: Boolean,
-    val rule: RuleObjectModel
+    val enabled: Boolean? = true,
+    val rule: RuleObjectModel? = null,
+    val ruleObject: RuleObjectModel? = null,
+    val vmsId: Int? = null,
+    val serviceId: Int? = null,
+    val extra: Map<String, Any>? = null,
+    val originId: Int? = null
+)
+
+data class ScenarioModel(
+    val id: Int,
+    val name: String,
+    val extra: Map<String, Any>? = null,
+    val vmsId: Int,
+    val originId: Int
+)
+
+data class DateEventItem(
+    val time: Long,
+    val total: Int
+)
+
+data class DateEventData(
+    val time: Long,
+    val total: Int,
+    val items: List<DateEventItem> = emptyList()
+)
+
+data class BoundingBox(
+    val x: Double,
+    val y: Double,
+    val width: Double,
+    val height: Double,
+    val label: String? = null,
+    val confidence: Double? = null,
+    val color: String? = null
+)
+
+data class AlertEvent(
+    val id: String,
+    val cameraId: String,
+    val cameraName: String? = null,
+    val type: String,
+    val severity: String,
+    val timestamp: String,
+    val imageUrl: String? = null,
+    val videoUrl: String? = null,
+    val description: String? = null,
+    val status: String = "pending"
+)
+
+data class EventFilter(
+    val dateRange: List<String>? = null,
+    val cameraIds: List<Any>? = null,
+    val types: List<String>? = null,
+    val search: String? = null,
+    val severity: String? = null,
+    val limit: Int? = null,
+    val offset: Int? = null
+)
+
+data class FetchUniformDataParams(
+    val profileUUID: String? = null,
+    val onlyProfileUnknown: Any? = null,
+    val isConfirmed: Any? = null,
+    val order: String? = null,
+    val count: Int? = null,
+    val eventType: String? = null,
+    val lastId: Int? = null,
+    val from: Long? = null,
+    val to: Long? = null,
+    val fromTime: Long? = null,
+    val toTime: Long? = null,
+    val serviceId: Int? = null,
+    val cameraId: Any? = null,
+    val cameraUUID: String? = null,
+    val camerauuid: String? = null,
+    val uniformLabel: String? = null,
+    val uniformlabel: String? = null,
+    val excludeUniformLabel: Any? = null
 )

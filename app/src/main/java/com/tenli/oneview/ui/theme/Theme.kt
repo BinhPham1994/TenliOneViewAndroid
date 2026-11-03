@@ -103,8 +103,29 @@ fun TenliAIoTTheme(content: @Composable () -> Unit) {
         }
     }
 
+    // Tự động co giãn kích thước chữ (sp) và khoảng cách (dp) theo độ rộng màn hình thiết bị (baseline 365dp của bản PWA).
+    // Trên các máy Android màn hình rộng (411dp - 448dp), chữ tự động lớn hơn ~10%-16% để cân đối với bố cục thẻ/ảnh,
+    // đồng thời giới hạn an toàn fontScale hệ thống để không bao giờ bị vỡ khung giao diện.
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val baseDensity = androidx.compose.ui.platform.LocalDensity.current
+    val smallestWidthDp = minOf(configuration.screenWidthDp, configuration.screenHeightDp).coerceAtLeast(320)
+    val screenScale = (smallestWidthDp / 365f).coerceIn(0.95f, 1.18f)
+    val safeSystemFontScale = baseDensity.fontScale.coerceIn(0.95f, 1.15f)
+    val responsiveFontScale = (screenScale * safeSystemFontScale).coerceIn(1.02f, 1.24f)
+
+    val responsiveDensity = androidx.compose.runtime.remember(baseDensity.density, responsiveFontScale) {
+        androidx.compose.ui.unit.Density(
+            density = baseDensity.density,
+            fontScale = responsiveFontScale
+        )
+    }
+    val responsiveDimensions = androidx.compose.runtime.remember(screenScale) {
+        Dimensions.scaled(screenScale)
+    }
+
     CompositionLocalProvider(
-        LocalSpacing provides Dimensions()
+        androidx.compose.ui.platform.LocalDensity provides responsiveDensity,
+        LocalSpacing provides responsiveDimensions
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

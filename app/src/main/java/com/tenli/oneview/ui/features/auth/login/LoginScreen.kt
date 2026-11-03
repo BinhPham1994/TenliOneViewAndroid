@@ -527,7 +527,7 @@ fun LoginContent(
                             Text(
                                 text = rememberMeText,
                                 style = MaterialTheme.typography.bodySmall.copy(
-                                    fontSize = 12.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Normal
                                 ),
                                 color = subtitleColor
@@ -631,7 +631,7 @@ fun LoginContent(
                                     text = loginBtnText,
                                     style = MaterialTheme.typography.titleMedium.copy(
                                         fontWeight = FontWeight.SemiBold,
-                                        fontSize = 14.sp,
+                                        fontSize = 15.sp,
                                         color = Color.White
                                     )
                                 )

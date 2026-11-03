@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.component
 
 import android.util.Log
+import android.view.TextureView
 import androidx.annotation.OptIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,6 +11,7 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,8 +28,10 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorInput
 import androidx.media3.extractor.ExtractorOutput
@@ -35,7 +39,9 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.ui.PlayerView
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
+import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 
 /**
@@ -69,12 +75,16 @@ private class NoSniffFragmentedMp4Extractor : Extractor {
 fun LiveStreamPlayer(
     wsUrl: String,
     videoCodecTag: String,
+    cameraId: Int = 0,
+    altCameraId: Int = 0,
+    showInternalOverlay: Boolean = false,
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
-    var isPlaying by remember { mutableStateOf(false) }
-    var isError by remember { mutableStateOf(false) }
+    var isPlaying by remember(wsUrl) { mutableStateOf(false) }
+    var isError by remember(wsUrl) { mutableStateOf(false) }
+    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var isLifecycleActive by remember { mutableStateOf(true) }
@@ -97,13 +107,35 @@ fun LiveStreamPlayer(
         return // Component will be destroyed, saving battery and network
     }
 
+    fun captureCurrentFrameToCache() {
+        if (cameraId <= 0) return
+        try {
+            val textureView = playerViewRef?.videoSurfaceView as? TextureView ?: return
+            if (textureView.isAvailable && textureView.width > 0 && textureView.height > 0) {
+                val bmp = textureView.bitmap
+                if (bmp != null) {
+                    MonitorCacheManager.saveCapturedCameraFrame(context, cameraId, bmp, altCameraId)
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    // Đồng bộ LivePlayer.vue: chụp 1 frame sau 1200ms khi luồng live bắt đầu phát
+    LaunchedEffect(isPlaying, wsUrl) {
+        if (isPlaying && cameraId > 0) {
+            delay(1200)
+            captureCurrentFrameToCache()
+        }
+    }
+
     val exoPlayer = remember(wsUrl) {
         val wsClient = OkHttpClient.Builder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
             .build()
-            
+
         val dataSourceFactory = DataSource.Factory {
             WebSocketDataSource(wsClient, UserSession.accessToken)
         }
@@ -125,32 +157,58 @@ fun LiveStreamPlayer(
             })
             .createMediaSource(MediaItem.fromUri(wsUrl))
 
-        ExoPlayer.Builder(context).build().apply {
-            setMediaSource(mediaSource)
-            prepare()
-            playWhenReady = true
-            volume = 0f // Muted – same as web player
-            addListener(object : Player.Listener {
-                override fun onRenderedFirstFrame() {
-                    isPlaying = true
-                    isError = false
-                    onPlayingChange(true)
-                    onErrorChange(false)
-                }
-
-                override fun onPlayerError(error: PlaybackException) {
-                    Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
-                    isError = true
-                    isPlaying = false
-                    onPlayingChange(false)
-                    onErrorChange(true)
-                }
-            })
+        // Vô hiệu hoá track Audio vì live view luôn tắt tiếng (volume = 0f) và nhiều camera CCTV
+        // có track audio rỗng/lệch PTS trong moov khiến MediaCodecAudioRenderer chặn việc render frame video.
+        val trackSelector = DefaultTrackSelector(context).apply {
+            setParameters(
+                buildUponParameters()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+            )
         }
+
+        // Giảm buffer khởi động xuống 100ms để hiển thị frame đầu tiên ngay lập tức như MSE trên web
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 1500,
+                /* maxBufferMs = */ 15000,
+                /* bufferForPlaybackMs = */ 100,
+                /* bufferForPlaybackAfterRebufferMs = */ 300
+            )
+            .build()
+
+        ExoPlayer.Builder(context)
+            .setTrackSelector(trackSelector)
+            .setLoadControl(loadControl)
+            .build()
+            .apply {
+                setMediaSource(mediaSource)
+                prepare()
+                playWhenReady = true
+                volume = 0f // Muted – same as web player
+                addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        isPlaying = true
+                        isError = false
+                        onPlayingChange(true)
+                        onErrorChange(false)
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
+                        isError = true
+                        isPlaying = false
+                        onPlayingChange(false)
+                        onErrorChange(true)
+                    }
+                })
+            }
     }
 
     DisposableEffect(exoPlayer) {
         onDispose {
+            if (isPlaying) {
+                captureCurrentFrameToCache()
+            }
             exoPlayer.stop()
             exoPlayer.release()
         }
@@ -161,6 +219,7 @@ fun LiveStreamPlayer(
             factory = { ctx ->
                 android.view.LayoutInflater.from(ctx).inflate(com.tenli.oneview.R.layout.view_exo_texture, null).apply {
                     (this as PlayerView).apply {
+                        playerViewRef = this
                         player = exoPlayer
                         useController = false
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -168,14 +227,24 @@ fun LiveStreamPlayer(
                     }
                 }
             },
-            update = { view -> (view as PlayerView).player = exoPlayer },
-            onRelease = { view -> (view as? PlayerView)?.player = null },
+            update = { view ->
+                (view as PlayerView).let {
+                    playerViewRef = it
+                    it.player = exoPlayer
+                }
+            },
+            onRelease = { view ->
+                if (playerViewRef === view) {
+                    playerViewRef = null
+                }
+                (view as? PlayerView)?.player = null
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer { alpha = if (isPlaying) 1f else 0f }
         )
 
-        if (!isPlaying) {
+        if (showInternalOverlay && !isPlaying) {
             Box(Modifier.fillMaxSize(), Alignment.Center) {
                 if (isError) {
                     androidx.compose.foundation.layout.Column(

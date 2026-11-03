@@ -29,6 +29,7 @@ class WebSocketManager(
 
     // WebSockets
     private var notifyClient: WebSocketNotifyClient? = null
+    private val dataNotifyClients = mutableMapOf<String, WebSocketNotifyClient>()
     private val reportClients = mutableMapOf<Int, WebSocketReportClient>()
 
     // Exposed Flows
@@ -51,8 +52,21 @@ class WebSocketManager(
 
     data class StatusLabel(val color: String, val label: String)
 
+    private fun normalizeWsBaseUrl(baseUrl: String): String {
+        var clean = baseUrl.trim().trimEnd('/')
+        if (clean.endsWith("/api/v1")) {
+            clean = clean.removeSuffix("/api/v1")
+        }
+        if (clean.startsWith("https://")) {
+            clean = clean.replaceFirst("https://", "wss://")
+        } else if (clean.startsWith("http://")) {
+            clean = clean.replaceFirst("http://", "ws://")
+        }
+        return clean
+    }
+
     /**
-     * Connect to the main Notify WebSocket.
+     * Connect to the main Notify WebSocket (/Data/ws/Notify — khớp websocketManager.ts dòng 102).
      */
     fun connectNotify(baseUrl: String) {
         if (notifyClient?.isConnected() == true) {
@@ -60,19 +74,54 @@ class WebSocketManager(
             return
         }
 
+        notifyClient?.disconnect()
         notifyClient = WebSocketNotifyClient(client, gson) { data ->
             Log.d("WebSocketManager", "Received notify event/channel: ${data.topic}")
-            if (data.topic == "ai-data" || data.topic == "event") {
+            if (data.topic != "pong") {
                 scope.launch {
                     _notifyEvent.emit(data)
                 }
             }
         }
 
-        val protocolUrl = baseUrl.trimEnd('/').replaceFirst("http", "ws")
-        val wsUrl = "$protocolUrl/ws/Notify"
+        val protocolUrl = normalizeWsBaseUrl(baseUrl)
+        val wsUrl = "$protocolUrl/Data/ws/Notify"
         Log.d("WebSocketManager", "Connecting Notify WebSocket to: $wsUrl")
         notifyClient?.connect(wsUrl)
+    }
+
+    /**
+     * Connect to per-type DataNotify WebSockets (/Data/ws/DataNotify/{type} — khớp websocketManager.ts dòng 107).
+     */
+    fun connectDataNotify(baseUrl: String, types: List<String>) {
+        val protocolUrl = normalizeWsBaseUrl(baseUrl)
+        val desiredUrls = types
+            .filter { it.isNotBlank() && it != "all" && it != "sensor-smoke-camera" }
+            .associateBy { "$protocolUrl/Data/ws/DataNotify/$it" }
+
+        val currentUrls = dataNotifyClients.keys.toList()
+        for (url in currentUrls) {
+            if (!desiredUrls.containsKey(url)) {
+                dataNotifyClients.remove(url)?.disconnect()
+            }
+        }
+
+        for (url in desiredUrls.keys) {
+            val existing = dataNotifyClients[url]
+            if (existing == null) {
+                val socket = WebSocketNotifyClient(client, gson) { data ->
+                    if (data.topic != "pong") {
+                        scope.launch {
+                            _notifyEvent.emit(data)
+                        }
+                    }
+                }
+                socket.connect(url)
+                dataNotifyClients[url] = socket
+            } else if (!existing.isConnected()) {
+                existing.connect(url)
+            }
+        }
     }
 
     /**
@@ -235,6 +284,9 @@ class WebSocketManager(
     fun disconnectAll() {
         notifyClient?.disconnect()
         notifyClient = null
+
+        dataNotifyClients.values.forEach { it.disconnect() }
+        dataNotifyClients.clear()
 
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()

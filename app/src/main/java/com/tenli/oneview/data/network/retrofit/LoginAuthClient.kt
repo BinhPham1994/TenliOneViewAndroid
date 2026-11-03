@@ -6,9 +6,17 @@ import com.google.gson.JsonDeserializationContext
 import com.google.gson.JsonDeserializer
 import com.google.gson.JsonElement
 import com.tenli.oneview.BuildConfig
+import com.tenli.oneview.model.network.BsProfileConfig
+import com.tenli.oneview.model.network.BsProfileGroupConfig
 import com.tenli.oneview.model.network.CameraExtra
 import com.tenli.oneview.model.network.CameraMonitorExtra
 import com.tenli.oneview.model.network.EventDataDetail
+import com.tenli.oneview.model.network.PlateConfig
+import com.tenli.oneview.model.network.PlateGroupConfig
+import com.tenli.oneview.model.network.ProfileGroupData
+import com.tenli.oneview.model.network.RuleObjectModel
+import com.tenli.oneview.model.network.TaskConfigModel
+import com.tenli.oneview.model.network.UniformLabelExtraConfig
 import com.tenli.oneview.model.network.UserExtra
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -74,6 +82,14 @@ object LoginAuthClient {
         .registerTypeAdapter(CameraExtra::class.java, StringOrObjectDeserializer(CameraExtra::class.java))
         .registerTypeAdapter(UserExtra::class.java, StringOrObjectDeserializer(UserExtra::class.java))
         .registerTypeAdapter(CameraMonitorExtra::class.java, StringOrObjectDeserializer(CameraMonitorExtra::class.java))
+        .registerTypeAdapter(ProfileGroupData::class.java, StringOrObjectDeserializer(ProfileGroupData::class.java))
+        .registerTypeAdapter(TaskConfigModel::class.java, StringOrObjectDeserializer(TaskConfigModel::class.java))
+        .registerTypeAdapter(RuleObjectModel::class.java, StringOrObjectDeserializer(RuleObjectModel::class.java))
+        .registerTypeAdapter(BsProfileGroupConfig::class.java, StringOrObjectDeserializer(BsProfileGroupConfig::class.java))
+        .registerTypeAdapter(BsProfileConfig::class.java, StringOrObjectDeserializer(BsProfileConfig::class.java))
+        .registerTypeAdapter(PlateConfig::class.java, StringOrObjectDeserializer(PlateConfig::class.java))
+        .registerTypeAdapter(PlateGroupConfig::class.java, StringOrObjectDeserializer(PlateGroupConfig::class.java))
+        .registerTypeAdapter(UniformLabelExtraConfig::class.java, StringOrObjectDeserializer(UniformLabelExtraConfig::class.java))
         .create()
 
     private val retrofit: Retrofit by lazy {

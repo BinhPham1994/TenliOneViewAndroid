@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -162,10 +162,11 @@ fun EventScreen(
                         }
                     }
                 } else {
-                    itemsIndexed(
+                    items(
                         items = uiState.events,
-                        key = { index, event -> "ev_${index}_${event.serviceId}_${event.id}_${event.time}" }
-                    ) { _, event ->
+                        key = { event -> "ev_${event.serviceId}_${event.id}_${event.time}" },
+                        contentType = { "event_card" }
+                    ) { event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
                         Box(modifier = Modifier.padding(horizontal = 10.dp)) {
                             MobileEventCard(
@@ -173,7 +174,14 @@ fun EventScreen(
                                 cameraName = cameraName,
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
-                                onClick = { onEventClick(event.id) }
+                                onClick = {
+                                    com.tenli.oneview.data.local.EventCacheManager.cacheClickedEvent(
+                                        event = event,
+                                        cameras = uiState.cameraList,
+                                        aiServices = uiState.aiServices
+                                    )
+                                    onEventClick(event.id)
+                                }
                             )
                         }
                     }

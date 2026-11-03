@@ -19,6 +19,8 @@ import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.util.toUserFriendlyMessage
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,7 +41,10 @@ data class SelectedCamera(
     val retryCount: Int = 0,
     val streamType: String = "LIVE",
     val fallbackImageUrl: String = "",
-    val vmsName: String = ""
+    val vmsName: String = "",
+    val channel: Int = 1,
+    val hasFallbackTried: Boolean = false,
+    val snapshotRetried: Boolean = false
 )
 
 enum class MonitorTab {
@@ -72,6 +77,55 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
+
+    private val streamJobs = arrayOfNulls<kotlinx.coroutines.Job>(4)
+
+    private fun getBaseDomain(): String {
+        var base = com.tenli.oneview.data.local.UserSession.domain
+            .ifEmpty { com.tenli.oneview.BuildConfig.DOMAIN_CLOUD }
+            .trim()
+            .trimEnd('/')
+        if (base.endsWith("/api/v1")) {
+            base = base.removeSuffix("/api/v1")
+        }
+        return base
+    }
+
+    private fun resolveFullMediaUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty() || trimmed == "NO_IMAGE") return ""
+        if (trimmed.startsWith("http://") ||
+            trimmed.startsWith("https://") ||
+            trimmed.startsWith("file://") ||
+            trimmed.startsWith("data:")
+        ) {
+            return trimmed
+        }
+        val base = getBaseDomain()
+        return if (trimmed.startsWith("/")) {
+            "$base$trimmed"
+        } else {
+            "$base/$trimmed"
+        }
+    }
+
+    private fun resolveWebSocketUrl(rawLink: String): String {
+        val trimmed = rawLink.trim()
+        if (trimmed.isEmpty()) return ""
+        var resolved = trimmed
+        if (resolved.startsWith("/")) {
+            resolved = "${getBaseDomain()}$resolved"
+        } else if (!resolved.startsWith("ws://") &&
+            !resolved.startsWith("wss://") &&
+            !resolved.startsWith("http://") &&
+            !resolved.startsWith("https://")
+        ) {
+            resolved = "${getBaseDomain()}/$resolved"
+        }
+        if (resolved.startsWith("http://")) resolved = resolved.replaceFirst("http://", "ws://")
+        if (resolved.startsWith("https://")) resolved = resolved.replaceFirst("https://", "wss://")
+        return resolved
+    }
 
     init {
         val prefs = GlobalData.preferences
@@ -214,12 +268,17 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private fun loadData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-
             val cachedData = MonitorCacheManager.getMonitorData(getApplication())
-            if (cachedData != null && cachedData.vmsList.isNotEmpty()) {
+            if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
                 val finalTree = buildTree(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
-                _uiState.update { it.copy(treeData = finalTree) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = null,
+                        treeData = finalTree,
+                        aiServices = cachedData.aiServices.ifEmpty { it.aiServices }
+                    )
+                }
                 ensureDefaultExpandedNodes(finalTree)
 
                 val prefs = GlobalData.preferences
@@ -236,51 +295,82 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
                     addCamera(targetCamera, 0)
                 }
+            } else {
+                _uiState.update { it.copy(isLoading = true, error = null) }
             }
 
             try {
-                val vmsResponse = vmsApi.getVMSServiceList()
-                val groupResponse = vmsApi.getCameraGroupList()
-                val cameraResponse = vmsApi.getCameraList()
-                val cameraInGroupResponse = vmsApi.getCameraInGroupList()
-                val aiServiceResponse = eventApi.getAIServiceList()
+                // Gọi song song cả 5 API cây camera & AI Services để giảm thời gian tải xuống 1 RTT duy nhất
+                coroutineScope {
+                    val vmsDeferred = async { runCatching { vmsApi.getVMSServiceList() }.getOrNull() }
+                    val groupDeferred = async { runCatching { vmsApi.getCameraGroupList() }.getOrNull() }
+                    val cameraDeferred = async { runCatching { vmsApi.getCameraList() }.getOrNull() }
+                    val cameraInGroupDeferred = async { runCatching { vmsApi.getCameraInGroupList() }.getOrNull() }
+                    val aiServiceDeferred = async { runCatching { eventApi.getAIServiceList() }.getOrNull() }
 
-                if (vmsResponse.isSuccessful && groupResponse.isSuccessful && cameraResponse.isSuccessful && cameraInGroupResponse.isSuccessful) {
-                    val vmsList = vmsResponse.body() ?: emptyList()
-                    val groupList = groupResponse.body() ?: emptyList()
-                    val cameraList = cameraResponse.body() ?: emptyList()
-                    val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
-                    val aiServices = if (aiServiceResponse.isSuccessful) aiServiceResponse.body() ?: emptyList() else emptyList()
+                    val vmsResponse = vmsDeferred.await()
+                    val groupResponse = groupDeferred.await()
+                    val cameraResponse = cameraDeferred.await()
+                    val cameraInGroupResponse = cameraInGroupDeferred.await()
+                    val aiServiceResponse = aiServiceDeferred.await()
 
-                    val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
+                    if (vmsResponse?.isSuccessful == true &&
+                        groupResponse?.isSuccessful == true &&
+                        cameraResponse?.isSuccessful == true &&
+                        cameraInGroupResponse?.isSuccessful == true
+                    ) {
+                        val vmsList = vmsResponse.body() ?: emptyList()
+                        val groupList = groupResponse.body() ?: emptyList()
+                        val cameraList = cameraResponse.body() ?: emptyList()
+                        val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
+                        val aiServices = if (aiServiceResponse?.isSuccessful == true) {
+                            aiServiceResponse.body() ?: emptyList()
+                        } else _uiState.value.aiServices
 
-                    _uiState.update { it.copy(isLoading = false, treeData = finalTree, aiServices = aiServices) }
-                    ensureDefaultExpandedNodes(finalTree)
+                        val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
 
-                    val prefs = GlobalData.preferences
-                    val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
-                    var targetCamera: CameraModel? = null
+                        _uiState.update { it.copy(isLoading = false, treeData = finalTree, aiServices = aiServices) }
+                        ensureDefaultExpandedNodes(finalTree)
 
-                    if (savedCameraId != -1) {
-                        targetCamera = findCameraById(finalTree, savedCameraId)
+                        val prefs = GlobalData.preferences
+                        val savedCameraId = prefs.getInt("saved_monitor_camera_id", -1)
+                        var targetCamera: CameraModel? = null
+
+                        if (savedCameraId != -1) {
+                            targetCamera = findCameraById(finalTree, savedCameraId)
+                        }
+                        if (targetCamera == null) {
+                            targetCamera = findFirstCamera(finalTree)
+                        }
+
+                        if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
+                            addCamera(targetCamera, 0)
+                        }
+
+                        MonitorCacheManager.saveMonitorData(
+                            getApplication(),
+                            CachedMonitorData(
+                                vmsList = vmsList,
+                                groupList = groupList,
+                                cameraList = cameraList,
+                                cameraInGroups = cameraInGroups,
+                                aiServices = aiServices,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                    } else if (_uiState.value.treeData.isEmpty()) {
+                        _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
+                    } else {
+                        _uiState.update { it.copy(isLoading = false) }
                     }
-                    if (targetCamera == null) {
-                        targetCamera = findFirstCamera(finalTree)
-                    }
-
-                    if (targetCamera != null && _uiState.value.selectedCameras[0] == null) {
-                        addCamera(targetCamera, 0)
-                    }
-
-                    MonitorCacheManager.saveMonitorData(
-                        getApplication(),
-                        CachedMonitorData(vmsList, groupList, cameraList, cameraInGroups)
-                    )
-                } else {
-                    _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isLoading = false, error = e.toUserFriendlyMessage()) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = if (it.treeData.isEmpty()) e.toUserFriendlyMessage() else null
+                    )
+                }
             }
         }
     }
@@ -377,33 +467,139 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
 
         val vmsName = getVmsNameForCamera(camera.vmsId)
+        // Đồng bộ LiveVideoView.vue (line 969): trên mobile ưu tiên luồng phụ (channel = 1) nếu camera có sub stream
+        val initialChannel = if (camera.sub.isNotBlank()) 1 else 0
+
+        // Ưu tiên lấy ngay ảnh snapshot đã cache (0ms) giống cachedSnapshotUrl trên PWA
+        val cachedRawSnap = MonitorCacheManager.getCachedCameraImageLink(
+            getApplication(),
+            camera.id,
+            camera.cameraId
+        ).orEmpty()
+        val initialSnapshotUrl = resolveFullMediaUrl(cachedRawSnap)
 
         val updatedCameras = currentState.selectedCameras.toMutableList()
         while (updatedCameras.size < 4) updatedCameras.add(null)
-        updatedCameras[slotIndex] = SelectedCamera(camera, "", vmsName = vmsName)
+        updatedCameras[slotIndex] = SelectedCamera(
+            camera = camera,
+            streamUrl = "",
+            fallbackImageUrl = initialSnapshotUrl,
+            vmsName = vmsName,
+            channel = initialChannel,
+            hasFallbackTried = false,
+            snapshotRetried = false
+        )
 
         _uiState.update { it.copy(selectedCameras = updatedCameras) }
 
-        fetchLiveStreamUrl(camera.id, slotIndex)
+        ensureCameraSnapshotUrl(camera, slotIndex, force = false)
+        startLiveStreamPolling(camera, slotIndex, channel = initialChannel, isFallback = false)
         if (slotIndex == 0) {
             fetchListData()
         }
     }
 
+    private fun ensureCameraSnapshotUrl(camera: CameraModel, slotIndex: Int, force: Boolean) {
+        val app = getApplication<Application>()
+        if (!force && MonitorCacheManager.isSnapshotCacheFresh(app, camera.id)) {
+            val cached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)
+            if (!cached.isNullOrBlank()) {
+                return
+            }
+        }
+
+        viewModelScope.launch {
+            try {
+                val response = vmsApi.getCameraImageLink(camera.id)
+                if (response.isSuccessful) {
+                    val rawLink = response.body()?.link?.trim().orEmpty()
+                    if (rawLink.isNotEmpty() && rawLink != "NO_IMAGE") {
+                        MonitorCacheManager.setCachedCameraImageLink(app, camera.id, rawLink, camera.cameraId)
+                        val resolvedUrl = resolveFullMediaUrl(rawLink)
+                        _uiState.update { state ->
+                            val cameras = state.selectedCameras.toMutableList()
+                            val current = cameras.getOrNull(slotIndex)
+                            if (current != null && current.camera.id == camera.id) {
+                                // Chỉ cập nhật nếu chưa có frame chụp trực tiếp mới hơn từ luồng live
+                                val latestCached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)
+                                val finalSnap = if (latestCached != null && latestCached.startsWith("file://")) {
+                                    latestCached
+                                } else {
+                                    resolvedUrl
+                                }
+                                cameras[slotIndex] = current.copy(fallbackImageUrl = finalSnap)
+                            }
+                            state.copy(selectedCameras = cameras)
+                        }
+                    } else if (force) {
+                        clearSlotSnapshotUrl(camera.id, slotIndex)
+                    }
+                } else if (force) {
+                    clearSlotSnapshotUrl(camera.id, slotIndex)
+                }
+            } catch (_: Exception) {
+                if (force) {
+                    clearSlotSnapshotUrl(camera.id, slotIndex)
+                }
+            }
+        }
+    }
+
+    private fun clearSlotSnapshotUrl(cameraId: Int, slotIndex: Int) {
+        _uiState.update { state ->
+            val cameras = state.selectedCameras.toMutableList()
+            val current = cameras.getOrNull(slotIndex)
+            if (current != null && current.camera.id == cameraId) {
+                cameras[slotIndex] = current.copy(fallbackImageUrl = "", snapshotRetried = true)
+            }
+            state.copy(selectedCameras = cameras)
+        }
+    }
+
+    /**
+     * Đồng bộ `onSnapshotError()` trong `LiveVideoView.vue` (lines 540-559):
+     * Khi ảnh snapshot cache bị lỗi hoặc hết hạn, xoá khỏi cache và gọi lại `CameraImageLink/{id}` với `force = true` 1 lần.
+     */
+    fun onSnapshotLoadError(slotIndex: Int) {
+        val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
+        val camera = current.camera
+        MonitorCacheManager.removeCachedCameraImageLink(getApplication(), camera.id, camera.cameraId)
+
+        if (!current.snapshotRetried) {
+            _uiState.update { state ->
+                val cameras = state.selectedCameras.toMutableList()
+                val slotCam = cameras.getOrNull(slotIndex)
+                if (slotCam != null && slotCam.camera.id == camera.id) {
+                    cameras[slotIndex] = slotCam.copy(snapshotRetried = true)
+                }
+                state.copy(selectedCameras = cameras)
+            }
+            ensureCameraSnapshotUrl(camera, slotIndex, force = true)
+        } else {
+            clearSlotSnapshotUrl(camera.id, slotIndex)
+        }
+    }
+
     fun playVideo(videoUrl: String, streamType: String, fallbackImageUrl: String = "") {
         if (videoUrl.isBlank()) return
+        streamJobs[0]?.cancel()
 
         _uiState.update { state ->
             val cameras = state.selectedCameras.toMutableList()
             val currentSelection = cameras[0]
             if (currentSelection != null) {
-                var fullUrl = videoUrl
-                if (fullUrl.startsWith("/")) {
-                    val domain = com.tenli.oneview.data.local.UserSession.domain.trimEnd('/')
-                    fullUrl = "$domain$fullUrl"
+                val fullUrl = resolveFullMediaUrl(videoUrl)
+                val fullFallback = if (fallbackImageUrl.isNotBlank()) {
+                    resolveFullMediaUrl(fallbackImageUrl)
+                } else {
+                    currentSelection.fallbackImageUrl
                 }
 
-                cameras[0] = currentSelection.copy(streamUrl = fullUrl, streamType = streamType, fallbackImageUrl = fallbackImageUrl)
+                cameras[0] = currentSelection.copy(
+                    streamUrl = fullUrl,
+                    streamType = streamType,
+                    fallbackImageUrl = fullFallback
+                )
             }
             state.copy(selectedCameras = cameras)
         }
@@ -413,10 +609,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         var hasActive = false
+        val app = getApplication<Application>()
 
         cameras.forEachIndexed { index, selectedCamera ->
             if (selectedCamera != null && index < currentState.gridSize) {
-                cameras[index] = selectedCamera.copy(streamUrl = "")
+                val latestSnap = MonitorCacheManager.getCachedCameraImageLink(
+                    app,
+                    selectedCamera.camera.id,
+                    selectedCamera.camera.cameraId
+                )?.let { resolveFullMediaUrl(it) } ?: selectedCamera.fallbackImageUrl
+
+                cameras[index] = selectedCamera.copy(
+                    streamUrl = "",
+                    retryCount = 0,
+                    hasFallbackTried = false,
+                    fallbackImageUrl = latestSnap
+                )
                 hasActive = true
             }
         }
@@ -426,57 +634,117 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
             currentState.selectedCameras.forEachIndexed { index, selectedCamera ->
                 if (selectedCamera != null && index < currentState.gridSize) {
-                    fetchLiveStreamUrl(selectedCamera.camera.id, index)
+                    val initialChannel = if (selectedCamera.camera.sub.isNotBlank()) 1 else 0
+                    ensureCameraSnapshotUrl(selectedCamera.camera, index, force = false)
+                    startLiveStreamPolling(selectedCamera.camera, index, channel = initialChannel, isFallback = false)
                 }
             }
         }
     }
 
-    private fun fetchLiveStreamUrl(cameraId: Int, slotIndex: Int) {
-        viewModelScope.launch {
-            try {
-                val requestModel = LiveStreamModel(
-                    cameraId = cameraId,
-                    channel = 1,
-                    link = "",
-                    videoCodec = "",
-                    audioCodec = "",
-                    videoCodecTag = ""
-                )
-                val response = vmsApi.createLiveStream(requestModel)
-                if (response.isSuccessful) {
-                    val liveStreamModel = response.body()
-                    if (liveStreamModel != null) {
-                        var streamUrl = liveStreamModel.link
-                        if (streamUrl.startsWith("/")) {
-                            val domain = com.tenli.oneview.data.local.UserSession.domain.trimEnd('/')
-                            streamUrl = "$domain$streamUrl"
-                        }
-                        if (streamUrl.startsWith("http://")) streamUrl = streamUrl.replaceFirst("http://", "ws://")
-                        if (streamUrl.startsWith("https://")) streamUrl = streamUrl.replaceFirst("https://", "wss://")
+    /**
+     * Đồng bộ cơ chế polling `check()` + `loadLiveStream()` + `fallbackStream()` của `LiveVideoView.vue` (lines 861-1023):
+     * - Gọi `POST /VMS/api/LiveStream` mỗi 2000ms (tối đa 10 lần trên mobile) cho đến khi cả `link` và `videoCodec` đều có dữ liệu.
+     * - Nếu hết 10 lần mà chưa có codec và camera có luồng phụ (`sub`), tự động chuyển đổi kênh (`sub <-> main`) để thử tiếp.
+     */
+    private fun startLiveStreamPolling(
+        camera: CameraModel,
+        slotIndex: Int,
+        channel: Int,
+        isFallback: Boolean = false
+    ) {
+        if (slotIndex !in 0..3) return
+        streamJobs[slotIndex]?.cancel()
 
-                        _uiState.update { state ->
-                            val cameras = state.selectedCameras.toMutableList()
-                            val currentSelection = cameras.getOrNull(slotIndex)
-                            if (currentSelection != null && currentSelection.camera.id == cameraId) {
-                                cameras[slotIndex] = currentSelection.copy(
-                                    streamUrl = streamUrl,
-                                    videoCodecTag = liveStreamModel.videoCodecTag,
-                                    retryCount = 0,
-                                    streamType = "LIVE"
+        streamJobs[slotIndex] = viewModelScope.launch {
+            val maxPollAttempts = 10
+            for (attempt in 1..maxPollAttempts) {
+                val activeCam = _uiState.value.selectedCameras.getOrNull(slotIndex)
+                if (activeCam == null || activeCam.camera.id != camera.id) {
+                    return@launch
+                }
+
+                try {
+                    val requestModel = LiveStreamModel(
+                        cameraId = camera.id,
+                        channel = channel,
+                        link = "",
+                        videoCodec = "",
+                        audioCodec = "",
+                        videoCodecTag = ""
+                    )
+                    val response = vmsApi.createLiveStream(requestModel)
+                    if (response.isSuccessful) {
+                        val liveStreamModel = response.body()
+                        val rawLink = liveStreamModel?.link?.trim().orEmpty()
+                        val videoCodec = liveStreamModel?.videoCodec?.trim().orEmpty()
+
+                        if (rawLink.isNotEmpty() && videoCodec.isNotEmpty()) {
+                            val wsUrl = resolveWebSocketUrl(rawLink)
+                            _uiState.update { state ->
+                                val cameras = state.selectedCameras.toMutableList()
+                                val currentSelection = cameras.getOrNull(slotIndex)
+                                if (currentSelection != null && currentSelection.camera.id == camera.id) {
+                                    cameras[slotIndex] = currentSelection.copy(
+                                        streamUrl = wsUrl,
+                                        videoCodecTag = liveStreamModel?.videoCodecTag?.trim().orEmpty(),
+                                        channel = channel,
+                                        hasFallbackTried = isFallback,
+                                        retryCount = 0,
+                                        streamType = "LIVE"
+                                    )
+                                }
+                                state.copy(
+                                    selectedCameras = cameras,
+                                    error = null
                                 )
                             }
-                            state.copy(
-                                selectedCameras = cameras,
-                                error = null
-                            )
+                            return@launch
                         }
                     }
-                } else {
-                    retryCameraStream(slotIndex)
+                } catch (_: kotlinx.coroutines.CancellationException) {
+                    throw kotlinx.coroutines.CancellationException()
+                } catch (_: Exception) {
+                    // Tiếp tục chờ tới lượt poll tiếp theo sau 2000ms
                 }
-            } catch (e: Exception) {
-                retryCameraStream(slotIndex)
+
+                if (attempt < maxPollAttempts) {
+                    kotlinx.coroutines.delay(2000L)
+                }
+            }
+
+            // Đã thử hết 10 lần poll cho channel hiện tại mà chưa nhận được link + videoCodec
+            val currentSelection = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return@launch
+            if (currentSelection.camera.id != camera.id) return@launch
+
+            if (!isFallback && camera.sub.isNotBlank()) {
+                val fallbackChannel = if (channel == 1) 0 else 1
+                _uiState.update { state ->
+                    val cameras = state.selectedCameras.toMutableList()
+                    val cur = cameras.getOrNull(slotIndex)
+                    if (cur != null && cur.camera.id == camera.id) {
+                        cameras[slotIndex] = cur.copy(
+                            streamUrl = "",
+                            channel = fallbackChannel,
+                            hasFallbackTried = true,
+                            retryCount = 0
+                        )
+                    }
+                    state.copy(selectedCameras = cameras)
+                }
+                startLiveStreamPolling(camera, slotIndex, channel = fallbackChannel, isFallback = true)
+            } else {
+                _uiState.update { state ->
+                    val cameras = state.selectedCameras.toMutableList()
+                    val cur = cameras.getOrNull(slotIndex)
+                    if (cur != null && cur.camera.id == camera.id) {
+                        cameras[slotIndex] = cur.copy(
+                            streamUrl = "error://no-video",
+                            retryCount = 6
+                        )
+                    }
+                    state.copy(selectedCameras = cameras)
+                }
             }
         }
     }
@@ -485,12 +753,19 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         val currentSelection = cameras.getOrNull(slotIndex) ?: return
-        cameras[slotIndex] = currentSelection.copy(retryCount = 0)
+        val latestSnap = MonitorCacheManager.getCachedCameraImageLink(
+            getApplication(),
+            currentSelection.camera.id,
+            currentSelection.camera.cameraId
+        )?.let { resolveFullMediaUrl(it) } ?: currentSelection.fallbackImageUrl
+        cameras[slotIndex] = currentSelection.copy(retryCount = 0, fallbackImageUrl = latestSnap)
         _uiState.update { it.copy(selectedCameras = cameras) }
     }
 
     fun removeCamera(slotIndex: Int) {
         if (slotIndex !in 0..3) return
+        streamJobs[slotIndex]?.cancel()
+        streamJobs[slotIndex] = null
         _uiState.update { state ->
             val cameras = state.selectedCameras.toMutableList()
             cameras[slotIndex] = null
@@ -505,9 +780,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retryCameraStream(slotIndex: Int) {
+        if (slotIndex !in 0..3) return
         val currentState = _uiState.value
         val cameras = currentState.selectedCameras.toMutableList()
         val currentSelection = cameras.getOrNull(slotIndex) ?: return
+
+        // Nếu luồng hiện tại lỗi sau vài lần thử và chưa fallback kênh (sub <-> main), chuyển sang kênh còn lại giống playerError() trong LiveVideoView.vue
+        if (currentSelection.retryCount >= 2 && !currentSelection.hasFallbackTried && currentSelection.camera.sub.isNotBlank()) {
+            val nextChannel = if (currentSelection.channel == 1) 0 else 1
+            cameras[slotIndex] = currentSelection.copy(
+                streamUrl = "",
+                channel = nextChannel,
+                hasFallbackTried = true,
+                retryCount = 0
+            )
+            _uiState.update { it.copy(selectedCameras = cameras) }
+            startLiveStreamPolling(currentSelection.camera, slotIndex, channel = nextChannel, isFallback = true)
+            return
+        }
 
         if (currentSelection.retryCount >= 5) {
             if (currentSelection.retryCount == 5) {
@@ -520,16 +810,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
+        val nextRetry = currentSelection.retryCount + 1
         cameras[slotIndex] = currentSelection.copy(
             streamUrl = "",
-            retryCount = currentSelection.retryCount + 1
+            retryCount = nextRetry
         )
         _uiState.update { it.copy(selectedCameras = cameras) }
 
-        viewModelScope.launch {
-            val delayMs = Math.min(1000 * Math.pow(2.0, currentSelection.retryCount.toDouble()).toLong(), 10000L)
+        streamJobs[slotIndex]?.cancel()
+        streamJobs[slotIndex] = viewModelScope.launch {
+            val delayMs = Math.min(1000 * Math.pow(2.0, (nextRetry - 1).toDouble()).toLong(), 8000L)
             kotlinx.coroutines.delay(delayMs)
-            fetchLiveStreamUrl(currentSelection.camera.id, slotIndex)
+            startLiveStreamPolling(
+                camera = currentSelection.camera,
+                slotIndex = slotIndex,
+                channel = currentSelection.channel,
+                isFallback = currentSelection.hasFallbackTried
+            )
         }
     }
 

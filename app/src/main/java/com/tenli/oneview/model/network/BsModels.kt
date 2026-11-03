@@ -2,32 +2,83 @@ package com.tenli.oneview.model.network
 
 import com.google.gson.annotations.SerializedName
 
-// ==================== Plate ====================
+// ==================== Plate & Plate Group ====================
 
 data class ExtraInfo(
     @SerializedName("unit_price")
     val unitPrice: Double = 0.0
 )
 
+data class PlateConfigUi(
+    val color: String? = null,
+    val background: String? = null,
+    val icon: String? = null
+)
+
+data class PlateConfig(
+    val ui: PlateConfigUi? = null
+)
+
+data class PlateGroupConfigUi(
+    val background: String? = null,
+    val icon: String? = null,
+    val color: String? = null
+)
+
+data class PlateGroupConfig(
+    val ui: PlateGroupConfigUi? = null
+)
+
+data class PlateGroupModel(
+    val id: Int? = null,
+    val uuid: String? = null,
+    val name: String,
+    val description: String? = null,
+    val info: Map<String, Any>? = null,
+    val config: PlateGroupConfig? = null,
+    @SerializedName("parent_uuid")
+    val parentUuid: String? = null,
+    val parentUUID: String? = null,
+    val type: String? = null,
+    @SerializedName("created_at")
+    val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
+    @SerializedName("plate_count")
+    val plateCount: Int? = null,
+    @SerializedName("plate_count_recursive")
+    val plateCountRecursive: Int? = null
+)
+
 data class PlateModel(
-    val id: Int,
+    val id: Int? = null,
     @SerializedName("plate_number")
     val plateNumber: String,
     @SerializedName("vehicle_type")
-    val vehicleType: String,
+    val vehicleType: String? = null,
     @SerializedName("internal_id")
-    val internalId: String,
+    val internalId: String? = null,
     @SerializedName("vehicle_class")
-    val vehicleClass: String,
+    val vehicleClass: String? = null,
     @SerializedName("guest_type")
-    val guestType: String,
+    val guestType: String? = null,
     @SerializedName("extra_info")
     val extraInfo: ExtraInfo? = null,
     @SerializedName("created_at")
     val createdAt: String? = null,
+    @SerializedName("updated_at")
+    val updatedAt: String? = null,
     val tags: Any? = null,            // String | List<String> | null
     @SerializedName("group_name")
-    val groupName: String? = null
+    val groupName: String? = null,
+    val config: PlateConfig? = null,
+    val groups: List<PlateGroupModel>? = null,
+    @SerializedName("group_ids")
+    val groupIds: List<Int>? = null,
+    @SerializedName("group_uuids")
+    val groupUuids: List<String>? = null,
+    @SerializedName("plate_unit_price")
+    val plateUnitPrice: Double? = null
 )
 
 // ==================== Contact ====================
@@ -223,7 +274,7 @@ data class VmsCountOverviewModel(
     val label: String,
     val tag: String,
     val count: Double,
-    @SerializedName("service_id")
+    @SerializedName("service_id", alternate = ["serviceId"])
     val serviceId: String? = null
 )
 
@@ -532,6 +583,61 @@ data class EventConfigGroupModel(
     val notification: EventConfigNotification? = null
 )
 
+data class EventConfigDevice(
+    val models: List<String>? = null,
+    val syncTypes: List<String>? = null
+)
+
+data class EventConfigDisplay(
+    @SerializedName("lang_key")
+    val langKey: String? = null,
+    val values: List<Any>? = null
+)
+
+data class EventConfigContentFormat(
+    @SerializedName("lang_key_format")
+    val langKeyFormat: String? = null
+)
+
+data class EventConfigContent(
+    val subject: EventConfigContentFormat? = null,
+    val body: EventConfigContentFormat? = null
+)
+
+data class EventConfigNotificationDetail(
+    val enabled: Boolean? = null,
+    val alarmMode: Map<String, Any>? = null,
+    val reduce: Map<String, Any>? = null,
+    val reCheck: Map<String, Any>? = null
+)
+
+data class EventConfigMedia(
+    val downloadVideo: Boolean? = null,
+    val downloadImage: Boolean? = null,
+    val ignoreDownload: Boolean? = null,
+    val includeSensor: Boolean? = null,
+    val multi: Boolean? = null,
+    val cropImageFields: List<String>? = null,
+    val priorityCrop: Boolean? = null
+)
+
+data class EventConfigValueValidate(
+    val type: String? = null,
+    val emptyAble: Boolean? = null,
+    val nullAble: Boolean? = null
+)
+
+data class EventConfigValueMapping(
+    val from: String? = null,
+    val to: String? = null,
+    val validate: EventConfigValueValidate? = null,
+    val defaultValue: Any? = null
+)
+
+data class EventConfigValues(
+    val mappings: List<EventConfigValueMapping>? = null
+)
+
 data class EventConfigModel(
     val key: String,
     val target: String? = null,
@@ -576,6 +682,51 @@ data class UserNotificationOverrides(
     var eventTypes: MutableMap<String, UserNotificationItemSetting>? = mutableMapOf()
 )
 
+data class UserNotificationScriptTimePoint(
+    val hour: Int = 0,
+    val minute: Int = 0
+)
+
+data class UserNotificationScriptTimePeriod(
+    val from: UserNotificationScriptTimePoint? = null,
+    val to: UserNotificationScriptTimePoint? = null
+)
+
+data class UserNotificationScriptSchedule(
+    val repeat: String? = null,
+    val dayOfWeeks: List<Int>? = null,
+    val dayPeriods: List<UserNotificationScriptTimePeriod>? = null
+)
+
+data class UserNotificationScriptFilter(
+    @SerializedName("event_types")
+    val eventTypes: List<String>? = null,
+    @SerializedName("camera_ids")
+    val cameraIds: List<Any>? = null,
+    val where: Any? = null
+)
+
+data class UserNotificationScriptAction(
+    val type: String? = null,
+    val values: List<String>? = null,
+    val channels: List<String>? = null
+)
+
+data class UserNotificationScriptModel(
+    val id: String,
+    val name: String,
+    val enabled: Boolean? = true,
+    val priority: Int? = null,
+    @SerializedName("unmatched_behavior")
+    val unmatchedBehavior: String? = null,
+    @SerializedName("flow_id")
+    val flowId: String? = null,
+    val filter: UserNotificationScriptFilter? = null,
+    val schedule: UserNotificationScriptSchedule? = null,
+    val actions: List<UserNotificationScriptAction>? = null,
+    val createdAt: String? = null
+)
+
 data class UserNotificationSettingsModel(
     var global: UserNotificationGlobalSetting = UserNotificationGlobalSetting(),
     var overrides: UserNotificationOverrides = UserNotificationOverrides(),
@@ -618,6 +769,35 @@ data class NotificationTokenRegisterModel(
     val clientId: String? = null
 )
 
+data class OccupationItem(
+    val key: String,
+    val display: String
+)
+
+data class ProfileOccupationsConfig(
+    val default: List<OccupationItem>? = null,
+    val custom: List<OccupationItem>? = null
+)
+
+data class ProfileOneviewConfig(
+    val occupations: ProfileOccupationsConfig? = null
+)
+
+data class AttendanceOneviewConfig(
+    val minDepartureFromArrivalTimeInSeconds: Int? = null
+)
+
+data class UniformLabel(
+    val label: String,
+    val display: String,
+    val code: String? = null,
+    val group: String
+)
+
+data class UniformOneviewConfig(
+    val validLabels: List<UniformLabel>? = null
+)
+
 data class OneviewConfigModel(
     val profile: Map<String, Any>? = null,
     val attendance: Map<String, Any>? = null,
@@ -625,6 +805,40 @@ data class OneviewConfigModel(
 )
 
 // ==================== Uniform Config & Labels ====================
+
+data class UniformRuleItem(
+    val required: Boolean = false,
+    val labels: List<String> = emptyList()
+)
+
+data class UniformRuleData(
+    val uniform: UniformRuleItem? = null,
+    val hat: UniformRuleItem? = null,
+    val gloves: UniformRuleItem? = null,
+    val shoes: UniformRuleItem? = null,
+    val mask: UniformRuleItem? = null,
+    val vest: UniformRuleItem? = null
+)
+
+data class UniformConfigRules(
+    val data: Map<String, UniformRuleItem> = emptyMap(),
+    val options: Map<String, Any>? = null
+)
+
+data class UniformCategoryLabel(
+    val key: String,
+    val name: String,
+    @SerializedName("default_required")
+    val defaultRequired: Boolean? = null,
+    val labels: List<String> = emptyList()
+)
+
+data class UniformAvailableLabelsResponse(
+    val source: String? = null,
+    @SerializedName("dataset_code")
+    val datasetCode: String? = null,
+    val categories: List<UniformCategoryLabel> = emptyList()
+)
 
 data class UniformConfigModel(
     val id: Int? = null,
@@ -648,7 +862,11 @@ data class UniformConfigModel(
     @SerializedName("created_at")
     val createdAt: String? = null,
     @SerializedName("updated_at")
-    val updatedAt: String? = null
+    val updatedAt: String? = null,
+    @SerializedName("valid_from_epoch")
+    val validFromEpoch: Long? = null,
+    @SerializedName("valid_to_epoch")
+    val validToEpoch: Long? = null
 )
 
 data class UniformLabelUiConfig(
@@ -688,6 +906,14 @@ data class UniformLabelModel(
     val categoryUuid: String? = null
 )
 
+data class FetchUniformLabelsParams(
+    @SerializedName("category_key")
+    val categoryKey: String? = null,
+    @SerializedName("is_active")
+    val isActive: Any? = null,
+    val search: String? = null
+)
+
 data class UniformAssignmentModel(
     val id: Int? = null,
     val uuid: String? = null,
@@ -717,10 +943,22 @@ data class UniformAssignmentModel(
     val isActive: Any? = null,
     @SerializedName("empty_action")
     val emptyAction: String? = null,
+    @SerializedName("effective_empty_action")
+    val effectiveEmptyAction: String? = null,
+    @SerializedName("system_default_action")
+    val systemDefaultAction: String? = null,
+    @SerializedName("extra_config")
+    val extraConfig: Map<String, Any>? = null,
+    @SerializedName("extra_info")
+    val extraInfo: Any? = null,
     @SerializedName("valid_from")
     val validFrom: String? = null,
     @SerializedName("valid_to")
     val validTo: String? = null,
+    @SerializedName("valid_from_epoch")
+    val validFromEpoch: Long? = null,
+    @SerializedName("valid_to_epoch")
+    val validToEpoch: Long? = null,
     @SerializedName("created_at")
     val createdAt: String? = null,
     @SerializedName("updated_at")
@@ -753,4 +991,24 @@ data class UniformComplianceEvaluationItem(
     val data: EventDataDetail? = null,
     @SerializedName("uniform_evaluation")
     val uniformEvaluation: UniformEvaluationInfo? = null
+)
+
+data class FetchUniformComplianceParams(
+    val fromTime: Long? = null,
+    val toTime: Long? = null,
+    val from: Long? = null,
+    val to: Long? = null,
+    val serviceId: String? = null,
+    val timezone: String? = null,
+    val eventType: String? = null,
+    val isViolation: Any? = null,
+    val cameraId: String? = null,
+    val cameraUUID: String? = null,
+    val camerauuid: String? = null,
+    val profileUUID: String? = null,
+    val assignmentUuid: String? = null,
+    val configCode: String? = null,
+    val count: Int? = null,
+    val order: String? = null,
+    val lastId: Int? = null
 )
