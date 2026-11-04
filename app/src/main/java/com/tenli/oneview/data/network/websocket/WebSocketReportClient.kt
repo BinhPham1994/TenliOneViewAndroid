@@ -27,15 +27,23 @@ class WebSocketReportClient(
     private val gson: Gson,
     private val onMessageReceived: (ReportPayload, Int) -> Unit
 ) {
+    @Volatile
     private var webSocket: WebSocket? = null
+    @Volatile
     private var url: String = ""
+    @Volatile
     private var isConnected = false
-    
+    @Volatile
+    private var isConnecting = false
+    @Volatile
+    private var manuallyDisconnected = false
+    private val lock = Any()
+
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var reconnectDelay = 2000L
-    private val heartbeatInterval = 10000L
+    private var reconnectDelay = 3000L
+    private val heartbeatInterval = 15000L
 
     private fun normalizeUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
@@ -53,95 +61,137 @@ class WebSocketReportClient(
 
     private fun appendTokenToUrl(normalizedUrl: String): String {
         val token = UserSession.accessToken
-        if (token.isEmpty() || normalizedUrl.contains("token=")) return normalizedUrl
-        val sep = if (normalizedUrl.contains("?")) "&" else "?"
-        return "$normalizedUrl${sep}token=${URLEncoder.encode(token, "UTF-8")}"
+        val base = normalizedUrl
+            .replace(Regex("([?&])token=[^&]*(&|$)")) { m ->
+                val p1 = m.groupValues[1]
+                val p2 = m.groupValues[2]
+                if (p2.isNotEmpty()) p1 else ""
+            }
+            .replace(Regex("[?&]$"), "")
+        if (token.isEmpty()) return base
+        val sep = if (base.contains("?")) "&" else "?"
+        return "$base${sep}token=${URLEncoder.encode(token, "UTF-8")}"
     }
 
     fun connect(urlStr: String) {
-        if (webSocket != null && isConnected) {
-            Log.w("WebSocketReport", "WebSocketReport already connected for VMS $vmsId")
-            return
-        }
+        if (UserSession.accessToken.isEmpty()) return
 
         val protocolUrl = normalizeUrl(urlStr)
         if (protocolUrl.isEmpty()) return
 
-        this.url = urlStr
-        val finalUrl = appendTokenToUrl(protocolUrl)
-        Log.d("WebSocketReport", "Connecting to Report for VMS $vmsId: $protocolUrl")
-
-        val request = Request.Builder().url(finalUrl).build()
-
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("WebSocketReport", "Connected VMS $vmsId")
-                isConnected = true
-                reconnectDelay = 2000L
-                reconnectJob?.cancel()
-                
-                // Subscribe to report topic
-                send(mapOf("action" to "subscribe", "topic" to "report"))
-                startHeartbeat()
+        synchronized(lock) {
+            if (webSocket != null && (isConnected || isConnecting) && this.url == urlStr) {
+                Log.d("WebSocketReport", "WebSocketReport already connected/connecting for VMS $vmsId")
+                return
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val data = gson.fromJson(text, ReportPayload::class.java)
-                    onMessageReceived(data, vmsId)
-                } catch (e: Exception) {
-                    // Report parsing error can be ignored or logged as warning
+            manuallyDisconnected = false
+            reconnectJob?.cancel()
+            reconnectJob = null
+            stopHeartbeat()
+
+            val oldSocket = webSocket
+            webSocket = null
+            isConnected = false
+            isConnecting = true
+            try {
+                oldSocket?.cancel()
+            } catch (_: Exception) {
+            }
+
+            this.url = urlStr
+            val finalUrl = appendTokenToUrl(protocolUrl)
+            Log.d("WebSocketReport", "Connecting to Report for VMS $vmsId: $protocolUrl")
+
+            val request = Request.Builder().url(finalUrl).build()
+
+            webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    if (ws !== this@WebSocketReportClient.webSocket) {
+                        try { ws.close(1000, null) } catch (_: Exception) {}
+                        return
+                    }
+                    Log.d("WebSocketReport", "Connected VMS $vmsId")
+                    isConnecting = false
+                    isConnected = true
+                    reconnectDelay = 3000L
+                    reconnectJob?.cancel()
+
+                    // Subscribe to report topic
+                    send(mapOf("action" to "subscribe", "topic" to "report"))
+                    startHeartbeat()
                 }
-            }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("WebSocketReport", "Closed VMS $vmsId: $reason")
-                handleDisconnect()
-            }
+                override fun onMessage(ws: WebSocket, text: String) {
+                    if (ws !== this@WebSocketReportClient.webSocket) return
+                    try {
+                        val data = gson.fromJson(text, ReportPayload::class.java)
+                        if (data != null) {
+                            onMessageReceived(data, vmsId)
+                        }
+                    } catch (_: Exception) {
+                        // Report parsing error can be ignored
+                    }
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("WebSocketReport", "Failure VMS $vmsId", t)
-                handleDisconnect()
-            }
-        })
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    if (ws !== this@WebSocketReportClient.webSocket) return
+                    Log.d("WebSocketReport", "Closed VMS $vmsId: $reason")
+                    handleDisconnect()
+                }
+
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    if (ws !== this@WebSocketReportClient.webSocket) return
+                    Log.e("WebSocketReport", "Failure VMS $vmsId", t)
+                    handleDisconnect()
+                }
+            })
+        }
     }
 
     private fun handleDisconnect() {
+        isConnecting = false
         isConnected = false
         stopHeartbeat()
         webSocket = null
-        scheduleReconnect()
+        if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+            scheduleReconnect()
+        }
     }
 
     fun send(data: Map<String, Any>) {
-        if (isConnected && webSocket != null) {
+        val ws = webSocket
+        if (isConnected && ws != null) {
             val json = gson.toJson(data)
-            webSocket?.send(json)
-        } else {
-            Log.w("WebSocketReport", "Not connected VMS $vmsId")
+            ws.send(json)
         }
     }
 
     fun disconnect() {
-        Log.w("WebSocketReport", "Disconnecting VMS $vmsId")
-        stopHeartbeat()
-        reconnectJob?.cancel()
-        reconnectJob = null
-        try {
-            webSocket?.close(1000, "User disconnected")
-        } catch (e: Exception) {
-            webSocket?.cancel()
+        synchronized(lock) {
+            Log.w("WebSocketReport", "Disconnecting VMS $vmsId")
+            manuallyDisconnected = true
+            isConnecting = false
+            isConnected = false
+            stopHeartbeat()
+            reconnectJob?.cancel()
+            reconnectJob = null
+            val ws = webSocket
+            webSocket = null
+            try {
+                ws?.close(1000, "User disconnected")
+            } catch (_: Exception) {
+                try { ws?.cancel() } catch (_: Exception) {}
+            }
         }
-        webSocket = null
-        isConnected = false
     }
 
-    fun isConnected(): Boolean = isConnected
+    fun isConnected(): Boolean = isConnected || isConnecting
 
     private fun startHeartbeat() {
         stopHeartbeat()
         heartbeatJob = scope.launch {
-            while (isActive) {
+            while (isActive && isConnected) {
                 delay(heartbeatInterval)
                 if (isConnected) {
                     send(mapOf("action" to "ping"))
@@ -156,14 +206,16 @@ class WebSocketReportClient(
     }
 
     private fun scheduleReconnect() {
-        if (reconnectJob?.isActive == true || url.isEmpty()) return
+        if (manuallyDisconnected || reconnectJob?.isActive == true || url.isEmpty() || UserSession.accessToken.isEmpty()) return
 
         val currentDelay = reconnectDelay
-        reconnectDelay = min((reconnectDelay * 1.5).roundToLong(), 15000L)
+        reconnectDelay = min((reconnectDelay * 1.5).roundToLong(), 30000L)
 
         reconnectJob = scope.launch {
             delay(currentDelay)
-            connect(url)
+            if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+                connect(url)
+            }
         }
     }
 }

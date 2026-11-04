@@ -29,8 +29,10 @@ class WebSocketManager(
 
     // WebSockets
     private var notifyClient: WebSocketNotifyClient? = null
-    private val dataNotifyClients = mutableMapOf<String, WebSocketNotifyClient>()
-    private val reportClients = mutableMapOf<Int, WebSocketReportClient>()
+    private val dataNotifyClients = java.util.concurrent.ConcurrentHashMap<String, WebSocketNotifyClient>()
+    private val reportClients = java.util.concurrent.ConcurrentHashMap<Int, WebSocketReportClient>()
+    private val isConnectingReports = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val notifyLock = Any()
 
     // Exposed Flows
     private val _notifyEvent = MutableSharedFlow<NotifyData>(extraBufferCapacity = 10)
@@ -69,25 +71,28 @@ class WebSocketManager(
      * Connect to the main Notify WebSocket (/Data/ws/Notify — khớp websocketManager.ts dòng 102).
      */
     fun connectNotify(baseUrl: String) {
-        if (notifyClient?.isConnected() == true) {
-            Log.d("WebSocketManager", "Notify already connected, skipping")
-            return
-        }
+        synchronized(notifyLock) {
+            if (notifyClient?.isConnected() == true) {
+                Log.d("WebSocketManager", "Notify already connected/connecting, skipping")
+                return
+            }
 
-        notifyClient?.disconnect()
-        notifyClient = WebSocketNotifyClient(client, gson) { data ->
-            Log.d("WebSocketManager", "Received notify event/channel: ${data.topic}")
-            if (data.topic != "pong") {
-                scope.launch {
-                    _notifyEvent.emit(data)
+            if (notifyClient == null) {
+                notifyClient = WebSocketNotifyClient(client, gson) { data ->
+                    Log.d("WebSocketManager", "Received notify event/channel: ${data.topic}")
+                    if (data.topic != "pong") {
+                        scope.launch {
+                            _notifyEvent.emit(data)
+                        }
+                    }
                 }
             }
-        }
 
-        val protocolUrl = normalizeWsBaseUrl(baseUrl)
-        val wsUrl = "$protocolUrl/Data/ws/Notify"
-        Log.d("WebSocketManager", "Connecting Notify WebSocket to: $wsUrl")
-        notifyClient?.connect(wsUrl)
+            val protocolUrl = normalizeWsBaseUrl(baseUrl)
+            val wsUrl = "$protocolUrl/Data/ws/Notify"
+            Log.d("WebSocketManager", "Connecting Notify WebSocket to: $wsUrl")
+            notifyClient?.connect(wsUrl)
+        }
     }
 
     /**
@@ -128,8 +133,12 @@ class WebSocketManager(
      * Fetch VMS list and connect report websockets
      */
     fun connectAllReports() {
-        if (reportClients.isNotEmpty()) {
+        if (reportClients.isNotEmpty() && reportClients.values.all { it.isConnected() }) {
             Log.d("WebSocketManager", "Report clients already connected, skipping")
+            return
+        }
+        if (!isConnectingReports.compareAndSet(false, true)) {
+            Log.d("WebSocketManager", "Report connection already in progress, skipping")
             return
         }
         scope.launch {
@@ -146,6 +155,8 @@ class WebSocketManager(
             } catch (e: Exception) {
                 Log.e("WebSocketManager", "Failed to fetch VMS list", e)
                 connectReports(listOf(0))
+            } finally {
+                isConnectingReports.set(false)
             }
         }
     }
@@ -159,28 +170,30 @@ class WebSocketManager(
         // Disconnect removed VMS IDs
         currentIds.forEach { id ->
             if (!vmsIds.contains(id)) {
-                reportClients[id]?.disconnect()
-                reportClients.remove(id)
+                reportClients.remove(id)?.disconnect()
             }
         }
 
         // Connect new VMS IDs
         vmsIds.forEach { id ->
-            if (!reportClients.containsKey(id)) {
-                scope.launch {
-                    try {
-                        val response = vmsApi.getReportLink(id)
-                        if (response.isSuccessful && response.body() != null) {
-                            val link = response.body()!!.link
-                            val reportClient = WebSocketReportClient(id, client, gson) { payload, vmsId ->
+            val existing = reportClients[id]
+            if (existing != null && existing.isConnected()) {
+                return@forEach
+            }
+            scope.launch {
+                try {
+                    val response = vmsApi.getReportLink(id)
+                    if (response.isSuccessful && response.body() != null) {
+                        val link = response.body()!!.link
+                        val reportClient = reportClients.getOrPut(id) {
+                            WebSocketReportClient(id, client, gson) { payload, vmsId ->
                                 handleReportPayload(payload, vmsId)
                             }
-                            reportClient.connect(link)
-                            reportClients[id] = reportClient
                         }
-                    } catch (e: Exception) {
-                        Log.e("WebSocketManager", "Failed to fetch report link for VMS $id", e)
+                        reportClient.connect(link)
                     }
+                } catch (e: Exception) {
+                    Log.e("WebSocketManager", "Failed to fetch report link for VMS $id", e)
                 }
             }
         }

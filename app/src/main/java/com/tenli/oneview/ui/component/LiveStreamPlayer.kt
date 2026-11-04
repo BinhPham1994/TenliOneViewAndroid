@@ -15,6 +15,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,19 @@ import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
+
+/**
+ * Shared OkHttpClient for WebSocket live video streams so that opening/closing or retrying
+ * camera streams does not allocate and leak separate Dispatcher thread pools and ConnectionPools.
+ */
+private val sharedWsStreamClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(8, 2, java.util.concurrent.TimeUnit.MINUTES))
+        .build()
+}
 
 /**
  * Wrapper around FragmentedMp4Extractor that skips format sniffing.
@@ -85,6 +99,8 @@ fun LiveStreamPlayer(
     var isPlaying by remember(wsUrl) { mutableStateOf(false) }
     var isError by remember(wsUrl) { mutableStateOf(false) }
     var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+    val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
+    val currentOnErrorChange by rememberUpdatedState(onErrorChange)
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     var isLifecycleActive by remember { mutableStateOf(true) }
@@ -130,14 +146,8 @@ fun LiveStreamPlayer(
     }
 
     val exoPlayer = remember(wsUrl) {
-        val wsClient = OkHttpClient.Builder()
-            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-
         val dataSourceFactory = DataSource.Factory {
-            WebSocketDataSource(wsClient, UserSession.accessToken)
+            WebSocketDataSource(sharedWsStreamClient, UserSession.accessToken)
         }
 
         val extractorsFactory = ExtractorsFactory {
@@ -189,16 +199,16 @@ fun LiveStreamPlayer(
                     override fun onRenderedFirstFrame() {
                         isPlaying = true
                         isError = false
-                        onPlayingChange(true)
-                        onErrorChange(false)
+                        currentOnPlayingChange(true)
+                        currentOnErrorChange(false)
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
                         Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
                         isError = true
                         isPlaying = false
-                        onPlayingChange(false)
-                        onErrorChange(true)
+                        currentOnPlayingChange(false)
+                        currentOnErrorChange(true)
                     }
                 })
             }

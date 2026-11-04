@@ -25,10 +25,18 @@ class WebSocketNotifyClient(
     private val gson: Gson,
     private val onMessageReceived: (NotifyData) -> Unit
 ) {
+    @Volatile
     private var webSocket: WebSocket? = null
+    @Volatile
     private var url: String = ""
+    @Volatile
     private var isConnected = false
-    
+    @Volatile
+    private var isConnecting = false
+    @Volatile
+    private var manuallyDisconnected = false
+    private val lock = Any()
+
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -50,90 +58,127 @@ class WebSocketNotifyClient(
     }
 
     fun connect(urlStr: String) {
-        if (webSocket != null && isConnected) {
-            Log.w("WebSocketNotify", "WebSocketNotify already connected")
-            return
-        }
+        if (UserSession.accessToken.isEmpty()) return
 
         var protocolUrl = urlStr.trim()
         if (protocolUrl.startsWith("http://")) protocolUrl = protocolUrl.replaceFirst("http://", "ws://")
         if (protocolUrl.startsWith("https://")) protocolUrl = protocolUrl.replaceFirst("https://", "wss://")
+        if (protocolUrl.isEmpty()) return
 
-        this.url = protocolUrl
-        val resolvedUrl = appendTokenToUrl(protocolUrl)
-        Log.d("WebSocketNotify", "Connecting to Notify: $protocolUrl")
-
-        val request = Request.Builder().url(resolvedUrl).build()
-
-        webSocket = client.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("WebSocketNotify", "Connected")
-                isConnected = true
-                reconnectDelay = 3000L
-                reconnectJob?.cancel()
-                
-                // Subscribe to notify topic
-                send(mapOf("action" to "subscribe", "topic" to "notify"))
-                startHeartbeat()
+        synchronized(lock) {
+            if (webSocket != null && (isConnected || isConnecting) && this.url == protocolUrl) {
+                Log.d("WebSocketNotify", "WebSocketNotify already connected/connecting")
+                return
             }
 
-            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val data = gson.fromJson(text, NotifyData::class.java)
-                    onMessageReceived(data)
-                } catch (e: Exception) {
-                    Log.e("WebSocketNotify", "Error parsing message: $text", e)
+            manuallyDisconnected = false
+            reconnectJob?.cancel()
+            reconnectJob = null
+            stopHeartbeat()
+
+            // Đóng kết nối cũ (nếu có) trước khi mở socket mới để tránh rò rỉ socket song song
+            val oldSocket = webSocket
+            webSocket = null
+            isConnected = false
+            isConnecting = true
+            try {
+                oldSocket?.cancel()
+            } catch (_: Exception) {
+            }
+
+            this.url = protocolUrl
+            val resolvedUrl = appendTokenToUrl(protocolUrl)
+            Log.d("WebSocketNotify", "Connecting to Notify: $protocolUrl")
+
+            val request = Request.Builder().url(resolvedUrl).build()
+
+            webSocket = client.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(ws: WebSocket, response: Response) {
+                    if (ws !== this@WebSocketNotifyClient.webSocket) {
+                        try { ws.close(1000, null) } catch (_: Exception) {}
+                        return
+                    }
+                    Log.d("WebSocketNotify", "Connected")
+                    isConnecting = false
+                    isConnected = true
+                    reconnectDelay = 3000L
+                    reconnectJob?.cancel()
+
+                    // Subscribe to notify topic
+                    send(mapOf("action" to "subscribe", "topic" to "notify"))
+                    startHeartbeat()
                 }
-            }
 
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("WebSocketNotify", "Closed: $reason")
-                handleDisconnect()
-            }
+                override fun onMessage(ws: WebSocket, text: String) {
+                    if (ws !== this@WebSocketNotifyClient.webSocket) return
+                    try {
+                        val data = gson.fromJson(text, NotifyData::class.java)
+                        if (data != null) {
+                            onMessageReceived(data)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("WebSocketNotify", "Error parsing message: $text", e)
+                    }
+                }
 
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("WebSocketNotify", "Failure", t)
-                handleDisconnect()
-            }
-        })
+                override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                    if (ws !== this@WebSocketNotifyClient.webSocket) return
+                    Log.d("WebSocketNotify", "Closed: $reason")
+                    handleDisconnect()
+                }
+
+                override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                    if (ws !== this@WebSocketNotifyClient.webSocket) return
+                    Log.e("WebSocketNotify", "Failure", t)
+                    handleDisconnect()
+                }
+            })
+        }
     }
 
     private fun handleDisconnect() {
+        isConnecting = false
         isConnected = false
         stopHeartbeat()
         webSocket = null
-        scheduleReconnect()
+        if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+            scheduleReconnect()
+        }
     }
 
     fun send(data: Map<String, Any>) {
-        if (isConnected && webSocket != null) {
+        val ws = webSocket
+        if (isConnected && ws != null) {
             val json = gson.toJson(data)
-            webSocket?.send(json)
-        } else {
-            Log.w("WebSocketNotify", "Not connected")
+            ws.send(json)
         }
     }
 
     fun disconnect() {
-        Log.w("WebSocketNotify", "Disconnecting")
-        stopHeartbeat()
-        reconnectJob?.cancel()
-        reconnectJob = null
-        try {
-            webSocket?.close(1000, "User disconnected")
-        } catch (e: Exception) {
-            webSocket?.cancel()
+        synchronized(lock) {
+            Log.w("WebSocketNotify", "Disconnecting")
+            manuallyDisconnected = true
+            isConnecting = false
+            isConnected = false
+            stopHeartbeat()
+            reconnectJob?.cancel()
+            reconnectJob = null
+            val ws = webSocket
+            webSocket = null
+            try {
+                ws?.close(1000, "User disconnected")
+            } catch (_: Exception) {
+                try { ws?.cancel() } catch (_: Exception) {}
+            }
         }
-        webSocket = null
-        isConnected = false
     }
 
-    fun isConnected(): Boolean = isConnected
+    fun isConnected(): Boolean = isConnected || isConnecting
 
     private fun startHeartbeat() {
         stopHeartbeat()
         heartbeatJob = scope.launch {
-            while (isActive) {
+            while (isActive && isConnected) {
                 delay(heartbeatInterval)
                 if (isConnected) {
                     send(mapOf("action" to "ping"))
@@ -148,14 +193,16 @@ class WebSocketNotifyClient(
     }
 
     private fun scheduleReconnect() {
-        if (reconnectJob?.isActive == true || url.isEmpty()) return
+        if (manuallyDisconnected || reconnectJob?.isActive == true || url.isEmpty() || UserSession.accessToken.isEmpty()) return
 
         val currentDelay = reconnectDelay
         reconnectDelay = min((reconnectDelay * 1.5).roundToLong(), 30000L)
 
         reconnectJob = scope.launch {
             delay(currentDelay)
-            connect(url)
+            if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+                connect(url)
+            }
         }
     }
 }

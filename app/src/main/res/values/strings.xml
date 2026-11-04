@@ -176,7 +176,7 @@
     <string name="setting_support">Hỗ trợ</string>
     <string name="setting_general">Cài đặt chung</string>
     <string name="setting_general_config">Cấu hình chung</string>
-    <string name="setting_notifications">Thông báo hệ thống</string>
+    <string name="setting_notifications">Cấu hình thông báo</string>
     <string name="setting_automation">Kịch bản tự động</string>
     <string name="setting_users">Quản lý người dùng</string>
     <string name="setting_theme">Giao diện</string>
@@ -630,4 +630,5 @@
     <string name="lbl_settings">Cài đặt</string>
     <string name="lbl_alarm_notifications">Thông báo báo động</string>
     <string name="lbl_receive_full_notifications">Nhận đầy đủ thông báo</string>
+    <string name="camera_grid_full">Lưới đang phát đã đầy, không thể phát thêm!</string>
 </resources>

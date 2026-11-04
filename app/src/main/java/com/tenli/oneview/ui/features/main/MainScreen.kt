@@ -1,8 +1,10 @@
 package com.tenli.oneview.ui.features.main
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +12,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,6 +30,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +40,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +52,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +67,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -70,10 +81,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -82,8 +95,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.zIndex
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
@@ -138,6 +156,8 @@ fun MainScreen(
     val density = LocalDensity.current
     val saveableStateHolder = rememberSaveableStateHolder()
     var showBottomBar by remember { mutableStateOf(true) }
+    var showNotificationConfigPage by remember { mutableStateOf(false) }
+    val overlayHostState = remember { com.tenli.oneview.ui.component.MobileOverlayHostState() }
 
     val homeListState = rememberLazyListState()
     val monitorState = rememberLazyListState()
@@ -179,6 +199,9 @@ fun MainScreen(
         val targetTab = uiState.currentTab
         if (targetTab != MainTab.Monitor) {
             showBottomBar = true
+        }
+        if (targetTab != MainTab.Setting) {
+            showNotificationConfigPage = false
         }
 
         if (targetTab == displayedTab) {
@@ -254,6 +277,7 @@ fun MainScreen(
 
     val currentTabState by rememberUpdatedState(uiState.currentTab)
     val showBottomBarState by rememberUpdatedState(showBottomBar)
+    val showNotificationConfigPageState by rememberUpdatedState(showNotificationConfigPage)
 
     val scrollTabToTop: (MainTab) -> Unit = { targetTab ->
         scope.launch {
@@ -290,8 +314,13 @@ fun MainScreen(
     }
 
     // Khi đang ở tab khác Trang chủ (Sự kiện, Trực tiếp, Cài đặt), ấn Back sẽ quay về tab Trang chủ trước
-    androidx.activity.compose.BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar) {
+    androidx.activity.compose.BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar && !showNotificationConfigPage) {
         switchToTab(MainTab.Home, false)
+    }
+
+    // Khi đang mở màn hình Cấu hình thông báo, ấn Back sẽ trượt đóng màn hình này từ trái sang phải
+    androidx.activity.compose.BackHandler(enabled = showNotificationConfigPage) {
+        showNotificationConfigPage = false
     }
 
     val edgeBufferPx = remember(density) { with(density) { 20.dp.toPx() } }
@@ -302,198 +331,256 @@ fun MainScreen(
     val longDragDistPx = remember(density) { with(density) { 90.dp.toPx() } }
     val minFlickVelDpPerMs = 0.28f
 
-    Scaffold(
-        topBar = {
-            AnimatedVisibility(visible = uiState.isOffline) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(ErrorRed)
-                        .padding(vertical = 8.dp, horizontal = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Không có kết nối mạng. Vui lòng kiểm tra lại.",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .padding(top = innerPadding.calculateTopPadding())
-                .pointerInput(Unit) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        val widthPx = size.width.toFloat()
-                        val heightPx = size.height.toFloat()
-                        val startX = down.position.x
-                        val startY = down.position.y
-
-                        // Ignore touches near screen left/right edges (<20dp) for system back gesture,
-                        // or in the bottom navigation bar zone, or when video is in fullscreen
-                        if (!showBottomBarState ||
-                            startX < edgeBufferPx ||
-                            startX > widthPx - edgeBufferPx ||
-                            startY > heightPx - bottomNavExclusionPx
-                        ) {
-                            return@awaitEachGesture
-                        }
-
-                        val startTime = System.currentTimeMillis()
-                        var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
-                        var lastX = startX
-                        var lastY = startY
-
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-
-                            if (change.changedToUpIgnoreConsumed()) {
-                                lastX = change.position.x
-                                lastY = change.position.y
-                                if (gestureDirection == 1) {
-                                    change.consume()
-                                }
-                                break
-                            }
-
-                            if (!change.pressed) break
-
-                            lastX = change.position.x
-                            lastY = change.position.y
-                            val dx = lastX - startX
-                            val dy = lastY - startY
-
-                            if (gestureDirection == 0) {
-                                if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                    gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
-                                }
-                            }
-
-                            if (gestureDirection == 2) {
-                                // Locked to vertical scrolling -> let child LazyColumn handle it
-                                break
-                            } else if (gestureDirection == 1) {
-                                // Consume horizontal drag so child views don't trigger accidental clicks
-                                change.consume()
-                            }
-                        }
-
-                        if (gestureDirection == 1) {
-                            val diffX = lastX - startX
-                            val diffY = lastY - startY
-                            val absX = abs(diffX)
-                            val absY = abs(diffY)
-                            val elapsed = (System.currentTimeMillis() - startTime).coerceAtLeast(1L)
-                            val absXDp = with(density) { absX.toDp().value }
-                            val velocityDpPerMs = absXDp / elapsed.toFloat()
-
-                            // Match MobileLayout.vue thresholds:
-                            // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
-                            // 2. Drag: distance >= 45dp && elapsed <= 700ms
-                            // 3. Long drag: distance >= 90dp
-                            val isFlick = velocityDpPerMs > minFlickVelDpPerMs && absX > minFlickDistPx
-                            val isDrag = absX >= minDragDistPx && elapsed <= 700L
-                            val isLongDrag = absX >= longDragDistPx
-
-                            if ((isFlick || isDrag || isLongDrag) && absX >= absY * 1.25f) {
-                                val currIdx = OrderedMainTabs.indexOf(currentTabState)
-                                if (currIdx != -1) {
-                                    if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
-                                        // Swipe right-to-left -> next tab
-                                        switchToTab(OrderedMainTabs[currIdx + 1], true)
-                                    } else if (diffX > 0f && currIdx > 0) {
-                                        // Swipe left-to-right -> previous tab
-                                        switchToTab(OrderedMainTabs[currIdx - 1], true)
-                                    }
-                                }
-                            }
-                        }
+    CompositionLocalProvider(com.tenli.oneview.ui.component.LocalMobileOverlayHost provides overlayHostState) {
+        Scaffold(
+            topBar = {
+                AnimatedVisibility(visible = uiState.isOffline) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(ErrorRed)
+                            .padding(vertical = 8.dp, horizontal = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Không có kết nối mạng. Vui lòng kiểm tra lại.",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
-        ) {
-            // Keep-Alive (<keep-alive>) Tab Container + Hardware-Accelerated mode="out-in" Transition
-            // Only compose displayedTab in the layout tree so inactive tabs (e.g. Monitor live player) never steal frame time during scroll
+            }
+        ) { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(1f)
-                    .graphicsLayer {
-                        translationX = tabOffsetFraction.value * size.width
-                        alpha = tabAlpha.value
-                    }
-            ) {
-                saveableStateHolder.SaveableStateProvider(key = displayedTab.route) {
-                    when (displayedTab) {
-                        MainTab.Home -> {
-                            HomeScreen(
-                                viewModel = homeViewModel,
-                                listState = homeListState,
-                                onEventClick = { eventId ->
-                                    val id = eventId.toIntOrNull()
-                                    if (id != null) {
-                                        onNavigateToEventDetail(id)
+                    .background(MaterialTheme.colorScheme.background)
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val widthPx = size.width.toFloat()
+                            val heightPx = size.height.toFloat()
+                            val startX = down.position.x
+                            val startY = down.position.y
+
+                            // Ignore touches near screen left/right edges (<20dp) for system back gesture,
+                            // or in the bottom navigation bar zone, or when video is in fullscreen
+                            if (!showBottomBarState ||
+                                showNotificationConfigPageState ||
+                                overlayHostState.hasOverlays ||
+                                startX < edgeBufferPx ||
+                                startX > widthPx - edgeBufferPx ||
+                                startY > heightPx - bottomNavExclusionPx
+                            ) {
+                                return@awaitEachGesture
+                            }
+
+                            val startTime = System.currentTimeMillis()
+                            var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
+                            var lastX = startX
+                            var lastY = startY
+
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+
+                                if (change.changedToUpIgnoreConsumed()) {
+                                    lastX = change.position.x
+                                    lastY = change.position.y
+                                    if (gestureDirection == 1) {
+                                        change.consume()
+                                    }
+                                    break
+                                }
+
+                                if (!change.pressed) break
+
+                                lastX = change.position.x
+                                lastY = change.position.y
+                                val dx = lastX - startX
+                                val dy = lastY - startY
+
+                                if (gestureDirection == 0) {
+                                    if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
+                                        gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
                                     }
                                 }
-                            )
-                        }
 
-                        MainTab.Event -> {
-                            com.tenli.oneview.ui.features.event.EventScreen(
-                                viewModel = eventViewModel,
-                                listState = eventListState,
-                                onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
-                            )
-                        }
-
-                        MainTab.Monitor -> {
-                            com.tenli.oneview.ui.features.monitor.MonitorScreen(
-                                listState = monitorState,
-                                isTabActive = (uiState.currentTab == MainTab.Monitor),
-                                onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
-                                onPlaybackClick = { videoLink, time, imageLink, cameraName ->
-                                    onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
-                                },
-                                onFullscreenChange = { isFullscreen ->
-                                    showBottomBar = !isFullscreen
+                                if (gestureDirection == 2) {
+                                    // Locked to vertical scrolling -> let child LazyColumn handle it
+                                    break
+                                } else if (gestureDirection == 1) {
+                                    // Consume horizontal drag so child views don't trigger accidental clicks
+                                    change.consume()
                                 }
-                            )
-                        }
+                            }
 
-                        MainTab.Setting -> {
-                            SettingScreen(
-                                listState = settingListState,
-                                onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
-                                onNavigateToDetail = navigateToSettingTarget
-                            )
+                            if (gestureDirection == 1) {
+                                val diffX = lastX - startX
+                                val diffY = lastY - startY
+                                val absX = abs(diffX)
+                                val absY = abs(diffY)
+                                val elapsed = (System.currentTimeMillis() - startTime).coerceAtLeast(1L)
+                                val absXDp = with(density) { absX.toDp().value }
+                                val velocityDpPerMs = absXDp / elapsed.toFloat()
+
+                                // Match MobileLayout.vue thresholds:
+                                // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
+                                // 2. Drag: distance >= 45dp && elapsed <= 700ms
+                                // 3. Long drag: distance >= 90dp
+                                val isFlick = velocityDpPerMs > minFlickVelDpPerMs && absX > minFlickDistPx
+                                val isDrag = absX >= minDragDistPx && elapsed <= 700L
+                                val isLongDrag = absX >= longDragDistPx
+
+                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * 1.25f) {
+                                    val currIdx = OrderedMainTabs.indexOf(currentTabState)
+                                    if (currIdx != -1) {
+                                        if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
+                                            // Swipe right-to-left -> next tab
+                                            switchToTab(OrderedMainTabs[currIdx + 1], true)
+                                        } else if (diffX > 0f && currIdx > 0) {
+                                            // Swipe left-to-right -> previous tab
+                                            switchToTab(OrderedMainTabs[currIdx - 1], true)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+            ) {
+                // Keep-Alive (<keep-alive>) Tab Container + Hardware-Accelerated mode="out-in" Transition
+                // Only compose displayedTab in the layout tree so inactive tabs (e.g. Monitor live player) never steal frame time during scroll
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
+                        .zIndex(1f)
+                        .graphicsLayer {
+                            translationX = tabOffsetFraction.value * size.width
+                            alpha = tabAlpha.value
+                        }
+                ) {
+                    saveableStateHolder.SaveableStateProvider(key = displayedTab.route) {
+                        when (displayedTab) {
+                            MainTab.Home -> {
+                                HomeScreen(
+                                    viewModel = homeViewModel,
+                                    listState = homeListState,
+                                    onEventClick = { eventId ->
+                                        val id = eventId.toIntOrNull()
+                                        if (id != null) {
+                                            onNavigateToEventDetail(id)
+                                        }
+                                    }
+                                )
+                            }
+
+                            MainTab.Event -> {
+                                com.tenli.oneview.ui.features.event.EventScreen(
+                                    viewModel = eventViewModel,
+                                    listState = eventListState,
+                                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
+                                )
+                            }
+
+                            MainTab.Monitor -> {
+                                com.tenli.oneview.ui.features.monitor.MonitorScreen(
+                                    listState = monitorState,
+                                    isTabActive = (uiState.currentTab == MainTab.Monitor),
+                                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
+                                    onPlaybackClick = { videoLink, time, imageLink, cameraName ->
+                                        onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+                                    },
+                                    onFullscreenChange = { isFullscreen ->
+                                        showBottomBar = !isFullscreen
+                                    }
+                                )
+                            }
+
+                            MainTab.Setting -> {
+                                SettingScreen(
+                                    listState = settingListState,
+                                    onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
+                                    onNavigateToDetail = navigateToSettingTarget,
+                                    onOpenNotificationConfig = { showNotificationConfigPage = true }
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            if (uiState.isBottomBarVisible && showBottomBar) {
-                Box(
+                if (uiState.isBottomBarVisible && showBottomBar) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .zIndex(10f)
+                    ) {
+                        MainBottomNavigation(
+                            currentTab = uiState.currentTab,
+                            isCurrentTabScrolled = isCurrentTabScrolled,
+                            onTabClick = { tab ->
+                                switchToTab(tab, false)
+                            },
+                            onScrollToTop = { tab ->
+                                scrollTabToTop(tab)
+                            }
+                        )
+                    }
+                }
+
+                // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)
+                AnimatedVisibility(
+                    visible = showNotificationConfigPage,
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .zIndex(10f)
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
+                        .zIndex(30f),
+                    enter = slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(
+                            durationMillis = 280,
+                            easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                        )
+                    ),
+                    exit = slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(
+                            durationMillis = 240,
+                            easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+                        )
+                    )
                 ) {
-                    MainBottomNavigation(
-                        currentTab = uiState.currentTab,
-                        isCurrentTabScrolled = isCurrentTabScrolled,
-                        onTabClick = { tab ->
-                            switchToTab(tab, false)
-                        },
-                        onScrollToTop = { tab ->
-                            scrollTabToTop(tab)
-                        }
+                    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+                    val isSystemDark = isSystemInDarkTheme()
+                    val isDark = when (themeMode) {
+                        0 -> false
+                        1 -> true
+                        else -> isSystemDark
+                    }
+                    MobileNotificationConfigScreen(
+                        isDark = isDark,
+                        onBackClick = { showNotificationConfigPage = false }
                     )
                 }
+
+                // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
+                if (overlayHostState.hasOverlays) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)
+                    ) {
+                        overlayHostState.Content()
+                    }
+                }
+
+                // Global Top Popup Notification Host (.ant-message capsule island matching PWA notifications.css)
+                com.tenli.oneview.ui.component.MobileTopPopupHost(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .zIndex(100f)
+                )
             }
         }
     }
@@ -503,14 +590,14 @@ fun MainScreen(
 fun SettingScreen(
     listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     onLogoutClick: (Boolean) -> Unit,
-    onNavigateToDetail: (String) -> Unit
+    onNavigateToDetail: (String) -> Unit,
+    onOpenNotificationConfig: () -> Unit = {}
 ) {
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     var showLogoutSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     var showThemeSheet by remember { mutableStateOf(false) }
     var showChangePasswordSheet by remember { mutableStateOf(false) }
-    var showNotificationConfigSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     var currentLanguage by remember { mutableStateOf(LocaleManager.getLocale(context)) }
@@ -654,7 +741,7 @@ fun SettingScreen(
                         icon = LucideIcons.Bell,
                         iconTint = Color(0xFFF59E0B),
                         title = stringResource(id = R.string.setting_notifications),
-                        onClick = { showNotificationConfigSheet = true },
+                        onClick = onOpenNotificationConfig,
                         showDivider = false
                     )
                 }
@@ -764,7 +851,7 @@ fun SettingScreen(
                         Text(
                             text = stringResource(id = R.string.lang_vi),
                             fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = if (currentLanguage == "vi") FontWeight.SemiBold else FontWeight.Normal,
                             color = if (currentLanguage == "vi") BrandAccent else textColor,
                             modifier = Modifier.weight(1f)
                         )
@@ -777,7 +864,6 @@ fun SettingScreen(
                             )
                         }
                     }
-                    HorizontalDivider(color = dividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 48.dp))
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -795,7 +881,7 @@ fun SettingScreen(
                         Text(
                             text = stringResource(id = R.string.lang_en),
                             fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
+                            fontWeight = if (currentLanguage == "en") FontWeight.SemiBold else FontWeight.Normal,
                             color = if (currentLanguage == "en") BrandAccent else textColor,
                             modifier = Modifier.weight(1f)
                         )
@@ -865,7 +951,7 @@ fun SettingScreen(
                             Text(
                                 text = label,
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = if (isSelected) BrandAccent else textColor,
                                 modifier = Modifier.weight(1f)
                             )
@@ -878,20 +964,9 @@ fun SettingScreen(
                                 )
                             }
                         }
-                        if (idx < options.lastIndex) {
-                            HorizontalDivider(color = dividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 58.dp))
-                        }
                     }
                 }
             }
-        }
-
-        // Notification Config Sheet matching MobileNotificationConfigModal.vue
-        if (showNotificationConfigSheet) {
-            MobileNotificationConfigSheet(
-                isDark = isDark,
-                onDismiss = { showNotificationConfigSheet = false }
-            )
         }
 
         // Password Change Sheet matching MobileSettingsPage.vue
@@ -1013,12 +1088,8 @@ private fun MobileNativeBottomSheet(
     val closeBtnBg = if (isDark) Color(0xFF263449) else Color(0xFFE2E8F0)
     val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+    com.tenli.oneview.ui.component.MobileFullScreenOverlay(
+        onDismissRequest = onDismiss
     ) {
         Box(
             modifier = Modifier
@@ -1046,6 +1117,7 @@ private fun MobileNativeBottomSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
+                        .imePadding()
                         .padding(horizontal = 16.dp)
                         .padding(top = 10.dp, bottom = 20.dp)
                 ) {
@@ -1095,31 +1167,68 @@ private fun MobileNativeBottomSheet(
 }
 
 @Composable
-private fun MobileNotificationConfigSheet(
+private fun MobileNotificationConfigScreen(
     isDark: Boolean,
-    onDismiss: () -> Unit
+    onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val bsApi = remember { LoginAuthClient.create(BsApi::class.java) }
 
-    var hasOsPermission by remember {
-        mutableStateOf(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    fun checkOsNotificationPermission(): Boolean {
+        val enabledByManager = NotificationManagerCompat.from(context).areNotificationsEnabled()
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            enabledByManager &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            } else {
-                true
+        } else {
+            enabledByManager
+        }
+    }
+
+    var hasOsPermission by remember { mutableStateOf(checkOsNotificationPermission()) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasOsPermission = checkOsNotificationPermission()
             }
-        )
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val openAppNotificationSettings: () -> Unit = {
+        try {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+            }
+            context.startActivity(intent)
+        } catch (_: Exception) {
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        hasOsPermission = granted
+        hasOsPermission = checkOsNotificationPermission()
+        if (!granted && !hasOsPermission) {
+            openAppNotificationSettings()
+        }
     }
 
-    // Hiển thị ngay lập tức trạng thái từ cache SharedPreferences (0ms), chỉ hiện loading nếu chưa từng lưu cache
+    val requestOrOpenPermission: () -> Unit = {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            openAppNotificationSettings()
+        }
+    }
+
     val hasCachedPref = remember { GlobalData.preferences.contains("push_notifications_enabled") }
     var isLoading by remember { mutableStateOf(!hasCachedPref) }
     var isSaving by remember { mutableStateOf(false) }
@@ -1145,134 +1254,312 @@ private fun MobileNotificationConfigSheet(
         }
     }
 
-    MobileNativeBottomSheet(
-        title = "Cấu hình thông báo",
-        isDark = isDark,
-        onDismiss = onDismiss
-    ) {
-        val cardBg = if (isDark) Color(0xFF242F41) else Color.White
-        val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
-        val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-        val dividerColor = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val titleColor = MaterialTheme.colorScheme.onBackground
+    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
-        Column(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+    ) {
+        // Header matching .drawer-header in MobileNotificationConfigModal.vue
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(cardBg)
+                .height(54.dp)
+                .background(backgroundColor)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Row 1: Push Notification Switch
-            Row(
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onBackClick),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFFF59E0B)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = LucideIcons.Bell,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Nhận thông báo sự kiện",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = titleColor
-                    )
-                    Text(
-                        text = "Thông báo đẩy khi phát hiện sự kiện AI mới",
-                        fontSize = 12.sp,
-                        color = subTextColor
-                    )
-                }
-                if (isLoading || isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                        color = BrandAccent
-                    )
-                } else {
-                    Switch(
-                        checked = pushEnabled,
-                        onCheckedChange = { nextVal ->
-                            pushEnabled = nextVal
-                            isSaving = true
-                            GlobalData.preferences.edit()
-                                .putBoolean("push_notifications_enabled", nextVal)
-                                .apply()
-                            scope.launch {
-                                try {
-                                    bsApi.updateUserNotificationSettings(
-                                        UserNotificationSettingsModel(
-                                            global = UserNotificationGlobalSetting(enabled = nextVal)
-                                        )
-                                    )
-                                } catch (_: Exception) {
-                                } finally {
-                                    isSaving = false
-                                }
-                            }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = BrandAccent
-                        )
-                    )
-                }
+                Icon(
+                    imageVector = LucideIcons.ChevronLeft,
+                    contentDescription = "Quay lại",
+                    tint = titleColor,
+                    modifier = Modifier.size(22.dp)
+                )
             }
+            Text(
+                text = "Cấu hình thông báo",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = titleColor
+            )
+            Spacer(modifier = Modifier.width(34.dp))
+        }
 
-            HorizontalDivider(color = dividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 60.dp))
-
-            // Row 2: Device OS Permission Status
-            Row(
+        if (isLoading) {
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(enabled = !hasOsPermission) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = BrandAccent,
+                    modifier = Modifier.size(28.dp),
+                    strokeWidth = 2.5.dp
+                )
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .navigationBarsPadding()
+                    .padding(horizontal = 10.dp, vertical = 10.dp)
+            ) {
+                // 1. Device Permission Status Card matching MobileNotificationConfigModal.vue
+                Text(
+                    text = "Quyền thông báo trên thiết bị",
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = subTextColor,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(surfaceColor)
+                ) {
+                    if (hasOsPermission) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF10B981)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Đã cấp quyền thông báo",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = titleColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Thiết bị này đã sẵn sàng nhận cảnh báo.",
+                                    fontSize = 12.5.sp,
+                                    color = subTextColor,
+                                    lineHeight = 17.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        Color(0xFF10B981).copy(alpha = if (isDark) 0.15f else 0.12f)
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Đang bật",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isDark) Color(0xFF10B981) else Color(0xFF059669)
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFF59E0B)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.Bell,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Chưa cấp quyền trên thiết bị",
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Normal,
+                                    color = titleColor
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Cần cấp quyền thông báo để nhận cảnh báo khi có sự kiện mới.",
+                                    fontSize = 12.5.sp,
+                                    color = subTextColor,
+                                    lineHeight = 17.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Box(
+                                modifier = Modifier
+                                    .height(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(BrandAccent)
+                                    .clickable(onClick = requestOrOpenPermission)
+                                    .padding(horizontal = 12.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Cấp quyền ngay",
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (hasOsPermission) Color(0xFF10B981) else BrandAccent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = LucideIcons.CheckCircle,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
                 }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Quyền thông báo thiết bị",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = titleColor
-                    )
-                    Text(
-                        text = if (hasOsPermission) "Đã cấp quyền thông báo" else "Chạm để cấp quyền thông báo trên thiết bị",
-                        fontSize = 12.sp,
-                        color = if (hasOsPermission) Color(0xFF10B981) else BrandAccent
-                    )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 2. System General Setting matching MobileNotificationConfigModal.vue
+                Text(
+                    text = "Cài đặt chung",
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = subTextColor,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(surfaceColor)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFF59E0B)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = LucideIcons.Bell,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Cho phép nhận thông báo",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal,
+                                color = titleColor
+                            )
+                            if (!hasOsPermission && pushEnabled) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "⚠️ Thiết bị này chưa cấp quyền nên chưa thể nhận thông báo",
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFF59E0B),
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Switch(
+                            checked = pushEnabled,
+                            enabled = !isSaving,
+                            onCheckedChange = { nextVal ->
+                                if (nextVal && !hasOsPermission) {
+                                    requestOrOpenPermission()
+                                }
+                                pushEnabled = nextVal
+                                isSaving = true
+                                GlobalData.preferences.edit()
+                                    .putBoolean("push_notifications_enabled", nextVal)
+                                    .apply()
+                                scope.launch {
+                                    try {
+                                        val resp = bsApi.updateUserNotificationSettings(
+                                            UserNotificationSettingsModel(
+                                                global = UserNotificationGlobalSetting(enabled = nextVal)
+                                            )
+                                        )
+                                        if (resp.isSuccessful) {
+                                            if (nextVal) {
+                                                if (hasOsPermission) {
+                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                                                        "Đã bật thông báo thành công!"
+                                                    )
+                                                } else {
+                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
+                                                        "Bạn chưa cấp quyền thông báo trên thiết bị."
+                                                    )
+                                                }
+                                            } else {
+                                                com.tenli.oneview.ui.component.MobileTopPopupManager.info(
+                                                    "Đã tắt nhận thông báo."
+                                                )
+                                            }
+                                        } else {
+                                            com.tenli.oneview.ui.component.MobileTopPopupManager.error(
+                                                "Không thể lưu cấu hình thông báo"
+                                            )
+                                        }
+                                    } catch (_: Exception) {
+                                        com.tenli.oneview.ui.component.MobileTopPopupManager.error(
+                                            "Không thể lưu cấu hình thông báo"
+                                        )
+                                    } finally {
+                                        isSaving = false
+                                    }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = BrandAccent
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -1288,6 +1575,11 @@ private fun MobilePasswordChangeSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val vmsApi = remember { LoginAuthClient.create(VmsApi::class.java) }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    val oldPasswordFocusRequester = remember { FocusRequester() }
+    val newPasswordFocusRequester = remember { FocusRequester() }
+    val confirmPasswordFocusRequester = remember { FocusRequester() }
 
     var oldPassword by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
@@ -1301,8 +1593,17 @@ private fun MobilePasswordChangeSheet(
     val cardBg = if (isDark) Color(0xFF242F41) else Color.White
     val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
     val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val dividerColor = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
+    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)
     val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
+
+    LaunchedEffect(Unit) {
+        delay(80)
+        try {
+            oldPasswordFocusRequester.requestFocus()
+            keyboardController?.show()
+        } catch (_: Exception) {
+        }
+    }
 
     MobileNativeBottomSheet(
         title = stringResource(id = R.string.acc_password_security),
@@ -1346,9 +1647,21 @@ private fun MobilePasswordChangeSheet(
                 isVisible = showOld,
                 onToggleVisible = { showOld = !showOld },
                 textColor = titleColor,
-                placeholderColor = subTextColor
+                placeholderColor = subTextColor,
+                focusRequester = oldPasswordFocusRequester,
+                imeAction = ImeAction.Next,
+                onImeAction = {
+                    try {
+                        newPasswordFocusRequester.requestFocus()
+                    } catch (_: Exception) {
+                    }
+                }
             )
-            HorizontalDivider(color = dividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+            HorizontalDivider(
+                thickness = 0.7.dp,
+                color = dividerColor,
+                modifier = Modifier.padding(horizontal = 14.dp)
+            )
             PasswordFieldRow(
                 badgeColor = Color(0xFFF59E0B),
                 badgeIcon = LucideIcons.ShieldAlert,
@@ -1361,9 +1674,21 @@ private fun MobilePasswordChangeSheet(
                 isVisible = showNew,
                 onToggleVisible = { showNew = !showNew },
                 textColor = titleColor,
-                placeholderColor = subTextColor
+                placeholderColor = subTextColor,
+                focusRequester = newPasswordFocusRequester,
+                imeAction = ImeAction.Next,
+                onImeAction = {
+                    try {
+                        confirmPasswordFocusRequester.requestFocus()
+                    } catch (_: Exception) {
+                    }
+                }
             )
-            HorizontalDivider(color = dividerColor, thickness = 0.5.dp, modifier = Modifier.padding(start = 56.dp))
+            HorizontalDivider(
+                thickness = 0.7.dp,
+                color = dividerColor,
+                modifier = Modifier.padding(horizontal = 14.dp)
+            )
             PasswordFieldRow(
                 badgeColor = Color(0xFF10B981),
                 badgeIcon = LucideIcons.CheckCircle,
@@ -1376,7 +1701,12 @@ private fun MobilePasswordChangeSheet(
                 isVisible = showConfirm,
                 onToggleVisible = { showConfirm = !showConfirm },
                 textColor = titleColor,
-                placeholderColor = subTextColor
+                placeholderColor = subTextColor,
+                focusRequester = confirmPasswordFocusRequester,
+                imeAction = ImeAction.Done,
+                onImeAction = {
+                    keyboardController?.hide()
+                }
             )
         }
 
@@ -1437,7 +1767,9 @@ private fun MobilePasswordChangeSheet(
                                     )
                                 )
                                 if (resp.isSuccessful) {
-                                    Toast.makeText(context, "Đổi mật khẩu thành công!", Toast.LENGTH_SHORT).show()
+                                    com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                                        "Đổi mật khẩu thành công!"
+                                    )
                                     onSuccess()
                                 } else {
                                     errorMsg = "Mật khẩu hiện tại không đúng (${resp.code()})"
@@ -1480,11 +1812,25 @@ private fun PasswordFieldRow(
     isVisible: Boolean,
     onToggleVisible: () -> Unit,
     textColor: Color,
-    placeholderColor: Color
+    placeholderColor: Color,
+    focusRequester: FocusRequester,
+    imeAction: ImeAction = ImeAction.Next,
+    onImeAction: () -> Unit = {}
 ) {
+    val keyboardController = LocalSoftwareKeyboardController.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                try {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                } catch (_: Exception) {
+                }
+            }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1523,9 +1869,18 @@ private fun PasswordFieldRow(
                     fontSize = 14.sp
                 ),
                 visualTransformation = if (isVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction = imeAction
+                ),
+                keyboardActions = KeyboardActions(
+                    onNext = { onImeAction() },
+                    onDone = { onImeAction() }
+                ),
                 cursorBrush = SolidColor(BrandAccent),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
             )
         }
         Icon(
@@ -1548,7 +1903,7 @@ fun ModernSettingItem(
     titleColor: Color = MaterialTheme.colorScheme.onBackground,
     valueText: String? = null,
     showChevron: Boolean = true,
-    showDivider: Boolean = true
+    showDivider: Boolean = false
 ) {
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     val isSystemDark = isSystemInDarkTheme()
@@ -1583,8 +1938,8 @@ fun ModernSettingItem(
             Spacer(modifier = Modifier.width(14.dp))
             Text(
                 text = title,
-                fontSize = 15.5.sp,
-                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Normal,
                 color = titleColor,
                 modifier = Modifier.weight(1f)
             )
@@ -1592,6 +1947,7 @@ fun ModernSettingItem(
                 Text(
                     text = valueText,
                     fontSize = 14.5.sp,
+                    fontWeight = FontWeight.Normal,
                     color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                     modifier = Modifier.padding(end = 6.dp)
                 )
@@ -1604,13 +1960,6 @@ fun ModernSettingItem(
                     modifier = Modifier.size(18.dp)
                 )
             }
-        }
-        if (showDivider) {
-            HorizontalDivider(
-                modifier = Modifier.padding(start = 62.dp, end = 16.dp),
-                color = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f),
-                thickness = 0.5.dp
-            )
         }
     }
 }

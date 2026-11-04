@@ -39,7 +39,7 @@ fun VideoPlayer(
     errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {},
-    onTimeUpdate: (Long) -> Unit = {}
+    onTimeUpdate: ((Long) -> Unit)? = null
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
@@ -97,10 +97,14 @@ fun VideoPlayer(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady) {
-        while (isActive && isVideoReady) {
-            onTimeUpdate(exoPlayer.currentPosition)
-            delay(100)
+    if (onTimeUpdate != null) {
+        androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady, onTimeUpdate) {
+            while (isActive && isVideoReady) {
+                if (exoPlayer.isPlaying) {
+                    onTimeUpdate(exoPlayer.currentPosition)
+                }
+                delay(250L)
+            }
         }
     }
 

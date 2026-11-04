@@ -84,7 +84,8 @@ fun EventScreen(
         }
     }
 
-    LaunchedEffect(shouldLoadMore, uiState.events.size, uiState.hasMore, uiState.isLoading, uiState.isPaginating) {
+    // Không truyền isLoading/isPaginating làm key để tránh vòng lặp vô hạn khi loadMore kết thúc mà events.size không đổi
+    LaunchedEffect(shouldLoadMore, uiState.events.size, uiState.hasMore) {
         if ((shouldLoadMore || uiState.events.size in 1..12) &&
             uiState.hasMore &&
             !uiState.isLoading &&

@@ -24,7 +24,9 @@ import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.toUserFriendlyMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,6 +104,9 @@ class HomeViewModel(
         }
     )
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+
+    private var dashboardJob: Job? = null
+    private var recentEventsJob: Job? = null
 
     init {
         fetchDashboardData()
@@ -210,7 +215,8 @@ class HomeViewModel(
     }
 
     private fun fetchRecentEvents() {
-        viewModelScope.launch {
+        recentEventsJob?.cancel()
+        recentEventsJob = viewModelScope.launch {
             try {
                 val calendar = Calendar.getInstance()
                 val toTime = calendar.timeInMillis
@@ -264,7 +270,8 @@ class HomeViewModel(
     }
 
     fun fetchDashboardData() {
-        viewModelScope.launch {
+        dashboardJob?.cancel()
+        dashboardJob = viewModelScope.launch {
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
 
@@ -524,6 +531,8 @@ class HomeViewModel(
                         HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Error fetching data", e)
                 _uiState.update {

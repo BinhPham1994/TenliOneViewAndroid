@@ -22,6 +22,8 @@ import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.ParamPlateModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,6 +101,8 @@ class EventDetailViewModel(
         )
     }
     val uiState: StateFlow<EventDetailUiState> = _uiState.asStateFlow()
+
+    private var relatedEventsJob: Job? = null
 
     init {
         loadEventDetails()
@@ -323,7 +327,8 @@ class EventDetailViewModel(
         val period = _uiState.value.selectedJourneyPeriod
         val cachedRelated = EventCacheManager.getRelatedEventsInMemory(targetEvent.id, period.code)
 
-        viewModelScope.launch {
+        relatedEventsJob?.cancel()
+        relatedEventsJob = viewModelScope.launch {
             if (cachedRelated != null) {
                 _uiState.update { it.copy(relatedEvents = cachedRelated, isJourneyLoading = false) }
             } else {
@@ -472,6 +477,8 @@ class EventDetailViewModel(
                 val sorted = filtered.sortedByDescending { it.time }
                 EventCacheManager.cacheRelatedEventsInMemory(targetEvent.id, period.code, sorted)
                 _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error fetching related events", e)
                 _uiState.update { it.copy(isJourneyLoading = false) }
@@ -529,9 +536,38 @@ class EventDetailViewModel(
         }
     }
 
+    private fun resolveFullMediaUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isEmpty() || trimmed == "NO_IMAGE") return ""
+        if (trimmed.startsWith("http://") ||
+            trimmed.startsWith("https://") ||
+            trimmed.startsWith("file://") ||
+            trimmed.startsWith("data:")
+        ) {
+            return trimmed
+        }
+        val base = com.tenli.oneview.data.local.UserSession.domain
+            .ifEmpty { com.tenli.oneview.BuildConfig.DOMAIN_CLOUD }
+            .trim()
+            .trimEnd('/')
+            .removeSuffix("/api/v1")
+        return if (trimmed.startsWith("/")) "$base$trimmed" else "$base/$trimmed"
+    }
+
     fun loadOriginalVideo() {
         val event = _uiState.value.event ?: return
-        val camera = _uiState.value.camera ?: return
+        val camera = _uiState.value.camera
+            ?: resolveCameraForEvent(event, _uiState.value.cameraList)
+
+        if (camera == null) {
+            _uiState.update {
+                it.copy(
+                    originalVideoLoading = false,
+                    originalVideoError = "Video không khả dụng"
+                )
+            }
+            return
+        }
 
         if (_uiState.value.originalVideoUrl != null || _uiState.value.originalVideoLoading) {
             return
@@ -565,7 +601,7 @@ class EventDetailViewModel(
 
                         _uiState.update {
                             it.copy(
-                                originalVideoUrl = videoItem.videoLink,
+                                originalVideoUrl = resolveFullMediaUrl(videoItem.videoLink),
                                 originalVideoSeekTimeMs = seekSeconds * 1000,
                                 originalVideoEventPositionMs = diffSeconds * 1000,
                                 originalVideoLoading = false

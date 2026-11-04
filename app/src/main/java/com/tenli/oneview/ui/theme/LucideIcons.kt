@@ -1062,5 +1062,110 @@ object LucideIcons {
             }
         }
     }
+
+    val ChevronLeft: ImageVector by lazy {
+        lucideVector("LucideChevronLeft") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // m15 18-6-6 6-6
+                moveTo(15f, 18f)
+                lineTo(9f, 12f)
+                lineTo(15f, 6f)
+            }
+        }
+    }
+
+    val FolderOpen: ImageVector by lazy {
+        lucideVector("LucideFolderOpen") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2
+                moveTo(6f, 14f)
+                lineTo(7.5f, 11.1f)
+                arcTo(2f, 2f, 0f, false, true, 9.24f, 10f)
+                horizontalLineTo(20f)
+                arcTo(2f, 2f, 0f, false, true, 21.94f, 12.5f)
+                lineTo(20.4f, 18.5f)
+                arcTo(2f, 2f, 0f, false, true, 18.45f, 20f)
+                horizontalLineTo(4f)
+                arcTo(2f, 2f, 0f, false, true, 2f, 18f)
+                verticalLineTo(5f)
+                arcTo(2f, 2f, 0f, false, true, 4f, 3f)
+                horizontalLineTo(7.9f)
+                arcTo(2f, 2f, 0f, false, true, 9.59f, 3.9f)
+                lineTo(10.4f, 5.1f)
+                arcTo(2f, 2f, 0f, false, false, 12.07f, 6f)
+                horizontalLineTo(18f)
+                arcTo(2f, 2f, 0f, false, true, 20f, 8f)
+                verticalLineTo(10f)
+            }
+        }
+    }
+
+    val XCircle: ImageVector by lazy {
+        lucideVector("LucideXCircle") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // circle cx="12" cy="12" r="10"
+                moveTo(22f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 2f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 22f, 12f)
+                close()
+                // m15 9-6 6 M9 9l6 6
+                moveTo(15f, 9f)
+                lineTo(9f, 15f)
+                moveTo(9f, 9f)
+                lineTo(15f, 15f)
+            }
+        }
+    }
+
+    val ImageOff: ImageVector by lazy {
+        lucideVector("LucideImageOff") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // line x1="2" x2="22" y1="2" y2="22"
+                moveTo(2f, 2f)
+                lineTo(22f, 22f)
+                // path d="M10.41 10.41a2 2 0 1 1-2.83-2.83"
+                moveTo(10.41f, 10.41f)
+                arcTo(2f, 2f, 0f, true, true, 7.58f, 7.58f)
+                // line x1="13.5" x2="6" y1="13.5" y2="21"
+                moveTo(13.5f, 13.5f)
+                lineTo(6f, 21f)
+                // line x1="18" x2="21" y1="12" y2="15"
+                moveTo(18f, 12f)
+                lineTo(21f, 15f)
+                // path d="M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59"
+                moveTo(3.59f, 3.59f)
+                arcTo(1.99f, 1.99f, 0f, false, false, 3f, 5f)
+                verticalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, false, 5f, 21f)
+                horizontalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, false, 20.41f, 20.41f)
+                // path d="M21 15V5a2 2 0 0 0-2-2H9"
+                moveTo(21f, 15f)
+                verticalLineTo(5f)
+                arcTo(2f, 2f, 0f, false, false, 19f, 3f)
+                horizontalLineTo(9f)
+            }
+        }
+    }
 }
 

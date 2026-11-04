@@ -20,7 +20,9 @@ import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.toUserFriendlyMessage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -81,6 +83,9 @@ class EventViewModel(
 
     // Track last raw ID returned by API so pagination advances even past disabled AI event batches
     private var lastFetchedRawId: Int? = null
+    private var initialFetchJob: Job? = null
+    private var recentFetchJob: Job? = null
+    private var paginateJob: Job? = null
 
     init {
         fetchInitialData()
@@ -171,7 +176,7 @@ class EventViewModel(
             }.getOrNull()
 
             if (response == null || !response.isSuccessful) {
-                if (attempts == 1) reachedEnd = true
+                reachedEnd = true
                 break
             }
 
@@ -206,12 +211,14 @@ class EventViewModel(
             }
         }
 
-        val hasMore = !reachedEnd && (validData.isNotEmpty() || attempts == maxAttempts)
+        // Nếu sau 5 lượt (250 bản ghi thô) vẫn không có sự kiện hợp lệ nào thì dừng tự động phân trang để tránh vòng lặp vô hạn
+        val hasMore = !reachedEnd && validData.isNotEmpty()
         return Triple(validData, currentLastId, hasMore)
     }
 
     private fun fetchRecentEvents() {
-        viewModelScope.launch {
+        recentFetchJob?.cancel()
+        recentFetchJob = viewModelScope.launch {
             try {
                 val (from, to) = getTimeRange()
                 val resolvedType = resolveApiEventType(_uiState.value.selectedAiType)
@@ -310,8 +317,11 @@ class EventViewModel(
     }
 
     fun fetchInitialData() {
-        viewModelScope.launch {
+        initialFetchJob?.cancel()
+        paginateJob?.cancel()
+        initialFetchJob = viewModelScope.launch {
             lastFetchedRawId = null
+            _uiState.update { it.copy(isPaginating = false) }
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
             val cameraUuid = _uiState.value.selectedCameraUuid
@@ -418,11 +428,14 @@ class EventViewModel(
                         )
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error fetching initial events", e)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        hasMore = false,
                         error = if (cachedData == null) e.toUserFriendlyMessage() else null
                     )
                 }
@@ -434,7 +447,8 @@ class EventViewModel(
         val currentState = _uiState.value
         if (currentState.isLoading || currentState.isPaginating || !currentState.hasMore || currentState.events.isEmpty()) return
 
-        viewModelScope.launch {
+        paginateJob?.cancel()
+        paginateJob = viewModelScope.launch {
             _uiState.update { it.copy(isPaginating = true, error = null) }
             try {
                 val startId = lastFetchedRawId ?: currentState.events.last().id
@@ -455,15 +469,19 @@ class EventViewModel(
                 }
 
                 _uiState.update {
+                    val merged = (it.events + newEvents).distinctBy { ev -> eventUniqueKey(ev) }
+                    val addedAny = merged.size > it.events.size
                     it.copy(
                         isPaginating = false,
-                        events = (it.events + newEvents).distinctBy { ev -> eventUniqueKey(ev) },
-                        hasMore = hasMore
+                        events = merged,
+                        hasMore = hasMore && addedAny
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("EventViewModel", "Error loading more events", e)
-                _uiState.update { it.copy(isPaginating = false, error = e.toUserFriendlyMessage()) }
+                _uiState.update { it.copy(isPaginating = false, hasMore = false, error = e.toUserFriendlyMessage()) }
             }
         }
     }

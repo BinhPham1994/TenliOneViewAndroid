@@ -31,6 +31,15 @@ class TokenAuthenticator : Authenticator {
     companion object {
         private const val TAG = "TokenAuthenticator"
         private val lock = Any()
+
+        // Dùng chung 1 OkHttpClient cho re-login (không có Authenticator) để tránh tạo mới thread pool mỗi lần 401
+        private val loginClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+                .build()
+        }
     }
 
     override fun authenticate(route: Route?, response: Response): Request? {
@@ -113,16 +122,10 @@ class TokenAuthenticator : Authenticator {
             return null
         }
 
-        val loginUrl = "$domain/VMS/api/LogIn"
+        val normalizedDomain = domain.trim().trimEnd('/').removeSuffix("/api/v1")
+        val loginUrl = "$normalizedDomain/VMS/api/LogIn"
 
-        // Tạo OkHttpClient riêng cho login — KHÔNG có Authenticator
-        val loginClient = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(15, TimeUnit.SECONDS)
-            .build()
-
-        val gson = com.google.gson.Gson()
+        val gson = LoginAuthClient.gson
         val jsonBody = gson.toJson(LogInModel(username = username, password = password))
         val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
 
@@ -133,37 +136,40 @@ class TokenAuthenticator : Authenticator {
             .header("Content-Type", "application/json")
             .build()
 
-        val response = loginClient.newCall(request).execute()
-
-        if (!response.isSuccessful) {
-            Log.w(TAG, "Re-login HTTP ${response.code}")
-            response.close()
-            return null
-        }
-
-        val responseBody = response.body?.string() ?: return null
-        val tokenModel = try {
-            gson.fromJson(responseBody, com.tenli.oneview.model.network.TokenModel::class.java)
-        } catch (e: Exception) {
-            Log.e(TAG, "Parse token response lỗi: ${e.message}")
-            return null
-        }
-
-        // Cập nhật UserSession
-        UserSession.accessToken = tokenModel.token
-        UserSession.refreshToken = tokenModel.token
-
-        // Cập nhật SharedPreferences
-        try {
-            GlobalData.preferences.edit {
-                putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
-                putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
+        return loginClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Log.w(TAG, "Re-login HTTP ${response.code}")
+                return null
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
-        }
 
-        return tokenModel.token
+            val responseBody = response.body?.string() ?: return null
+            val tokenModel = try {
+                gson.fromJson(responseBody, com.tenli.oneview.model.network.TokenModel::class.java)
+            } catch (e: Exception) {
+                Log.e(TAG, "Parse token response lỗi: ${e.message}")
+                return null
+            }
+
+            if (tokenModel?.token.isNullOrBlank()) {
+                return null
+            }
+
+            // Cập nhật UserSession
+            UserSession.accessToken = tokenModel.token
+            UserSession.refreshToken = tokenModel.token
+
+            // Cập nhật SharedPreferences
+            try {
+                GlobalData.preferences.edit {
+                    putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
+                    putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
+            }
+
+            tokenModel.token
+        }
     }
 
     /**

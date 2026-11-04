@@ -60,13 +60,21 @@ object LoginAuthClient {
     }
 
     val client: OkHttpClient by lazy {
+        // Sử dụng BASIC thay vì BODY để tránh buffer toàn bộ JSON lớn vào RAM và spam Logcat gây giật/nóng máy
         val logging = HttpLoggingInterceptor().apply {
-            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
             else HttpLoggingInterceptor.Level.NONE
+        }
+
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 16
         }
 
         // Timeouts đồng bộ với api.ts (GET_TIMEOUT_MS = 30s, WRITE_TIMEOUT_MS = 60s)
         OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
             .addInterceptor(LoginAuthInterceptor())
             .addInterceptor(logging)
             .authenticator(TokenAuthenticator())

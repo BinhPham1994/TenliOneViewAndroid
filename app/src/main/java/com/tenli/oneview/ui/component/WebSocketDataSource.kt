@@ -23,10 +23,13 @@ class WebSocketDataSource(
 
     private var webSocket: WebSocket? = null
     private var dataSpec: DataSpec? = null
-    private val dataQueue = LinkedBlockingQueue<ByteArray>()
+    // Giới hạn kích thước queue để không làm tràn bộ nhớ RAM hoặc treo luồng đọc của OkHttp khi giải mã chậm
+    private val dataQueue = LinkedBlockingQueue<ByteArray>(120)
     private var currentBuffer: ByteArray? = null
     private var currentBufferPosition = 0
+    @Volatile
     private var isOpen = false
+    @Volatile
     private var error: IOException? = null
 
     override fun open(dataSpec: DataSpec): Long {
@@ -64,19 +67,23 @@ class WebSocketDataSource(
             }
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 if (isOpen) {
-                    dataQueue.put(bytes.toByteArray())
+                    val chunk = bytes.toByteArray()
+                    if (!dataQueue.offer(chunk)) {
+                        dataQueue.poll()
+                        dataQueue.offer(chunk)
+                    }
                 }
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
                 isOpen = false
-                dataQueue.put(ByteArray(0)) // Unblock read
+                dataQueue.offer(ByteArray(0)) // Unblock read
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("WebSocketDataSource", "WebSocket Failure", t)
                 isOpen = false
                 error = IOException("WebSocket failure", t)
-                dataQueue.put(ByteArray(0)) // Unblock read
+                dataQueue.offer(ByteArray(0)) // Unblock read
             }
         })
         
@@ -130,8 +137,9 @@ class WebSocketDataSource(
             try { webSocket?.cancel() } catch (_: Exception) {}
         }
         webSocket = null
-        // Unblock any thread stuck in read() waiting on dataQueue.take()
-        dataQueue.put(ByteArray(0))
+        dataQueue.clear()
+        // Unblock any thread stuck in read() waiting on dataQueue.poll()
+        dataQueue.offer(ByteArray(0))
         if (wasOpen) {
             transferEnded()
         }
