@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -42,19 +43,20 @@ import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.ui.PlayerView
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 
 /**
- * Shared OkHttpClient for WebSocket live video streams so that opening/closing or retrying
- * camera streams does not allocate and leak separate Dispatcher thread pools and ConnectionPools.
+ * Shared OkHttpClient for WebSocket live video streams derived from [LoginAuthClient.baseClient]
+ * so opening/closing camera streams reuses the app-wide Dispatcher and ConnectionPool.
  */
 private val sharedWsStreamClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
+    LoginAuthClient.baseClient.newBuilder()
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
-        .connectionPool(okhttp3.ConnectionPool(8, 2, java.util.concurrent.TimeUnit.MINUTES))
         .build()
 }
 
@@ -88,7 +90,7 @@ private class NoSniffFragmentedMp4Extractor : Extractor {
 @Composable
 fun LiveStreamPlayer(
     wsUrl: String,
-    videoCodecTag: String,
+    videoCodecTag: String = "",
     cameraId: Int = 0,
     altCameraId: Int = 0,
     showInternalOverlay: Boolean = false,
@@ -256,23 +258,24 @@ fun LiveStreamPlayer(
 
         if (showInternalOverlay && !isPlaying) {
             val isEn = rememberIsEnglish()
+            val spacing = MaterialTheme.spacing
             Box(Modifier.fillMaxSize(), Alignment.Center) {
                 if (isError) {
                     androidx.compose.foundation.layout.Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
                     ) {
-                        androidx.compose.material3.Icon(
+                        Icon(
                             imageVector = Icons.Outlined.Videocam,
                             contentDescription = if (isEn) "Playback error" else "Lỗi phát",
-                            tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(48.dp)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(spacing.iconExtraLarge)
                         )
-                        androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
-                        androidx.compose.material3.Text(
+                        androidx.compose.foundation.layout.Spacer(Modifier.size(spacing.space8))
+                        Text(
                             text = if (isEn) "Cannot play video" else "Không thể phát video",
-                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )
                     }
                 } else {

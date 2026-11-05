@@ -1,16 +1,14 @@
 package com.tenli.oneview
 
+import android.app.Activity
 import android.app.Application
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.RingtoneManager
+import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import coil.ImageLoader
@@ -18,13 +16,22 @@ import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.google.gson.GsonBuilder
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
+import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.network.KeepAliveWorker
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.di.AppContainer
 import com.tenli.oneview.di.DefaultAppContainer
 import com.tenli.oneview.service.KeepAliveService
+import com.tenli.oneview.service.NotificationChannels
+import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
@@ -32,47 +39,22 @@ class TenliApp : Application(), ImageLoaderFactory {
 
     lateinit var container: AppContainer
 
-    override fun newImageLoader(): ImageLoader {
-        val imageHttpClient = okhttp3.OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                val req = chain.request()
-                val token = com.tenli.oneview.data.local.UserSession.accessToken
-                val path = req.url.encodedPath
-                val domainHost = runCatching {
-                    java.net.URI(com.tenli.oneview.data.local.UserSession.domain.trim()).host
-                }.getOrNull()
-                val needsAuth = token.isNotEmpty() && req.header("Authorization") == null && (
-                    (domainHost != null && req.url.host.equals(domainHost, ignoreCase = true)) ||
-                    path.contains("/files/download/") ||
-                    path.contains("/Data/") ||
-                    path.contains("/VMS/") ||
-                    path.contains("/api/") ||
-                    path.contains("/ts/api/")
-                )
-                val finalReq = if (needsAuth) {
-                    req.newBuilder()
-                        .header("Authorization", "Bearer $token")
-                        .build()
-                } else {
-                    req
-                }
-                chain.proceed(finalReq)
-            }
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .build()
+    /** Scope sống cùng tiến trình cho các tác vụ nền ngắn (preload cache, tải ảnh thông báo...) */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .okHttpClient(imageHttpClient)
+            // Dùng chung connection pool/thread pool với API (xem LoginAuthClient.imageClient)
+            .okHttpClient(LoginAuthClient.imageClient)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(IMAGE_MEMORY_CACHE_PERCENT)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
-                    .directory(this.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(150L * 1024 * 1024) // 150 MB disk cache cho ảnh sự kiện & snapshot camera
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(IMAGE_DISK_CACHE_BYTES) // disk cache cho ảnh sự kiện & snapshot camera
                     .build()
             }
             .crossfade(true)
@@ -82,81 +64,80 @@ class TenliApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         container = DefaultAppContainer(this)
-        val currentLang = LocaleManager.getLocale(this)
-        val appLocale = LocaleListCompat.forLanguageTags(currentLang)
-        AppCompatDelegate.setApplicationLocales(appLocale)
+        ThemeManager.init(this)
+        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(LocaleManager.getLocale(this)))
 
-        setupNotificationChannels()
         GlobalData.apply {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
             gson = GsonBuilder().serializeNulls().create()
         }
+
+        // Tạo channel đồng bộ (rất nhẹ) để FCM/Service luôn có channel ngay khi cần
+        NotificationChannels.createAll(this)
+
         // Pre-warm dữ liệu cache từ ổ đĩa lên RAM ngay khi khởi tạo tiến trình ứng dụng
         // để cả 3 màn hình chính (Trang chủ, Sự kiện, Trực tiếp) và Chi tiết sự kiện có dữ liệu 0ms ở frame đầu tiên
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
-            runCatching { com.tenli.oneview.data.local.HomeCacheManager.preloadDefaultCache(this@TenliApp) }
-            runCatching { com.tenli.oneview.data.local.EventCacheManager.preloadDefaultCache(this@TenliApp) }
-            runCatching { com.tenli.oneview.data.local.MonitorCacheManager.preloadDefaultCache(this@TenliApp) }
+        appScope.launch {
+            runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) }
+            runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) }
+            runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) }
         }
-        startKeepAliveService(this)
+
+        registerActivityLifecycleCallbacks(ForegroundTracker())
+        startKeepAliveService()
         setupBackgroundWorkers()
     }
 
+    /**
+     * Theo dõi app foreground/background (đếm số Activity đang started) để WebSocket chỉ chạy khi người dùng
+     * đang mở app → giảm đáng kể pin/nhiệt khi app ở nền.
+     */
+    private inner class ForegroundTracker : ActivityLifecycleCallbacks {
+        private var startedCount = 0
+
+        override fun onActivityStarted(activity: Activity) {
+            if (startedCount++ == 0) container.webSocketManager.onAppForegroundChanged(true)
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+            startedCount = (startedCount - 1).coerceAtLeast(0)
+            if (startedCount == 0 && !activity.isChangingConfigurations) {
+                container.webSocketManager.onAppForegroundChanged(false)
+            }
+        }
+
+        override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
+        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityPaused(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
+        override fun onActivityDestroyed(activity: Activity) = Unit
+    }
+
     private fun setupBackgroundWorkers() {
-        try {
-            val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED) // Chỉ chạy khi có mạng
+        runCatching {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED) // Chỉ chạy khi có mạng
                 .build()
-            val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(15, TimeUnit.MINUTES)
+            val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(KEEP_ALIVE_WORK_INTERVAL_MIN, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
 
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-                "ping_firebase",
+                KEEP_ALIVE_WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
                 workRequest
             )
-        } catch (_: Exception) {
         }
     }
 
-    private fun setupNotificationChannels() {
-        val manager = getSystemService(NotificationManager::class.java) ?: return
-        val eventChannel = NotificationChannel(
-            "ai_event_channel",
-            "Cảnh báo AI",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Thông báo khi phát hiện người, cháy, hoặc khuôn mặt"
-            enableVibration(true)
-            setShowBadge(true)
-        }
-        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        val audioAttributes = AudioAttributes.Builder()
-            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-            .build()
-        val callChannel = NotificationChannel(
-            "emergency_call_channel",
-            "Cuộc gọi cảnh báo",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Kênh dành riêng cho cuộc gọi khẩn cấp từ AI"
-            enableLights(true)
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 1000, 500, 1000)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            setBypassDnd(true)
-            setSound(ringtoneUri, audioAttributes)
-        }
-        manager.createNotificationChannels(listOf(eventChannel, callChannel))
+    private fun startKeepAliveService() {
+        runCatching { startForegroundService(Intent(this, KeepAliveService::class.java)) }
     }
 
-    private fun startKeepAliveService(context: Context) {
-        try {
-            val intent = Intent(context, KeepAliveService::class.java)
-            context.startForegroundService(intent)
-        } catch (_: Exception) {
-        }
+    private companion object {
+        const val IMAGE_MEMORY_CACHE_PERCENT = 0.25
+        const val IMAGE_DISK_CACHE_BYTES = 150L * 1024 * 1024
+        const val KEEP_ALIVE_WORK_NAME = "ping_firebase"
+        const val KEEP_ALIVE_WORK_INTERVAL_MIN = 15L
     }
 }

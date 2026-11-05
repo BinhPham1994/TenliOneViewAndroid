@@ -9,6 +9,8 @@ import com.tenli.oneview.model.network.CameraInGroupModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -35,6 +37,18 @@ object MonitorCacheManager {
 
     private val gson = Gson()
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val snapshotMapType = object : TypeToken<Map<String, SnapshotCacheItem>>() {}.type
+
+    /** Gom nhiều lần cập nhật snapshot liên tiếp thành 1 lần ghi đĩa (tránh ghi file liên tục khi xem nhiều camera) */
+    private const val SNAPSHOT_PERSIST_DEBOUNCE_MS = 2_000L
+    private const val LIVE_FRAME_PROTECT_MS = 30_000L
+    private const val SNAPSHOT_MAX_DIMENSION_PX = 640
+    private const val SNAPSHOT_JPEG_QUALITY = 70
+    private const val MIN_VALID_IMAGE_BYTES = 200L
+    @Volatile
+    private var persistJob: Job? = null
+    @Volatile
+    private var snapshotDir: File? = null
 
     private const val SNAPSHOT_TTL_MS = 60 * 60 * 1000L // 1 giờ (đồng bộ vmsData.ts)
     private const val SNAPSHOT_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L // 7 ngày
@@ -64,23 +78,28 @@ object MonitorCacheManager {
     }
 
     private fun getSnapshotImageDir(context: Context): File {
+        snapshotDir?.let { return it }
         return File(context.cacheDir, "camera_snapshots").apply {
             if (!exists()) mkdirs()
+            snapshotDir = this
         }
     }
 
-    @Synchronized
     private fun ensureSnapshotsLoaded(context: Context) {
+        // Fast-path không cần lock (được gọi rất thường xuyên khi hiển thị lưới camera)
+        if (snapshotsLoaded) return
+        loadSnapshotsLocked(context)
+    }
+
+    @Synchronized
+    private fun loadSnapshotsLocked(context: Context) {
         if (snapshotsLoaded) return
         snapshotsLoaded = true
         try {
-            val file = getSnapshotCacheFile(context)
-            if (file.exists()) {
-                val json = file.readText()
-                val type = object : TypeToken<Map<String, SnapshotCacheItem>>() {}.type
-                val parsed: Map<String, SnapshotCacheItem>? = gson.fromJson(json, type)
+            val parsed: Map<String, SnapshotCacheItem>? = JsonFileStore.read(gson, getSnapshotCacheFile(context), snapshotMapType)
+            if (parsed != null) {
                 val now = System.currentTimeMillis()
-                parsed?.forEach { (keyStr, item) ->
+                parsed.forEach { (keyStr, item) ->
                     val id = keyStr.toIntOrNull()
                     if (id != null && item.link.isNotBlank() && item.link != "NO_IMAGE") {
                         if (now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
@@ -96,20 +115,17 @@ object MonitorCacheManager {
 
     private fun persistSnapshotsAsync(context: Context) {
         val appContext = context.applicationContext
-        ioScope.launch {
-            try {
-                val now = System.currentTimeMillis()
-                val cleanMap = mutableMapOf<String, SnapshotCacheItem>()
-                for ((id, item) in snapshotMap.entries) {
-                    if (item.link.isNotBlank() && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
-                        cleanMap[id.toString()] = item
-                    }
+        persistJob?.cancel()
+        persistJob = ioScope.launch {
+            delay(SNAPSHOT_PERSIST_DEBOUNCE_MS)
+            val now = System.currentTimeMillis()
+            val cleanMap = HashMap<String, SnapshotCacheItem>(snapshotMap.size)
+            for ((id, item) in snapshotMap.entries) {
+                if (item.link.isNotBlank() && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
+                    cleanMap[id.toString()] = item
                 }
-                val file = getSnapshotCacheFile(appContext)
-                file.writeText(gson.toJson(cleanMap))
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
+            JsonFileStore.write(gson, getSnapshotCacheFile(appContext), cleanMap)
         }
     }
 
@@ -135,7 +151,7 @@ object MonitorCacheManager {
                 }
             }
             val localFile = File(getSnapshotImageDir(context), "cam_${id}.jpg")
-            if (localFile.exists() && localFile.length() > 200) {
+            if (localFile.exists() && localFile.length() > MIN_VALID_IMAGE_BYTES) {
                 return "file://${localFile.absolutePath}?t=${localFile.lastModified()}"
             }
         }
@@ -158,7 +174,7 @@ object MonitorCacheManager {
         if (existing != null &&
             existing.link.startsWith("file://") &&
             !link.startsWith("file://") &&
-            (now - existing.updatedAt) < 30_000L
+            (now - existing.updatedAt) < LIVE_FRAME_PROTECT_MS
         ) {
             return
         }
@@ -187,7 +203,7 @@ object MonitorCacheManager {
         val appContext = context.applicationContext
         ioScope.launch {
             try {
-                val maxDim = 640
+                val maxDim = SNAPSHOT_MAX_DIMENSION_PX
                 val scale = minOf(1f, maxDim.toFloat() / bitmap.width.toFloat())
                 val targetW = (bitmap.width * scale).toInt().coerceAtLeast(1)
                 val targetH = (bitmap.height * scale).toInt().coerceAtLeast(1)
@@ -198,12 +214,12 @@ object MonitorCacheManager {
                 }
                 val outFile = File(getSnapshotImageDir(appContext), "cam_${cameraId}.jpg")
                 FileOutputStream(outFile).use { fos ->
-                    scaled.compress(Bitmap.CompressFormat.JPEG, 70, fos)
+                    scaled.compress(Bitmap.CompressFormat.JPEG, SNAPSHOT_JPEG_QUALITY, fos)
                 }
                 if (scaled !== bitmap) {
                     scaled.recycle()
                 }
-                if (outFile.exists() && outFile.length() > 200) {
+                if (outFile.exists() && outFile.length() > MIN_VALID_IMAGE_BYTES) {
                     val fileUrl = "file://${outFile.absolutePath}?t=${System.currentTimeMillis()}"
                     setCachedCameraImageLink(appContext, cameraId, fileUrl, altCameraId)
                 }
@@ -218,41 +234,23 @@ object MonitorCacheManager {
         inMemoryMonitorData = stamped
         EventCacheManager.cacheInMemory(cameras = stamped.cameraList, aiServices = stamped.aiServices)
         withContext(Dispatchers.IO) {
-            try {
-                val file = getCacheFile(context)
-                val json = gson.toJson(stamped)
-                file.writeText(json)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            JsonFileStore.write(gson, getCacheFile(context), stamped)
         }
     }
 
     suspend fun getMonitorData(context: Context): CachedMonitorData? {
         inMemoryMonitorData?.let { return it }
         return withContext(Dispatchers.IO) {
-            try {
-                val file = getCacheFile(context)
-                if (file.exists()) {
-                    val json = file.readText()
-                    val parsed = gson.fromJson(json, CachedMonitorData::class.java)
-                    if (parsed != null) {
-                        inMemoryMonitorData = parsed
-                        EventCacheManager.cacheInMemory(cameras = parsed.cameraList, aiServices = parsed.aiServices)
-                    }
-                    parsed
-                } else {
-                    null
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                null
+            JsonFileStore.read(gson, getCacheFile(context), CachedMonitorData::class.java)?.also { parsed ->
+                inMemoryMonitorData = parsed
+                EventCacheManager.cacheInMemory(cameras = parsed.cameraList.orEmpty(), aiServices = parsed.aiServices.orEmpty())
             }
         }
     }
 
     fun clearCache(context: Context) {
         inMemoryMonitorData = null
+        persistJob?.cancel()
         try {
             val file = getCacheFile(context)
             if (file.exists()) {

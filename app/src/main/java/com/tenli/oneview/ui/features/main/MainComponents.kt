@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.features.main
 
 import android.graphics.BlurMaskFilter
 import android.graphics.Paint as FrameworkPaint
+import androidx.annotation.StringRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -13,7 +14,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,8 +29,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,12 +41,12 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -57,8 +59,10 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -68,13 +72,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.tenli.oneview.R
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
+import com.tenli.oneview.ui.theme.BrandContainerDark
+import com.tenli.oneview.ui.theme.BrandLight
+import com.tenli.oneview.ui.theme.BrandLighter
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.theme.LucideIcons
-import com.tenli.oneview.ui.theme.ThemeManager
+import com.tenli.oneview.ui.theme.Slate300
+import com.tenli.oneview.ui.theme.Slate400
+import com.tenli.oneview.ui.theme.Slate50
+import com.tenli.oneview.ui.theme.Slate500
+import com.tenli.oneview.ui.theme.Slate600
+import com.tenli.oneview.ui.theme.Slate900
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.caption
+import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.launch
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -82,6 +95,62 @@ import kotlin.math.roundToInt
 // Exact cubic-bezier curve from tenli-oneview MobileLayout.vue & mobile.css:
 // transition: transform 0.32s cubic-bezier(0.18, 0.9, 0.3, 1)
 private val NavCapsuleGlideEasing = CubicBezierEasing(0.18f, 0.9f, 0.3f, 1f)
+private const val NAV_CAPSULE_GLIDE_DURATION_MS = 320
+private const val NAV_PILL_SCALE_DURATION_MS = 150
+private const val NAV_CONTENT_ANIM_DURATION_MS = 180
+private const val NAV_PILL_DRAG_SCALE = 1.05f
+private const val NAV_ICON_DRAG_SCALE = 1.12f
+private const val NAV_ICON_SELECTED_SCALE = 1.04f
+/** Lực cản cao su khi kéo viên nang vượt mép (MobileLayout.vue lines 405-409) */
+private const val RUBBER_BAND_EXPONENT = 0.75f
+
+private data class NavItem(val tab: MainTab, @StringRes val labelRes: Int, val icon: ImageVector)
+
+// Tab order matching tenli-oneview MobileLayout.vue:
+// 1. Trang chủ (Home) -> 2. Sự kiện (Event) -> 3. Trực tiếp (Monitor/Live) -> 4. Cài đặt (Setting)
+private val NavItems = listOf(
+    NavItem(MainTab.Home, R.string.tab_home, LucideIcons.Home),
+    NavItem(MainTab.Event, R.string.tab_event, LucideIcons.Bell),
+    NavItem(MainTab.Monitor, R.string.tab_monitor, LucideIcons.Video),
+    NavItem(MainTab.Setting, R.string.tab_setting, LucideIcons.Settings)
+)
+
+// ---------------------------------------------------------------------------------------------
+// Bảng màu riêng của hiệu ứng Liquid Glass (đặc thù, không đổi theo token theme chung)
+// ---------------------------------------------------------------------------------------------
+private val DockGlassDarkTop = Color(0xF219263E)
+private val DockGlassDarkMid = Color(0xF50E1729)
+private val DockGlassDarkBottom = Color(0xF2142238)
+private val DockGlassLightTop = Color(0xF6E3EAF5)
+private val DockGlassLightMid = Color(0xF6D5DFEE)
+private val DockGlassLightBottom = Color(0xF6DFE7F4)
+private val GlassCausticSky = Color(0xFF38BDF8)
+private val PillBlueDeep = Color(0xFF1D4ED8)
+private val PillLightMid = Color(0xFFF8FBFF)
+private val PillLightBottom = Color(0xFFEEF5FF)
+private val PillLightBottomDragging = Color(0xFFE6F0FF)
+private val PillLightSpecular = Color(0xFFE0ECFF)
+
+// Kích thước hiệu ứng (px tính trong DrawScope – không phụ thuộc thang spacing)
+private val DockAmbientShadowBlur = 18.dp
+private val DockAmbientShadowOffsetY = 7.dp
+private val DockContactShadowBlur = 5.dp
+private val DockContactShadowOffsetY = 2.dp
+private val DockAmbientShadowInset = 2.dp
+private val DockContactShadowInset = 1.dp
+private val DockInnerBevelStroke = 2.dp
+private val DockInnerBevelInset = 1.6.dp
+private val DockSpecularRimStroke = 1.35.dp
+private val DockSpecularRimInset = 0.75.dp
+private val DockOuterContourStroke = 0.85.dp
+private val PillShadowBlur = 8.dp
+private val PillShadowBlurDragging = 12.dp
+private val PillShadowOffsetY = 2.5.dp
+private val PillShadowOffsetYDragging = 4.dp
+private val PillShadowInset = 1.dp
+private val PillInnerSpecularStroke = 1.2.dp
+private val PillInnerSpecularInset = 0.7.dp
+private val PillOuterContourStroke = 0.8.dp
 
 /**
  * Custom modifier vẽ hiệu ứng "iPhone iOS 26 Liquid Glass" cho thanh Dock chính:
@@ -90,6 +159,8 @@ private val NavCapsuleGlideEasing = CubicBezierEasing(0.18f, 0.9f, 0.3f, 1f)
  *   giúp nổi bật rõ ràng ngay cả khi đè lên thẻ sự kiện màu trắng (#FFFFFF).
  * - Lớp phản chiếu mặt kính cong phía trên (Top Curved Lens Sheen) & khúc xạ đáy (Bottom Bounce).
  * - Viền khúc xạ ánh sáng 3D (Diagonal Specular Rim + Inner Bevel + Outer Micro-Contour).
+ *
+ * Toàn bộ Path/Brush/Paint được tạo trong drawWithCache => chỉ tạo lại khi đổi kích thước hoặc theme.
  */
 private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWithCache {
     val cornerRadiusPx = size.height / 2f
@@ -105,69 +176,65 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     }
 
     // 1. Paint bóng đổ ngoài (Ambient + Contact Shadow)
-    val ambientBlurPx = 18.dp.toPx()
-    val ambientDyPx = 7.dp.toPx()
+    val ambientDyPx = DockAmbientShadowOffsetY.toPx()
     val ambientShadowColor = if (isDark) {
         Color.Black.copy(alpha = 0.62f)
     } else {
-        Color(0xFF0F172A).copy(alpha = 0.18f)
+        Slate900.copy(alpha = 0.18f)
     }
     val ambientShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = ambientShadowColor.toArgb()
-        maskFilter = BlurMaskFilter(ambientBlurPx, BlurMaskFilter.Blur.NORMAL)
+        maskFilter = BlurMaskFilter(DockAmbientShadowBlur.toPx(), BlurMaskFilter.Blur.NORMAL)
     }
 
-    val contactBlurPx = 5.dp.toPx()
-    val contactDyPx = 2.dp.toPx()
+    val contactDyPx = DockContactShadowOffsetY.toPx()
     val contactShadowColor = if (isDark) {
         Color.Black.copy(alpha = 0.42f)
     } else {
-        Color(0xFF0F172A).copy(alpha = 0.10f)
+        Slate900.copy(alpha = 0.10f)
     }
     val contactShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = contactShadowColor.toArgb()
-        maskFilter = BlurMaskFilter(contactBlurPx, BlurMaskFilter.Blur.NORMAL)
+        maskFilter = BlurMaskFilter(DockContactShadowBlur.toPx(), BlurMaskFilter.Blur.NORMAL)
     }
+    val ambientInsetPx = DockAmbientShadowInset.toPx()
+    val contactInsetPx = DockContactShadowInset.toPx()
 
     // 2. Thân kính lỏng (Liquid Glass Body)
     // Light Mode dùng tông kính khói ngọc trai (Smoky Ice-Slate Glass) để tách biệt rõ với thẻ trắng #FFFFFF
     val baseGlassBrush = if (isDark) {
         Brush.verticalGradient(
-            0.0f to Color(0xF219263E),
-            0.48f to Color(0xF50E1729),
-            1.0f to Color(0xF2142238)
+            0.0f to DockGlassDarkTop,
+            0.48f to DockGlassDarkMid,
+            1.0f to DockGlassDarkBottom
         )
     } else {
         Brush.verticalGradient(
-            0.0f to Color(0xF6E3EAF5),
-            0.50f to Color(0xF6D5DFEE),
-            1.0f to Color(0xF6DFE7F4)
+            0.0f to DockGlassLightTop,
+            0.50f to DockGlassLightMid,
+            1.0f to DockGlassLightBottom
         )
     }
 
     // Lớp khúc xạ ánh sáng chéo (Diagonal Caustic Refraction giống iOS 26 Dock)
-    val diagonalRefractionBrush = if (isDark) {
-        Brush.linearGradient(
-            colors = listOf(
+    val diagonalRefractionBrush = Brush.linearGradient(
+        colors = if (isDark) {
+            listOf(
                 Color.White.copy(alpha = 0.10f),
                 Color.Transparent,
-                Color(0xFF38BDF8).copy(alpha = 0.08f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(size.width, size.height)
-        )
-    } else {
-        Brush.linearGradient(
-            colors = listOf(
+                GlassCausticSky.copy(alpha = 0.08f)
+            )
+        } else {
+            listOf(
                 Color.White.copy(alpha = 0.42f),
-                Color(0xFF94A3B8).copy(alpha = 0.14f),
-                Color(0xFFCBD5E1).copy(alpha = 0.10f),
+                Slate400.copy(alpha = 0.14f),
+                Slate300.copy(alpha = 0.10f),
                 Color.White.copy(alpha = 0.48f)
-            ),
-            start = Offset(0f, 0f),
-            end = Offset(size.width, size.height)
-        )
-    }
+            )
+        },
+        start = Offset.Zero,
+        end = Offset(size.width, size.height)
+    )
 
     // 3. Độ bóng vòm kính phía trên (Top Curved Lens Specular Sheen)
     val topLensSheenBrush = Brush.verticalGradient(
@@ -191,23 +258,17 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     // Ánh sáng dội ngược dưới đáy kính (Bottom Internal Bounce)
     val bottomBounceBrush = Brush.verticalGradient(
         colors = if (isDark) {
-            listOf(
-                Color.Transparent,
-                Color(0xFF60A5FA).copy(alpha = 0.10f)
-            )
+            listOf(Color.Transparent, BrandLight.copy(alpha = 0.10f))
         } else {
-            listOf(
-                Color.Transparent,
-                Color.White.copy(alpha = 0.55f)
-            )
+            listOf(Color.Transparent, Color.White.copy(alpha = 0.55f))
         },
         startY = size.height * 0.68f,
         endY = size.height
     )
 
     // 4. Viền dày khối kính 3D bên trong (Inner 3D Bevel Thickness)
-    val innerBevelStrokePx = 2.dp.toPx()
-    val innerBevelInsetPx = 1.6.dp.toPx()
+    val innerBevelStrokePx = DockInnerBevelStroke.toPx()
+    val innerBevelInsetPx = DockInnerBevelInset.toPx()
     val innerBevelBrush = Brush.verticalGradient(
         colors = if (isDark) {
             listOf(
@@ -218,62 +279,78 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
         } else {
             listOf(
                 Color.White.copy(alpha = 0.85f),
-                Color(0xFF64748B).copy(alpha = 0.22f),
+                Slate500.copy(alpha = 0.22f),
                 Color.White.copy(alpha = 0.78f)
             )
         }
     )
 
     // 5. Viền phản quang kim cương 3D (Signature iOS 26 Diagonal Specular Rim)
-    val specularRimStrokePx = 1.35.dp.toPx()
-    val specularRimInsetPx = 0.75.dp.toPx()
+    val specularRimStrokePx = DockSpecularRimStroke.toPx()
+    val specularRimInsetPx = DockSpecularRimInset.toPx()
     val specularRimBrush = Brush.linearGradient(
         colors = if (isDark) {
             listOf(
                 Color.White.copy(alpha = 0.52f),
                 Color.White.copy(alpha = 0.18f),
                 Color.White.copy(alpha = 0.08f),
-                Color(0xFF93C5FD).copy(alpha = 0.26f),
+                BrandLighter.copy(alpha = 0.26f),
                 Color.White.copy(alpha = 0.45f)
             )
         } else {
             listOf(
                 Color.White,
                 Color.White.copy(alpha = 0.88f),
-                Color(0xFFF8FAFC).copy(alpha = 0.60f),
+                Slate50.copy(alpha = 0.60f),
                 Color.White.copy(alpha = 0.88f),
                 Color.White
             )
         },
-        start = Offset(0f, 0f),
+        start = Offset.Zero,
         end = Offset(size.width, size.height)
     )
 
     // 6. Viền định hình siêu mảnh ngoài cùng (Outer Micro-Contour giúp tách nền trắng 100%)
-    val outerContourStrokePx = 0.85.dp.toPx()
+    val outerContourStrokePx = DockOuterContourStroke.toPx()
     val outerContourColor = if (isDark) {
         Color.Black.copy(alpha = 0.60f)
     } else {
-        Color(0xFF0F172A).copy(alpha = 0.15f)
+        Slate900.copy(alpha = 0.15f)
     }
+
+    // Hình học tính sẵn (không cấp phát trong onDrawBehind)
+    val topSheenSize = Size(size.width, size.height * 0.48f)
+    val bottomBounceTopLeft = Offset(0f, size.height * 0.68f)
+    val bottomBounceSize = Size(size.width, size.height * 0.32f)
+    val innerBevelTopLeft = Offset(innerBevelInsetPx, innerBevelInsetPx)
+    val innerBevelSize = Size(size.width - innerBevelInsetPx * 2f, size.height - innerBevelInsetPx * 2f)
+    val innerBevelRadius = (cornerRadiusPx - innerBevelInsetPx).coerceAtLeast(0f)
+    val innerBevelStroke = Stroke(width = innerBevelStrokePx)
+    val specularTopLeft = Offset(specularRimInsetPx, specularRimInsetPx)
+    val specularSize = Size(size.width - specularRimInsetPx * 2f, size.height - specularRimInsetPx * 2f)
+    val specularRadius = (cornerRadiusPx - specularRimInsetPx).coerceAtLeast(0f)
+    val specularStroke = Stroke(width = specularRimStrokePx)
+    val contourTopLeft = Offset(outerContourStrokePx / 2f, outerContourStrokePx / 2f)
+    val contourSize = Size(size.width - outerContourStrokePx, size.height - outerContourStrokePx)
+    val contourStroke = Stroke(width = outerContourStrokePx)
 
     onDrawBehind {
         // Vẽ bóng đổ bên ngoài viên nang (không bị lọt vào bên trong lớp kính)
         clipPath(capsulePath, clipOp = ClipOp.Difference) {
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.drawRoundRect(
-                    2.dp.toPx(),
+                    ambientInsetPx,
                     ambientDyPx,
-                    size.width - 2.dp.toPx(),
+                    size.width - ambientInsetPx,
                     size.height + ambientDyPx,
                     cornerRadiusPx,
                     cornerRadiusPx,
                     ambientShadowPaint
                 )
                 canvas.nativeCanvas.drawRoundRect(
-                    1.dp.toPx(),
+                    contactInsetPx,
                     contactDyPx,
-                    size.width - 1.dp.toPx(),
+                    size.width - contactInsetPx,
                     size.height + contactDyPx,
                     cornerRadiusPx,
                     cornerRadiusPx,
@@ -284,66 +361,37 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
 
         // Vẽ các lớp kính lỏng bên trong viên nang
         clipPath(capsulePath) {
-            drawRoundRect(
-                brush = baseGlassBrush,
-                cornerRadius = cornerRadius
-            )
-            drawRoundRect(
-                brush = diagonalRefractionBrush,
-                cornerRadius = cornerRadius
-            )
-            drawRect(
-                brush = topLensSheenBrush,
-                topLeft = Offset.Zero,
-                size = Size(size.width, size.height * 0.48f)
-            )
-            drawRect(
-                brush = bottomBounceBrush,
-                topLeft = Offset(0f, size.height * 0.68f),
-                size = Size(size.width, size.height * 0.32f)
-            )
+            drawRoundRect(brush = baseGlassBrush, cornerRadius = cornerRadius)
+            drawRoundRect(brush = diagonalRefractionBrush, cornerRadius = cornerRadius)
+            drawRect(brush = topLensSheenBrush, topLeft = Offset.Zero, size = topSheenSize)
+            drawRect(brush = bottomBounceBrush, topLeft = bottomBounceTopLeft, size = bottomBounceSize)
         }
 
         // Vẽ viền khối 3D bên trong (Inner Bevel)
         drawRoundRect(
             brush = innerBevelBrush,
-            topLeft = Offset(innerBevelInsetPx, innerBevelInsetPx),
-            size = Size(
-                size.width - innerBevelInsetPx * 2f,
-                size.height - innerBevelInsetPx * 2f
-            ),
-            cornerRadius = CornerRadius(
-                (cornerRadiusPx - innerBevelInsetPx).coerceAtLeast(0f),
-                (cornerRadiusPx - innerBevelInsetPx).coerceAtLeast(0f)
-            ),
-            style = Stroke(width = innerBevelStrokePx)
+            topLeft = innerBevelTopLeft,
+            size = innerBevelSize,
+            cornerRadius = CornerRadius(innerBevelRadius, innerBevelRadius),
+            style = innerBevelStroke
         )
 
         // Vẽ viền phản quang ánh sáng 3D (Specular Rim)
         drawRoundRect(
             brush = specularRimBrush,
-            topLeft = Offset(specularRimInsetPx, specularRimInsetPx),
-            size = Size(
-                size.width - specularRimInsetPx * 2f,
-                size.height - specularRimInsetPx * 2f
-            ),
-            cornerRadius = CornerRadius(
-                (cornerRadiusPx - specularRimInsetPx).coerceAtLeast(0f),
-                (cornerRadiusPx - specularRimInsetPx).coerceAtLeast(0f)
-            ),
-            style = Stroke(width = specularRimStrokePx)
+            topLeft = specularTopLeft,
+            size = specularSize,
+            cornerRadius = CornerRadius(specularRadius, specularRadius),
+            style = specularStroke
         )
 
         // Vẽ viền định hình ngoài cùng (Outer Contour Hairline)
         drawRoundRect(
             color = outerContourColor,
-            topLeft = Offset(outerContourStrokePx / 2f, outerContourStrokePx / 2f),
-            size = Size(
-                size.width - outerContourStrokePx,
-                size.height - outerContourStrokePx
-            ),
+            topLeft = contourTopLeft,
+            size = contourSize,
             cornerRadius = cornerRadius,
-            style = Stroke(width = outerContourStrokePx)
+            style = contourStroke
         )
     }
 }
@@ -369,12 +417,13 @@ private fun Modifier.iosLiquidGlassActivePill(
         )
     }
 
-    val shadowBlurPx = (if (isDragging) 12.dp else 8.dp).toPx()
-    val shadowDyPx = (if (isDragging) 4.dp else 2.5.dp).toPx()
+    val shadowBlurPx = (if (isDragging) PillShadowBlurDragging else PillShadowBlur).toPx()
+    val shadowDyPx = (if (isDragging) PillShadowOffsetYDragging else PillShadowOffsetY).toPx()
+    val shadowInsetPx = PillShadowInset.toPx()
     val pillShadowColor = if (isDark) {
         if (isDragging) BrandPrimary.copy(alpha = 0.42f) else Color.Black.copy(alpha = 0.48f)
     } else {
-        if (isDragging) BrandPrimary.copy(alpha = 0.24f) else Color(0xFF1E3A8A).copy(alpha = 0.16f)
+        if (isDragging) BrandPrimary.copy(alpha = 0.24f) else BrandContainerDark.copy(alpha = 0.16f)
     }
     val pillShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = pillShadowColor.toArgb()
@@ -383,15 +432,15 @@ private fun Modifier.iosLiquidGlassActivePill(
 
     val pillBodyBrush = if (isDark) {
         Brush.verticalGradient(
-            0.0f to Color(0xFF3B82F6).copy(alpha = if (isDragging) 0.44f else 0.32f),
-            0.50f to Color(0xFF2563EB).copy(alpha = if (isDragging) 0.28f else 0.18f),
-            1.0f to Color(0xFF1D4ED8).copy(alpha = if (isDragging) 0.36f else 0.25f)
+            0.0f to BrandActiveNavDark.copy(alpha = if (isDragging) 0.44f else 0.32f),
+            0.50f to BrandPrimary.copy(alpha = if (isDragging) 0.28f else 0.18f),
+            1.0f to PillBlueDeep.copy(alpha = if (isDragging) 0.36f else 0.25f)
         )
     } else {
         Brush.verticalGradient(
             0.0f to Color.White,
-            0.55f to Color(0xFFF8FBFF),
-            1.0f to if (isDragging) Color(0xFFE6F0FF) else Color(0xFFEEF5FF)
+            0.55f to PillLightMid,
+            1.0f to if (isDragging) PillLightBottomDragging else PillLightBottom
         )
     }
 
@@ -411,41 +460,51 @@ private fun Modifier.iosLiquidGlassActivePill(
         endY = size.height * 0.50f
     )
 
-    val innerSpecularStrokePx = 1.2.dp.toPx()
-    val innerSpecularInsetPx = 0.7.dp.toPx()
+    val innerSpecularStrokePx = PillInnerSpecularStroke.toPx()
+    val innerSpecularInsetPx = PillInnerSpecularInset.toPx()
     val innerSpecularBrush = Brush.linearGradient(
         colors = if (isDark) {
             listOf(
                 Color.White.copy(alpha = 0.50f),
                 BrandActiveNavDark.copy(alpha = 0.25f),
-                Color(0xFF93C5FD).copy(alpha = 0.45f)
+                BrandLighter.copy(alpha = 0.45f)
             )
         } else {
             listOf(
                 Color.White,
-                Color(0xFFE0ECFF),
+                PillLightSpecular,
                 Color.White
             )
         },
-        start = Offset(0f, 0f),
+        start = Offset.Zero,
         end = Offset(size.width, size.height)
     )
 
-    val outerPillContourPx = 0.8.dp.toPx()
+    val outerPillContourPx = PillOuterContourStroke.toPx()
     val outerPillContourColor = if (isDark) {
         BrandActiveNavDark.copy(alpha = if (isDragging) 0.55f else 0.35f)
     } else {
         BrandPrimary.copy(alpha = if (isDragging) 0.30f else 0.18f)
     }
 
+    // Hình học tính sẵn (không cấp phát trong onDrawBehind)
+    val topSheenSize = Size(size.width, size.height * 0.50f)
+    val specularTopLeft = Offset(innerSpecularInsetPx, innerSpecularInsetPx)
+    val specularSize = Size(size.width - innerSpecularInsetPx * 2f, size.height - innerSpecularInsetPx * 2f)
+    val specularRadius = (cornerRadiusPx - innerSpecularInsetPx).coerceAtLeast(0f)
+    val specularStroke = Stroke(width = innerSpecularStrokePx)
+    val contourTopLeft = Offset(outerPillContourPx / 2f, outerPillContourPx / 2f)
+    val contourSize = Size(size.width - outerPillContourPx, size.height - outerPillContourPx)
+    val contourStroke = Stroke(width = outerPillContourPx)
+
     onDrawBehind {
         // Bóng đổ bên ngoài viên nang đang chọn
         clipPath(pillPath, clipOp = ClipOp.Difference) {
             drawIntoCanvas { canvas ->
                 canvas.nativeCanvas.drawRoundRect(
-                    1.dp.toPx(),
+                    shadowInsetPx,
                     shadowDyPx,
-                    size.width - 1.dp.toPx(),
+                    size.width - shadowInsetPx,
                     size.height + shadowDyPx,
                     cornerRadiusPx,
                     cornerRadiusPx,
@@ -456,99 +515,91 @@ private fun Modifier.iosLiquidGlassActivePill(
 
         // Thân kính của viên nang đang chọn
         clipPath(pillPath) {
-            drawRoundRect(
-                brush = pillBodyBrush,
-                cornerRadius = cornerRadius
-            )
-            drawRect(
-                brush = pillTopSheenBrush,
-                topLeft = Offset.Zero,
-                size = Size(size.width, size.height * 0.50f)
-            )
+            drawRoundRect(brush = pillBodyBrush, cornerRadius = cornerRadius)
+            drawRect(brush = pillTopSheenBrush, topLeft = Offset.Zero, size = topSheenSize)
         }
 
         // Viền phản quang 3D bên trong viên nang
         drawRoundRect(
             brush = innerSpecularBrush,
-            topLeft = Offset(innerSpecularInsetPx, innerSpecularInsetPx),
-            size = Size(
-                size.width - innerSpecularInsetPx * 2f,
-                size.height - innerSpecularInsetPx * 2f
-            ),
-            cornerRadius = CornerRadius(
-                (cornerRadiusPx - innerSpecularInsetPx).coerceAtLeast(0f),
-                (cornerRadiusPx - innerSpecularInsetPx).coerceAtLeast(0f)
-            ),
-            style = Stroke(width = innerSpecularStrokePx)
+            topLeft = specularTopLeft,
+            size = specularSize,
+            cornerRadius = CornerRadius(specularRadius, specularRadius),
+            style = specularStroke
         )
 
         // Viền định hình mảnh bên ngoài viên nang
         drawRoundRect(
             color = outerPillContourColor,
-            topLeft = Offset(outerPillContourPx / 2f, outerPillContourPx / 2f),
-            size = Size(
-                size.width - outerPillContourPx,
-                size.height - outerPillContourPx
-            ),
+            topLeft = contourTopLeft,
+            size = contourSize,
             cornerRadius = cornerRadius,
-            style = Stroke(width = outerPillContourPx)
+            style = contourStroke
         )
     }
 }
 
+/** Lực cản cao su khi kéo viên nang vượt ra ngoài [0, maxLeftPx] */
+private fun rubberBand(rawLeft: Float, maxLeftPx: Float): Float = when {
+    rawLeft < 0f -> -(-rawLeft).pow(RUBBER_BAND_EXPONENT)
+    rawLeft > maxLeftPx -> maxLeftPx + (rawLeft - maxLeftPx).pow(RUBBER_BAND_EXPONENT)
+    else -> rawLeft
+}
+
+private fun hoverIndexOf(leftPx: Float, tabWidthPx: Float): Int =
+    ((leftPx + tabWidthPx / 2f) / tabWidthPx).toInt().coerceIn(0, NavItems.size - 1)
+
 @Composable
 fun MainBottomNavigation(
     currentTab: MainTab,
-    isCurrentTabScrolled: Boolean,
     onTabClick: (MainTab) -> Unit,
     onScrollToTop: (MainTab) -> Unit
 ) {
-    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val isDark = colors.isDark
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
 
     // Active / Inactive text & icon colors với độ tương phản sắc nét cho cả Light và Dark theme
-    val activeContentColor = if (isDark) Color(0xFF60A5FA) else BrandPrimary
-    val inactiveContentColor = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+    val activeContentColor = colors.activeContent
+    val inactiveContentColor = if (isDark) Slate300 else Slate600
 
-    // Tab order matching tenli-oneview MobileLayout.vue:
-    // 1. Trang chủ (Home) -> 2. Sự kiện (Event) -> 3. Trực tiếp (Monitor/Live) -> 4. Cài đặt (Setting)
-    val items = listOf(
-        Triple(MainTab.Home, R.string.tab_home, LucideIcons.Home),
-        Triple(MainTab.Event, R.string.tab_event, LucideIcons.Bell),
-        Triple(MainTab.Monitor, R.string.tab_monitor, LucideIcons.Video),
-        Triple(MainTab.Setting, R.string.tab_setting, LucideIcons.Settings)
-    )
-    val selectedIndex = items.indexOfFirst { it.first == currentTab }.coerceAtLeast(0)
+    val selectedIndex = NavItems.indexOfFirst { it.tab == currentTab }.coerceAtLeast(0)
     val scope = rememberCoroutineScope()
+
+    // Đọc giá trị mới nhất trong gesture detector mà không phải khởi động lại pointerInput
+    val currentTabState by rememberUpdatedState(currentTab)
+    val onTabClickState by rememberUpdatedState(onTabClick)
+    val onScrollToTopState by rememberUpdatedState(onScrollToTop)
 
     var isDraggingNav by remember { mutableStateOf(false) }
     var rawDragLeftPx by remember { mutableFloatStateOf(0f) }
     var dragHoverIndex by remember { mutableStateOf<Int?>(null) }
 
+    val iconSize = spacing.iconRegular + spacing.space2
+    val selectedIconOffset = -spacing.space1
+    val dragIconOffset = -spacing.space2
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = spacing.space14, vertical = spacing.space10),
         contentAlignment = Alignment.Center
     ) {
         BoxWithConstraints(
             modifier = Modifier
+                // Trên tablet/foldable giữ Dock gọn ở giữa thay vì kéo dài toàn màn hình
+                .widthIn(max = spacing.contentMaxWidth)
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(spacing.bottomNavHeight)
                 .iosLiquidGlassDock(isDark = isDark)
-                .padding(horizontal = 5.dp, vertical = 5.dp)
+                .padding(spacing.space5)
         ) {
-            val tabWidth = maxWidth / items.size
+            val tabWidth = maxWidth / NavItems.size
             val tabWidthPx = with(density) { tabWidth.toPx() }
-            val maxLeftPx = tabWidthPx * (items.size - 1)
+            val maxLeftPx = tabWidthPx * (NavItems.size - 1)
 
             // Unified pixel Animatable matching MobileLayout.vue:
             // transition: transform 0.32s cubic-bezier(0.18, 0.9, 0.3, 1)
@@ -559,7 +610,7 @@ fun MainBottomNavigation(
                     indicatorLeftAnim.animateTo(
                         targetValue = selectedIndex * tabWidthPx,
                         animationSpec = tween(
-                            durationMillis = 320,
+                            durationMillis = NAV_CAPSULE_GLIDE_DURATION_MS,
                             easing = NavCapsuleGlideEasing
                         )
                     )
@@ -567,18 +618,23 @@ fun MainBottomNavigation(
             }
 
             val pillScale by animateFloatAsState(
-                targetValue = if (isDraggingNav) 1.05f else 1f,
-                animationSpec = tween(durationMillis = 150),
+                targetValue = if (isDraggingNav) NAV_PILL_DRAG_SCALE else 1f,
+                animationSpec = tween(durationMillis = NAV_PILL_SCALE_DURATION_MS),
                 label = "pillScale"
             )
 
             // Sliding Liquid Glass Capsule Indicator
+            // graphicsLayer: viên nang có layer riêng => di chuyển/scale không vẽ lại Dock (blur shadow),
+            // và giá trị animation chỉ được đọc ở pha layout/draw (không recompose mỗi frame).
             Box(
                 modifier = Modifier
                     .offset { IntOffset(indicatorLeftAnim.value.roundToInt(), 0) }
                     .width(tabWidth)
                     .fillMaxHeight()
-                    .scale(pillScale)
+                    .graphicsLayer {
+                        scaleX = pillScale
+                        scaleY = pillScale
+                    }
                     .iosLiquidGlassActivePill(
                         isDark = isDark,
                         isDragging = isDraggingNav
@@ -588,54 +644,43 @@ fun MainBottomNavigation(
             Row(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(selectedIndex, tabWidthPx) {
+                    // Layer riêng cho icon/nhãn: animation màu/scale của tab không làm vẽ lại Dock
+                    .graphicsLayer()
+                    .pointerInput(tabWidthPx) {
                         detectHorizontalDragGestures(
                             onDragStart = { startOffset ->
                                 isDraggingNav = true
                                 val initialLeft = startOffset.x - tabWidthPx / 2f
                                 rawDragLeftPx = initialLeft
-                                val dampedLeft = when {
-                                    initialLeft < 0f -> -(-initialLeft).pow(0.75f)
-                                    initialLeft > maxLeftPx -> maxLeftPx + (initialLeft - maxLeftPx).pow(0.75f)
-                                    else -> initialLeft
-                                }
+                                val dampedLeft = rubberBand(initialLeft, maxLeftPx)
                                 scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
-                                val idx = ((dampedLeft + tabWidthPx / 2f) / tabWidthPx)
-                                    .toInt()
-                                    .coerceIn(0, items.size - 1)
-                                dragHoverIndex = idx
+                                dragHoverIndex = hoverIndexOf(dampedLeft, tabWidthPx)
                             },
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
                                 val nextRaw = rawDragLeftPx + dragAmount
                                 rawDragLeftPx = nextRaw
-                                // Rubber-band edge resistance matching MobileLayout.vue lines 405-409
-                                val dampedLeft = when {
-                                    nextRaw < 0f -> -(-nextRaw).pow(0.75f)
-                                    nextRaw > maxLeftPx -> maxLeftPx + (nextRaw - maxLeftPx).pow(0.75f)
-                                    else -> nextRaw
-                                }
+                                val dampedLeft = rubberBand(nextRaw, maxLeftPx)
                                 scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
-                                val idx = ((dampedLeft + tabWidthPx / 2f) / tabWidthPx)
-                                    .toInt()
-                                    .coerceIn(0, items.size - 1)
+                                val idx = hoverIndexOf(dampedLeft, tabWidthPx)
                                 if (dragHoverIndex != idx) {
                                     dragHoverIndex = idx
                                     try {
                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    } catch (_: Exception) {}
+                                    } catch (_: Exception) {
+                                    }
                                 }
                             },
                             onDragEnd = {
                                 val targetIdx = dragHoverIndex
                                 isDraggingNav = false
                                 dragHoverIndex = null
-                                if (targetIdx != null && targetIdx in items.indices) {
-                                    val targetTab = items[targetIdx].first
-                                    if (targetTab == currentTab) {
-                                        onScrollToTop(targetTab)
+                                if (targetIdx != null && targetIdx in NavItems.indices) {
+                                    val targetTab = NavItems[targetIdx].tab
+                                    if (targetTab == currentTabState) {
+                                        onScrollToTopState(targetTab)
                                     } else {
-                                        onTabClick(targetTab)
+                                        onTabClickState(targetTab)
                                     }
                                 }
                             },
@@ -648,23 +693,22 @@ fun MainBottomNavigation(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                items.forEachIndexed { index, (tab, labelRes, iconRes) ->
+                NavItems.forEachIndexed { index, item ->
                     val isSelected = if (isDraggingNav && dragHoverIndex != null) {
                         dragHoverIndex == index
                     } else {
-                        currentTab == tab
+                        currentTab == item.tab
                     }
                     val isDragTarget = isDraggingNav && dragHoverIndex == index
-                    val showBackToTop = !isDraggingNav && currentTab == tab && isCurrentTabScrolled
                     val contentColor by animateColorAsState(
                         targetValue = if (isSelected) activeContentColor else inactiveContentColor,
-                        animationSpec = tween(durationMillis = 180),
+                        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
                         label = "tabColor"
                     )
                     val iconScale by animateFloatAsState(
                         targetValue = when {
-                            isDragTarget -> 1.12f
-                            isSelected -> 1.04f
+                            isDragTarget -> NAV_ICON_DRAG_SCALE
+                            isSelected -> NAV_ICON_SELECTED_SCALE
                             else -> 1f
                         },
                         animationSpec = spring(
@@ -675,27 +719,28 @@ fun MainBottomNavigation(
                     )
                     val iconOffsetY by animateDpAsState(
                         targetValue = when {
-                            isDragTarget -> (-2).dp
-                            isSelected -> (-1).dp
+                            isDragTarget -> dragIconOffset
+                            isSelected -> selectedIconOffset
                             else -> 0.dp
                         },
-                        animationSpec = tween(durationMillis = 180),
+                        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
                         label = "iconOffsetY"
                     )
+                    val label = stringResource(id = item.labelRes)
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .clip(RoundedCornerShape(26.dp))
+                            .clip(RoundedCornerShape(spacing.radiusExtraLarge))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) {
-                                if (currentTab == tab) {
-                                    onScrollToTop(tab)
+                                if (currentTab == item.tab) {
+                                    onScrollToTop(item.tab)
                                 } else {
-                                    onTabClick(tab)
+                                    onTabClick(item.tab)
                                 }
                             },
                         contentAlignment = Alignment.Center
@@ -705,19 +750,23 @@ fun MainBottomNavigation(
                             verticalArrangement = Arrangement.Center
                         ) {
                             Icon(
-                                imageVector = iconRes,
-                                contentDescription = stringResource(id = labelRes),
+                                imageVector = item.icon,
+                                contentDescription = label,
                                 tint = contentColor,
                                 modifier = Modifier
-                                    .offset(y = iconOffsetY)
-                                    .scale(iconScale)
-                                    .size(22.dp)
+                                    // Đọc animation trong graphicsLayer => chỉ vẽ lại, không recompose
+                                    .graphicsLayer {
+                                        translationY = iconOffsetY.toPx()
+                                        scaleX = iconScale
+                                        scaleY = iconScale
+                                    }
+                                    .size(iconSize)
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
+                            Spacer(modifier = Modifier.height(spacing.space2))
                             Text(
-                                text = stringResource(id = labelRes),
+                                text = label,
                                 color = contentColor,
-                                fontSize = 11.5.sp,
+                                style = MaterialTheme.typography.caption,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -729,4 +778,3 @@ fun MainBottomNavigation(
         }
     }
 }
-

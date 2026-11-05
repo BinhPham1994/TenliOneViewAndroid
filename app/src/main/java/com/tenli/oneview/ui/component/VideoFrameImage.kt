@@ -9,8 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -19,12 +19,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -42,11 +43,9 @@ object VideoFrameCache {
         }
     }
 
-    // Shared OkHttpClient for range requests instead of allocating per frame
-    val rangeHttpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder().build()
-    }
-    
+    // Reuse shared OkHttpClient connection pool & dispatcher instead of allocating a new one
+    val rangeHttpClient: OkHttpClient get() = LoginAuthClient.baseClient
+
     // Track URLs that are confirmed to be videos (failed as images)
     val knownVideoUrls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
 }
@@ -124,8 +123,7 @@ fun VideoFrameImage(
                     bitmap = extracted
                     VideoFrameCache.cache.put(effectiveKey, extracted)
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
                 hasError = true
             }
         }
@@ -154,18 +152,23 @@ private fun LoadingPlaceholder(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
     )
 }
 
 @Composable
 private fun ErrorPlaceholder(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center
+    ) {
         Icon(
             painter = painterResource(id = android.R.drawable.ic_menu_gallery),
             contentDescription = "Error",
-            tint = Color.LightGray,
-            modifier = Modifier.size(24.dp)
+            tint = MaterialTheme.appColors.textMuted,
+            modifier = Modifier.size(MaterialTheme.spacing.iconMedium)
         )
     }
 }

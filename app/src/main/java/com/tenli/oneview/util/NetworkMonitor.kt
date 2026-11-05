@@ -8,33 +8,45 @@ import android.net.NetworkRequest
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import java.util.concurrent.ConcurrentHashMap
 
 class NetworkMonitor(context: Context, private val dispatcherProvider: DispatcherProvider) {
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
+    /**
+     * true khi có ÍT NHẤT 1 mạng có Internet. Theo dõi tập hợp mạng để khi chuyển Wi-Fi ↔ 4G
+     * (mạng cũ onLost trong khi mạng mới vẫn còn) không bị báo "mất mạng" nhầm.
+     */
     val isOnline: Flow<Boolean> = callbackFlow {
+        val onlineNetworks = ConcurrentHashMap.newKeySet<Network>()
+
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                onlineNetworks.add(network)
                 trySend(true)
             }
 
             override fun onLost(network: Network) {
-                trySend(false)
+                onlineNetworks.remove(network)
+                trySend(onlineNetworks.isNotEmpty())
             }
 
             override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
-                val hasInternet = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                trySend(hasInternet)
+                if (networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    onlineNetworks.add(network)
+                } else {
+                    onlineNetworks.remove(network)
+                }
+                trySend(onlineNetworks.isNotEmpty())
             }
         }
 
         // Send initial state
-        val activeNetwork = connectivityManager.activeNetwork
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-        val hasInternet = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        trySend(hasInternet)
+        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
+        trySend(capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
 
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
@@ -44,5 +56,5 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
         awaitClose {
             connectivityManager.unregisterNetworkCallback(callback)
         }
-    }.distinctUntilChanged().flowOn(dispatcherProvider.io)
+    }.conflate().distinctUntilChanged().flowOn(dispatcherProvider.io)
 }

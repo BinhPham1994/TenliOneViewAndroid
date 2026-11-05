@@ -6,15 +6,16 @@ import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -25,6 +26,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import com.tenli.oneview.R
+import com.tenli.oneview.ui.theme.appColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
@@ -44,8 +46,9 @@ fun VideoPlayer(
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
-    val isDark = rememberIsDarkTheme()
-    val containerBg = if (isDark) com.tenli.oneview.ui.theme.SurfaceDark else com.tenli.oneview.ui.theme.SurfaceLight
+    val containerBg = MaterialTheme.appColors.surface
+    val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
+    val currentOnErrorChange by rememberUpdatedState(onErrorChange)
 
     val exoPlayer = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
@@ -61,15 +64,15 @@ fun VideoPlayer(
             addListener(object : Player.Listener {
                 override fun onRenderedFirstFrame() {
                     isVideoReady = true; isError = false
-                    onPlayingChange(true)
-                    onErrorChange(false)
+                    currentOnPlayingChange(true)
+                    currentOnErrorChange(false)
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                     android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
                     isError = true; isVideoReady = false
-                    onPlayingChange(false)
-                    onErrorChange(true)
+                    currentOnPlayingChange(false)
+                    currentOnErrorChange(true)
                 }
             })
         }

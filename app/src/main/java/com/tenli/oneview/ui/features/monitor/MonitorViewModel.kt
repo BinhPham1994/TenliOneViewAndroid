@@ -7,19 +7,22 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
-import com.tenli.oneview.data.network.api.VmsApi
-import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.ApiProvider
+import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraGroupModel
 import com.tenli.oneview.model.network.CameraInGroupModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.VMSServiceModel
-import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.util.toUserFriendlyMessage
-import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -27,9 +30,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.Normalizer
 
 sealed class CameraTreeNode {
@@ -38,15 +41,6 @@ sealed class CameraTreeNode {
     data class GroupNode(val group: CameraGroupModel, val children: MutableList<CameraTreeNode>, override val key: String) : CameraTreeNode()
     data class CameraLeaf(val camera: CameraModel, override val key: String) : CameraTreeNode()
 }
-
-data class VmsFilterChip(
-    val key: String,
-    val name: String,
-    val totalCount: Int,
-    val activeCount: Int,
-    val isActive: Boolean,
-    val isGroupFiltered: Boolean
-)
 
 data class GroupSheetRow(
     val key: String,
@@ -66,64 +60,199 @@ data class CameraCardItem(
 data class SelectedCamera(
     val camera: CameraModel,
     val streamUrl: String,
-    val videoCodecTag: String = "",
     val retryCount: Int = 0,
-    val streamType: String = "LIVE",
     val fallbackImageUrl: String = "",
-    val vmsName: String = "",
     val channel: Int = 1,
     val hasFallbackTried: Boolean = false,
     val snapshotRetried: Boolean = false
 )
 
-enum class MonitorTab {
-    EVENTS, PLAYBACK
-}
-
 data class MonitorUiState(
     val isLoading: Boolean = false,
-    val treeData: List<CameraTreeNode> = emptyList(),
     val gridSize: Int = 1, // 1 (1x1) or 4 (2x2)
     val activeSlotIndex: Int = 0,
-    val blinkStates: List<Boolean> = List(4) { false },
+    val blinkStates: List<Boolean> = List(MonitorViewModel.SLOT_COUNT) { false },
     val searchQuery: String = "",
-    val selectedCameras: List<SelectedCamera?> = List(4) { null },
+    val selectedCameras: List<SelectedCamera?> = List(MonitorViewModel.SLOT_COUNT) { null },
     val expandedNodes: Set<String> = emptySet(),
-    val activeVmsKey: String = "",
-    val sheetVmsKey: String = "",
-    val selectedFilterNodeKey: String = "all",
+    val selectedFilterNodeKey: String = MonitorViewModel.FILTER_ALL,
     val showGroupFilterSheet: Boolean = false,
     val currentCameraPage: Int = 1,
     val cameraSnapshots: Map<Int, String?> = emptyMap(),
     val error: String? = null,
-    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
-    val selectedTab: MonitorTab = MonitorTab.EVENTS,
-    val selectedTimeFilter: TimeFilter = TimeFilter.TODAY,
-    val events: List<com.tenli.oneview.model.network.EventData> = emptyList(),
-    val playbacks: List<com.tenli.oneview.model.network.VideoModel> = emptyList(),
-    val isPaginating: Boolean = false,
-    val hasMoreEvents: Boolean = true,
-    val hasMorePlaybacks: Boolean = true,
-    val cameraStatusMap: Map<String, String> = emptyMap(),
-    val recordStatusMap: Map<String, String> = emptyMap()
+
+    // ---- Dữ liệu suy ra từ cây camera – tính sẵn trong ViewModel, UI chỉ việc đọc ----
+    val hasAvailableCameras: Boolean = false,
+    val totalAllCamerasCount: Int = 0,
+    val groupTreeRows: List<GroupSheetRow> = emptyList(),
+    val pagedCameraItems: List<CameraCardItem> = emptyList(),
+    val totalCameraPages: Int = 1
 )
 
-@OptIn(FlowPreview::class)
+/**
+ * Chỉ mục tính sẵn từ cây camera. Dựng 1 lần trên [Dispatchers.Default] mỗi khi cây thay đổi,
+ * nhờ đó mọi thao tác lọc / đếm / phân trang / tìm kiếm sau đó chỉ là tra cứu O(1) hoặc duyệt O(n) rất rẻ
+ * (trước đây mỗi lần đổi trang/gõ phím lại duyệt toàn bộ cây nhiều lần trên Main thread).
+ */
+private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
+    private val nodeByKey = HashMap<String, CameraTreeNode>()
+    private val camerasByNodeKey = HashMap<String, List<CameraCardItem>>()
+    private val normalizedNameById = HashMap<Int, String>()
+    private val ipTextById = HashMap<Int, String>()
+
+    /** Các VMS có ít nhất 1 camera */
+    val vmsNodes: List<CameraTreeNode.VMSNode>
+
+    /** Toàn bộ camera (không trùng id) theo thứ tự duyệt cây */
+    val allCameras: List<CameraCardItem>
+    val totalCameraCount: Int
+    private val cameraById: Map<Int, CameraModel>
+
+    init {
+        tree.forEach { collect(it) }
+        vmsNodes = tree.filterIsInstance<CameraTreeNode.VMSNode>().filter { count(it) > 0 }
+        allCameras = mergeUnique(tree.map { camerasOf(it) })
+        totalCameraCount = tree.sumOf { count(it) }
+        cameraById = allCameras.associate { it.camera.id to it.camera }
+        for (item in allCameras) {
+            val cam = item.camera
+            normalizedNameById[cam.id] = MonitorViewModel.normalizeVietnameseText(cam.name)
+            ipTextById[cam.id] = MonitorViewModel.getCameraIpText(cam).lowercase()
+        }
+    }
+
+    /** Duyệt hậu thứ tự: danh sách camera của node = hợp (giữ thứ tự, không trùng id) của các node con. */
+    private fun collect(node: CameraTreeNode): List<CameraCardItem> {
+        // Giữ ngữ nghĩa "node đầu tiên khớp key theo thứ tự duyệt" như hàm tìm kiếm cũ
+        nodeByKey.putIfAbsent(node.key, node)
+        val items = when (node) {
+            is CameraTreeNode.CameraLeaf -> {
+                val cam = node.camera
+                if (cam.id != 0) listOf(CameraCardItem(key = "cam-${cam.id}", camera = cam)) else emptyList()
+            }
+            is CameraTreeNode.GroupNode -> mergeUnique(node.children.map { collect(it) })
+            is CameraTreeNode.VMSNode -> mergeUnique(node.children.map { collect(it) })
+        }
+        camerasByNodeKey.putIfAbsent(node.key, items)
+        return items
+    }
+
+    private fun mergeUnique(lists: List<List<CameraCardItem>>): List<CameraCardItem> {
+        if (lists.size == 1) return lists[0]
+        val map = LinkedHashMap<Int, CameraCardItem>()
+        for (list in lists) for (item in list) map.putIfAbsent(item.camera.id, item)
+        return map.values.toList()
+    }
+
+    private fun camerasOf(node: CameraTreeNode): List<CameraCardItem> = camerasByNodeKey[node.key].orEmpty()
+
+    fun count(node: CameraTreeNode): Int = camerasOf(node).size
+
+    fun hasNode(key: String): Boolean = nodeByKey.containsKey(key)
+
+    fun findCamera(id: Int): CameraModel? = cameraById[id]
+
+    fun camerasForFilter(filterKey: String): List<CameraCardItem> {
+        if (filterKey == MonitorViewModel.FILTER_ALL) return allCameras
+        val node = nodeByKey[filterKey] ?: return allCameras
+        return camerasOf(node)
+    }
+
+    fun matchesSearch(cam: CameraModel, normalizedQuery: String, rawLowerQuery: String): Boolean {
+        if (normalizedNameById[cam.id].orEmpty().contains(normalizedQuery)) return true
+        val ip = ipTextById[cam.id].orEmpty()
+        return ip.isNotEmpty() && ip.contains(rawLowerQuery)
+    }
+
+    fun groupRows(expandedNodes: Set<String>): List<GroupSheetRow> {
+        if (vmsNodes.isEmpty()) return emptyList()
+        val rows = mutableListOf<GroupSheetRow>()
+
+        fun subGroupsOf(children: List<CameraTreeNode>) =
+            children.filter { it is CameraTreeNode.GroupNode && count(it) > 0 }
+
+        fun walkGroups(nodes: List<CameraTreeNode>, depth: Int) {
+            for (node in nodes) {
+                if (node !is CameraTreeNode.GroupNode) continue
+                val count = count(node)
+                if (count <= 0) continue
+                val subGroups = subGroupsOf(node.children)
+                val hasSubGroups = subGroups.isNotEmpty()
+                val isExpanded = expandedNodes.contains(node.key)
+                rows.add(
+                    GroupSheetRow(
+                        key = node.key,
+                        title = node.group.name,
+                        depth = depth,
+                        hasSubGroups = hasSubGroups,
+                        isExpanded = isExpanded,
+                        count = count,
+                        isVmsNode = false
+                    )
+                )
+                if (hasSubGroups && isExpanded) walkGroups(subGroups, depth + 1)
+            }
+        }
+
+        for (vmsNode in vmsNodes) {
+            val subGroups = subGroupsOf(vmsNode.children)
+            val hasSubGroups = subGroups.isNotEmpty()
+            val isExpanded = expandedNodes.contains(vmsNode.key)
+            rows.add(
+                GroupSheetRow(
+                    key = vmsNode.key,
+                    title = vmsNode.vms.name.ifBlank { "VMS" },
+                    depth = 0,
+                    hasSubGroups = hasSubGroups,
+                    isExpanded = isExpanded,
+                    count = count(vmsNode),
+                    isVmsNode = true
+                )
+            )
+            if (hasSubGroups && isExpanded) walkGroups(subGroups, 1)
+        }
+        return rows
+    }
+}
+
 class MonitorViewModel(application: Application) : AndroidViewModel(application) {
-    private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
-    private val eventApi = LoginAuthClient.create(com.tenli.oneview.data.network.api.EventApi::class.java)
+    private val app: Application get() = getApplication()
+    private val vmsApi get() = ApiProvider.vmsApi
+    private val eventApi get() = ApiProvider.eventApi
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
 
-    private val streamJobs = arrayOfNulls<Job>(4)
-    private val blinkJobs = arrayOfNulls<Job>(4)
+    /** Chỉ được đọc/ghi trên Main thread (cùng luồng với _uiState.update) */
+    private var treeIndex = CameraTreeIndex(emptyList())
+
+    /** AI services chỉ dùng để lưu kèm cache Monitor (các màn hình khác đọc lại), UI màn hình này không hiển thị */
+    private var aiServices: List<AIServiceModel> = emptyList()
+
+    private val streamJobs = arrayOfNulls<Job>(SLOT_COUNT)
+    private val blinkJobs = arrayOfNulls<Job>(SLOT_COUNT)
+    private var snapshotLookupJob: Job? = null
     private var isMonitorTabActive: Boolean = false
     private val pendingSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
     private val retriedCardSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
     companion object {
         const val CAMERA_PAGE_SIZE = 10
+        const val SLOT_COUNT = 4
+        const val FILTER_ALL = "all"
+
+        private const val PREF_EXPANDED_NODES = "saved_expanded_nodes"
+        private const val PREF_GRID_SIZE = "saved_monitor_grid_size"
+        private const val PREF_GRID_CAMERA_IDS = "saved_monitor_grid_camera_ids"
+        private const val PREF_CAMERA_ID = "saved_monitor_camera_id"
+
+        /** Đồng bộ LiveVideoView.vue: poll `LiveStream` mỗi 2000ms, tối đa 10 lần trên mobile */
+        private const val LIVE_POLL_MAX_ATTEMPTS = 10
+        private const val LIVE_POLL_INTERVAL_MS = 2000L
+        private const val BLINK_DURATION_MS = 1000L
+        private const val RETRY_MAX_DELAY_MS = 8000L
+        private const val NO_IMAGE = "NO_IMAGE"
+
         private val RTSP_HOST_REGEX = Regex("(?i)^rtsp://(?:[^@/\\s]+@)?([^:/?\\s]+)")
         private val DIACRITICS_REGEX = Regex("\\p{InCombiningDiacriticalMarks}+")
 
@@ -146,199 +275,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         fun getCameraIpText(cam: CameraModel): String {
             val mainHost = extractHostFromRtsp(cam.main)
             if (mainHost.isNotEmpty()) return mainHost
-            val subHost = extractHostFromRtsp(cam.sub)
-            if (subHost.isNotEmpty()) return subHost
-            return ""
-        }
-
-        fun doesCameraMatchSearch(cam: CameraModel, rawQuery: String): Boolean {
-            val trimmed = rawQuery.trim()
-            if (trimmed.isEmpty()) return true
-            val normalizedQuery = normalizeVietnameseText(trimmed)
-            val rawLower = trimmed.lowercase()
-
-            val normalizedName = normalizeVietnameseText(cam.name)
-            if (normalizedName.contains(normalizedQuery)) return true
-
-            val ipText = getCameraIpText(cam)
-            if (ipText.isNotEmpty() && ipText.lowercase().contains(rawLower)) return true
-
-            return false
-        }
-
-        fun collectUniqueCamerasFromNode(node: CameraTreeNode?): List<CameraCardItem> {
-            if (node == null) return emptyList()
-            val map = linkedMapOf<Int, CameraCardItem>()
-            fun walk(n: CameraTreeNode) {
-                when (n) {
-                    is CameraTreeNode.CameraLeaf -> {
-                        val cam = n.camera
-                        if (cam.id != 0 && !map.containsKey(cam.id)) {
-                            map[cam.id] = CameraCardItem(key = "cam-${cam.id}", camera = cam)
-                        }
-                    }
-                    is CameraTreeNode.GroupNode -> {
-                        for (child in n.children) walk(child)
-                    }
-                    is CameraTreeNode.VMSNode -> {
-                        for (child in n.children) walk(child)
-                    }
-                }
-            }
-            walk(node)
-            return map.values.toList()
-        }
-
-        fun countNodeCameras(node: CameraTreeNode?): Int {
-            return collectUniqueCamerasFromNode(node).size
-        }
-
-        fun findTreeNodeByKey(nodes: List<CameraTreeNode>, targetKey: String): CameraTreeNode? {
-            for (node in nodes) {
-                if (node.key == targetKey) return node
-                when (node) {
-                    is CameraTreeNode.VMSNode -> {
-                        val found = findTreeNodeByKey(node.children, targetKey)
-                        if (found != null) return found
-                    }
-                    is CameraTreeNode.GroupNode -> {
-                        val found = findTreeNodeByKey(node.children, targetKey)
-                        if (found != null) return found
-                    }
-                    is CameraTreeNode.CameraLeaf -> {}
-                }
-            }
-            return null
-        }
-
-        fun isDescendantOrSelfKey(node: CameraTreeNode?, targetKey: String): Boolean {
-            if (node == null || targetKey.isEmpty()) return false
-            if (node.key == targetKey) return true
-            return when (node) {
-                is CameraTreeNode.VMSNode -> node.children.any { isDescendantOrSelfKey(it, targetKey) }
-                is CameraTreeNode.GroupNode -> node.children.any { isDescendantOrSelfKey(it, targetKey) }
-                is CameraTreeNode.CameraLeaf -> false
-            }
-        }
-
-        fun computeVmsFilterChips(state: MonitorUiState): List<VmsFilterChip> {
-            val result = mutableListOf<VmsFilterChip>()
-            for (node in state.treeData) {
-                if (node is CameraTreeNode.VMSNode) {
-                    val totalCount = countNodeCameras(node)
-                    if (totalCount <= 0) continue
-
-                    val isFilterInThisVms = state.selectedFilterNodeKey != "all" &&
-                        isDescendantOrSelfKey(node, state.selectedFilterNodeKey)
-                    val isSubGroupFiltered = isFilterInThisVms && state.selectedFilterNodeKey != node.key
-
-                    var activeCount = totalCount
-                    if (isSubGroupFiltered) {
-                        val subNode = findTreeNodeByKey(node.children, state.selectedFilterNodeKey)
-                        if (subNode != null) {
-                            activeCount = countNodeCameras(subNode)
-                        }
-                    }
-
-                    result.add(
-                        VmsFilterChip(
-                            key = node.key,
-                            name = node.vms.name.ifBlank { "VMS" },
-                            totalCount = totalCount,
-                            activeCount = activeCount,
-                            isActive = state.activeVmsKey == node.key,
-                            isGroupFiltered = isSubGroupFiltered
-                        )
-                    )
-                }
-            }
-            return result
-        }
-
-        fun computeGroupTreeRows(state: MonitorUiState): List<GroupSheetRow> {
-            val vmsNodes = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-                .filter { countNodeCameras(it) > 0 }
-            if (vmsNodes.isEmpty()) return emptyList()
-
-            val rows = mutableListOf<GroupSheetRow>()
-
-            fun walkGroups(nodes: List<CameraTreeNode>, depth: Int) {
-                for (node in nodes) {
-                    if (node is CameraTreeNode.GroupNode) {
-                        val count = countNodeCameras(node)
-                        if (count <= 0) continue
-                        val subGroups = node.children.filter {
-                            it is CameraTreeNode.GroupNode && countNodeCameras(it) > 0
-                        }
-                        val hasSubGroups = subGroups.isNotEmpty()
-                        val isExpanded = state.expandedNodes.contains(node.key)
-                        rows.add(
-                            GroupSheetRow(
-                                key = node.key,
-                                title = node.group.name,
-                                depth = depth,
-                                hasSubGroups = hasSubGroups,
-                                isExpanded = isExpanded,
-                                count = count,
-                                isVmsNode = false
-                            )
-                        )
-                        if (hasSubGroups && isExpanded) {
-                            walkGroups(subGroups, depth + 1)
-                        }
-                    }
-                }
-            }
-
-            for (vmsNode in vmsNodes) {
-                val vmsCount = countNodeCameras(vmsNode)
-                if (vmsCount <= 0) continue
-                val subGroups = vmsNode.children.filter {
-                    it is CameraTreeNode.GroupNode && countNodeCameras(it) > 0
-                }
-                val hasSubGroups = subGroups.isNotEmpty()
-                val isExpanded = state.expandedNodes.contains(vmsNode.key)
-                rows.add(
-                    GroupSheetRow(
-                        key = vmsNode.key,
-                        title = vmsNode.vms.name.ifBlank { "VMS" },
-                        depth = 0,
-                        hasSubGroups = hasSubGroups,
-                        isExpanded = isExpanded,
-                        count = vmsCount,
-                        isVmsNode = true
-                    )
-                )
-                if (hasSubGroups && isExpanded) {
-                    walkGroups(subGroups, 1)
-                }
-            }
-            return rows
-        }
-
-        fun computeDisplayedCameraItems(state: MonitorUiState): List<CameraCardItem> {
-            val targetNode: CameraTreeNode? = if (state.selectedFilterNodeKey != "all") {
-                findTreeNodeByKey(state.treeData, state.selectedFilterNodeKey)
-            } else {
-                null
-            }
-
-            val baseCameras = if (targetNode != null) {
-                collectUniqueCamerasFromNode(targetNode)
-            } else {
-                val map = linkedMapOf<Int, CameraCardItem>()
-                for (vmsNode in state.treeData) {
-                    for (item in collectUniqueCamerasFromNode(vmsNode)) {
-                        if (!map.containsKey(item.camera.id)) {
-                            map[item.camera.id] = item
-                        }
-                    }
-                }
-                map.values.toList()
-            }
-
-            if (state.searchQuery.isBlank()) return baseCameras
-            return baseCameras.filter { doesCameraMatchSearch(it.camera, state.searchQuery) }
+            return extractHostFromRtsp(cam.sub)
         }
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
@@ -347,11 +284,140 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 MonitorViewModel(application)
             }
         }
+
+        /** Đồng bộ LiveVideoView.vue (line 969): trên mobile ưu tiên luồng phụ (channel = 1, độ phân giải thấp) nếu có */
+        private fun preferredChannel(camera: CameraModel): Int = if (camera.sub.isNotBlank()) 1 else 0
+
+        private fun List<SelectedCamera?>.toPaddedMutableList(): MutableList<SelectedCamera?> =
+            toMutableList().also { list -> while (list.size < SLOT_COUNT) list.add(null) }
+
+        private fun buildTree(
+            vmsList: List<VMSServiceModel>,
+            groupList: List<CameraGroupModel>,
+            cameraList: List<CameraModel>,
+            cameraInGroups: List<CameraInGroupModel>
+        ): List<CameraTreeNode> {
+            val treeData = mutableListOf<CameraTreeNode>()
+            val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
+
+            val fullVmsList = mutableListOf(
+                VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")
+            )
+            fullVmsList.addAll(vmsList)
+
+            val camerasByVms = cameraList.groupBy { it.vmsId }
+            val groupsByVms = groupList.groupBy { it.vmsId }
+            val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
+            val cameraById = cameraList.associateBy { it.id }
+
+            for (item in cameraInGroups) {
+                val cam = cameraById[item.cameraId] ?: continue
+                cameraInGroupByVms.getOrPut(cam.vmsId) { mutableListOf() }.add(item)
+            }
+
+            for (service in fullVmsList) {
+                val serviceId = service.id
+
+                val groups = groupsByVms[serviceId] ?: emptyList()
+                val cameras = camerasByVms[serviceId] ?: emptyList()
+                val camGroups = cameraInGroupByVms[serviceId] ?: emptyList()
+
+                val vmsNode = CameraTreeNode.VMSNode(service, mutableListOf(), "vms-$serviceId")
+                treeData.add(vmsNode)
+
+                for (group in groups) {
+                    if (group.parentGroupId == 0) continue
+
+                    val groupNodeKey = "group-$serviceId-${group.id}"
+                    val groupNode = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
+                    groupMapData[groupNodeKey] = groupNode
+
+                    val parentNode = groupMapData["group-$serviceId-${group.parentGroupId}"]
+                    if (parentNode != null) {
+                        parentNode.children.add(groupNode)
+                    } else {
+                        vmsNode.children.add(groupNode)
+                    }
+                }
+
+                val groupedCameraIds = mutableSetOf<Int>()
+                fun camKey(cam: CameraModel) =
+                    if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
+
+                for (item in camGroups) {
+                    val cam = cameraById[item.cameraId] ?: continue
+                    groupedCameraIds.add(cam.id)
+                    val groupNode = groupMapData["group-$serviceId-${item.groupId}"] ?: continue
+                    groupNode.children.add(CameraTreeNode.CameraLeaf(cam, camKey(cam)))
+                }
+
+                for (cam in cameras) {
+                    if (groupedCameraIds.contains(cam.id)) continue
+                    vmsNode.children.add(CameraTreeNode.CameraLeaf(cam, camKey(cam)))
+                }
+
+                sortNodeChildren(vmsNode.children)
+            }
+
+            pruneEmptyNodes(treeData)
+            return treeData.toList()
+        }
+
+        private fun pruneEmptyNodes(nodes: MutableList<CameraTreeNode>) {
+            val it = nodes.iterator()
+            while (it.hasNext()) {
+                val children = when (val node = it.next()) {
+                    is CameraTreeNode.GroupNode -> node.children
+                    is CameraTreeNode.VMSNode -> node.children
+                    is CameraTreeNode.CameraLeaf -> continue
+                }
+                pruneEmptyNodes(children)
+                if (children.isEmpty()) it.remove()
+            }
+        }
+
+        /** Nhóm con đứng trước, camera lẻ đứng sau (sort ổn định – giữ thứ tự gốc trong cùng loại) */
+        private fun sortNodeChildren(children: MutableList<CameraTreeNode>) {
+            if (children.size <= 1) return
+            children.sortBy { if (it is CameraTreeNode.CameraLeaf) 1 else 0 }
+            for (child in children) {
+                when (child) {
+                    is CameraTreeNode.GroupNode -> sortNodeChildren(child.children)
+                    is CameraTreeNode.VMSNode -> sortNodeChildren(child.children)
+                    is CameraTreeNode.CameraLeaf -> Unit
+                }
+            }
+        }
+
+        private fun findFirstCamera(nodes: List<CameraTreeNode>): CameraModel? {
+            for (node in nodes) {
+                val found = when (node) {
+                    is CameraTreeNode.CameraLeaf -> node.camera
+                    is CameraTreeNode.GroupNode -> findFirstCamera(node.children)
+                    is CameraTreeNode.VMSNode -> findFirstCamera(node.children)
+                }
+                if (found != null) return found
+            }
+            return null
+        }
     }
 
+    init {
+        val prefs = GlobalData.preferences
+        val savedNodes = prefs.getStringSet(PREF_EXPANDED_NODES, emptySet()) ?: emptySet()
+        val savedGridSize = if (prefs.getInt(PREF_GRID_SIZE, 1) == 4) 4 else 1
+        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = savedGridSize) }
+
+        loadData()
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // URL helpers
+    // ---------------------------------------------------------------------------------------------
+
     private fun getBaseDomain(): String {
-        var base = com.tenli.oneview.data.local.UserSession.domain
-            .ifEmpty { com.tenli.oneview.BuildConfig.DOMAIN_CLOUD }
+        var base = UserSession.domain
+            .ifEmpty { BuildConfig.DOMAIN_CLOUD }
             .trim()
             .trimEnd('/')
         if (base.endsWith("/api/v1")) {
@@ -362,7 +428,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private fun resolveFullMediaUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
-        if (trimmed.isEmpty() || trimmed == "NO_IMAGE") return ""
+        if (trimmed.isEmpty() || trimmed == NO_IMAGE) return ""
         if (trimmed.startsWith("http://") ||
             trimmed.startsWith("https://") ||
             trimmed.startsWith("file://") ||
@@ -371,11 +437,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             return trimmed
         }
         val base = getBaseDomain()
-        return if (trimmed.startsWith("/")) {
-            "$base$trimmed"
-        } else {
-            "$base/$trimmed"
-        }
+        return if (trimmed.startsWith("/")) "$base$trimmed" else "$base/$trimmed"
     }
 
     private fun resolveWebSocketUrl(rawLink: String): String {
@@ -396,63 +458,120 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         return resolved
     }
 
-    init {
-        val prefs = GlobalData.preferences
-        val savedNodes = prefs.getStringSet("saved_expanded_nodes", emptySet()) ?: emptySet()
-        val savedGridSize = prefs.getInt("saved_monitor_grid_size", 1).let { if (it == 4) 4 else 1 }
-        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = savedGridSize) }
+    /** Đọc link snapshot đã cache (có truy cập đĩa) trên IO. Trả về null nếu chưa có cache. */
+    private suspend fun readCachedSnapshot(camera: CameraModel): String? = withContext(Dispatchers.IO) {
+        MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)?.let(::resolveFullMediaUrl)
+    }
 
-        loadData()
+    // ---------------------------------------------------------------------------------------------
+    // State helpers
+    // ---------------------------------------------------------------------------------------------
 
-        viewModelScope.launch {
-            val app = application as com.tenli.oneview.TenliApp
-            val wsManager = app.container.webSocketManager
-            wsManager.cameraStatusMap
-                .debounce(800L)
-                .collect { statusMap ->
-                    _uiState.update { it.copy(cameraStatusMap = statusMap) }
-                }
+    /**
+     * Chuẩn hoá bộ lọc/trang và tính lại dữ liệu suy ra (danh sách camera theo trang, cây nhóm...).
+     * Chỉ gọi khi cây / bộ lọc / tìm kiếm / trang / nhóm mở rộng thay đổi. Giữ nguyên instance list cũ nếu nội dung
+     * không đổi để Compose bỏ qua recomposition.
+     */
+    private fun MonitorUiState.withDerivedData(): MonitorUiState {
+        val index = treeIndex
+        val filterKey = if (selectedFilterNodeKey != FILTER_ALL &&
+            (index.vmsNodes.isEmpty() || !index.hasNode(selectedFilterNodeKey))
+        ) FILTER_ALL else selectedFilterNodeKey
+
+        val baseCameras = index.camerasForFilter(filterKey)
+        val query = searchQuery.trim()
+        val displayed = if (query.isEmpty()) {
+            baseCameras
+        } else {
+            val normalizedQuery = normalizeVietnameseText(query)
+            val rawLower = query.lowercase()
+            baseCameras.filter { index.matchesSearch(it.camera, normalizedQuery, rawLower) }
         }
-        viewModelScope.launch {
-            val app = application as com.tenli.oneview.TenliApp
-            val wsManager = app.container.webSocketManager
-            wsManager.recordStatusMap
-                .debounce(800L)
-                .collect { recMap ->
-                    _uiState.update { it.copy(recordStatusMap = recMap) }
-                }
+
+        val totalPages = maxOf(1, (displayed.size + CAMERA_PAGE_SIZE - 1) / CAMERA_PAGE_SIZE)
+        val page = currentCameraPage.coerceIn(1, totalPages)
+        val start = (page - 1) * CAMERA_PAGE_SIZE
+        val paged = displayed.subList(start.coerceAtMost(displayed.size), (start + CAMERA_PAGE_SIZE).coerceAtMost(displayed.size)).toList()
+        val rows = index.groupRows(expandedNodes)
+
+        return copy(
+            selectedFilterNodeKey = filterKey,
+            currentCameraPage = page,
+            hasAvailableCameras = index.vmsNodes.isNotEmpty(),
+            totalAllCamerasCount = index.totalCameraCount,
+            groupTreeRows = if (rows == groupTreeRows) groupTreeRows else rows,
+            pagedCameraItems = if (paged == pagedCameraItems) pagedCameraItems else paged,
+            totalCameraPages = totalPages
+        )
+    }
+
+    /** Cập nhật 1 ô đang phát nếu ô đó vẫn đang giữ đúng camera [cameraId]. */
+    private inline fun updateSlot(
+        slotIndex: Int,
+        cameraId: Int,
+        crossinline transform: (SelectedCamera) -> SelectedCamera
+    ) {
+        _uiState.update { state ->
+            val current = state.selectedCameras.getOrNull(slotIndex)
+            if (current == null || current.camera.id != cameraId) return@update state
+            val next = transform(current)
+            if (next == current) {
+                state
+            } else {
+                state.copy(selectedCameras = state.selectedCameras.toPaddedMutableList().also { it[slotIndex] = next })
+            }
         }
     }
+
+    private fun cancelStreamJob(slotIndex: Int) {
+        streamJobs[slotIndex]?.cancel()
+        streamJobs[slotIndex] = null
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Tab / grid / selection
+    // ---------------------------------------------------------------------------------------------
 
     fun setMonitorTabActive(active: Boolean) {
         if (isMonitorTabActive == active) return
         isMonitorTabActive = active
         if (!active) {
-            for (i in 0..3) {
-                streamJobs[i]?.cancel()
-                streamJobs[i] = null
-            }
+            // Dừng mọi vòng poll LiveStream / retry khi màn hình không hiển thị hoặc app vào nền
+            for (i in 0 until SLOT_COUNT) cancelStreamJob(i)
+            snapshotLookupJob?.cancel()
         }
     }
 
     fun setGridSize(size: Int) {
         val normalized = if (size == 4) 4 else 1
         if (_uiState.value.gridSize == normalized) return
-        GlobalData.preferences.edit().putInt("saved_monitor_grid_size", normalized).apply()
+        GlobalData.preferences.edit().putInt(PREF_GRID_SIZE, normalized).apply()
+
+        if (normalized == 1) {
+            // Các ô 2..4 không còn hiển thị: dừng poll và bỏ link live cũ (link WS dùng 1 lần) để khi quay lại 2x2 lấy link mới
+            for (idx in 1 until SLOT_COUNT) cancelStreamJob(idx)
+        }
 
         _uiState.update { state ->
             val newActiveSlot = if (normalized == 1) {
                 0
             } else {
-                val firstEmpty = (0 until 4).firstOrNull { state.selectedCameras.getOrNull(it) == null }
-                firstEmpty ?: 0
+                (0 until SLOT_COUNT).firstOrNull { state.selectedCameras.getOrNull(it) == null } ?: 0
             }
-            state.copy(gridSize = normalized, activeSlotIndex = newActiveSlot)
+            val cameras = if (normalized == 1) {
+                state.selectedCameras.mapIndexed { idx, cam ->
+                    if (idx == 0 || cam == null) cam
+                    else cam.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
+                }
+            } else {
+                state.selectedCameras
+            }
+            state.copy(gridSize = normalized, activeSlotIndex = newActiveSlot, selectedCameras = cameras)
         }
 
         if (normalized == 4) {
             val currentCameras = _uiState.value.selectedCameras
-            for (idx in 1..3) {
+            for (idx in 1 until SLOT_COUNT) {
                 val selected = currentCameras.getOrNull(idx)
                 if (selected != null && selected.streamUrl.isEmpty()) {
                     ensureCameraSnapshotUrl(selected.camera, idx, force = false)
@@ -463,61 +582,34 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setSearchQuery(query: String) {
-        _uiState.update { state ->
-            val nextState = state.copy(searchQuery = query, currentCameraPage = 1)
-            clampAndNormalizeState(nextState)
-        }
+        _uiState.update { it.copy(searchQuery = query, currentCameraPage = 1).withDerivedData() }
         loadVisibleCameraSnapshots()
     }
 
     fun handleCellTap(index: Int) {
-        if (index !in 0..3) return
+        if (index !in 0 until SLOT_COUNT) return
         if (_uiState.value.gridSize == 4) {
             _uiState.update { it.copy(activeSlotIndex = index) }
         }
     }
 
-    fun triggerBlink(index: Int) {
-        if (index !in 0..3) return
-        blinkJobs[index]?.cancel()
+    private fun setBlink(index: Int, value: Boolean) {
         _uiState.update { state ->
             val updated = state.blinkStates.toMutableList()
-            while (updated.size < 4) updated.add(false)
-            updated[index] = true
+            while (updated.size < SLOT_COUNT) updated.add(false)
+            updated[index] = value
             state.copy(blinkStates = updated)
-        }
-        blinkJobs[index] = viewModelScope.launch {
-            delay(1000L)
-            _uiState.update { state ->
-                val updated = state.blinkStates.toMutableList()
-                while (updated.size < 4) updated.add(false)
-                updated[index] = false
-                state.copy(blinkStates = updated)
-            }
         }
     }
 
-    fun handleVmsChipClick(vmsKey: String) {
-        _uiState.update { state ->
-            val vmsNode = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-                .firstOrNull { it.key == vmsKey }
-            val isCurrentFilterInVms = state.selectedFilterNodeKey != "all" &&
-                isDescendantOrSelfKey(vmsNode, state.selectedFilterNodeKey)
-
-            val nextFilterKey = if (!isCurrentFilterInVms) vmsKey else state.selectedFilterNodeKey
-            val nextPage = if (!isCurrentFilterInVms) 1 else state.currentCameraPage
-
-            clampAndNormalizeState(
-                state.copy(
-                    activeVmsKey = vmsKey,
-                    sheetVmsKey = vmsKey,
-                    selectedFilterNodeKey = nextFilterKey,
-                    currentCameraPage = nextPage,
-                    showGroupFilterSheet = true
-                )
-            )
+    fun triggerBlink(index: Int) {
+        if (index !in 0 until SLOT_COUNT) return
+        blinkJobs[index]?.cancel()
+        setBlink(index, true)
+        blinkJobs[index] = viewModelScope.launch {
+            delay(BLINK_DURATION_MS)
+            setBlink(index, false)
         }
-        loadVisibleCameraSnapshots()
     }
 
     fun openGroupFilterSheet() {
@@ -530,121 +622,72 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun handleGroupRowClick(groupKey: String) {
         _uiState.update { state ->
-            val nextFilterKey = if (groupKey == "all" || state.selectedFilterNodeKey == groupKey) {
-                "all"
+            val nextFilterKey = if (groupKey == FILTER_ALL || state.selectedFilterNodeKey == groupKey) {
+                FILTER_ALL
             } else {
                 groupKey
             }
-            val matchedVms = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-                .firstOrNull { isDescendantOrSelfKey(it, nextFilterKey) }
-            val nextActiveVms = matchedVms?.key ?: state.activeVmsKey
-            clampAndNormalizeState(
-                state.copy(
-                    selectedFilterNodeKey = nextFilterKey,
-                    activeVmsKey = nextActiveVms,
-                    currentCameraPage = 1,
-                    showGroupFilterSheet = false
-                )
-            )
+            state.copy(
+                selectedFilterNodeKey = nextFilterKey,
+                currentCameraPage = 1,
+                showGroupFilterSheet = false
+            ).withDerivedData()
         }
         loadVisibleCameraSnapshots()
     }
 
     fun setCameraPage(page: Int) {
-        _uiState.update { state ->
-            val allItems = computeDisplayedCameraItems(state)
-            val totalPages = maxOf(1, (allItems.size + CAMERA_PAGE_SIZE - 1) / CAMERA_PAGE_SIZE)
-            val clamped = page.coerceIn(1, totalPages)
-            state.copy(currentCameraPage = clamped)
-        }
+        _uiState.update { it.copy(currentCameraPage = page).withDerivedData() }
         loadVisibleCameraSnapshots()
     }
 
     fun prevCameraPage() {
         val cur = _uiState.value.currentCameraPage
-        if (cur > 1) {
-            setCameraPage(cur - 1)
-        }
+        if (cur > 1) setCameraPage(cur - 1)
     }
 
     fun nextCameraPage() {
         val state = _uiState.value
-        val allItems = computeDisplayedCameraItems(state)
-        val totalPages = maxOf(1, (allItems.size + CAMERA_PAGE_SIZE - 1) / CAMERA_PAGE_SIZE)
-        if (state.currentCameraPage < totalPages) {
-            setCameraPage(state.currentCameraPage + 1)
-        }
+        if (state.currentCameraPage < state.totalCameraPages) setCameraPage(state.currentCameraPage + 1)
     }
 
-    private fun clampAndNormalizeState(state: MonitorUiState): MonitorUiState {
-        val vmsNodes = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-            .filter { countNodeCameras(it) > 0 }
-
-        var activeVms = state.activeVmsKey
-        var sheetVms = state.sheetVmsKey
-        var selectedFilter = state.selectedFilterNodeKey
-
-        if (vmsNodes.isEmpty()) {
-            activeVms = ""
-            sheetVms = ""
-            selectedFilter = "all"
-        } else {
-            val firstKey = vmsNodes.first().key
-            if (activeVms.isEmpty() || vmsNodes.none { it.key == activeVms }) {
-                activeVms = firstKey
-            }
-            if (sheetVms.isEmpty() || vmsNodes.none { it.key == sheetVms }) {
-                sheetVms = activeVms.ifEmpty { firstKey }
-            }
-            if (selectedFilter != "all" && findTreeNodeByKey(state.treeData, selectedFilter) == null) {
-                selectedFilter = "all"
-            }
-        }
-
-        val normalized = state.copy(
-            activeVmsKey = activeVms,
-            sheetVmsKey = sheetVms,
-            selectedFilterNodeKey = selectedFilter
-        )
-        val allItems = computeDisplayedCameraItems(normalized)
-        val totalPages = maxOf(1, (allItems.size + CAMERA_PAGE_SIZE - 1) / CAMERA_PAGE_SIZE)
-        val clampedPage = normalized.currentCameraPage.coerceIn(1, totalPages)
-        return normalized.copy(currentCameraPage = clampedPage)
+    fun toggleNodeExpansion(nodeId: String) {
+        val current = _uiState.value.expandedNodes
+        val next = if (current.contains(nodeId)) current - nodeId else current + nodeId
+        GlobalData.preferences.edit().putStringSet(PREF_EXPANDED_NODES, next).apply()
+        _uiState.update { it.copy(expandedNodes = next).withDerivedData() }
     }
 
     private fun saveSelectedCamerasToPrefs(cameras: List<SelectedCamera?>) {
-        val prefs = GlobalData.preferences
-        val idsCsv = (0 until 4).joinToString(",") { idx ->
+        val idsCsv = (0 until SLOT_COUNT).joinToString(",") { idx ->
             (cameras.getOrNull(idx)?.camera?.id ?: -1).toString()
         }
-        val editor = prefs.edit().putString("saved_monitor_grid_camera_ids", idsCsv)
+        val editor = GlobalData.preferences.edit().putString(PREF_GRID_CAMERA_IDS, idsCsv)
         val firstCamId = cameras.getOrNull(0)?.camera?.id
         if (firstCamId != null) {
-            editor.putInt("saved_monitor_camera_id", firstCamId)
+            editor.putInt(PREF_CAMERA_ID, firstCamId)
         } else {
-            editor.remove("saved_monitor_camera_id")
+            editor.remove(PREF_CAMERA_ID)
         }
         editor.apply()
     }
 
-    private fun restoreOrSelectInitialCameras(tree: List<CameraTreeNode>) {
-        val currentState = _uiState.value
-        if (currentState.selectedCameras.any { it != null }) return
+    private fun restoreOrSelectInitialCameras() {
+        if (_uiState.value.selectedCameras.any { it != null }) return
 
         val prefs = GlobalData.preferences
-        val savedCsv = prefs.getString("saved_monitor_grid_camera_ids", null)
+        val savedCsv = prefs.getString(PREF_GRID_CAMERA_IDS, null)
         val savedIds = if (!savedCsv.isNullOrBlank()) {
             savedCsv.split(",").mapNotNull { it.trim().toIntOrNull() }
         } else {
-            val singleId = prefs.getInt("saved_monitor_camera_id", -1)
-            listOf(singleId, -1, -1, -1)
+            listOf(prefs.getInt(PREF_CAMERA_ID, -1), -1, -1, -1)
         }
 
         var restoredAny = false
-        for (idx in 0 until 4) {
+        for (idx in 0 until SLOT_COUNT) {
             val camId = savedIds.getOrNull(idx) ?: -1
             if (camId > 0) {
-                val cam = findCameraById(tree, camId)
+                val cam = treeIndex.findCamera(camId)
                 if (cam != null) {
                     restoredAny = true
                     addCamera(cam, idx, startPolling = idx < _uiState.value.gridSize)
@@ -653,61 +696,53 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
 
         if (!restoredAny) {
-            val firstCamera = findFirstCamera(tree)
-            if (firstCamera != null) {
-                addCamera(firstCamera, 0, startPolling = true)
-            }
+            findFirstCamera(treeIndex.tree)?.let { addCamera(it, 0, startPolling = true) }
         }
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Snapshot thẻ camera (danh sách)
+    // ---------------------------------------------------------------------------------------------
+
     fun loadVisibleCameraSnapshots() {
         val state = _uiState.value
-        val allItems = computeDisplayedCameraItems(state)
-        val start = (state.currentCameraPage - 1) * CAMERA_PAGE_SIZE
-        val visibleCameras = allItems.drop(start).take(CAMERA_PAGE_SIZE).map { it.camera }
+        val visibleCameras = state.pagedCameraItems.map { it.camera }.filter { it.id != 0 }
         if (visibleCameras.isEmpty()) return
+        val knownSnapshots = state.cameraSnapshots
 
-        val app = getApplication<Application>()
-        val immediateUpdates = mutableMapOf<Int, String?>()
-        val toFetch = mutableListOf<CameraModel>()
+        // Chỉ xử lý trang đang hiển thị: huỷ lượt tra cứu của trang/bộ lọc trước
+        snapshotLookupJob?.cancel()
+        snapshotLookupJob = viewModelScope.launch {
+            val immediateUpdates = HashMap<Int, String?>()
+            val toFetch = ArrayList<CameraModel>()
 
-        for (cam in visibleCameras) {
-            val camId = cam.id
-            if (camId == 0) continue
+            // Tra cache (đọc đĩa) trên IO thay vì Main thread
+            withContext(Dispatchers.IO) {
+                for (cam in visibleCameras) {
+                    val camId = cam.id
+                    val isFresh = MonitorCacheManager.isSnapshotCacheFresh(app, camId)
 
-            // Nếu đã có kết quả trong state (kể cả null khi camera thực sự không có ảnh snapshot)
-            // thì không gọi lại API trên mỗi lần đổi trang/bộ lọc
-            if (state.cameraSnapshots.containsKey(camId)) {
-                val existingSnap = state.cameraSnapshots[camId]
-                if (!existingSnap.isNullOrEmpty() || !MonitorCacheManager.isSnapshotCacheFresh(app, camId)) {
-                    continue
+                    // Nếu đã có kết quả trong state (kể cả null khi camera thực sự không có ảnh snapshot)
+                    // thì không gọi lại API trên mỗi lần đổi trang/bộ lọc
+                    if (knownSnapshots.containsKey(camId)) {
+                        if (!knownSnapshots[camId].isNullOrEmpty() || !isFresh) continue
+                    }
+
+                    val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId, cam.cameraId)
+                    if (!cachedRaw.isNullOrBlank()) {
+                        val resolved = resolveFullMediaUrl(cachedRaw)
+                        if (resolved.isNotEmpty()) immediateUpdates[camId] = resolved
+                        if (isFresh) continue
+                    }
+
+                    if (!pendingSnapshotIds.contains(camId)) toFetch.add(cam)
                 }
             }
 
-            val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId, cam.cameraId)
-            if (!cachedRaw.isNullOrBlank()) {
-                val resolved = resolveFullMediaUrl(cachedRaw)
-                if (resolved.isNotEmpty()) {
-                    immediateUpdates[camId] = resolved
-                }
-                if (MonitorCacheManager.isSnapshotCacheFresh(app, camId)) {
-                    continue
-                }
+            if (immediateUpdates.isNotEmpty()) {
+                _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + immediateUpdates) }
             }
-
-            if (!pendingSnapshotIds.contains(camId)) {
-                toFetch.add(cam)
-            }
-        }
-
-        if (immediateUpdates.isNotEmpty()) {
-            _uiState.update { cur ->
-                cur.copy(cameraSnapshots = cur.cameraSnapshots + immediateUpdates)
-            }
-        }
-
-        for (cam in toFetch) {
-            fetchCardSnapshot(cam, force = false)
+            toFetch.forEach { fetchCardSnapshot(it, force = false) }
         }
     }
 
@@ -717,15 +752,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (!force && !pendingSnapshotIds.add(camId)) return
         if (force) pendingSnapshotIds.add(camId)
 
-        val app = getApplication<Application>()
         viewModelScope.launch {
             try {
                 var resolvedLink = ""
                 val res = runCatching { vmsApi.getCameraImageLink(camId) }.getOrNull()
                 if (res?.isSuccessful == true) {
                     val rawLink = res.body()?.link?.trim().orEmpty()
-                    if (rawLink.isNotEmpty() && rawLink != "NO_IMAGE") {
-                        MonitorCacheManager.setCachedCameraImageLink(app, camId, rawLink, cam.cameraId)
+                    if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
+                        withContext(Dispatchers.IO) {
+                            MonitorCacheManager.setCachedCameraImageLink(app, camId, rawLink, cam.cameraId)
+                        }
                         resolvedLink = resolveFullMediaUrl(rawLink)
                     }
                 }
@@ -738,8 +774,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     if (videoRes?.isSuccessful == true) {
                         val firstVideo = videoRes.body()?.firstOrNull()
                         val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
-                        if (rawThumb.isNotEmpty() && rawThumb != "NO_IMAGE") {
-                            MonitorCacheManager.setCachedCameraImageLink(app, camId, rawThumb, cam.cameraId)
+                        if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
+                            withContext(Dispatchers.IO) {
+                                MonitorCacheManager.setCachedCameraImageLink(app, camId, rawThumb, cam.cameraId)
+                            }
                             resolvedLink = resolveFullMediaUrl(rawThumb)
                         }
                     }
@@ -747,20 +785,18 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
                 _uiState.update { cur ->
                     val currentVal = cur.cameraSnapshots[camId]
-                    val nextMap = cur.cameraSnapshots.toMutableMap()
-                    if (resolvedLink.isNotEmpty()) {
-                        nextMap[camId] = resolvedLink
-                    } else if (currentVal.isNullOrEmpty() || force) {
-                        nextMap[camId] = null
+                    when {
+                        resolvedLink.isNotEmpty() -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to resolvedLink))
+                        currentVal.isNullOrEmpty() || force -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
+                        else -> cur
                     }
-                    cur.copy(cameraSnapshots = nextMap)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 _uiState.update { cur ->
                     if (!cur.cameraSnapshots.containsKey(camId) || force) {
-                        val nextMap = cur.cameraSnapshots.toMutableMap()
-                        nextMap[camId] = null
-                        cur.copy(cameraSnapshots = nextMap)
+                        cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
                     } else {
                         cur
                     }
@@ -774,146 +810,54 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun onCardSnapshotError(cam: CameraModel) {
         val camId = cam.id
         if (camId == 0) return
-        MonitorCacheManager.removeCachedCameraImageLink(getApplication(), camId, cam.cameraId)
+        viewModelScope.launch(Dispatchers.IO) {
+            MonitorCacheManager.removeCachedCameraImageLink(app, camId, cam.cameraId)
+        }
 
         if (retriedCardSnapshotIds.add(camId)) {
-            _uiState.update { cur ->
-                val nextMap = cur.cameraSnapshots.toMutableMap()
-                nextMap.remove(camId)
-                cur.copy(cameraSnapshots = nextMap)
-            }
+            _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots - camId) }
             fetchCardSnapshot(cam, force = true)
         } else {
-            _uiState.update { cur ->
-                val nextMap = cur.cameraSnapshots.toMutableMap()
-                nextMap[camId] = null
-                cur.copy(cameraSnapshots = nextMap)
-            }
+            _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null)) }
         }
     }
 
-    private fun buildTree(
+    // ---------------------------------------------------------------------------------------------
+    // Load cây camera
+    // ---------------------------------------------------------------------------------------------
+
+    private suspend fun buildIndex(
         vmsList: List<VMSServiceModel>,
         groupList: List<CameraGroupModel>,
         cameraList: List<CameraModel>,
         cameraInGroups: List<CameraInGroupModel>
-    ): List<CameraTreeNode> {
-        val treeData = mutableListOf<CameraTreeNode>()
-        val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
-
-        val fullVmsList = mutableListOf(
-            VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")
-        )
-        fullVmsList.addAll(vmsList)
-
-        val camerasByVms = cameraList.groupBy { it.vmsId }
-        val groupsByVms = groupList.groupBy { it.vmsId }
-        val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
-        val cameraById = cameraList.associateBy { it.id }
-
-        for (item in cameraInGroups) {
-            val cam = cameraById[item.cameraId] ?: continue
-            cameraInGroupByVms.getOrPut(cam.vmsId) { mutableListOf() }.add(item)
-        }
-
-        for (service in fullVmsList) {
-            val serviceId = service.id
-
-            val groups = groupsByVms[serviceId] ?: emptyList()
-            val cameras = camerasByVms[serviceId] ?: emptyList()
-            val camGroups = cameraInGroupByVms[serviceId] ?: emptyList()
-
-            val vmsNodeKey = "vms-$serviceId"
-            val vmsNode = CameraTreeNode.VMSNode(service, mutableListOf(), vmsNodeKey)
-            treeData.add(vmsNode)
-
-            for (group in groups) {
-                if (group.parentGroupId == 0) continue
-
-                val groupNodeKey = "group-$serviceId-${group.id}"
-                val groupNode = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
-                groupMapData[groupNodeKey] = groupNode
-
-                val parentNode = groupMapData["group-$serviceId-${group.parentGroupId}"]
-                if (parentNode != null) {
-                    parentNode.children.add(groupNode)
-                } else {
-                    vmsNode.children.add(groupNode)
-                }
-            }
-
-            val groupedCameraIds = mutableSetOf<Int>()
-
-            for (item in camGroups) {
-                val cam = cameraById[item.cameraId] ?: continue
-                groupedCameraIds.add(cam.id)
-
-                val groupNode = groupMapData["group-$serviceId-${item.groupId}"] ?: continue
-
-                val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
-                val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
-                groupNode.children.add(camNode)
-            }
-
-            for (cam in cameras) {
-                if (groupedCameraIds.contains(cam.id)) continue
-
-                val camKey = if (serviceId == 0) "cam-$serviceId-${cam.id}" else "cam-$serviceId-${cam.cameraId}"
-                val camNode = CameraTreeNode.CameraLeaf(cam, camKey)
-                vmsNode.children.add(camNode)
-            }
-
-            sortNodeChildren(vmsNode.children)
-        }
-
-        fun pruneEmptyNodes(nodes: MutableList<CameraTreeNode>): MutableList<CameraTreeNode> {
-            val it = nodes.iterator()
-            while (it.hasNext()) {
-                val node = it.next()
-                if (node is CameraTreeNode.GroupNode) {
-                    pruneEmptyNodes(node.children)
-                    if (node.children.isEmpty()) {
-                        it.remove()
-                    }
-                } else if (node is CameraTreeNode.VMSNode) {
-                    pruneEmptyNodes(node.children)
-                    if (node.children.isEmpty()) {
-                        it.remove()
-                    }
-                }
-            }
-            return nodes
-        }
-
-        val prunedTree = pruneEmptyNodes(treeData)
-        return prunedTree.toList()
+    ): CameraTreeIndex = withContext(Dispatchers.Default) {
+        CameraTreeIndex(buildTree(vmsList, groupList, cameraList, cameraInGroups))
     }
 
-    private fun ensureDefaultExpandedNodes(tree: List<CameraTreeNode>) {
-        if (_uiState.value.expandedNodes.isEmpty() && tree.isNotEmpty()) {
-            val defaults = tree.map { it.key }.toSet()
-            _uiState.update { it.copy(expandedNodes = defaults) }
+    private fun applyTree(index: CameraTreeIndex) {
+        treeIndex = index
+        _uiState.update { state ->
+            // Mặc định mở rộng các VMS ở lần đầu (chưa có trạng thái lưu)
+            val expanded = if (state.expandedNodes.isEmpty() && index.tree.isNotEmpty()) {
+                index.tree.map { it.key }.toSet()
+            } else {
+                state.expandedNodes
+            }
+            state.copy(isLoading = false, error = null, expandedNodes = expanded).withDerivedData()
         }
+        restoreOrSelectInitialCameras()
+        loadVisibleCameraSnapshots()
     }
 
     private fun loadData() {
         viewModelScope.launch {
-            val cachedData = MonitorCacheManager.getMonitorData(getApplication())
+            val cachedData = MonitorCacheManager.getMonitorData(app)
             if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
-                val finalTree = buildTree(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
-                _uiState.update { state ->
-                    clampAndNormalizeState(
-                        state.copy(
-                            isLoading = false,
-                            error = null,
-                            treeData = finalTree,
-                            aiServices = cachedData.aiServices.ifEmpty { state.aiServices }
-                        )
-                    )
-                }
-                ensureDefaultExpandedNodes(finalTree)
-                restoreOrSelectInitialCameras(finalTree)
-                loadVisibleCameraSnapshots()
+                if (cachedData.aiServices.isNotEmpty()) aiServices = cachedData.aiServices
+                applyTree(
+                    buildIndex(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
+                )
             } else {
                 _uiState.update { it.copy(isLoading = true, error = null) }
             }
@@ -942,23 +886,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         val groupList = groupResponse.body() ?: emptyList()
                         val cameraList = cameraResponse.body() ?: emptyList()
                         val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
-                        val aiServices = if (aiServiceResponse?.isSuccessful == true) {
-                            aiServiceResponse.body() ?: emptyList()
-                        } else _uiState.value.aiServices
-
-                        val finalTree = buildTree(vmsList, groupList, cameraList, cameraInGroups)
-
-                        _uiState.update { state ->
-                            clampAndNormalizeState(
-                                state.copy(isLoading = false, treeData = finalTree, aiServices = aiServices)
-                            )
+                        if (aiServiceResponse?.isSuccessful == true) {
+                            aiServices = aiServiceResponse.body() ?: emptyList()
                         }
-                        ensureDefaultExpandedNodes(finalTree)
-                        restoreOrSelectInitialCameras(finalTree)
-                        loadVisibleCameraSnapshots()
+
+                        applyTree(buildIndex(vmsList, groupList, cameraList, cameraInGroups))
 
                         MonitorCacheManager.saveMonitorData(
-                            getApplication(),
+                            app,
                             CachedMonitorData(
                                 vmsList = vmsList,
                                 groupList = groupList,
@@ -968,63 +903,26 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                                 updatedAt = System.currentTimeMillis()
                             )
                         )
-                    } else if (_uiState.value.treeData.isEmpty()) {
+                    } else if (treeIndex.tree.isEmpty()) {
                         _uiState.update { it.copy(isLoading = false, error = "Failed to load data") }
                     } else {
                         _uiState.update { it.copy(isLoading = false) }
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
+                val hasTree = treeIndex.tree.isNotEmpty()
                 _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = if (it.treeData.isEmpty()) e.toUserFriendlyMessage() else null
-                    )
+                    it.copy(isLoading = false, error = if (hasTree) null else e.toUserFriendlyMessage())
                 }
             }
         }
     }
 
-    private fun sortNodeChildren(children: MutableList<CameraTreeNode>) {
-        if (children.size <= 1) return
-        children.sortWith(Comparator { a, b ->
-            val aIsLeaf = if (a is CameraTreeNode.CameraLeaf) 1 else 0
-            val bIsLeaf = if (b is CameraTreeNode.CameraLeaf) 1 else 0
-            aIsLeaf.compareTo(bIsLeaf)
-        })
-        for (child in children) {
-            if (child is CameraTreeNode.GroupNode && child.children.size > 1) {
-                sortNodeChildren(child.children)
-            } else if (child is CameraTreeNode.VMSNode && child.children.size > 1) {
-                sortNodeChildren(child.children)
-            }
-        }
-    }
-
-    fun toggleNodeExpansion(nodeId: String) {
-        _uiState.update { state ->
-            val newExpanded = state.expandedNodes.toMutableSet()
-            if (newExpanded.contains(nodeId)) {
-                newExpanded.remove(nodeId)
-            } else {
-                newExpanded.add(nodeId)
-            }
-
-            val prefs = GlobalData.preferences
-            prefs.edit().putStringSet("saved_expanded_nodes", newExpanded).apply()
-
-            state.copy(expandedNodes = newExpanded)
-        }
-    }
-
-    private fun getVmsNameForCamera(vmsId: Int): String {
-        for (node in _uiState.value.treeData) {
-            if (node is CameraTreeNode.VMSNode && node.vms.id == vmsId) {
-                return node.vms.name
-            }
-        }
-        return ""
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Live stage (1x1 / 2x2)
+    // ---------------------------------------------------------------------------------------------
 
     /**
      * Xử lý chọn camera trên màn hình Trực tiếp:
@@ -1043,8 +941,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val currentState = _uiState.value
         if (currentState.gridSize == 1) {
             _uiState.update { it.copy(activeSlotIndex = 0) }
-            val currentCam0 = currentState.selectedCameras.getOrNull(0)
-            if (currentCam0?.camera?.id == camera.id) {
+            if (currentState.selectedCameras.getOrNull(0)?.camera?.id == camera.id) {
                 triggerBlink(0)
                 return
             }
@@ -1053,7 +950,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
 
         // Chế độ 2x2 (gridSize == 4)
-        val existingIndex = (0 until 4).indexOfFirst { idx ->
+        val existingIndex = (0 until SLOT_COUNT).indexOfFirst { idx ->
             currentState.selectedCameras.getOrNull(idx)?.camera?.id == camera.id
         }
         if (existingIndex != -1) {
@@ -1062,22 +959,18 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        val preferredSlot = currentState.activeSlotIndex.coerceIn(0, 3)
+        val preferredSlot = currentState.activeSlotIndex.coerceIn(0, SLOT_COUNT - 1)
         val targetSlot = if (currentState.selectedCameras.getOrNull(preferredSlot) == null) {
             preferredSlot
         } else {
-            (0 until 4).firstOrNull { idx ->
-                currentState.selectedCameras.getOrNull(idx) == null
-            }
+            (0 until SLOT_COUNT).firstOrNull { idx -> currentState.selectedCameras.getOrNull(idx) == null }
         }
 
         if (targetSlot == null) {
             if (onGridFull != null) {
                 onGridFull()
             } else {
-                com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
-                    "Lưới đang phát đã đầy, không thể phát thêm!"
-                )
+                MobileTopPopupManager.warning("Lưới đang phát đã đầy, không thể phát thêm!")
             }
             return
         }
@@ -1085,113 +978,85 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         addCamera(camera, targetSlot)
 
         val updatedCameras = _uiState.value.selectedCameras
-        val nextEmpty = (0 until 4).firstOrNull { idx ->
+        val nextEmpty = (0 until SLOT_COUNT).firstOrNull { idx ->
             idx != targetSlot && updatedCameras.getOrNull(idx) == null
         }
-        _uiState.update {
-            it.copy(activeSlotIndex = nextEmpty ?: targetSlot)
-        }
+        _uiState.update { it.copy(activeSlotIndex = nextEmpty ?: targetSlot) }
     }
 
     fun addCamera(camera: CameraModel, slotIndex: Int, startPolling: Boolean = true) {
-        if (slotIndex !in 0..3) return
-        val currentState = _uiState.value
+        if (slotIndex !in 0 until SLOT_COUNT) return
 
-        val existing = currentState.selectedCameras.getOrNull(slotIndex)
-        if (existing?.camera?.id == camera.id && existing.streamUrl.startsWith("ws")) {
-            return
+        val existing = _uiState.value.selectedCameras.getOrNull(slotIndex)
+        if (existing?.camera?.id == camera.id && existing.streamUrl.startsWith("ws")) return
+
+        val initialChannel = preferredChannel(camera)
+        var updatedCameras: List<SelectedCamera?> = emptyList()
+        _uiState.update { state ->
+            val cameras = state.selectedCameras.toPaddedMutableList()
+            cameras[slotIndex] = SelectedCamera(camera = camera, streamUrl = "", channel = initialChannel)
+            updatedCameras = cameras
+            state.copy(selectedCameras = cameras)
         }
-
-        val vmsName = getVmsNameForCamera(camera.vmsId)
-        // Đồng bộ LiveVideoView.vue (line 969): trên mobile ưu tiên luồng phụ (channel = 1) nếu camera có sub stream
-        val initialChannel = if (camera.sub.isNotBlank()) 1 else 0
-
-        // Ưu tiên lấy ngay ảnh snapshot đã cache (0ms) giống cachedSnapshotUrl trên PWA
-        val cachedRawSnap = MonitorCacheManager.getCachedCameraImageLink(
-            getApplication(),
-            camera.id,
-            camera.cameraId
-        ).orEmpty()
-        val initialSnapshotUrl = resolveFullMediaUrl(cachedRawSnap)
-
-        val updatedCameras = currentState.selectedCameras.toMutableList()
-        while (updatedCameras.size < 4) updatedCameras.add(null)
-        updatedCameras[slotIndex] = SelectedCamera(
-            camera = camera,
-            streamUrl = "",
-            fallbackImageUrl = initialSnapshotUrl,
-            vmsName = vmsName,
-            channel = initialChannel,
-            hasFallbackTried = false,
-            snapshotRetried = false
-        )
-
-        _uiState.update { it.copy(selectedCameras = updatedCameras) }
         saveSelectedCamerasToPrefs(updatedCameras)
+
+        // Gắn ngay ảnh snapshot đã cache (đọc đĩa trên IO) giống cachedSnapshotUrl trên PWA
+        viewModelScope.launch {
+            val cachedSnap = readCachedSnapshot(camera).orEmpty()
+            if (cachedSnap.isNotEmpty()) {
+                updateSlot(slotIndex, camera.id) {
+                    if (it.fallbackImageUrl.isEmpty()) it.copy(fallbackImageUrl = cachedSnap) else it
+                }
+            }
+        }
 
         if (startPolling && isMonitorTabActive) {
             ensureCameraSnapshotUrl(camera, slotIndex, force = false)
             startLiveStreamPolling(camera, slotIndex, channel = initialChannel, isFallback = false)
-            if (slotIndex == 0) {
-                fetchListData()
-            }
         }
     }
 
     private fun ensureCameraSnapshotUrl(camera: CameraModel, slotIndex: Int, force: Boolean) {
-        val app = getApplication<Application>()
-        if (!force && MonitorCacheManager.isSnapshotCacheFresh(app, camera.id)) {
-            val cached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)
-            if (!cached.isNullOrBlank()) {
-                return
-            }
-        }
-
         viewModelScope.launch {
+            if (!force) {
+                val hasFreshCache = withContext(Dispatchers.IO) {
+                    MonitorCacheManager.isSnapshotCacheFresh(app, camera.id) &&
+                        !MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId).isNullOrBlank()
+                }
+                if (hasFreshCache) return@launch
+            }
+
             try {
                 val response = vmsApi.getCameraImageLink(camera.id)
-                if (response.isSuccessful) {
-                    val rawLink = response.body()?.link?.trim().orEmpty()
-                    if (rawLink.isNotEmpty() && rawLink != "NO_IMAGE") {
+                val rawLink = if (response.isSuccessful) response.body()?.link?.trim().orEmpty() else ""
+                if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
+                    val finalSnap = withContext(Dispatchers.IO) {
                         MonitorCacheManager.setCachedCameraImageLink(app, camera.id, rawLink, camera.cameraId)
-                        val resolvedUrl = resolveFullMediaUrl(rawLink)
-                        _uiState.update { state ->
-                            val cameras = state.selectedCameras.toMutableList()
-                            val current = cameras.getOrNull(slotIndex)
-                            if (current != null && current.camera.id == camera.id) {
-                                // Chỉ cập nhật nếu chưa có frame chụp trực tiếp mới hơn từ luồng live
-                                val latestCached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)
-                                val finalSnap = if (latestCached != null && latestCached.startsWith("file://")) {
-                                    latestCached
-                                } else {
-                                    resolvedUrl
-                                }
-                                cameras[slotIndex] = current.copy(fallbackImageUrl = finalSnap)
-                            }
-                            state.copy(selectedCameras = cameras)
-                        }
-                    } else if (force) {
-                        clearSlotSnapshotUrl(camera.id, slotIndex)
+                        // Chỉ dùng link API nếu chưa có frame chụp trực tiếp mới hơn từ luồng live
+                        val latestCached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id, camera.cameraId)
+                        if (latestCached != null && latestCached.startsWith("file://")) latestCached else resolveFullMediaUrl(rawLink)
                     }
+                    updateSlot(slotIndex, camera.id) { it.copy(fallbackImageUrl = finalSnap) }
                 } else if (force) {
                     clearSlotSnapshotUrl(camera.id, slotIndex)
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
-                if (force) {
-                    clearSlotSnapshotUrl(camera.id, slotIndex)
-                }
+                if (force) clearSlotSnapshotUrl(camera.id, slotIndex)
             }
         }
     }
 
     private fun clearSlotSnapshotUrl(cameraId: Int, slotIndex: Int) {
-        _uiState.update { state ->
-            val cameras = state.selectedCameras.toMutableList()
-            val current = cameras.getOrNull(slotIndex)
-            if (current != null && current.camera.id == cameraId) {
-                cameras[slotIndex] = current.copy(fallbackImageUrl = "", snapshotRetried = true)
-            }
-            state.copy(selectedCameras = cameras)
+        updateSlot(slotIndex, cameraId) { it.copy(fallbackImageUrl = "", snapshotRetried = true) }
+    }
+
+    /** Cập nhật ảnh nền của ô theo cache mới nhất (vd. frame vừa chụp từ luồng live). */
+    private fun refreshSlotSnapshotFromCache(slotIndex: Int, camera: CameraModel) {
+        viewModelScope.launch {
+            val latest = readCachedSnapshot(camera) ?: return@launch
+            updateSlot(slotIndex, camera.id) { it.copy(fallbackImageUrl = latest) }
         }
     }
 
@@ -1202,82 +1067,40 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun onSnapshotLoadError(slotIndex: Int) {
         val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
         val camera = current.camera
-        MonitorCacheManager.removeCachedCameraImageLink(getApplication(), camera.id, camera.cameraId)
+        viewModelScope.launch(Dispatchers.IO) {
+            MonitorCacheManager.removeCachedCameraImageLink(app, camera.id, camera.cameraId)
+        }
 
         if (!current.snapshotRetried) {
-            _uiState.update { state ->
-                val cameras = state.selectedCameras.toMutableList()
-                val slotCam = cameras.getOrNull(slotIndex)
-                if (slotCam != null && slotCam.camera.id == camera.id) {
-                    cameras[slotIndex] = slotCam.copy(snapshotRetried = true)
-                }
-                state.copy(selectedCameras = cameras)
-            }
+            updateSlot(slotIndex, camera.id) { it.copy(snapshotRetried = true) }
             ensureCameraSnapshotUrl(camera, slotIndex, force = true)
         } else {
             clearSlotSnapshotUrl(camera.id, slotIndex)
         }
     }
 
-    fun playVideo(videoUrl: String, streamType: String, fallbackImageUrl: String = "") {
-        if (videoUrl.isBlank()) return
-        streamJobs[0]?.cancel()
-
-        _uiState.update { state ->
-            val cameras = state.selectedCameras.toMutableList()
-            val currentSelection = cameras[0]
-            if (currentSelection != null) {
-                val fullUrl = resolveFullMediaUrl(videoUrl)
-                val fullFallback = if (fallbackImageUrl.isNotBlank()) {
-                    resolveFullMediaUrl(fallbackImageUrl)
-                } else {
-                    currentSelection.fallbackImageUrl
-                }
-
-                cameras[0] = currentSelection.copy(
-                    streamUrl = fullUrl,
-                    streamType = streamType,
-                    fallbackImageUrl = fullFallback
-                )
-            }
-            state.copy(selectedCameras = cameras)
-        }
-    }
-
     fun refreshActiveStreams() {
-        val currentState = _uiState.value
-        val cameras = currentState.selectedCameras.toMutableList()
-        var hasActive = false
-        val app = getApplication<Application>()
-
-        cameras.forEachIndexed { index, selectedCamera ->
-            if (selectedCamera != null && index < currentState.gridSize) {
-                val latestSnap = MonitorCacheManager.getCachedCameraImageLink(
-                    app,
-                    selectedCamera.camera.id,
-                    selectedCamera.camera.cameraId
-                )?.let { resolveFullMediaUrl(it) } ?: selectedCamera.fallbackImageUrl
-
-                cameras[index] = selectedCamera.copy(
-                    streamUrl = "",
-                    retryCount = 0,
-                    hasFallbackTried = false,
-                    fallbackImageUrl = latestSnap
-                )
-                hasActive = true
-            }
+        val state = _uiState.value
+        val active = (0 until state.gridSize).mapNotNull { idx ->
+            state.selectedCameras.getOrNull(idx)?.let { idx to it }
         }
+        if (active.isEmpty()) return
 
-        if (hasActive) {
-            _uiState.update { it.copy(selectedCameras = cameras) }
-
-            currentState.selectedCameras.forEachIndexed { index, selectedCamera ->
-                if (selectedCamera != null && index < currentState.gridSize) {
-                    val initialChannel = if (selectedCamera.camera.sub.isNotBlank()) 1 else 0
-                    ensureCameraSnapshotUrl(selectedCamera.camera, index, force = false)
-                    startLiveStreamPolling(selectedCamera.camera, index, channel = initialChannel, isFallback = false)
+        _uiState.update { cur ->
+            val cameras = cur.selectedCameras.toPaddedMutableList()
+            for ((idx, selected) in active) {
+                val slotCam = cameras[idx]
+                if (slotCam != null && slotCam.camera.id == selected.camera.id) {
+                    cameras[idx] = slotCam.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
                 }
             }
+            cur.copy(selectedCameras = cameras)
+        }
+
+        for ((idx, selected) in active) {
+            refreshSlotSnapshotFromCache(idx, selected.camera)
+            ensureCameraSnapshotUrl(selected.camera, idx, force = false)
+            startLiveStreamPolling(selected.camera, idx, channel = preferredChannel(selected.camera), isFallback = false)
         }
     }
 
@@ -1285,6 +1108,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * Đồng bộ cơ chế polling `check()` + `loadLiveStream()` + `fallbackStream()` của `LiveVideoView.vue` (lines 861-1023):
      * - Gọi `POST /VMS/api/LiveStream` mỗi 2000ms (tối đa 10 lần trên mobile) cho đến khi cả `link` và `videoCodec` đều có dữ liệu.
      * - Nếu hết 10 lần mà chưa có codec và camera có luồng phụ (`sub`), tự động chuyển đổi kênh (`sub <-> main`) để thử tiếp.
+     * - Không poll khi tab Trực tiếp không hiển thị / app ở nền (job bị huỷ trong [setMonitorTabActive]).
      */
     private fun startLiveStreamPolling(
         camera: CameraModel,
@@ -1292,28 +1116,26 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         channel: Int,
         isFallback: Boolean = false
     ) {
-        if (slotIndex !in 0..3) return
+        if (slotIndex !in 0 until SLOT_COUNT) return
         streamJobs[slotIndex]?.cancel()
         if (!isMonitorTabActive) return
 
         streamJobs[slotIndex] = viewModelScope.launch {
-            val maxPollAttempts = 10
-            for (attempt in 1..maxPollAttempts) {
+            for (attempt in 1..LIVE_POLL_MAX_ATTEMPTS) {
                 val activeCam = _uiState.value.selectedCameras.getOrNull(slotIndex)
-                if (activeCam == null || activeCam.camera.id != camera.id) {
-                    return@launch
-                }
+                if (activeCam == null || activeCam.camera.id != camera.id) return@launch
 
                 try {
-                    val requestModel = LiveStreamModel(
-                        cameraId = camera.id,
-                        channel = channel,
-                        link = "",
-                        videoCodec = "",
-                        audioCodec = "",
-                        videoCodecTag = ""
+                    val response = vmsApi.createLiveStream(
+                        LiveStreamModel(
+                            cameraId = camera.id,
+                            channel = channel,
+                            link = "",
+                            videoCodec = "",
+                            audioCodec = "",
+                            videoCodecTag = ""
+                        )
                     )
-                    val response = vmsApi.createLiveStream(requestModel)
                     if (response.isSuccessful) {
                         val liveStreamModel = response.body()
                         val rawLink = liveStreamModel?.link?.trim().orEmpty()
@@ -1321,94 +1143,55 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
                         if (rawLink.isNotEmpty() && videoCodec.isNotEmpty()) {
                             val wsUrl = resolveWebSocketUrl(rawLink)
-                            _uiState.update { state ->
-                                val cameras = state.selectedCameras.toMutableList()
-                                val currentSelection = cameras.getOrNull(slotIndex)
-                                if (currentSelection != null && currentSelection.camera.id == camera.id) {
-                                    cameras[slotIndex] = currentSelection.copy(
-                                        streamUrl = wsUrl,
-                                        videoCodecTag = liveStreamModel?.videoCodecTag?.trim().orEmpty(),
-                                        channel = channel,
-                                        hasFallbackTried = isFallback,
-                                        retryCount = 0,
-                                        streamType = "LIVE"
-                                    )
-                                }
-                                state.copy(
-                                    selectedCameras = cameras,
-                                    error = null
+                            updateSlot(slotIndex, camera.id) {
+                                it.copy(
+                                    streamUrl = wsUrl,
+                                    channel = channel,
+                                    hasFallbackTried = isFallback,
+                                    retryCount = 0
                                 )
                             }
+                            _uiState.update { it.copy(error = null) }
                             return@launch
                         }
                     }
-                } catch (_: kotlinx.coroutines.CancellationException) {
-                    throw kotlinx.coroutines.CancellationException()
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: Exception) {
-                    // Tiếp tục chờ tới lượt poll tiếp theo sau 2000ms
+                    // Tiếp tục chờ tới lượt poll tiếp theo
                 }
 
-                if (attempt < maxPollAttempts) {
-                    kotlinx.coroutines.delay(2000L)
-                }
+                if (attempt < LIVE_POLL_MAX_ATTEMPTS) delay(LIVE_POLL_INTERVAL_MS)
             }
 
-            // Đã thử hết 10 lần poll cho channel hiện tại mà chưa nhận được link + videoCodec
+            // Đã thử hết số lần poll cho channel hiện tại mà chưa nhận được link + videoCodec
             val currentSelection = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return@launch
             if (currentSelection.camera.id != camera.id) return@launch
 
             if (!isFallback && camera.sub.isNotBlank()) {
                 val fallbackChannel = if (channel == 1) 0 else 1
-                _uiState.update { state ->
-                    val cameras = state.selectedCameras.toMutableList()
-                    val cur = cameras.getOrNull(slotIndex)
-                    if (cur != null && cur.camera.id == camera.id) {
-                        cameras[slotIndex] = cur.copy(
-                            streamUrl = "",
-                            channel = fallbackChannel,
-                            hasFallbackTried = true,
-                            retryCount = 0
-                        )
-                    }
-                    state.copy(selectedCameras = cameras)
+                updateSlot(slotIndex, camera.id) {
+                    it.copy(streamUrl = "", channel = fallbackChannel, hasFallbackTried = true, retryCount = 0)
                 }
                 startLiveStreamPolling(camera, slotIndex, channel = fallbackChannel, isFallback = true)
             } else {
-                _uiState.update { state ->
-                    val cameras = state.selectedCameras.toMutableList()
-                    val cur = cameras.getOrNull(slotIndex)
-                    if (cur != null && cur.camera.id == camera.id) {
-                        cameras[slotIndex] = cur.copy(
-                            streamUrl = "error://no-video",
-                            retryCount = 6
-                        )
-                    }
-                    state.copy(selectedCameras = cameras)
-                }
+                updateSlot(slotIndex, camera.id) { it.copy(streamUrl = "error://no-video", retryCount = 6) }
             }
         }
     }
 
     fun resetRetryCount(slotIndex: Int) {
-        val currentState = _uiState.value
-        val cameras = currentState.selectedCameras.toMutableList()
-        val currentSelection = cameras.getOrNull(slotIndex) ?: return
-        val latestSnap = MonitorCacheManager.getCachedCameraImageLink(
-            getApplication(),
-            currentSelection.camera.id,
-            currentSelection.camera.cameraId
-        )?.let { resolveFullMediaUrl(it) } ?: currentSelection.fallbackImageUrl
-        cameras[slotIndex] = currentSelection.copy(retryCount = 0, fallbackImageUrl = latestSnap)
-        _uiState.update { it.copy(selectedCameras = cameras) }
+        val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
+        updateSlot(slotIndex, current.camera.id) { it.copy(retryCount = 0) }
+        refreshSlotSnapshotFromCache(slotIndex, current.camera)
     }
 
     fun removeCamera(slotIndex: Int) {
-        if (slotIndex !in 0..3) return
-        streamJobs[slotIndex]?.cancel()
-        streamJobs[slotIndex] = null
+        if (slotIndex !in 0 until SLOT_COUNT) return
+        cancelStreamJob(slotIndex)
         var updatedCameras: List<SelectedCamera?> = emptyList()
         _uiState.update { state ->
-            val cameras = state.selectedCameras.toMutableList()
+            val cameras = state.selectedCameras.toPaddedMutableList()
             cameras[slotIndex] = null
             updatedCameras = cameras
             state.copy(selectedCameras = cameras, activeSlotIndex = slotIndex)
@@ -1417,47 +1200,35 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun retryCameraStream(slotIndex: Int) {
-        if (slotIndex !in 0..3) return
-        val currentState = _uiState.value
-        val cameras = currentState.selectedCameras.toMutableList()
-        val currentSelection = cameras.getOrNull(slotIndex) ?: return
+        if (slotIndex !in 0 until SLOT_COUNT) return
+        val currentSelection = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
+        val cameraId = currentSelection.camera.id
 
         // Nếu luồng hiện tại lỗi sau vài lần thử và chưa fallback kênh (sub <-> main), chuyển sang kênh còn lại giống playerError() trong LiveVideoView.vue
         if (currentSelection.retryCount >= 2 && !currentSelection.hasFallbackTried && currentSelection.camera.sub.isNotBlank()) {
             val nextChannel = if (currentSelection.channel == 1) 0 else 1
-            cameras[slotIndex] = currentSelection.copy(
-                streamUrl = "",
-                channel = nextChannel,
-                hasFallbackTried = true,
-                retryCount = 0
-            )
-            _uiState.update { it.copy(selectedCameras = cameras) }
+            updateSlot(slotIndex, cameraId) {
+                it.copy(streamUrl = "", channel = nextChannel, hasFallbackTried = true, retryCount = 0)
+            }
             startLiveStreamPolling(currentSelection.camera, slotIndex, channel = nextChannel, isFallback = true)
             return
         }
 
         if (currentSelection.retryCount >= 5) {
             if (currentSelection.retryCount == 5) {
-                cameras[slotIndex] = currentSelection.copy(
-                    retryCount = 6,
-                    streamUrl = "error://failed"
-                )
-                _uiState.update { it.copy(selectedCameras = cameras) }
+                updateSlot(slotIndex, cameraId) { it.copy(retryCount = 6, streamUrl = "error://failed") }
             }
             return
         }
 
         val nextRetry = currentSelection.retryCount + 1
-        cameras[slotIndex] = currentSelection.copy(
-            streamUrl = "",
-            retryCount = nextRetry
-        )
-        _uiState.update { it.copy(selectedCameras = cameras) }
+        updateSlot(slotIndex, cameraId) { it.copy(streamUrl = "", retryCount = nextRetry) }
 
         streamJobs[slotIndex]?.cancel()
+        if (!isMonitorTabActive) return
         streamJobs[slotIndex] = viewModelScope.launch {
-            val delayMs = Math.min(1000 * Math.pow(2.0, (nextRetry - 1).toDouble()).toLong(), 8000L)
-            kotlinx.coroutines.delay(delayMs)
+            // Exponential backoff: 1s, 2s, 4s, 8s (tối đa 8s)
+            delay((1000L shl (nextRetry - 1)).coerceAtMost(RETRY_MAX_DELAY_MS))
             startLiveStreamPolling(
                 camera = currentSelection.camera,
                 slotIndex = slotIndex,
@@ -1469,167 +1240,5 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    fun setTab(tab: MonitorTab) {
-        _uiState.update { it.copy(selectedTab = tab) }
-        fetchListData()
-    }
-
-    fun setTimeFilter(filter: TimeFilter) {
-        _uiState.update { it.copy(selectedTimeFilter = filter) }
-        fetchListData()
-    }
-
-    private fun fetchListData() {
-        val selectedCam = _uiState.value.selectedCameras.firstOrNull()?.camera ?: return
-
-        viewModelScope.launch {
-            try {
-                val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(_uiState.value.selectedTimeFilter)
-
-                _uiState.update { it.copy(hasMoreEvents = true, hasMorePlaybacks = true) }
-
-                if (_uiState.value.selectedTab == MonitorTab.EVENTS) {
-                    val uuid = selectedCam.extra?.uuid
-                    if (uuid != null) {
-                        val response = eventApi.getDataList(
-                            cameraUUID = uuid,
-                            from = fromTime / 1000,
-                            to = toTime / 1000,
-                            count = 20
-                        )
-                        if (response.isSuccessful) {
-                            val newEvents = response.body() ?: emptyList()
-                            _uiState.update { it.copy(events = newEvents, hasMoreEvents = newEvents.size == 20) }
-                        }
-                    }
-                } else {
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
-                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    val fromStr = sdf.format(java.util.Date(fromTime))
-                    val toStr = sdf.format(java.util.Date(toTime))
-
-                    val response = vmsApi.getVideoList(
-                        camera = selectedCam.id,
-                        count = 20,
-                        from = fromStr,
-                        to = toStr
-                    )
-                    if (response.isSuccessful) {
-                        val newPlaybacks = response.body() ?: emptyList()
-                        _uiState.update { it.copy(playbacks = newPlaybacks, hasMorePlaybacks = newPlaybacks.size == 20) }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MonitorViewModel", "Error fetching list data", e)
-            }
-        }
-    }
-
-    fun loadMoreData() {
-        val currentState = _uiState.value
-        if (currentState.isPaginating) return
-
-        val selectedCam = currentState.selectedCameras.firstOrNull()?.camera ?: return
-
-        if (currentState.selectedTab == MonitorTab.EVENTS && (!currentState.hasMoreEvents || currentState.events.isEmpty())) return
-        if (currentState.selectedTab == MonitorTab.PLAYBACK && (!currentState.hasMorePlaybacks || currentState.playbacks.isEmpty())) return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isPaginating = true) }
-            try {
-                val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(currentState.selectedTimeFilter)
-
-                if (currentState.selectedTab == MonitorTab.EVENTS) {
-                    val uuid = selectedCam.extra?.uuid
-                    if (uuid != null) {
-                        val lastId = currentState.events.last().id
-                        val response = eventApi.getDataList(
-                            cameraUUID = uuid,
-                            lastId = lastId,
-                            from = fromTime / 1000,
-                            to = toTime / 1000,
-                            count = 20
-                        )
-                        if (response.isSuccessful) {
-                            val newEvents = response.body() ?: emptyList()
-                            _uiState.update {
-                                it.copy(
-                                    events = it.events + newEvents,
-                                    hasMoreEvents = newEvents.size == 20,
-                                    isPaginating = false
-                                )
-                            }
-                        } else {
-                            _uiState.update { it.copy(isPaginating = false) }
-                        }
-                    } else {
-                        _uiState.update { it.copy(isPaginating = false) }
-                    }
-                } else {
-                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault())
-                    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                    val fromStr = sdf.format(java.util.Date(fromTime))
-                    val lastVideoTimeStr = currentState.playbacks.last().time
-
-                    val response = vmsApi.getVideoList(
-                        camera = selectedCam.id,
-                        count = 20,
-                        from = fromStr,
-                        to = lastVideoTimeStr
-                    )
-                    if (response.isSuccessful) {
-                        val newPlaybacks = response.body() ?: emptyList()
-                        _uiState.update {
-                            it.copy(
-                                playbacks = it.playbacks + newPlaybacks,
-                                hasMorePlaybacks = newPlaybacks.size == 20,
-                                isPaginating = false
-                            )
-                        }
-                    } else {
-                        _uiState.update { it.copy(isPaginating = false) }
-                    }
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("MonitorViewModel", "Error loading more list data", e)
-                _uiState.update { it.copy(isPaginating = false) }
-            }
-        }
-    }
-
-    private fun findCameraById(nodes: List<CameraTreeNode>, id: Int): CameraModel? {
-        for (node in nodes) {
-            when (node) {
-                is CameraTreeNode.CameraLeaf -> if (node.camera.id == id) return node.camera
-                is CameraTreeNode.GroupNode -> {
-                    val found = findCameraById(node.children, id)
-                    if (found != null) return found
-                }
-                is CameraTreeNode.VMSNode -> {
-                    val found = findCameraById(node.children, id)
-                    if (found != null) return found
-                }
-            }
-        }
-        return null
-    }
-
-    private fun findFirstCamera(nodes: List<CameraTreeNode>): CameraModel? {
-        for (node in nodes) {
-            when (node) {
-                is CameraTreeNode.CameraLeaf -> return node.camera
-                is CameraTreeNode.GroupNode -> {
-                    val found = findFirstCamera(node.children)
-                    if (found != null) return found
-                }
-                is CameraTreeNode.VMSNode -> {
-                    val found = findFirstCamera(node.children)
-                    if (found != null) return found
-                }
-            }
-        }
-        return null
     }
 }

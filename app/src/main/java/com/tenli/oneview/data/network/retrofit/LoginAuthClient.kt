@@ -18,6 +18,8 @@ import com.tenli.oneview.model.network.RuleObjectModel
 import com.tenli.oneview.model.network.TaskConfigModel
 import com.tenli.oneview.model.network.UniformLabelExtraConfig
 import com.tenli.oneview.model.network.UserExtra
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -27,13 +29,25 @@ import java.util.concurrent.TimeUnit
 
 object LoginAuthClient {
 
+    // Timeouts đồng bộ với api.ts (GET_TIMEOUT_MS = 30s, WRITE_TIMEOUT_MS = 60s)
+    private const val CONNECT_TIMEOUT_SEC = 30L
+    private const val READ_TIMEOUT_SEC = 30L
+    private const val WRITE_TIMEOUT_SEC = 60L
+    private const val IMAGE_TIMEOUT_SEC = 15L
+    private const val WS_PING_INTERVAL_SEC = 25L
+    private const val MAX_REQUESTS = 64
+    private const val MAX_REQUESTS_PER_HOST = 16
+    private const val MAX_IDLE_CONNECTIONS = 10
+    private const val KEEP_ALIVE_MINUTES = 5L
+
+    /** Gson lenient dùng chung cho mọi [StringOrObjectDeserializer] (tránh tạo 1 instance Gson cho mỗi type) */
+    private val lenientGson: Gson by lazy { GsonBuilder().setLenient().create() }
+
     /**
      * Deserializer linh hoạt hỗ trợ cả JSON Object và JSON String được stringify từ backend
      * (tương đương logic `typeof x === 'string' ? JSON.parse(x) : x` trong PWA eventData.ts / vmsData.ts / auth.ts).
      */
     private class StringOrObjectDeserializer<T>(private val clazz: Class<T>) : JsonDeserializer<T?> {
-        private val delegateGson = GsonBuilder().setLenient().create()
-
         override fun deserialize(
             json: JsonElement?,
             typeOfT: Type?,
@@ -41,17 +55,13 @@ object LoginAuthClient {
         ): T? {
             if (json == null || json.isJsonNull) return null
             return try {
-                if (json.isJsonObject) {
-                    delegateGson.fromJson(json, clazz)
-                } else if (json.isJsonPrimitive && json.asJsonPrimitive.isString) {
-                    val raw = json.asString.trim()
-                    if (raw.startsWith("{")) {
-                        delegateGson.fromJson(raw, clazz)
-                    } else {
-                        null
+                when {
+                    json.isJsonObject -> lenientGson.fromJson(json, clazz)
+                    json.isJsonPrimitive && json.asJsonPrimitive.isString -> {
+                        val raw = json.asString.trim()
+                        if (raw.startsWith("{")) lenientGson.fromJson(raw, clazz) else null
                     }
-                } else {
-                    null
+                    else -> null
                 }
             } catch (_: Exception) {
                 null
@@ -59,28 +69,57 @@ object LoginAuthClient {
         }
     }
 
+    /**
+     * Client gốc: giữ DUY NHẤT 1 connection pool + 1 dispatcher (thread pool) cho toàn app.
+     * Các client chuyên dụng (API, ảnh, WebSocket, re-login, live stream) đều tạo bằng `newBuilder()`
+     * từ client này nên dùng chung tài nguyên → ít thread, ít socket, ít TLS handshake → tiết kiệm pin/CPU.
+     */
+    val baseClient: OkHttpClient by lazy {
+        val dispatcher = Dispatcher().apply {
+            maxRequests = MAX_REQUESTS
+            maxRequestsPerHost = MAX_REQUESTS_PER_HOST
+        }
+        OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .connectionPool(ConnectionPool(MAX_IDLE_CONNECTIONS, KEEP_ALIVE_MINUTES, TimeUnit.MINUTES))
+            .connectTimeout(CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .readTimeout(READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .writeTimeout(WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** Client cho REST API: gắn auth header, rewrite domain động, tự re-login khi 401 */
     val client: OkHttpClient by lazy {
         // Sử dụng BASIC thay vì BODY để tránh buffer toàn bộ JSON lớn vào RAM và spam Logcat gây giật/nóng máy
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
             else HttpLoggingInterceptor.Level.NONE
         }
-
-        val dispatcher = okhttp3.Dispatcher().apply {
-            maxRequests = 64
-            maxRequestsPerHost = 16
-        }
-
-        // Timeouts đồng bộ với api.ts (GET_TIMEOUT_MS = 30s, WRITE_TIMEOUT_MS = 60s)
-        OkHttpClient.Builder()
-            .dispatcher(dispatcher)
-            .connectionPool(okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
+        baseClient.newBuilder()
             .addInterceptor(LoginAuthInterceptor())
             .addInterceptor(logging)
             .authenticator(TokenAuthenticator())
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
+     * Client cho WebSocket Notify / Report:
+     * - Bỏ readTimeout (WebSocket cần giữ kết nối lâu dài, readTimeout sẽ kill connection)
+     * - pingInterval để OkHttp phát hiện kết nối chết và đóng → kích hoạt reconnect
+     */
+    val webSocketClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(0, TimeUnit.SECONDS)
+            .pingInterval(WS_PING_INTERVAL_SEC, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** Client cho Coil tải ảnh: chỉ gắn token cho host backend (không lộ token cho host bên thứ 3) */
+    val imageClient: OkHttpClient by lazy {
+        baseClient.newBuilder()
+            .addInterceptor(ImageAuthInterceptor())
+            .connectTimeout(IMAGE_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .readTimeout(IMAGE_TIMEOUT_SEC, TimeUnit.SECONDS)
             .build()
     }
 

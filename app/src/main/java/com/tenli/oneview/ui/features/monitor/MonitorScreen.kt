@@ -2,7 +2,7 @@ package com.tenli.oneview.ui.features.monitor
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -11,19 +11,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,7 +33,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -50,13 +45,9 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -64,12 +55,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,39 +68,54 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
+import coil.size.Precision
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.LiveStreamPlayer
+import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
-import com.tenli.oneview.ui.theme.BrandAccent
 import com.tenli.oneview.ui.theme.LucideIcons
-import com.tenli.oneview.ui.theme.ThemeManager
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.caption
+import com.tenli.oneview.ui.theme.micro
+import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+
+private const val LIVE_STAGE_ASPECT_RATIO = 16f / 9f
+private const val SNAPSHOT_CARD_WIDTH_PX = 420
+private const val SNAPSHOT_CARD_HEIGHT_PX = 236
+private val GroupFilterSheetMaxHeight = 520.dp
+private val GroupFilterEmptyHeight = 160.dp
+private val GroupRowBaseHeight = 38.dp
+private val CameraInfoPillMaxWidthCompact = 140.dp
+private val CameraInfoPillMaxWidthRegular = 260.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,25 +129,17 @@ fun MonitorScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isEn = rememberIsEnglish()
-    val context = LocalContext.current
     val activity = LocalContext.current as? Activity
-    val coroutineScope = rememberCoroutineScope()
     val cameraGridState = rememberLazyGridState()
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
 
     // fullscreenIndex != null: 1x1 single-camera fullscreen
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
     // isGridFullscreen: 2x2 grid fullscreen matching MobileLivePage.vue
     var isGridFullscreen by remember { mutableStateOf(false) }
-    // Thu gọn mặc định các ô lọc, chọn lưới 1x1/2x2 và VMS chips để giao diện gọn gàng
+    // Thu gọn mặc định các ô lọc, chọn lưới 1x1/2x2 để giao diện gọn gàng
     var isControlsExpanded by remember { mutableStateOf(false) }
-
-    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
 
     var wasDeactivated by remember { mutableStateOf(true) }
     LaunchedEffect(isTabActive) {
@@ -171,18 +168,18 @@ fun MonitorScreen(
     LaunchedEffect(uiState.error, isTabActive) {
         uiState.error?.let {
             if (isTabActive) {
-                com.tenli.oneview.ui.component.MobileTopPopupManager.error(it)
+                MobileTopPopupManager.error(it)
             }
             viewModel.clearError()
         }
     }
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    val currentIsTabActive by androidx.compose.runtime.rememberUpdatedState(isTabActive)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentIsTabActive by rememberUpdatedState(isTabActive)
     DisposableEffect(lifecycleOwner) {
         var isFirstResume = true
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.setMonitorTabActive(currentIsTabActive)
                 if (isFirstResume) {
                     isFirstResume = false
@@ -190,7 +187,7 @@ fun MonitorScreen(
                     viewModel.refreshActiveStreams()
                     viewModel.loadVisibleCameraSnapshots()
                 }
-            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+            } else if (event == Lifecycle.Event.ON_STOP) {
                 viewModel.setMonitorTabActive(false)
             }
         }
@@ -200,40 +197,14 @@ fun MonitorScreen(
         }
     }
 
-    // Derived data matching MobileLivePage.vue
-    val hasAvailableCameras = remember(uiState.treeData) {
-        uiState.treeData.any { MonitorViewModel.countNodeCameras(it) > 0 }
-    }
-
-    val totalAllCamerasCount = remember(uiState.treeData) {
-        uiState.treeData.sumOf { MonitorViewModel.countNodeCameras(it) }
-    }
-
-    val groupTreeRows = remember(
-        uiState.treeData,
-        uiState.expandedNodes
-    ) {
-        MonitorViewModel.computeGroupTreeRows(uiState)
-    }
+    // Derived data precomputed on background/ViewModel layer
+    val hasAvailableCameras = uiState.hasAvailableCameras
+    val totalAllCamerasCount = uiState.totalAllCamerasCount
+    val groupTreeRows = uiState.groupTreeRows
+    val pagedCameraItems = uiState.pagedCameraItems
+    val totalCameraPages = uiState.totalCameraPages
 
     val sheetTitle = if (isEn) "Filter camera groups" else "Lọc nhóm camera"
-
-    val displayedCameraItems = remember(
-        uiState.treeData,
-        uiState.selectedFilterNodeKey,
-        uiState.searchQuery
-    ) {
-        MonitorViewModel.computeDisplayedCameraItems(uiState)
-    }
-
-    val totalCameraPages = remember(displayedCameraItems.size) {
-        maxOf(1, (displayedCameraItems.size + MonitorViewModel.CAMERA_PAGE_SIZE - 1) / MonitorViewModel.CAMERA_PAGE_SIZE)
-    }
-
-    val pagedCameraItems = remember(displayedCameraItems, uiState.currentCameraPage) {
-        val start = (uiState.currentCameraPage - 1).coerceAtLeast(0) * MonitorViewModel.CAMERA_PAGE_SIZE
-        displayedCameraItems.drop(start).take(MonitorViewModel.CAMERA_PAGE_SIZE)
-    }
 
     val cameraPageNumbers = remember(uiState.currentCameraPage, totalCameraPages) {
         val total = totalCameraPages
@@ -262,8 +233,8 @@ fun MonitorScreen(
         viewModel.loadVisibleCameraSnapshots()
     }
 
-    val panelBg = if (isDark) Color(0xFF172033) else Color.White
-    val gridDividerBg = if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1)
+    val panelBg = colors.surface
+    val gridDividerBg = colors.borderStrong
 
     val isSingleFullscreen = fullscreenIndex == 0 && uiState.gridSize == 1
     val is2x2Fullscreen = isGridFullscreen && uiState.gridSize == 4
@@ -280,11 +251,13 @@ fun MonitorScreen(
         )
     }
 
+    val bottomClearance = spacing.bottomNavHeight + spacing.space20
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (isAnyFullscreen) Color.Black else MaterialTheme.colorScheme.background)
+                .background(if (isAnyFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
         ) {
             if (!isAnyFullscreen) {
                 MobileTopBar(
@@ -293,7 +266,7 @@ fun MonitorScreen(
                         MobileTopActionButton(
                             icon = LucideIcons.ListFilter,
                             contentDescription = if (isEn) "Filter" else "Bộ lọc",
-                            hasActiveDot = uiState.selectedFilterNodeKey != "all",
+                            hasActiveDot = uiState.selectedFilterNodeKey != MonitorViewModel.FILTER_ALL,
                             onClick = { viewModel.openGroupFilterSheet() }
                         )
                     }
@@ -305,7 +278,7 @@ fun MonitorScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(bottom = 80.dp),
+                        .padding(bottom = bottomClearance),
                     contentAlignment = Alignment.Center
                 ) {
                     WaveDotsLoading()
@@ -315,7 +288,7 @@ fun MonitorScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(bottom = 80.dp),
+                        .padding(bottom = bottomClearance),
                     contentAlignment = Alignment.Center
                 ) {
                     CommonEmptyState(text = if (isEn) "No cameras available" else "Không có camera nào")
@@ -327,11 +300,11 @@ fun MonitorScreen(
                     modifier = if (isAnyFullscreen) {
                         Modifier
                             .fillMaxSize()
-                            .background(Color.Black)
+                            .background(colors.mediaBg)
                     } else {
                         Modifier
                             .fillMaxWidth()
-                            .aspectRatio(16f / 9f)
+                            .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
                             .background(if (uiState.gridSize == 4) gridDividerBg else panelBg)
                     }
                 ) {
@@ -341,10 +314,10 @@ fun MonitorScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(if (isSingleFullscreen) Color.Black else panelBg)
+                                .background(if (isSingleFullscreen) colors.mediaBg else panelBg)
                                 .then(
                                     if (isBlinking && !isSingleFullscreen) {
-                                        Modifier.border(2.dp, BrandAccent)
+                                        Modifier.border(spacing.borderFocus, colors.accent)
                                     } else {
                                         Modifier
                                     }
@@ -354,7 +327,6 @@ fun MonitorScreen(
                                 CameraGridItem(
                                     selectedCamera = selectedCam,
                                     isTabActive = isTabActive,
-                                    isDark = isDark,
                                     onClick = {},
                                     onRetryClick = { viewModel.retryCameraStream(0) },
                                     onSuccess = { viewModel.resetRetryCount(0) },
@@ -389,8 +361,7 @@ fun MonitorScreen(
                                 EmptyGridItem(
                                     onClick = {},
                                     isCompact = false,
-                                    isActiveSlot = false,
-                                    isDark = isDark
+                                    isActiveSlot = false
                                 )
                             }
                         }
@@ -399,7 +370,6 @@ fun MonitorScreen(
                         LiveGrid2x2Stage(
                             uiState = uiState,
                             isTabActive = isTabActive,
-                            isDark = isDark,
                             panelBg = panelBg,
                             gridDividerBg = gridDividerBg,
                             onCellTap = { viewModel.handleCellTap(it) },
@@ -415,11 +385,15 @@ fun MonitorScreen(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomEnd)
-                                    .padding(12.dp)
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(Color(0xFF0F172A).copy(alpha = 0.65f))
-                                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(9.dp))
+                                    .padding(spacing.space12)
+                                    .size(spacing.iconButton)
+                                    .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                    .background(colors.mediaOverlay)
+                                    .border(
+                                        spacing.borderMedium,
+                                        colors.onMedia.copy(alpha = 0.18f),
+                                        RoundedCornerShape(spacing.radiusSmallMedium)
+                                    )
                                     .clickable {
                                         restoreSystemOrientationAndBars(activity)
                                         isGridFullscreen = false
@@ -429,8 +403,8 @@ fun MonitorScreen(
                                 Icon(
                                     imageVector = LucideIcons.Minimize,
                                     contentDescription = "Thu nhỏ lưới 2x2",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(spacing.iconSmall)
                                 )
                             }
                         }
@@ -438,28 +412,33 @@ fun MonitorScreen(
                 }
 
                 if (!isAnyFullscreen) {
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(spacing.space10))
 
                     // 2. Camera Panel (.mobile-camera-panel)
-                    val controlBg = if (isDark) Color.White.copy(alpha = 0.07f) else Color(0xFFF1F5F9)
-                    val mutedText = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569)
-                    val placeholderColor = if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)
+                    val controlBg = colors.controlBg
+                    val mutedText = colors.textSubtle
+                    val placeholderColor = colors.textPlaceholder
 
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .navigationBarsPadding()
-                            .padding(horizontal = 10.dp)
-                            .padding(bottom = 84.dp)
-                            .clip(RoundedCornerShape(14.dp))
+                            .padding(horizontal = spacing.space10)
+                            .padding(bottom = bottomClearance)
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
                             .background(panelBg)
                     ) {
                         // .camera-filter-header
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp)
+                                .padding(
+                                    start = spacing.space10,
+                                    end = spacing.space10,
+                                    top = spacing.space8,
+                                    bottom = spacing.space4
+                                )
                         ) {
                             // Row 1 (Collapsible): .tree-search-bar (Search + 1x1/2x2 selector + 2x2 Fullscreen button)
                             AnimatedVisibility(
@@ -474,27 +453,27 @@ fun MonitorScreen(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 8.dp),
+                                        .padding(bottom = spacing.space8),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
                                 ) {
                                     // .search-input-box
                                     Row(
                                         modifier = Modifier
                                             .weight(1f)
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(9.dp))
+                                            .height(spacing.buttonHeightSmall)
+                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
                                             .background(controlBg)
-                                            .padding(horizontal = 10.dp),
+                                            .padding(horizontal = spacing.space10),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
                                             imageVector = LucideIcons.Search,
                                             contentDescription = if (isEn) "Search camera" else "Tìm camera",
-                                            tint = if (isDark) BrandAccent else Color(0xFF64748B),
-                                            modifier = Modifier.size(15.dp)
+                                            tint = if (colors.isDark) colors.accent else colors.textMuted,
+                                            modifier = Modifier.size(spacing.iconSmall)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(spacing.space6))
                                         Box(
                                             modifier = Modifier.weight(1f),
                                             contentAlignment = Alignment.CenterStart
@@ -503,35 +482,34 @@ fun MonitorScreen(
                                                 Text(
                                                     text = if (isEn) "Search camera..." else "Tìm camera...",
                                                     color = placeholderColor,
-                                                    fontSize = 13.sp
+                                                    style = MaterialTheme.typography.bodySmall
                                                 )
                                             }
                                             BasicTextField(
                                                 value = uiState.searchQuery,
                                                 onValueChange = { viewModel.setSearchQuery(it) },
                                                 singleLine = true,
-                                                textStyle = TextStyle(
-                                                    color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
-                                                    fontSize = 13.sp
+                                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                                    color = colors.textStrong
                                                 ),
-                                                cursorBrush = SolidColor(BrandAccent),
+                                                cursorBrush = SolidColor(colors.accent),
                                                 modifier = Modifier.fillMaxWidth()
                                             )
                                         }
                                         if (uiState.searchQuery.isNotEmpty()) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(18.dp)
+                                                    .size(spacing.badgeMinSize)
                                                     .clip(CircleShape)
-                                                    .background(Color(0xFF94A3B8).copy(alpha = 0.2f))
+                                                    .background(colors.textMuted.copy(alpha = 0.2f))
                                                     .clickable { viewModel.setSearchQuery("") },
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Icon(
                                                     imageVector = LucideIcons.X,
                                                     contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm",
-                                                    tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                                    modifier = Modifier.size(11.dp)
+                                                    tint = colors.textMuted,
+                                                    modifier = Modifier.size(spacing.iconTiny)
                                                 )
                                             }
                                         }
@@ -540,23 +518,21 @@ fun MonitorScreen(
                                     // .mobile-grid-selector ("1x1" / "2x2")
                                     Row(
                                         modifier = Modifier
-                                            .height(36.dp)
-                                            .clip(RoundedCornerShape(9.dp))
+                                            .height(spacing.buttonHeightSmall)
+                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
                                             .background(controlBg)
-                                            .padding(3.dp),
+                                            .padding(spacing.space3),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
                                     ) {
                                         GridOptionButton(
                                             label = "1x1",
                                             isSelected = uiState.gridSize == 1,
-                                            isDark = isDark,
                                             onClick = { viewModel.setGridSize(1) }
                                         )
                                         GridOptionButton(
                                             label = "2x2",
                                             isSelected = uiState.gridSize == 4,
-                                            isDark = isDark,
                                             onClick = { viewModel.setGridSize(4) }
                                         )
                                     }
@@ -565,8 +541,8 @@ fun MonitorScreen(
                                     if (uiState.gridSize == 4) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(RoundedCornerShape(9.dp))
+                                                .size(spacing.iconButton)
+                                                .clip(RoundedCornerShape(spacing.radiusSmallMedium))
                                                 .background(controlBg)
                                                 .clickable { isGridFullscreen = true },
                                             contentAlignment = Alignment.Center
@@ -575,7 +551,7 @@ fun MonitorScreen(
                                                 imageVector = LucideIcons.Maximize,
                                                 contentDescription = "Phóng to lưới 2x2",
                                                 tint = mutedText,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(spacing.iconSmall)
                                             )
                                         }
                                     }
@@ -598,18 +574,18 @@ fun MonitorScreen(
                                 // Nút mũi tên đóng/mở thanh công cụ tìm kiếm và chọn lưới 1x1/2x2
                                 Box(
                                     modifier = Modifier
-                                        .height(28.dp)
-                                        .widthIn(min = 28.dp)
-                                        .clip(RoundedCornerShape(7.dp))
+                                        .height(spacing.chipHeight)
+                                        .widthIn(min = spacing.chipHeight)
+                                        .clip(RoundedCornerShape(spacing.radiusSmall))
                                         .background(
                                             if (isControlsExpanded || hasActiveCustomControl) {
-                                                BrandAccent.copy(alpha = if (isDark) 0.20f else 0.12f)
+                                                colors.accent.copy(alpha = if (colors.isDark) 0.20f else 0.12f)
                                             } else {
                                                 controlBg
                                             }
                                         )
                                         .clickable { isControlsExpanded = !isControlsExpanded }
-                                        .padding(horizontal = 7.dp),
+                                        .padding(horizontal = spacing.space6),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -619,39 +595,39 @@ fun MonitorScreen(
                                         } else {
                                             if (isControlsExpanded) "Thu gọn công cụ" else "Mở rộng công cụ"
                                         },
-                                        tint = if (isControlsExpanded || hasActiveCustomControl) BrandAccent else mutedText,
+                                        tint = if (isControlsExpanded || hasActiveCustomControl) colors.accent else mutedText,
                                         modifier = Modifier
-                                            .size(15.dp)
+                                            .size(spacing.iconSmall)
                                             .rotate(arrowRotation)
                                     )
                                 }
 
                                 // .pagination-controls (luôn hiển thị)
                                 if (totalCameraPages > 1) {
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(spacing.space6))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(spacing.space3)
                                     ) {
                                         val canPrev = uiState.currentCameraPage > 1
                                         val canNext = uiState.currentCameraPage < totalCameraPages
 
                                         Box(
                                             modifier = Modifier
-                                                .height(28.dp)
-                                                .widthIn(min = 24.dp)
-                                                .clip(RoundedCornerShape(7.dp))
+                                                .height(spacing.chipHeight)
+                                                .widthIn(min = spacing.space24)
+                                                .clip(RoundedCornerShape(spacing.radiusSmall))
                                                 .background(controlBg)
                                                 .alpha(if (canPrev) 1f else 0.4f)
                                                 .clickable(enabled = canPrev) { viewModel.prevCameraPage() }
-                                                .padding(horizontal = 5.dp),
+                                                .padding(horizontal = spacing.space5),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = LucideIcons.ChevronLeft,
                                                 contentDescription = "Trang trước",
                                                 tint = mutedText,
-                                                modifier = Modifier.size(13.dp)
+                                                modifier = Modifier.size(spacing.iconXSmall)
                                             )
                                         }
 
@@ -659,18 +635,18 @@ fun MonitorScreen(
                                             val isPageActive = page == uiState.currentCameraPage
                                             Box(
                                                 modifier = Modifier
-                                                    .height(28.dp)
-                                                    .widthIn(min = 24.dp)
-                                                    .clip(RoundedCornerShape(7.dp))
-                                                    .background(if (isPageActive) BrandAccent else controlBg)
+                                                    .height(spacing.chipHeight)
+                                                    .widthIn(min = spacing.space24)
+                                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                                    .background(if (isPageActive) colors.accent else controlBg)
                                                     .clickable { viewModel.setCameraPage(page) }
-                                                    .padding(horizontal = 6.dp),
+                                                    .padding(horizontal = spacing.space6),
                                                 contentAlignment = Alignment.Center
                                             ) {
                                                 Text(
                                                     text = page.toString(),
-                                                    color = if (isPageActive) Color.White else mutedText,
-                                                    fontSize = 11.sp,
+                                                    color = if (isPageActive) colors.onAccent else mutedText,
+                                                    style = MaterialTheme.typography.caption,
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                             }
@@ -678,20 +654,20 @@ fun MonitorScreen(
 
                                         Box(
                                             modifier = Modifier
-                                                .height(28.dp)
-                                                .widthIn(min = 24.dp)
-                                                .clip(RoundedCornerShape(7.dp))
+                                                .height(spacing.chipHeight)
+                                                .widthIn(min = spacing.space24)
+                                                .clip(RoundedCornerShape(spacing.radiusSmall))
                                                 .background(controlBg)
                                                 .alpha(if (canNext) 1f else 0.4f)
                                                 .clickable(enabled = canNext) { viewModel.nextCameraPage() }
-                                                .padding(horizontal = 5.dp),
+                                                .padding(horizontal = spacing.space5),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
                                                 imageVector = LucideIcons.ChevronRight,
                                                 contentDescription = "Trang sau",
                                                 tint = mutedText,
-                                                modifier = Modifier.size(13.dp)
+                                                modifier = Modifier.size(spacing.iconXSmall)
                                             )
                                         }
                                     }
@@ -705,7 +681,7 @@ fun MonitorScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(16.dp),
+                                    .padding(spacing.space16),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CommonEmptyState(
@@ -718,13 +694,13 @@ fun MonitorScreen(
                                 state = cameraGridState,
                                 modifier = Modifier.fillMaxSize(),
                                 contentPadding = PaddingValues(
-                                    start = 8.dp,
-                                    end = 8.dp,
-                                    top = 6.dp,
-                                    bottom = 12.dp
+                                    start = spacing.space8,
+                                    end = spacing.space8,
+                                    top = spacing.space6,
+                                    bottom = spacing.space12
                                 ),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space8),
+                                verticalArrangement = Arrangement.spacedBy(spacing.space8)
                             ) {
                                 items(
                                     items = pagedCameraItems,
@@ -739,13 +715,12 @@ fun MonitorScreen(
                                         isPlaying = isPlaying,
                                         hasSnapKey = hasSnapKey,
                                         snapshotUrl = snapUrl,
-                                        isDark = isDark,
                                         onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
                                         onClick = {
                                             viewModel.selectCameraFromTree(
                                                 camera = item.camera,
                                                 onGridFull = {
-                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.warning(gridFullMsg)
+                                                    MobileTopPopupManager.warning(gridFullMsg)
                                                 }
                                             )
                                         }
@@ -765,7 +740,6 @@ fun MonitorScreen(
                 rows = groupTreeRows,
                 totalAllCamerasCount = totalAllCamerasCount,
                 selectedFilterNodeKey = uiState.selectedFilterNodeKey,
-                isDark = isDark,
                 onDismiss = { viewModel.closeGroupFilterSheet() },
                 onToggleExpand = { viewModel.toggleNodeExpansion(it) },
                 onRowClick = { viewModel.handleGroupRowClick(it) }
@@ -785,23 +759,23 @@ private fun LandscapeFullscreenHandler(
 
         val window = activity?.window
         val insetsController = window?.let {
-            androidx.core.view.WindowCompat.getInsetsController(it, it.decorView)
+            WindowCompat.getInsetsController(it, it.decorView)
         }
 
         if (insetsController != null) {
             insetsController.systemBarsBehavior =
-                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
         }
 
         onDispose {
             activity?.requestedOrientation =
                 originalOrientation ?: ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-            insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            insetsController?.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 
-    androidx.activity.compose.BackHandler {
+    BackHandler {
         onExit()
     }
 }
@@ -810,16 +784,15 @@ private fun restoreSystemOrientationAndBars(activity: Activity?) {
     activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     val window = activity?.window
     val insetsController = window?.let {
-        androidx.core.view.WindowCompat.getInsetsController(it, it.decorView)
+        WindowCompat.getInsetsController(it, it.decorView)
     }
-    insetsController?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+    insetsController?.show(WindowInsetsCompat.Type.systemBars())
 }
 
 @Composable
 private fun LiveGrid2x2Stage(
     uiState: MonitorUiState,
     isTabActive: Boolean,
-    isDark: Boolean,
     panelBg: Color,
     gridDividerBg: Color,
     onCellTap: (Int) -> Unit,
@@ -829,18 +802,21 @@ private fun LiveGrid2x2Stage(
     onReloadClick: (CameraModel, Int) -> Unit,
     onRemoveClick: (Int) -> Unit
 ) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(gridDividerBg),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+        verticalArrangement = Arrangement.spacedBy(spacing.space2)
     ) {
         for (row in 0..1) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
             ) {
                 for (col in 0..1) {
                     val slotIdx = row * 2 + col
@@ -855,7 +831,7 @@ private fun LiveGrid2x2Stage(
                             .background(panelBg)
                             .then(
                                 if (isBlinking) {
-                                    Modifier.border(2.dp, BrandAccent)
+                                    Modifier.border(spacing.borderFocus, colors.accent)
                                 } else {
                                     Modifier
                                 }
@@ -865,7 +841,6 @@ private fun LiveGrid2x2Stage(
                             CameraGridItem(
                                 selectedCamera = selectedCam,
                                 isTabActive = isTabActive,
-                                isDark = isDark,
                                 onClick = { onCellTap(slotIdx) },
                                 onRetryClick = { onRetryClick(slotIdx) },
                                 onSuccess = { onSuccess(slotIdx) },
@@ -881,8 +856,7 @@ private fun LiveGrid2x2Stage(
                             EmptyGridItem(
                                 onClick = { onCellTap(slotIdx) },
                                 isCompact = true,
-                                isActiveSlot = isActiveSlot,
-                                isDark = isDark
+                                isActiveSlot = isActiveSlot
                             )
                         }
                     }
@@ -896,97 +870,28 @@ private fun LiveGrid2x2Stage(
 private fun GridOptionButton(
     label: String,
     isSelected: Boolean,
-    isDark: Boolean,
     onClick: () -> Unit
 ) {
-    val bgColor = if (isSelected) BrandAccent else Color.Transparent
-    val contentColor = when {
-        isSelected -> Color.White
-        isDark -> Color(0xFF94A3B8)
-        else -> Color(0xFF475569)
-    }
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val bgColor = if (isSelected) colors.accent else Color.Transparent
+    val contentColor = if (isSelected) colors.onAccent else colors.textSubtle
 
     Box(
         modifier = Modifier
-            .height(30.dp)
-            .clip(RoundedCornerShape(7.dp))
+            .height(spacing.avatarSmall)
+            .clip(RoundedCornerShape(spacing.radiusSmall))
             .background(bgColor)
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp),
+            .padding(horizontal = spacing.space8),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             color = contentColor,
-            fontSize = 11.5.sp,
+            style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold
         )
-    }
-}
-
-@Composable
-private fun VmsFilterChipButton(
-    chip: VmsFilterChip,
-    isDark: Boolean,
-    panelBg: Color,
-    controlBg: Color,
-    mutedText: Color,
-    onClick: () -> Unit
-) {
-    val chipBg = if (chip.isActive) BrandAccent else controlBg
-    val textColor = if (chip.isActive) Color.White else mutedText
-    val countBg = when {
-        chip.isActive -> Color.White.copy(alpha = 0.22f)
-        isDark -> Color.White.copy(alpha = 0.08f)
-        else -> Color(0xFF0F172A).copy(alpha = 0.07f)
-    }
-    val displayCount = if (chip.isGroupFiltered) chip.activeCount else chip.totalCount
-
-    Box {
-        Row(
-            modifier = Modifier
-                .height(28.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(chipBg)
-                .clickable(onClick = onClick)
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = chip.name,
-                color = textColor,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(5.dp))
-                    .background(countBg)
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = displayCount.toString(),
-                    color = textColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-
-        if (chip.isGroupFiltered) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .offset(x = 2.dp, y = (-2).dp)
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFEF4444))
-                    .border(1.5.dp, panelBg, CircleShape)
-            )
-        }
     }
 }
 
@@ -996,28 +901,40 @@ private fun MobileCameraSnapshotCard(
     isPlaying: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
-    isDark: Boolean,
     onSnapshotError: () -> Unit,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+
     val cardBg = when {
-        isPlaying && isDark -> BrandAccent.copy(alpha = 0.14f)
-        isPlaying && !isDark -> BrandAccent.copy(alpha = 0.10f)
-        isDark -> Color.White.copy(alpha = 0.04f)
-        else -> Color(0xFFF1F5F9)
+        isPlaying && colors.isDark -> colors.accent.copy(alpha = 0.14f)
+        isPlaying -> colors.accent.copy(alpha = 0.10f)
+        else -> colors.inputBg
     }
-    val thumbBg = if (isDark) Color(0xFF0F172A).copy(alpha = 0.45f) else Color(0xFFE2E8F0)
-    val noImageTint = (if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8)).copy(alpha = 0.45f)
-    val nameColor = when {
-        isPlaying -> BrandAccent
-        isDark -> Color(0xFFF1F5F9)
-        else -> Color(0xFF1E293B)
+    val thumbBg = colors.thumbnailBg
+    val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
+    val nameColor = if (isPlaying) colors.accent else colors.textTitle
+
+    val imageRequest = remember(snapshotUrl) {
+        if (snapshotUrl.isNullOrEmpty()) {
+            null
+        } else {
+            ImageRequest.Builder(context)
+                .data(snapshotUrl)
+                .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
+                .precision(Precision.INEXACT)
+                .allowHardware(true)
+                .crossfade(false)
+                .build()
+        }
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
             .background(cardBg)
             .clickable(onClick = onClick)
     ) {
@@ -1025,13 +942,13 @@ private fun MobileCameraSnapshotCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
                 .background(thumbBg),
             contentAlignment = Alignment.Center
         ) {
-            if (!snapshotUrl.isNullOrEmpty()) {
+            if (imageRequest != null) {
                 SubcomposeAsyncImage(
-                    model = snapshotUrl,
+                    model = imageRequest,
                     contentDescription = camera.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
@@ -1041,9 +958,9 @@ private fun MobileCameraSnapshotCard(
                             contentAlignment = Alignment.Center
                         ) {
                             WaveDotsLoading(
-                                dotSize = 6.dp,
-                                dotColor = BrandAccent,
-                                maxOffset = 6.dp
+                                dotSize = spacing.space6,
+                                dotColor = colors.accent,
+                                maxOffset = spacing.space6
                             )
                         }
                     },
@@ -1059,23 +976,23 @@ private fun MobileCameraSnapshotCard(
                                 imageVector = LucideIcons.ImageOff,
                                 contentDescription = null,
                                 tint = noImageTint,
-                                modifier = Modifier.size(26.dp)
+                                modifier = Modifier.size(spacing.iconMedium)
                             )
                         }
                     }
                 )
             } else if (!hasSnapKey) {
                 WaveDotsLoading(
-                    dotSize = 6.dp,
-                    dotColor = BrandAccent,
-                    maxOffset = 6.dp
+                    dotSize = spacing.space6,
+                    dotColor = colors.accent,
+                    maxOffset = spacing.space6
                 )
             } else {
                 Icon(
                     imageVector = LucideIcons.ImageOff,
                     contentDescription = null,
                     tint = noImageTint,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(spacing.iconMedium)
                 )
             }
 
@@ -1085,22 +1002,21 @@ private fun MobileCameraSnapshotCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(6.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(BrandAccent)
-                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .padding(spacing.space6)
+                        .clip(CircleShape)
+                        .background(colors.accent)
+                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space5)
                     ) {
                         PlayingEqualizerBars()
                         Text(
                             text = if (isEn) "Playing" else "Đang xem",
-                            color = Color.White,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            lineHeight = 13.sp
+                            color = colors.onAccent,
+                            style = MaterialTheme.typography.micro,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -1111,14 +1027,14 @@ private fun MobileCameraSnapshotCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 30.dp)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .heightIn(min = spacing.avatarSmall)
+                .padding(horizontal = spacing.space8, vertical = spacing.space6),
             contentAlignment = Alignment.CenterStart
         ) {
             Text(
                 text = camera.name,
                 color = nameColor,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1129,6 +1045,8 @@ private fun MobileCameraSnapshotCard(
 
 @Composable
 private fun PlayingEqualizerBars() {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
     val infiniteTransition = rememberInfiniteTransition(label = "playingEqualizer")
     val scale1 by infiniteTransition.animateFloat(
         initialValue = 0.45f,
@@ -1159,39 +1077,39 @@ private fun PlayingEqualizerBars() {
     )
 
     Row(
-        modifier = Modifier.height(10.dp),
+        modifier = Modifier.height(spacing.space10),
         verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(1.5.dp)
+        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
     ) {
         Box(
             modifier = Modifier
-                .width(2.dp)
-                .height(4.dp)
+                .width(spacing.space2)
+                .height(spacing.space4)
                 .graphicsLayer {
                     scaleY = scale1
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                 }
-                .background(Color.White, RoundedCornerShape(1.dp))
+                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
         )
         Box(
             modifier = Modifier
-                .width(2.dp)
-                .height(9.dp)
+                .width(spacing.space2)
+                .height(spacing.space10)
                 .graphicsLayer {
                     scaleY = scale2
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                 }
-                .background(Color.White, RoundedCornerShape(1.dp))
+                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
         )
         Box(
             modifier = Modifier
-                .width(2.dp)
-                .height(6.dp)
+                .width(spacing.space2)
+                .height(spacing.space6)
                 .graphicsLayer {
                     scaleY = scale3
-                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
+                    transformOrigin = TransformOrigin(0.5f, 1f)
                 }
-                .background(Color.White, RoundedCornerShape(1.dp))
+                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
         )
     }
 }
@@ -1202,21 +1120,15 @@ private fun MobileGroupFilterBottomSheet(
     rows: List<GroupSheetRow>,
     totalAllCamerasCount: Int,
     selectedFilterNodeKey: String,
-    isDark: Boolean,
     onDismiss: () -> Unit,
     onToggleExpand: (String) -> Unit,
     onRowClick: (String) -> Unit
 ) {
     val isEn = rememberIsEnglish()
-    val sheetBg = if (isDark) Color(0xFF172033) else Color.White
-    val sheetBorder = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
-    val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A)
-    val closeBtnBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9)
-    val mutedColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val rowTextColor = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
-    val countBadgeBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9)
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
 
-    com.tenli.oneview.ui.component.MobileFullScreenOverlay(
+    MobileFullScreenOverlay(
         onDismissRequest = onDismiss
     ) {
         Box(
@@ -1228,47 +1140,53 @@ private fun MobileGroupFilterBottomSheet(
                     onClick = onDismiss
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+                .padding(horizontal = spacing.space10, vertical = spacing.space10),
             contentAlignment = Alignment.BottomCenter
         ) {
             Column(
                 modifier = Modifier
+                    .widthIn(max = spacing.contentMaxWidth)
                     .fillMaxWidth()
-                    .heightIn(max = 520.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(sheetBg)
-                    .border(1.dp, sheetBorder, RoundedCornerShape(22.dp))
+                    .heightIn(max = GroupFilterSheetMaxHeight)
+                    .clip(RoundedCornerShape(spacing.radiusLarge))
+                    .background(colors.surface)
+                    .border(spacing.borderMedium, colors.border, RoundedCornerShape(spacing.radiusLarge))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {}
                     )
-                    .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp)
+                    .padding(
+                        start = spacing.space10,
+                        end = spacing.space10,
+                        top = spacing.space10,
+                        bottom = spacing.space12
+                    )
             ) {
                 // Sheet Header (drag handle + title + close button)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 10.dp)
+                        .padding(bottom = spacing.space10)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 36.dp),
+                            .padding(horizontal = spacing.iconButton),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
                             modifier = Modifier
-                                .width(36.dp)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Color(0xFF94A3B8).copy(alpha = 0.38f))
+                                .width(spacing.sheetHandleWidth)
+                                .height(spacing.sheetHandleHeight)
+                                .clip(CircleShape)
+                                .background(colors.handle)
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(spacing.space10))
                         Text(
                             text = title,
-                            color = titleColor,
-                            fontSize = 15.sp,
+                            color = colors.textStrong,
+                            style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1278,17 +1196,17 @@ private fun MobileGroupFilterBottomSheet(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .size(30.dp)
+                            .size(spacing.avatarSmall)
                             .clip(CircleShape)
-                            .background(closeBtnBg)
+                            .background(colors.controlBg)
                             .clickable(onClick = onDismiss),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = LucideIcons.X,
                             contentDescription = if (isEn) "Close" else "Đóng",
-                            tint = mutedColor,
-                            modifier = Modifier.size(18.dp)
+                            tint = colors.textMuted,
+                            modifier = Modifier.size(spacing.iconSmallMedium)
                         )
                     }
                 }
@@ -1298,7 +1216,7 @@ private fun MobileGroupFilterBottomSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp),
+                            .height(GroupFilterEmptyHeight),
                         contentAlignment = Alignment.Center
                     ) {
                         CommonEmptyState(text = if (isEn) "No camera groups" else "Không có nhóm camera")
@@ -1306,43 +1224,43 @@ private fun MobileGroupFilterBottomSheet(
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                        verticalArrangement = Arrangement.spacedBy(spacing.space2)
                     ) {
                         // Top option: "Tất cả camera" / "All cameras"
-                        item(key = "all") {
-                            val isAllSelected = selectedFilterNodeKey == "all"
-                            val allIconTint = if (isAllSelected) BrandAccent else mutedColor
+                        item(key = MonitorViewModel.FILTER_ALL) {
+                            val isAllSelected = selectedFilterNodeKey == MonitorViewModel.FILTER_ALL
+                            val allIconTint = if (isAllSelected) colors.accent else colors.textMuted
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .heightIn(min = GroupRowBaseHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
                                     .background(
-                                        if (isAllSelected) BrandAccent.copy(alpha = 0.12f) else Color.Transparent
+                                        if (isAllSelected) colors.accent.copy(alpha = 0.12f) else Color.Transparent
                                     )
-                                    .clickable { onRowClick("all") }
+                                    .clickable { onRowClick(MonitorViewModel.FILTER_ALL) }
                                     .padding(
-                                        start = 10.dp,
-                                        end = 10.dp,
-                                        top = 6.dp,
-                                        bottom = 6.dp
+                                        start = spacing.space10,
+                                        end = spacing.space10,
+                                        top = spacing.space6,
+                                        bottom = spacing.space6
                                     ),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space8)
                             ) {
-                                Spacer(modifier = Modifier.size(22.dp))
+                                Spacer(modifier = Modifier.size(spacing.iconMedium))
 
                                 Icon(
                                     imageVector = LucideIcons.Video,
                                     contentDescription = null,
                                     tint = allIconTint,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(spacing.iconSmall)
                                 )
 
                                 Text(
                                     text = if (isEn) "All cameras" else "Tất cả camera",
-                                    color = if (isAllSelected) BrandAccent else rowTextColor,
-                                    fontSize = 13.sp,
+                                    color = if (isAllSelected) colors.accent else colors.textStrong,
+                                    style = MaterialTheme.typography.bodySmall,
                                     fontWeight = if (isAllSelected) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1351,17 +1269,17 @@ private fun MobileGroupFilterBottomSheet(
 
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
                                         .background(
-                                            if (isAllSelected) BrandAccent.copy(alpha = 0.18f) else countBadgeBg
+                                            if (isAllSelected) colors.accent.copy(alpha = 0.18f) else colors.controlBg
                                         )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        .padding(horizontal = spacing.space6, vertical = spacing.space2),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = totalAllCamerasCount.toString(),
-                                        color = if (isAllSelected) BrandAccent else mutedColor,
-                                        fontSize = 11.sp,
+                                        color = if (isAllSelected) colors.accent else colors.textMuted,
+                                        style = MaterialTheme.typography.caption,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -1370,8 +1288,8 @@ private fun MobileGroupFilterBottomSheet(
                                     Icon(
                                         imageVector = LucideIcons.Check,
                                         contentDescription = null,
-                                        tint = BrandAccent,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(spacing.iconSmall)
                                     )
                                 }
                             }
@@ -1379,32 +1297,32 @@ private fun MobileGroupFilterBottomSheet(
 
                         items(items = rows, key = { it.key }) { row ->
                             val isSelected = selectedFilterNodeKey == row.key
-                            val indentDp = (minOf(row.depth, 5) * 16 + 10).dp
-                            val iconTint = if (isSelected) BrandAccent else mutedColor
+                            val indentDp = spacing.space10 + (spacing.space16 * minOf(row.depth, 5))
+                            val iconTint = if (isSelected) colors.accent else colors.textMuted
 
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .heightIn(min = GroupRowBaseHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
                                     .background(
-                                        if (isSelected) BrandAccent.copy(alpha = 0.12f) else Color.Transparent
+                                        if (isSelected) colors.accent.copy(alpha = 0.12f) else Color.Transparent
                                     )
                                     .clickable { onRowClick(row.key) }
                                     .padding(
                                         start = indentDp,
-                                        end = 10.dp,
-                                        top = 6.dp,
-                                        bottom = 6.dp
+                                        end = spacing.space10,
+                                        top = spacing.space6,
+                                        bottom = spacing.space6
                                     ),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space8)
                             ) {
                                 if (row.hasSubGroups) {
                                     Box(
                                         modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(RoundedCornerShape(6.dp))
+                                            .size(spacing.iconMedium)
+                                            .clip(RoundedCornerShape(spacing.radiusTiny))
                                             .clickable { onToggleExpand(row.key) },
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -1413,12 +1331,12 @@ private fun MobileGroupFilterBottomSheet(
                                             contentDescription = if (isEn) "Expand group" else "Mở rộng nhóm",
                                             tint = iconTint,
                                             modifier = Modifier
-                                                .size(15.dp)
+                                                .size(spacing.iconSmall)
                                                 .rotate(if (row.isExpanded) 0f else -90f)
                                         )
                                     }
                                 } else {
-                                    Spacer(modifier = Modifier.size(22.dp))
+                                    Spacer(modifier = Modifier.size(spacing.iconMedium))
                                 }
 
                                 Icon(
@@ -1429,13 +1347,13 @@ private fun MobileGroupFilterBottomSheet(
                                     },
                                     contentDescription = null,
                                     tint = iconTint,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(spacing.iconSmall)
                                 )
 
                                 Text(
                                     text = row.title,
-                                    color = if (isSelected) BrandAccent else rowTextColor,
-                                    fontSize = 13.sp,
+                                    color = if (isSelected) colors.accent else colors.textStrong,
+                                    style = MaterialTheme.typography.bodySmall,
                                     fontWeight = if (isSelected || row.isVmsNode) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -1444,17 +1362,17 @@ private fun MobileGroupFilterBottomSheet(
 
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
                                         .background(
-                                            if (isSelected) BrandAccent.copy(alpha = 0.18f) else countBadgeBg
+                                            if (isSelected) colors.accent.copy(alpha = 0.18f) else colors.controlBg
                                         )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        .padding(horizontal = spacing.space6, vertical = spacing.space2),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = row.count.toString(),
-                                        color = if (isSelected) BrandAccent else mutedColor,
-                                        fontSize = 11.sp,
+                                        color = if (isSelected) colors.accent else colors.textMuted,
+                                        style = MaterialTheme.typography.caption,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -1463,8 +1381,8 @@ private fun MobileGroupFilterBottomSheet(
                                     Icon(
                                         imageVector = LucideIcons.Check,
                                         contentDescription = null,
-                                        tint = BrandAccent,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(spacing.iconSmall)
                                     )
                                 }
                             }
@@ -1480,7 +1398,6 @@ private fun MobileGroupFilterBottomSheet(
 fun CameraGridItem(
     selectedCamera: SelectedCamera,
     isTabActive: Boolean = true,
-    isDark: Boolean = true,
     onClick: () -> Unit,
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
@@ -1492,6 +1409,8 @@ fun CameraGridItem(
     isCompact: Boolean = false,
     showFullscreenButton: Boolean = true
 ) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
     val deviceKey = UserSession.accessToken
     var isLiveViewPlaying by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
     var isLiveViewError by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
@@ -1509,11 +1428,7 @@ fun CameraGridItem(
         }
     }
 
-    val surfaceBg = when {
-        isFullscreen -> Color.Black
-        isDark -> Color(0xFF172033)
-        else -> Color.White
-    }
+    val surfaceBg = if (isFullscreen) colors.mediaBg else colors.surface
 
     val canPlayStream = isTabActive &&
         selectedCamera.streamUrl.isNotEmpty() &&
@@ -1542,9 +1457,8 @@ fun CameraGridItem(
     ) {
         if (canPlayStream) {
             if (selectedCamera.streamUrl.startsWith("ws")) {
-                com.tenli.oneview.ui.component.LiveStreamPlayer(
+                LiveStreamPlayer(
                     wsUrl = selectedCamera.streamUrl,
-                    videoCodecTag = selectedCamera.videoCodecTag.ifEmpty { "hvc1.1.6.L90" },
                     cameraId = selectedCamera.camera.id,
                     altCameraId = selectedCamera.camera.cameraId,
                     showInternalOverlay = false,
@@ -1588,11 +1502,11 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (isFullscreen) Color.Black else if (isDark) Color(0xFF172033) else Color.White),
+                    .background(surfaceBg),
                 contentAlignment = Alignment.Center
             ) {
                 if (selectedCamera.fallbackImageUrl.isNotEmpty() && !snapshotFailed) {
-                    coil.compose.AsyncImage(
+                    AsyncImage(
                         model = selectedCamera.fallbackImageUrl,
                         contentDescription = selectedCamera.camera.name,
                         contentScale = ContentScale.Crop,
@@ -1603,7 +1517,7 @@ fun CameraGridItem(
                         }
                     )
                 }
-                WaveDotsLoading(dotColor = BrandAccent)
+                WaveDotsLoading(dotColor = colors.accent)
             }
         }
 
@@ -1613,7 +1527,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (isFullscreen) Color.Black else if (isDark) Color(0xFF172033) else Color.White)
+                    .background(surfaceBg)
                     .clickable {
                         onClick()
                         infoTrigger++
@@ -1637,25 +1551,29 @@ fun CameraGridItem(
             exit = fadeOut(animationSpec = tween(200)),
             modifier = Modifier.fillMaxSize()
         ) {
+            val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+            val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+            val edgePadding = if (isCompact) spacing.space4 else spacing.space8
+
             Box(modifier = Modifier.fillMaxSize()) {
                 // .info-name
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(if (isCompact) 4.dp else 8.dp)
-                        .widthIn(max = if (isCompact) 140.dp else 260.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.42f))
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .padding(edgePadding)
+                        .widthIn(max = if (isCompact) CameraInfoPillMaxWidthCompact else CameraInfoPillMaxWidthRegular)
+                        .clip(RoundedCornerShape(spacing.radiusSmall))
+                        .background(overlayPillBg)
+                        .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
                         .padding(
-                            horizontal = if (isCompact) 6.dp else 8.dp,
-                            vertical = if (isCompact) 2.dp else 3.dp
+                            horizontal = if (isCompact) spacing.space6 else spacing.space8,
+                            vertical = if (isCompact) spacing.space2 else spacing.space3
                         )
                 ) {
                     Text(
                         text = selectedCamera.camera.name,
-                        color = Color.White,
-                        fontSize = if (isCompact) 11.sp else 12.sp,
+                        color = colors.onMedia,
+                        style = if (isCompact) MaterialTheme.typography.caption else MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1667,24 +1585,24 @@ fun CameraGridItem(
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(if (isCompact) 4.dp else 8.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.42f))
-                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                            .padding(if (isCompact) 2.dp else 3.dp)
+                            .padding(edgePadding)
+                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                            .background(overlayPillBg)
+                            .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                            .padding(if (isCompact) spacing.space2 else spacing.space3)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(if (isCompact) 22.dp else 26.dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .size(if (isCompact) spacing.iconMedium else spacing.iconButtonSmall)
+                                .clip(RoundedCornerShape(spacing.radiusTiny))
                                 .clickable { onRemoveClick() },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = LucideIcons.XCircle,
                                 contentDescription = "Đóng luồng trực tiếp",
-                                tint = Color.White,
-                                modifier = Modifier.size(if (isCompact) 14.dp else 16.dp)
+                                tint = colors.onMedia,
+                                modifier = Modifier.size(if (isCompact) spacing.iconXSmall else spacing.iconSmall)
                             )
                         }
                     }
@@ -1697,18 +1615,18 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(if (isCompact) 4.dp else 6.dp)
-                    .size(if (isFullscreen) 32.dp else 28.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.42f))
+                    .padding(if (isCompact) spacing.space4 else spacing.space6)
+                    .size(if (isFullscreen) spacing.iconLarge else spacing.iconButtonSmall)
+                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                    .background(colors.mediaBg.copy(alpha = 0.42f))
                     .clickable { onFullscreenClick() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
                     contentDescription = "Toàn màn hình",
-                    tint = Color.White,
-                    modifier = Modifier.size(if (isFullscreen) 17.dp else 15.dp)
+                    tint = colors.onMedia,
+                    modifier = Modifier.size(if (isFullscreen) spacing.iconSmallMedium else spacing.iconSmall)
                 )
             }
         }
@@ -1719,20 +1637,16 @@ fun CameraGridItem(
 fun EmptyGridItem(
     onClick: () -> Unit,
     isCompact: Boolean = false,
-    isActiveSlot: Boolean = false,
-    isDark: Boolean = true
+    isActiveSlot: Boolean = false
 ) {
-    val bgColor = if (isDark) Color(0xFF172033) else Color.White
-    val iconColor = when {
-        isActiveSlot -> BrandAccent
-        isDark -> Color(0xFF64748B)
-        else -> Color(0xFF94A3B8)
-    }
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val iconColor = if (isActiveSlot) colors.accent else colors.textPlaceholder
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bgColor)
+            .background(colors.surface)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -1740,120 +1654,7 @@ fun EmptyGridItem(
             imageVector = LucideIcons.Video,
             contentDescription = "Chọn Camera",
             tint = iconColor,
-            modifier = Modifier.size(if (isCompact) 34.dp else 46.dp)
+            modifier = Modifier.size(if (isCompact) spacing.iconLarge else spacing.iconExtraLarge)
         )
-    }
-}
-
-@Composable
-fun PlaybackItemView(
-    playback: com.tenli.oneview.model.network.VideoModel,
-    cameraName: String,
-    isSelected: Boolean = false,
-    onClick: () -> Unit
-) {
-    val formattedTime = remember(playback.time) {
-        var parsedDate: java.util.Date? = null
-
-        val numericTime = playback.time.toDoubleOrNull()
-        if (numericTime != null && numericTime > 0) {
-            val timeMillis = if (numericTime < 100000000000.0) (numericTime * 1000).toLong() else numericTime.toLong()
-            parsedDate = java.util.Date(timeMillis)
-        } else {
-            val formatters = listOf(
-                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSS'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
-                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.getDefault()).apply { timeZone = java.util.TimeZone.getTimeZone("UTC") },
-                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()),
-                java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.getDefault()),
-                java.text.SimpleDateFormat("yyyy-MM-dd-HH-mm-ss", java.util.Locale.getDefault())
-            )
-
-            for (f in formatters) {
-                try {
-                    parsedDate = f.parse(playback.time)
-                    if (parsedDate != null) break
-                } catch (_: Exception) {
-                }
-            }
-        }
-
-        val outputFormatter = java.text.SimpleDateFormat("HH:mm:ss dd/MM/yyyy", java.util.Locale.getDefault())
-        parsedDate?.let { outputFormatter.format(it) } ?: playback.time
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.1f) else Color.Transparent)
-            .clickable { onClick() }
-            .padding(start = 4.dp, top = 4.dp, bottom = 4.dp, end = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .width(140.dp)
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Color(0xFFF3F4F6))
-        ) {
-            val rawLink = playback.thumbnailLink.ifEmpty { playback.imageLink }
-            val link = if (rawLink.startsWith("http")) rawLink else if (rawLink.isNotEmpty()) "${UserSession.domain.trimEnd('/')}/$rawLink" else ""
-            if (link.isNotEmpty()) {
-                com.tenli.oneview.ui.component.VideoFrameImage(
-                    url = link,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                    cacheKey = "playback_${cameraName}_${playback.time}"
-                )
-            }
-            Icon(
-                imageVector = Icons.Default.PlayArrow,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.8f),
-                modifier = Modifier.align(Alignment.Center)
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = cameraName,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            val timeAnnotatedString = remember(formattedTime) {
-                buildAnnotatedString {
-                    val parts = formattedTime.split(" ")
-                    if (parts.size == 2) {
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.SemiBold)) {
-                            append(parts[0])
-                        }
-                        append(" ")
-                        append(parts[1])
-                    } else {
-                        append(formattedTime)
-                    }
-                }
-            }
-            Text(
-                text = timeAnnotatedString,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "PLAYBACK",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .background(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(4.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            )
-        }
     }
 }

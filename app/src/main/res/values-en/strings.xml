@@ -629,4 +629,15 @@
     <string name="lbl_alarm_notifications">Alarm Notifications</string>
     <string name="lbl_receive_full_notifications">Receive full notifications</string>
     <string name="camera_grid_full">Grid is full, cannot add more streams!</string>
+    <!-- System notifications / channels -->
+    <string name="notif_channel_event_name">AI alerts</string>
+    <string name="notif_channel_event_desc">Notifications when a person, fire or face is detected</string>
+    <string name="notif_channel_call_name">Alert calls</string>
+    <string name="notif_channel_call_desc">Dedicated channel for emergency calls from AI</string>
+    <string name="notif_channel_keep_alive_name">Tenli background service</string>
+    <string name="notif_keep_alive_title">Protection system is running</string>
+    <string name="notif_keep_alive_text">Tenli AIoT is always ready to receive alerts 24/7</string>
+    <string name="notif_default_title">Alert</string>
+    <string name="notif_missed_call_title">Missed call: %1$s</string>
+    <string name="notif_missed_call_text">Detected at: %1$s…</string>
 </resources>

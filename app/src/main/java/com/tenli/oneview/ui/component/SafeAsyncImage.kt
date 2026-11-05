@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BrokenImage
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,14 +15,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.spacing
 
 @Composable
 fun SafeAsyncImage(
@@ -33,16 +35,22 @@ fun SafeAsyncImage(
     errorIcon: ImageVector = Icons.Rounded.BrokenImage,
     showLoading: Boolean = true
 ) {
-    var isImageLoading by remember { mutableStateOf(true) }
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    var isImageLoading by remember(url) { mutableStateOf(true) }
     val context = LocalContext.current
 
-    // Xây dựng ImageRequest với Header Authorization [cite: 2026-03-16]
-    val imageRequest = remember(url, deviceKey) {
+    // Xây dựng ImageRequest với Header Authorization
+    val imageRequest = remember(context, url, deviceKey) {
         ImageRequest.Builder(context)
             .data(url)
-            .addHeader("Authorization", "Bearer $deviceKey")
+            .apply {
+                if (deviceKey.isNotEmpty()) {
+                    addHeader("Authorization", "Bearer $deviceKey")
+                }
+            }
             .crossfade(true)
-            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+            .diskCachePolicy(CachePolicy.ENABLED)
             .build()
     }
 
@@ -58,12 +66,11 @@ fun SafeAsyncImage(
             error = rememberVectorPainter(image = errorIcon)
         )
 
-        // Hiển thị vòng xoay loading nếu được phép [cite: 2026-03-16]
         if (showLoading && isImageLoading) {
             CircularProgressIndicator(
-                modifier = Modifier.size(30.dp),
-                color = Color.White.copy(alpha = 0.5f),
-                strokeWidth = 3.dp
+                modifier = Modifier.size(spacing.avatarSmall),
+                color = colors.onMedia.copy(alpha = 0.5f),
+                strokeWidth = spacing.space3
             )
         }
     }

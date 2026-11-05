@@ -2,29 +2,31 @@ package com.tenli.oneview.ui.features.home
 
 import android.app.Application
 import android.util.Log
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.BuildConfig
+import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.CachedHomeData
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
-import com.tenli.oneview.data.network.api.AiApi
-import com.tenli.oneview.data.network.api.BsApi
-import com.tenli.oneview.data.network.api.EventApi
-import com.tenli.oneview.data.network.api.VmsApi
-import com.tenli.oneview.data.network.retrofit.LoginAuthClient
+import com.tenli.oneview.data.network.ApiProvider
+import com.tenli.oneview.data.network.websocket.WebSocketManager
+import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.VmsCountOverviewModel
-import com.tenli.oneview.model.network.VmsEventCountByCameraModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
-import com.tenli.oneview.model.network.VmsEventStatisticalOverTimeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -35,7 +37,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 enum class TimeFilter(val title: String, val titleEn: String = title) {
     TODAY("Hôm nay", "Today"),
@@ -45,6 +51,13 @@ enum class TimeFilter(val title: String, val titleEn: String = title) {
     CUSTOM_RANGE("Tùy chỉnh", "Custom");
 
     companion object {
+        private val dateFormatThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+            override fun initialValue(): SimpleDateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        }
+        private val dateTimeFormatThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+            override fun initialValue(): SimpleDateFormat = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
+        }
+
         @Volatile
         var customDateStartMs: Long = run {
             val cal = Calendar.getInstance()
@@ -134,18 +147,18 @@ enum class TimeFilter(val title: String, val titleEn: String = title) {
         }
 
         fun formatDisplayLabel(filter: TimeFilter, isEn: Boolean): String {
-            val dateFmt = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
-            val dateTimeFmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
             return when (filter) {
                 TODAY -> if (isEn) TODAY.titleEn else TODAY.title
                 YESTERDAY -> if (isEn) YESTERDAY.titleEn else YESTERDAY.title
                 LAST_7_DAYS -> if (isEn) LAST_7_DAYS.titleEn else LAST_7_DAYS.title
                 CUSTOM_DATE -> {
                     val prefix = if (isEn) CUSTOM_DATE.titleEn else CUSTOM_DATE.title
-                    "$prefix (${dateFmt.format(java.util.Date(customDateStartMs))})"
+                    val dateFmt = dateFormatThreadLocal.get()!!
+                    "$prefix (${dateFmt.format(Date(customDateStartMs))})"
                 }
                 CUSTOM_RANGE -> {
-                    "${dateTimeFmt.format(java.util.Date(customRangeFromMs))} - ${dateTimeFmt.format(java.util.Date(customRangeToMs))}"
+                    val dateTimeFmt = dateTimeFormatThreadLocal.get()!!
+                    "${dateTimeFmt.format(Date(customRangeFromMs))} - ${dateTimeFmt.format(Date(customRangeToMs))}"
                 }
             }
         }
@@ -157,14 +170,16 @@ data class HomeUiState(
     val selectedFilter: TimeFilter = TimeFilter.TODAY,
     val selectedServiceId: Int? = null,
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
-    val eventsOverTime: List<VmsEventStatisticalOverTimeModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
-    val eventsByCamera: List<VmsEventCountByCameraModel> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
-    val aiServices: List<com.tenli.oneview.model.network.AIServiceModel> = emptyList(),
+    val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
     val cameraStatusMap: Map<String, String> = emptyMap(),
     val recordStatusMap: Map<String, String> = emptyMap(),
+    val totalDetectionsCount: Long = 0L,
+    val totalCamerasCount: Int = 0,
+    val onlineCamerasCount: Int = 0,
+    val recordingCamerasCount: Int = 0,
     val runningAiTasks: Int = 0,
     val totalAiTasks: Int = 0,
     val isListView: Boolean = true,
@@ -174,43 +189,15 @@ data class HomeUiState(
 @OptIn(FlowPreview::class)
 class HomeViewModel(
     application: Application,
-    private val webSocketManager: com.tenli.oneview.data.network.websocket.WebSocketManager
+    private val webSocketManager: WebSocketManager
 ) : AndroidViewModel(application) {
 
-    private val bsApi = LoginAuthClient.create(BsApi::class.java)
-    private val eventApi = LoginAuthClient.create(EventApi::class.java)
-    private val vmsApi = LoginAuthClient.create(VmsApi::class.java)
-    private val aiApi = LoginAuthClient.create(AiApi::class.java)
+    private val bsApi get() = ApiProvider.bsApi
+    private val eventApi get() = ApiProvider.eventApi
+    private val vmsApi get() = ApiProvider.vmsApi
+    private val aiApi get() = ApiProvider.aiApi
 
-    private val _uiState = MutableStateFlow(
-        run {
-            val isList = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
-            val memCached = HomeCacheManager.getHomeDataInMemory(TimeFilter.TODAY, null)
-            if (memCached != null) {
-                HomeUiState(
-                    isLoading = false,
-                    isListView = isList,
-                    overviewStats = memCached.overviewStats,
-                    eventsOverTime = memCached.eventsOverTime,
-                    eventsByType = memCached.eventsByType,
-                    eventsByCamera = memCached.eventsByCamera,
-                    cameraList = memCached.cameraList.ifEmpty { com.tenli.oneview.data.local.EventCacheManager.getCamerasInMemory() },
-                    aiServices = memCached.aiServices.ifEmpty { com.tenli.oneview.data.local.EventCacheManager.getAiServicesInMemory() },
-                    recentEvents = memCached.recentEvents
-                        .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
-                        .take(5),
-                    runningAiTasks = memCached.runningAiTasks,
-                    totalAiTasks = memCached.totalAiTasks
-                )
-            } else {
-                HomeUiState(
-                    isListView = isList,
-                    cameraList = com.tenli.oneview.data.local.EventCacheManager.getCamerasInMemory(),
-                    aiServices = com.tenli.oneview.data.local.EventCacheManager.getAiServicesInMemory()
-                )
-            }
-        }
-    )
+    private val _uiState = MutableStateFlow(buildInitialState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private var dashboardJob: Job? = null
@@ -222,16 +209,45 @@ class HomeViewModel(
         webSocketManager.connectAllReports()
     }
 
+    private fun buildInitialState(): HomeUiState {
+        val isList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
+        val memCached = HomeCacheManager.getHomeDataInMemory(TimeFilter.TODAY, null)
+        return if (memCached != null) {
+            val cameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+            val services = memCached.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() }
+            HomeUiState(
+                isLoading = false,
+                isListView = isList,
+                overviewStats = memCached.overviewStats,
+                eventsByType = memCached.eventsByType,
+                cameraList = cameras,
+                aiServices = services,
+                recentEvents = memCached.recentEvents
+                    .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
+                    .take(MAX_RECENT_EVENTS),
+                runningAiTasks = memCached.runningAiTasks,
+                totalAiTasks = memCached.totalAiTasks
+            ).withRecomputedMetrics()
+        } else {
+            val cameras = EventCacheManager.getCamerasInMemory()
+            HomeUiState(
+                isListView = isList,
+                cameraList = cameras,
+                aiServices = EventCacheManager.getAiServicesInMemory()
+            ).withRecomputedMetrics()
+        }
+    }
+
     fun toggleViewMode() {
         val nextIsList = !_uiState.value.isListView
-        GlobalData.preferences.edit()
-            .putString("mobile_event_view_mode", if (nextIsList) "list" else "grid")
-            .apply()
+        GlobalData.preferences.edit {
+            putString(PREF_VIEW_MODE, if (nextIsList) "list" else "grid")
+        }
         _uiState.update { it.copy(isListView = nextIsList) }
     }
 
     fun syncViewModeFromPrefs() {
-        val savedIsList = GlobalData.preferences.getString("mobile_event_view_mode", "list") != "grid"
+        val savedIsList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
         if (_uiState.value.isListView != savedIsList) {
             _uiState.update { it.copy(isListView = savedIsList) }
         }
@@ -239,36 +255,32 @@ class HomeViewModel(
 
     private fun listenToWebSocket() {
         viewModelScope.launch {
-            Log.d("HomeViewModel", "Started listening to notifyEvent flow")
             webSocketManager.notifyEvent
-                .debounce(600L)
+                .debounce(NOTIFY_DEBOUNCE_MS)
                 .collect { _ ->
-                    Log.d("HomeViewModel", "notifyEvent debounced -> filter=${_uiState.value.selectedFilter}")
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
                         fetchRecentEvents()
                     }
                 }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             webSocketManager.cameraStatusMap
-                .debounce(800L)
+                .debounce(STATUS_DEBOUNCE_MS)
                 .collect { statusMap ->
-                    _uiState.update { it.copy(cameraStatusMap = statusMap) }
+                    _uiState.update { it.copy(cameraStatusMap = statusMap).withRecomputedCameraMetrics() }
                 }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.Default) {
             webSocketManager.recordStatusMap
-                .debounce(800L)
+                .debounce(STATUS_DEBOUNCE_MS)
                 .collect { recMap ->
-                    _uiState.update { it.copy(recordStatusMap = recMap) }
+                    _uiState.update { it.copy(recordStatusMap = recMap).withRecomputedCameraMetrics() }
                 }
         }
         viewModelScope.launch {
-            com.tenli.oneview.util.EventBus.eventReportedFalse.collect { eventId ->
+            EventBus.eventReportedFalse.collect { eventId ->
                 _uiState.update { state ->
-                    state.copy(
-                        recentEvents = state.recentEvents.filter { it.id != eventId }
-                    )
+                    state.copy(recentEvents = state.recentEvents.filter { it.id != eventId })
                 }
             }
         }
@@ -285,17 +297,15 @@ class HomeViewModel(
         serviceId: Int?
     ): List<EventData> {
         val permitted = mutableListOf<EventData>()
-        val seenIds = mutableSetOf<Int>()
+        val seenIds = HashSet<Int>()
         var lastId: Int? = null
-        val batchSize = 50
         var attempts = 0
-        val maxAttempts = 3
 
-        while (permitted.size < 5 && attempts < maxAttempts) {
+        while (permitted.size < MAX_RECENT_EVENTS && attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
             val resp = runCatching {
                 eventApi.getDataList(
-                    count = batchSize,
+                    count = RECENT_BATCH_SIZE,
                     lastId = lastId,
                     from = fromSec,
                     to = toSec,
@@ -308,49 +318,43 @@ class HomeViewModel(
             if (data.isEmpty()) break
 
             for (ev in data) {
-                if (AiTypeHelper.isAiTypeEnabled(ev.type) && !seenIds.contains(ev.id)) {
-                    seenIds.add(ev.id)
+                if (AiTypeHelper.isAiTypeEnabled(ev.type) && seenIds.add(ev.id)) {
                     permitted.add(ev)
-                    if (permitted.size >= 5) break
+                    if (permitted.size >= MAX_RECENT_EVENTS) break
                 }
             }
 
-            if (data.size < batchSize) break
+            if (data.size < RECENT_BATCH_SIZE) break
             lastId = data.last().id
         }
 
-        return permitted.take(5)
+        return permitted.take(MAX_RECENT_EVENTS)
     }
 
     private fun fetchRecentEvents() {
         recentEventsJob?.cancel()
         recentEventsJob = viewModelScope.launch {
             try {
-                val calendar = Calendar.getInstance()
-                val toTime = calendar.timeInMillis
-                calendar.set(Calendar.HOUR_OF_DAY, 0)
-                calendar.set(Calendar.MINUTE, 0)
-                calendar.set(Calendar.SECOND, 0)
-                calendar.set(Calendar.MILLISECOND, 0)
-                val fromTime = calendar.timeInMillis
-
+                val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(TimeFilter.TODAY)
                 val newEvents = fetchPermittedRecentEvents(
                     fromSec = fromTime / 1000,
                     toSec = toTime / 1000,
                     serviceId = _uiState.value.selectedServiceId
                 )
                 if (newEvents.isNotEmpty()) {
-                    com.tenli.oneview.data.local.EventCacheManager.cacheInMemory(events = newEvents)
-                    _uiState.update { state ->
-                        val merged = (newEvents + state.recentEvents)
+                    EventCacheManager.cacheInMemory(events = newEvents)
+                    val merged = withContext(Dispatchers.Default) {
+                        (newEvents + _uiState.value.recentEvents)
                             .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
                             .distinctBy { it.id }
-                            .take(5)
-                        state.copy(recentEvents = merged)
+                            .take(MAX_RECENT_EVENTS)
                     }
+                    _uiState.update { it.copy(recentEvents = merged) }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "Error fetching recent events via WebSocket", e)
+                if (BuildConfig.DEBUG) Log.e(TAG, "Error fetching recent events via WebSocket", e)
             }
         }
     }
@@ -388,23 +392,23 @@ class HomeViewModel(
             // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate)
             val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
             if (cachedData != null) {
-                _uiState.update {
-                    it.copy(
+                val updatedFromCache = withContext(Dispatchers.Default) {
+                    val cur = _uiState.value
+                    cur.copy(
                         isLoading = false,
                         error = null,
                         overviewStats = cachedData.overviewStats,
-                        eventsOverTime = cachedData.eventsOverTime,
                         eventsByType = cachedData.eventsByType,
-                        eventsByCamera = cachedData.eventsByCamera,
-                        cameraList = cachedData.cameraList.ifEmpty { it.cameraList },
-                        aiServices = cachedData.aiServices.ifEmpty { it.aiServices },
+                        cameraList = cachedData.cameraList.ifEmpty { cur.cameraList },
+                        aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
                         recentEvents = cachedData.recentEvents
                             .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
-                            .take(5),
-                        runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else it.runningAiTasks,
-                        totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else it.totalAiTasks
-                    )
+                            .take(MAX_RECENT_EVENTS),
+                        runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else cur.runningAiTasks,
+                        totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
+                    ).withRecomputedMetrics()
                 }
+                _uiState.value = updatedFromCache
             } else {
                 _uiState.update { it.copy(isLoading = true, error = null) }
             }
@@ -412,7 +416,7 @@ class HomeViewModel(
             try {
                 val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
 
-                // 2. Gọi song song tất cả các API Dashboard để rút ngắn thời gian phản hồi xuống 1 RTT duy nhất
+                // 2. Gọi song song các API thực sự hiển thị trên Trang chủ (đã bỏ 2 API chart không dùng)
                 coroutineScope {
                     val serviceIdStr = serviceId?.toString()
                     val overviewDeferred = async {
@@ -424,27 +428,9 @@ class HomeViewModel(
                             )
                         }.getOrNull()
                     }
-                    val overTimeDeferred = async {
-                        runCatching {
-                            bsApi.getVmsEventStatsOverTime(
-                                fromTime = fromTime,
-                                toTime = toTime,
-                                serviceId = serviceIdStr
-                            )
-                        }.getOrNull()
-                    }
                     val byTypeDeferred = async {
                         runCatching {
                             bsApi.getVmsEventCountByType(
-                                fromTime = fromTime,
-                                toTime = toTime,
-                                serviceId = serviceIdStr
-                            )
-                        }.getOrNull()
-                    }
-                    val byCameraDeferred = async {
-                        runCatching {
-                            bsApi.getVmsEventCountByCamera(
                                 fromTime = fromTime,
                                 toTime = toTime,
                                 serviceId = serviceIdStr
@@ -467,19 +453,17 @@ class HomeViewModel(
 
                     // Pre-warm danh sách hồ sơ khuôn mặt trong nền nếu chưa có để màn Chi tiết sự kiện mở 0ms
                     launch {
-                        if (com.tenli.oneview.data.local.EventCacheManager.getProfilesInMemory().isEmpty()) {
+                        if (EventCacheManager.getProfilesInMemory().isEmpty()) {
                             val profiles = runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
                             val groups = runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
                             if (profiles.isNotEmpty() || groups.isNotEmpty()) {
-                                com.tenli.oneview.data.local.EventCacheManager.saveProfilesCache(getApplication(), profiles, groups)
+                                EventCacheManager.saveProfilesCache(getApplication(), profiles, groups)
                             }
                         }
                     }
 
                     val overviewResponse = overviewDeferred.await()
-                    val overTimeResponse = overTimeDeferred.await()
                     val byTypeResponse = byTypeDeferred.await()
-                    val byCameraResponse = byCameraDeferred.await()
                     val recentEvents = recentEventsDeferred.await()
                     val cameraResponse = cameraDeferred.await()
                     val aiServiceResponse = aiServiceDeferred.await()
@@ -488,17 +472,9 @@ class HomeViewModel(
                         overviewResponse.body() ?: emptyList()
                     } else _uiState.value.overviewStats
 
-                    val eventsOverTime = if (overTimeResponse?.isSuccessful == true) {
-                        overTimeResponse.body() ?: emptyList()
-                    } else _uiState.value.eventsOverTime
-
                     val eventsByType = if (byTypeResponse?.isSuccessful == true) {
                         byTypeResponse.body() ?: emptyList()
                     } else _uiState.value.eventsByType
-
-                    val eventsByCamera = if (byCameraResponse?.isSuccessful == true) {
-                        byCameraResponse.body() ?: emptyList()
-                    } else _uiState.value.eventsByCamera
 
                     val cameraList = if (cameraResponse?.isSuccessful == true) {
                         cameraResponse.body() ?: emptyList()
@@ -550,7 +526,7 @@ class HomeViewModel(
                             }
                         }
                     } catch (e: Exception) {
-                        Log.w("HomeViewModel", "Fallback monitor count from overviewStats", e)
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                     }
                     if (totalTasks == 0) {
                         val overviewMonitorCount = overviewStats
@@ -571,34 +547,31 @@ class HomeViewModel(
                         _uiState.value.recentEvents
                     }
 
-                    com.tenli.oneview.data.local.EventCacheManager.cacheInMemory(
+                    EventCacheManager.cacheInMemory(
                         events = finalRecentEvents,
                         cameras = cameraList,
                         aiServices = aiServices
                     )
 
-                    _uiState.update {
-                        it.copy(
+                    val nextState = withContext(Dispatchers.Default) {
+                        _uiState.value.copy(
                             isLoading = false,
                             overviewStats = overviewStats,
-                            eventsOverTime = eventsOverTime,
                             eventsByType = eventsByType,
-                            eventsByCamera = eventsByCamera,
                             cameraList = cameraList,
                             aiServices = aiServices,
                             recentEvents = finalRecentEvents,
                             runningAiTasks = runningTasks,
                             totalAiTasks = totalTasks,
                             error = errorMsg
-                        )
+                        ).withRecomputedMetrics()
                     }
+                    _uiState.value = nextState
 
                     if (overviewResponse?.isSuccessful == true) {
                         val newCachedData = CachedHomeData(
                             overviewStats = overviewStats,
-                            eventsOverTime = eventsOverTime,
                             eventsByType = eventsByType,
-                            eventsByCamera = eventsByCamera,
                             cameraList = cameraList,
                             aiServices = aiServices,
                             recentEvents = finalRecentEvents,
@@ -612,7 +585,7 @@ class HomeViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e("HomeViewModel", "Error fetching data", e)
+                if (BuildConfig.DEBUG) Log.e(TAG, "Error fetching data", e)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -623,10 +596,81 @@ class HomeViewModel(
         }
     }
 
+    private fun HomeUiState.withRecomputedMetrics(): HomeUiState {
+        val sumByType = eventsByType
+            .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+            .sumOf { it.count.toString().toDoubleOrNull()?.toLong() ?: 0L }
+        val totalDetections = if (sumByType > 0L) {
+            sumByType
+        } else {
+            overviewStats
+                .find { it.label == "event-count" && it.tag == "all" }
+                ?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
+        }
+        return copy(totalDetectionsCount = totalDetections).withRecomputedCameraMetrics()
+    }
+
+    private fun HomeUiState.withRecomputedCameraMetrics(): HomeUiState {
+        val totalFromOverview = overviewStats
+            .find { it.label == "camera-count" && it.tag == "all" }
+            ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+        val totalCams = if (cameraList.isNotEmpty()) cameraList.size else totalFromOverview
+
+        val onlineCams = if (cameraList.isEmpty()) {
+            totalCams
+        } else {
+            cameraList.count { cam ->
+                val wsStatus = cameraStatusMap["cam-0-${cam.id}"]
+                    ?: cameraStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                    ?: cameraStatusMap["cam-${cam.vmsId}-${cam.id}"]
+                    ?: cameraStatusMap["cam-${cam.id}"]
+                when (wsStatus) {
+                    "green" -> true
+                    "red", "orange" -> false
+                    else -> {
+                        val issues = cam.extra?.latestReport?.issues
+                        if (issues != null) {
+                            !issues.contains("loi_ket_noi") && !issues.contains("mat_ket_noi")
+                        } else {
+                            val legacyStatus = cam.extra?.status
+                            legacyStatus != "red" && legacyStatus != "offline"
+                        }
+                    }
+                }
+            }
+        }
+
+        val recordingCams = cameraList.count { cam ->
+            val wsRecStatus = recordStatusMap["cam-0-${cam.id}"]
+                ?: recordStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                ?: recordStatusMap["cam-${cam.vmsId}-${cam.id}"]
+                ?: recordStatusMap["cam-${cam.id}"]
+            if (wsRecStatus != null) {
+                wsRecStatus == "green"
+            } else {
+                cam.enableRecord || cam.extra?.recording == true || cam.extra?.recordStatus == "green"
+            }
+        }
+
+        return copy(
+            totalCamerasCount = totalCams,
+            onlineCamerasCount = onlineCams,
+            recordingCamerasCount = recordingCams
+        )
+    }
+
     companion object {
+        private const val TAG = "HomeViewModel"
+        private const val PREF_VIEW_MODE = "mobile_event_view_mode"
+        private const val MAX_RECENT_EVENTS = 5
+        private const val RECENT_BATCH_SIZE = 50
+        private const val MAX_BATCH_ATTEMPTS = 3
+        private const val NOTIFY_DEBOUNCE_MS = 600L
+        private const val STATUS_DEBOUNCE_MS = 800L
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as com.tenli.oneview.TenliApp
+                val application = this[APPLICATION_KEY] as TenliApp
                 HomeViewModel(application, application.container.webSocketManager)
             }
         }

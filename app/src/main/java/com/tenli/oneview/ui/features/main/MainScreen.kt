@@ -1,11 +1,13 @@
 package com.tenli.oneview.ui.features.main
 
 import android.Manifest
+import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -20,34 +22,37 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -55,9 +60,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,32 +75,26 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.zIndex
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -106,22 +104,27 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
-import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.data.network.api.BsApi
-import com.tenli.oneview.data.network.api.VmsApi
-import com.tenli.oneview.data.network.retrofit.LoginAuthClient
-import com.tenli.oneview.model.network.ChangePasswordModel
-import com.tenli.oneview.model.network.UserNotificationGlobalSetting
-import com.tenli.oneview.model.network.UserNotificationSettingsModel
+import com.tenli.oneview.ui.component.IconBadge
+import com.tenli.oneview.ui.component.LocalMobileOverlayHost
+import com.tenli.oneview.ui.component.MobileNativeBottomSheet
+import com.tenli.oneview.ui.component.MobileOverlayHostState
 import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.SheetActionButtons
+import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.features.event.EventScreen
+import com.tenli.oneview.ui.features.event.EventViewModel
 import com.tenli.oneview.ui.features.home.HomeScreen
-import com.tenli.oneview.ui.theme.BrandAccent
-import com.tenli.oneview.ui.theme.ErrorRed
+import com.tenli.oneview.ui.features.home.HomeViewModel
+import com.tenli.oneview.ui.features.monitor.MonitorScreen
+import com.tenli.oneview.ui.features.monitor.MonitorViewModel
 import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.Slate300
+import com.tenli.oneview.ui.theme.Slate500
 import com.tenli.oneview.ui.theme.ThemeManager
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -133,12 +136,60 @@ private val OrderedMainTabs = listOf(
     MainTab.Setting
 )
 
-// Exact cubic-bezier curves from tenli-oneview MobileLayout.vue:
-// .mobile-tab-slide-*-leave-active: transform 0.09s cubic-bezier(0.35, 0, 0.7, 0.2), opacity 0.08s ease-out
-// .mobile-tab-slide-*-enter-active: transform 0.21s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.16s ease-out
-private val TabLeaveTransformEasing = CubicBezierEasing(0.35f, 0f, 0.7f, 0.2f)
-private val TabEnterTransformEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-private val TabOpacityEaseOut = CubicBezierEasing(0f, 0f, 0.58f, 1f)
+// --- Animation (cubic-bezier khớp tenli-oneview MobileLayout.vue / MobileNotificationConfigModal.vue) ---
+private const val TAB_SWITCH_DURATION_MS = 250
+private val TabSwitchEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+private val TabSwitchAnimSpec = tween<Float>(durationMillis = TAB_SWITCH_DURATION_MS, easing = TabSwitchEasing)
+private const val PAGE_ENTER_DURATION_MS = 280
+private const val PAGE_EXIT_DURATION_MS = 240
+private val PageEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val PageExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+
+// --- Ngưỡng cử chỉ vuốt chuyển tab (khớp MobileLayout.vue) ---
+/** Bỏ qua chạm sát mép trái/phải để nhường cử chỉ Back hệ thống */
+private val SwipeEdgeBuffer = 20.dp
+/** Bỏ qua vùng thanh điều hướng dưới cùng */
+private val SwipeBottomNavExclusion = 96.dp
+/** Khoảng di chuyển tối thiểu để khóa hướng (ngang/dọc) */
+private val SwipeDirectionLockThreshold = 10.dp
+private val SwipeMinFlickDistance = 30.dp
+private val SwipeMinDragDistance = 45.dp
+private val SwipeLongDragDistance = 90.dp
+private const val SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.28f
+private const val SWIPE_MAX_DRAG_DURATION_MS = 700L
+private const val SWIPE_HORIZONTAL_DOMINANCE = 1.25f
+
+// --- Cuộn về đầu danh sách ---
+private const val SCROLL_TO_TOP_JUMP_THRESHOLD = 12
+private const val SCROLL_TO_TOP_JUMP_TARGET = 8
+
+/** Độ trong suốt nền icon badge trong sheet xác nhận */
+private const val CONFIRM_BADGE_BG_ALPHA = 0.14f
+private const val ERROR_BOX_BG_ALPHA = 0.12f
+private const val ERROR_BOX_BORDER_ALPHA = 0.25f
+
+/** Chờ sheet đổi mật khẩu hiển thị xong mới focus + bật bàn phím (đồng bộ với LoginScreen) */
+private const val PASSWORD_SHEET_FOCUS_DELAY_MS = 700L
+private const val KEYBOARD_SHOW_DELAY_MS = 100L
+
+private const val SUPPORT_URL = "https://tenli.ai"
+
+private val PasswordMask = PasswordVisualTransformation()
+
+private data class LanguageOption(val code: String, val labelRes: Int, val flag: String)
+
+private val LanguageOptions = listOf(
+    LanguageOption("vi", R.string.lang_vi, "🇻🇳"),
+    LanguageOption("en", R.string.lang_en, "🇺🇸")
+)
+
+private val ThemeModes = listOf(ThemeManager.MODE_LIGHT, ThemeManager.MODE_DARK, ThemeManager.MODE_SYSTEM)
+
+private fun themeModeLabel(mode: Int, isEn: Boolean): String = when (mode) {
+    ThemeManager.MODE_LIGHT -> if (isEn) "Light" else "Sáng"
+    ThemeManager.MODE_DARK -> if (isEn) "Dark" else "Tối"
+    else -> if (isEn) "System" else "Hệ thống"
+}
 
 @Composable
 fun MainScreen(
@@ -148,56 +199,27 @@ fun MainScreen(
     onNavigateToPlaybackDetail: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val navigateToSettingTarget: (String) -> Unit = { _ ->
-        viewModel.onTabSelected(MainTab.Setting)
-    }
 
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val density = LocalDensity.current
     val saveableStateHolder = rememberSaveableStateHolder()
     var showBottomBar by remember { mutableStateOf(true) }
     var showNotificationConfigPage by remember { mutableStateOf(false) }
-    val overlayHostState = remember { com.tenli.oneview.ui.component.MobileOverlayHostState() }
+    val overlayHostState = remember { MobileOverlayHostState() }
 
     val homeListState = rememberLazyListState()
     val monitorState = rememberLazyListState()
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
-    val isHomeScrolled by remember {
-        derivedStateOf { homeListState.firstVisibleItemIndex > 0 || homeListState.firstVisibleItemScrollOffset > 0 }
-    }
-    val isMonitorScrolled by remember {
-        derivedStateOf { monitorState.firstVisibleItemIndex > 0 || monitorState.firstVisibleItemScrollOffset > 0 }
-    }
-    val isEventScrolled by remember {
-        derivedStateOf { eventListState.firstVisibleItemIndex > 0 || eventListState.firstVisibleItemScrollOffset > 0 }
-    }
-    val isSettingScrolled by remember {
-        derivedStateOf { settingListState.firstVisibleItemIndex > 0 || settingListState.firstVisibleItemScrollOffset > 0 }
-    }
-
-    val isCurrentTabScrolled = when (uiState.currentTab) {
-        MainTab.Home -> isHomeScrolled
-        MainTab.Monitor -> isMonitorScrolled
-        MainTab.Event -> isEventScrolled
-        MainTab.Setting -> isSettingScrolled
-    }
-
     // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation
-    val homeViewModel: com.tenli.oneview.ui.features.home.HomeViewModel = viewModel(
-        factory = com.tenli.oneview.ui.features.home.HomeViewModel.Factory
-    )
-    val eventViewModel: com.tenli.oneview.ui.features.event.EventViewModel = viewModel(
-        factory = com.tenli.oneview.ui.features.event.EventViewModel.Factory
-    )
-    val monitorViewModel: com.tenli.oneview.ui.features.monitor.MonitorViewModel = viewModel(
-        factory = com.tenli.oneview.ui.features.monitor.MonitorViewModel.Factory
-    )
+    val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
+    val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
+    val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+
     var activeTab by remember { mutableStateOf(uiState.currentTab) }
     var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
-    var slideDirection by remember { mutableStateOf(1) }
+    var slideDirection by remember { mutableIntStateOf(1) }
     val transitionProgress = remember { Animatable(1f) }
 
     LaunchedEffect(uiState.currentTab) {
@@ -215,13 +237,7 @@ fun MainScreen(
         }
 
         if (targetTab == activeTab) {
-            transitionProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(
-                    durationMillis = 250,
-                    easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
-                )
-            )
+            transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
             outgoingTab = null
             return@LaunchedEffect
         }
@@ -232,21 +248,15 @@ fun MainScreen(
         outgoingTab = activeTab
         activeTab = targetTab
         transitionProgress.snapTo(0f)
-        transitionProgress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(
-                durationMillis = 250,
-                easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
-            )
-        )
+        transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
         outgoingTab = null
     }
 
-    LaunchedEffect(Unit) {
+    val currentOnLogoutRequest by rememberUpdatedState(onLogoutRequest)
+    LaunchedEffect(viewModel) {
         viewModel.event.collect { event ->
             when (event) {
-                is MainEvent.Logout -> onLogoutRequest()
-                else -> {}
+                MainEvent.Logout -> currentOnLogoutRequest()
             }
         }
     }
@@ -255,75 +265,100 @@ fun MainScreen(
     val showBottomBarState by rememberUpdatedState(showBottomBar)
     val showNotificationConfigPageState by rememberUpdatedState(showNotificationConfigPage)
 
-    val scrollTabToTop: (MainTab) -> Unit = { targetTab ->
-        scope.launch {
-            val targetListState = when (targetTab) {
-                MainTab.Home -> homeListState
-                MainTab.Monitor -> monitorState
-                MainTab.Event -> eventListState
-                MainTab.Setting -> settingListState
-            }
-            if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
-                try {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                } catch (_: Exception) {}
-                if (targetListState.firstVisibleItemIndex > 12) {
-                    targetListState.scrollToItem(8)
+    // Callback ổn định (không tạo lambda mới mỗi lần recompose -> các tab con được skip)
+    val currentOnNavigateToEventDetail by rememberUpdatedState(onNavigateToEventDetail)
+    val currentOnNavigateToPlaybackDetail by rememberUpdatedState(onNavigateToPlaybackDetail)
+    val onEventIdClick: (Int) -> Unit = remember { { id: Int -> currentOnNavigateToEventDetail(id) } }
+    val onHomeEventClick: (String) -> Unit = remember {
+        { eventId: String -> eventId.toIntOrNull()?.let { currentOnNavigateToEventDetail(it) } }
+    }
+    val onPlaybackClick: (String, String, String, String) -> Unit = remember {
+        { videoLink: String, time: String, imageLink: String, cameraName: String ->
+            currentOnNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+        }
+    }
+    val onMonitorFullscreenChange: (Boolean) -> Unit = remember { { isFullscreen: Boolean -> showBottomBar = !isFullscreen } }
+    val onLogoutClick: () -> Unit = remember(viewModel) { { viewModel.logout() } }
+    val onOpenNotificationConfig: () -> Unit = remember(viewModel) {
+        {
+            viewModel.loadNotificationConfig()
+            showNotificationConfigPage = true
+        }
+    }
+    val onCloseNotificationConfig: () -> Unit = remember { { showNotificationConfigPage = false } }
+
+    val scrollTabToTop: (MainTab) -> Unit = remember(scope, haptic) {
+        { targetTab: MainTab ->
+            scope.launch {
+                val targetListState = when (targetTab) {
+                    MainTab.Home -> homeListState
+                    MainTab.Monitor -> monitorState
+                    MainTab.Event -> eventListState
+                    MainTab.Setting -> settingListState
                 }
-                targetListState.animateScrollToItem(0, 0)
+                if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
+                    try {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    } catch (_: Exception) {
+                    }
+                    if (targetListState.firstVisibleItemIndex > SCROLL_TO_TOP_JUMP_THRESHOLD) {
+                        targetListState.scrollToItem(SCROLL_TO_TOP_JUMP_TARGET)
+                    }
+                    targetListState.animateScrollToItem(0, 0)
+                }
             }
         }
     }
 
-    val switchToTab: (MainTab, Boolean) -> Unit = { targetTab, withHaptic ->
-        if (targetTab != currentTabState) {
-            showBottomBar = true
-            if (withHaptic) {
-                try {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                } catch (_: Exception) {}
+    val switchToTab: (MainTab, Boolean) -> Unit = remember(viewModel, haptic, scrollTabToTop) {
+        { targetTab: MainTab, withHaptic: Boolean ->
+            if (targetTab != currentTabState) {
+                showBottomBar = true
+                if (withHaptic) {
+                    try {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    } catch (_: Exception) {
+                    }
+                }
+                viewModel.onTabSelected(targetTab)
+            } else {
+                scrollTabToTop(targetTab)
             }
-            viewModel.onTabSelected(targetTab)
-        } else {
-            scrollTabToTop(targetTab)
         }
     }
+    val onBottomTabClick: (MainTab) -> Unit = remember(switchToTab) { { tab: MainTab -> switchToTab(tab, false) } }
 
     // Khi đang ở tab khác Trang chủ (Sự kiện, Trực tiếp, Cài đặt), ấn Back sẽ quay về tab Trang chủ trước
-    androidx.activity.compose.BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar && !showNotificationConfigPage) {
+    BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar && !showNotificationConfigPage) {
         switchToTab(MainTab.Home, false)
     }
 
     // Khi đang mở màn hình Cấu hình thông báo, ấn Back sẽ trượt đóng màn hình này từ trái sang phải
-    androidx.activity.compose.BackHandler(enabled = showNotificationConfigPage) {
+    BackHandler(enabled = showNotificationConfigPage) {
         showNotificationConfigPage = false
     }
 
-    val edgeBufferPx = remember(density) { with(density) { 20.dp.toPx() } }
-    val bottomNavExclusionPx = remember(density) { with(density) { 96.dp.toPx() } }
-    val lockThresholdPx = remember(density) { with(density) { 10.dp.toPx() } }
-    val minFlickDistPx = remember(density) { with(density) { 30.dp.toPx() } }
-    val minDragDistPx = remember(density) { with(density) { 45.dp.toPx() } }
-    val longDragDistPx = remember(density) { with(density) { 90.dp.toPx() } }
-    val minFlickVelDpPerMs = 0.28f
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
 
-    CompositionLocalProvider(com.tenli.oneview.ui.component.LocalMobileOverlayHost provides overlayHostState) {
-        val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
+    CompositionLocalProvider(LocalMobileOverlayHost provides overlayHostState) {
+        val isEn = rememberIsEnglish()
         Scaffold(
             topBar = {
                 AnimatedVisibility(visible = uiState.isOffline) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(ErrorRed)
-                            .padding(vertical = 8.dp, horizontal = 10.dp),
+                            .background(colors.error)
+                            .padding(vertical = spacing.space8, horizontal = spacing.space10),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = if (isEn) "No network connection. Please check again." else "Không có kết nối mạng. Vui lòng kiểm tra lại.",
-                            color = Color.White,
+                            color = colors.onAccent,
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -334,6 +369,13 @@ fun MainScreen(
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
                     .pointerInput(Unit) {
+                        val edgeBufferPx = SwipeEdgeBuffer.toPx()
+                        val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
+                        val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
+                        val minFlickDistPx = SwipeMinFlickDistance.toPx()
+                        val minDragDistPx = SwipeMinDragDistance.toPx()
+                        val longDragDistPx = SwipeLongDragDistance.toPx()
+
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                             val widthPx = size.width.toFloat()
@@ -341,7 +383,7 @@ fun MainScreen(
                             val startX = down.position.x
                             val startY = down.position.y
 
-                            // Ignore touches near screen left/right edges (<20dp) for system back gesture,
+                            // Ignore touches near screen left/right edges for system back gesture,
                             // or in the bottom navigation bar zone, or when video is in fullscreen
                             if (!showBottomBarState ||
                                 showNotificationConfigPageState ||
@@ -353,7 +395,8 @@ fun MainScreen(
                                 return@awaitEachGesture
                             }
 
-                            val startTime = System.currentTimeMillis()
+                            val startTime = down.uptimeMillis
+                            var endTime = startTime
                             var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
                             var lastX = startX
                             var lastY = startY
@@ -361,6 +404,7 @@ fun MainScreen(
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                endTime = change.uptimeMillis
 
                                 if (change.changedToUpIgnoreConsumed()) {
                                     lastX = change.position.x
@@ -398,19 +442,18 @@ fun MainScreen(
                                 val diffY = lastY - startY
                                 val absX = abs(diffX)
                                 val absY = abs(diffY)
-                                val elapsed = (System.currentTimeMillis() - startTime).coerceAtLeast(1L)
-                                val absXDp = with(density) { absX.toDp().value }
-                                val velocityDpPerMs = absXDp / elapsed.toFloat()
+                                val elapsed = (endTime - startTime).coerceAtLeast(1L)
+                                val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
 
                                 // Match MobileLayout.vue thresholds:
                                 // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
                                 // 2. Drag: distance >= 45dp && elapsed <= 700ms
                                 // 3. Long drag: distance >= 90dp
-                                val isFlick = velocityDpPerMs > minFlickVelDpPerMs && absX > minFlickDistPx
-                                val isDrag = absX >= minDragDistPx && elapsed <= 700L
+                                val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
+                                val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
                                 val isLongDrag = absX >= longDragDistPx
 
-                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * 1.25f) {
+                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
                                     val currIdx = OrderedMainTabs.indexOf(currentTabState)
                                     if (currIdx != -1) {
                                         if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
@@ -428,6 +471,7 @@ fun MainScreen(
             ) {
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
                 // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
+                // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -435,7 +479,6 @@ fun MainScreen(
                         .zIndex(1f)
                 ) {
                     OrderedMainTabs.forEach { tab ->
-                        val isVisible = (tab == activeTab || tab == outgoingTab)
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -449,20 +492,17 @@ fun MainScreen(
                                 .layout { measurable, constraints ->
                                     val placeable = measurable.measure(constraints)
                                     layout(placeable.width, placeable.height) {
-                                        if (isVisible) {
+                                        // Đọc animation value ở pha placement (không gây recompose mỗi frame)
+                                        val currentOutgoing = outgoingTab
+                                        if (tab == activeTab || tab == currentOutgoing) {
                                             val progress = transitionProgress.value
                                             val offsetX = when (tab) {
-                                                activeTab -> {
-                                                    if (outgoingTab != null) {
-                                                        (slideDirection * (1f - progress) * placeable.width).toInt()
-                                                    } else {
-                                                        0
-                                                    }
+                                                activeTab -> if (currentOutgoing != null) {
+                                                    (slideDirection * (1f - progress) * placeable.width).toInt()
+                                                } else {
+                                                    0
                                                 }
-                                                outgoingTab -> {
-                                                    (-slideDirection * progress * placeable.width).toInt()
-                                                }
-                                                else -> 0
+                                                else -> (-slideDirection * progress * placeable.width).toInt()
                                             }
                                             placeable.placeRelativeWithLayer(offsetX, 0)
                                         }
@@ -471,57 +511,40 @@ fun MainScreen(
                         ) {
                             saveableStateHolder.SaveableStateProvider(key = tab.route) {
                                 when (tab) {
-                                    MainTab.Home -> {
-                                        HomeScreen(
-                                            viewModel = homeViewModel,
-                                            listState = homeListState,
-                                            onEventClick = { eventId ->
-                                                val id = eventId.toIntOrNull()
-                                                if (id != null) {
-                                                    onNavigateToEventDetail(id)
-                                                }
-                                            }
-                                        )
-                                    }
+                                    MainTab.Home -> HomeScreen(
+                                        viewModel = homeViewModel,
+                                        listState = homeListState,
+                                        onEventClick = onHomeEventClick
+                                    )
 
-                                    MainTab.Event -> {
-                                        com.tenli.oneview.ui.features.event.EventScreen(
-                                            viewModel = eventViewModel,
-                                            listState = eventListState,
-                                            onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
-                                        )
-                                    }
+                                    MainTab.Event -> EventScreen(
+                                        viewModel = eventViewModel,
+                                        listState = eventListState,
+                                        onEventClick = onEventIdClick
+                                    )
 
-                                    MainTab.Monitor -> {
-                                        com.tenli.oneview.ui.features.monitor.MonitorScreen(
-                                            viewModel = monitorViewModel,
-                                            listState = monitorState,
-                                            isTabActive = (uiState.currentTab == MainTab.Monitor),
-                                            onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
-                                            onPlaybackClick = { videoLink, time, imageLink, cameraName ->
-                                                onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
-                                            },
-                                            onFullscreenChange = { isFullscreen ->
-                                                showBottomBar = !isFullscreen
-                                            }
-                                        )
-                                    }
+                                    MainTab.Monitor -> MonitorScreen(
+                                        viewModel = monitorViewModel,
+                                        listState = monitorState,
+                                        isTabActive = uiState.currentTab == MainTab.Monitor,
+                                        onEventClick = onEventIdClick,
+                                        onPlaybackClick = onPlaybackClick,
+                                        onFullscreenChange = onMonitorFullscreenChange
+                                    )
 
-                                    MainTab.Setting -> {
-                                        SettingScreen(
-                                            listState = settingListState,
-                                            onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
-                                            onNavigateToDetail = navigateToSettingTarget,
-                                            onOpenNotificationConfig = { showNotificationConfigPage = true }
-                                        )
-                                    }
+                                    MainTab.Setting -> SettingScreen(
+                                        viewModel = viewModel,
+                                        listState = settingListState,
+                                        onLogoutClick = onLogoutClick,
+                                        onOpenNotificationConfig = onOpenNotificationConfig
+                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                if (uiState.isBottomBarVisible && showBottomBar) {
+                if (showBottomBar) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
@@ -529,13 +552,8 @@ fun MainScreen(
                     ) {
                         MainBottomNavigation(
                             currentTab = uiState.currentTab,
-                            isCurrentTabScrolled = isCurrentTabScrolled,
-                            onTabClick = { tab ->
-                                switchToTab(tab, false)
-                            },
-                            onScrollToTop = { tab ->
-                                scrollTabToTop(tab)
-                            }
+                            onTabClick = onBottomTabClick,
+                            onScrollToTop = scrollTabToTop
                         )
                     }
                 }
@@ -549,29 +567,16 @@ fun MainScreen(
                         .zIndex(30f),
                     enter = slideInHorizontally(
                         initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(
-                            durationMillis = 280,
-                            easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                        )
+                        animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
                     ),
                     exit = slideOutHorizontally(
                         targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(
-                            durationMillis = 240,
-                            easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
-                        )
+                        animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
                     )
                 ) {
-                    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-                    val isSystemDark = isSystemInDarkTheme()
-                    val isDark = when (themeMode) {
-                        0 -> false
-                        1 -> true
-                        else -> isSystemDark
-                    }
                     MobileNotificationConfigScreen(
-                        isDark = isDark,
-                        onBackClick = { showNotificationConfigPage = false }
+                        viewModel = viewModel,
+                        onBackClick = onCloseNotificationConfig
                     )
                 }
 
@@ -592,10 +597,10 @@ fun MainScreen(
 
 @Composable
 fun SettingScreen(
-    listState: androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
-    onLogoutClick: (Boolean) -> Unit,
-    onNavigateToDetail: (String) -> Unit,
-    onOpenNotificationConfig: () -> Unit = {}
+    viewModel: MainViewModel,
+    listState: LazyListState,
+    onLogoutClick: () -> Unit,
+    onOpenNotificationConfig: () -> Unit
 ) {
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     var showLogoutSheet by remember { mutableStateOf(false) }
@@ -606,18 +611,10 @@ fun SettingScreen(
     val context = LocalContext.current
     var currentLanguage by remember { mutableStateOf(LocaleManager.getLocale(context)) }
 
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
-
     val uriHandler = LocalUriHandler.current
-    val backgroundColor = MaterialTheme.colorScheme.background
-    val surfaceColor = MaterialTheme.colorScheme.surface
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
     val textColor = MaterialTheme.colorScheme.onBackground
-    val sectionColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
     val defaultMyPage = stringResource(id = R.string.setting_my_page)
     val userName: String = UserSession.userData?.name?.takeIf { it.isNotBlank() }
@@ -625,16 +622,14 @@ fun SettingScreen(
         ?: defaultMyPage
 
     val isEn = currentLanguage.startsWith("en")
-    val themeLabel = when (themeMode) {
-        0 -> if (isEn) "Light" else "Sáng"
-        1 -> if (isEn) "Dark" else "Tối"
-        else -> if (isEn) "System" else "Hệ thống"
-    }
+    val groupModifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = spacing.space10)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundColor)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         // Sticky Mobile Top Bar matching MobileSettingsPage.vue (.mobile-top-bar)
         MobileTopBar(
@@ -646,178 +641,84 @@ fun SettingScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            contentPadding = PaddingValues(top = 2.dp, bottom = 120.dp)
+            contentPadding = PaddingValues(top = spacing.space2, bottom = spacing.bottomNavHeight + spacing.space56),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // 2 Top Square Cards (User Profile & Support) matching .top-cards-grid (padding: 10px, gap: 10px)
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // User Card (#F97316 icon box)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(surfaceColor)
-                            .padding(vertical = 16.dp, horizontal = 14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+            item(key = "top_cards") {
+                Column(modifier = Modifier.widthIn(max = spacing.contentMaxWidth).fillMaxWidth()) {
+                    Row(
+                        modifier = groupModifier,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFFF97316)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.User,
-                                contentDescription = userName,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = userName,
-                            fontSize = 15.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = textColor,
-                            maxLines = 1
+                        SettingTopCard(
+                            icon = LucideIcons.User,
+                            iconBackground = colors.orange,
+                            label = userName,
+                            modifier = Modifier.weight(1f)
+                        )
+                        SettingTopCard(
+                            icon = LucideIcons.Info,
+                            iconBackground = colors.accent,
+                            label = stringResource(id = R.string.setting_support),
+                            onClick = { uriHandler.openUri(SUPPORT_URL) },
+                            modifier = Modifier.weight(1f)
                         )
                     }
-
-                    // Support Card (#0980EE icon box)
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(surfaceColor)
-                            .clickable { uriHandler.openUri("https://tenli.ai") }
-                            .padding(vertical = 16.dp, horizontal = 14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(BrandAccent),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.Info,
-                                contentDescription = stringResource(id = R.string.setting_support),
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = stringResource(id = R.string.setting_support),
-                            fontSize = 15.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = textColor,
-                            maxLines = 1
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(spacing.space10))
                 }
-                Spacer(modifier = Modifier.height(10.dp))
             }
 
             // Section: Cài đặt chung
-            item {
-                Text(
-                    text = stringResource(id = R.string.setting_general),
-                    modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.5.sp,
-                    color = sectionColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(surfaceColor)
-                ) {
-                    ModernSettingItem(
+            item(key = "section_general") {
+                SettingsSection(title = stringResource(id = R.string.setting_general), groupModifier = groupModifier) {
+                    SettingsRow(
                         icon = LucideIcons.Bell,
-                        iconTint = Color(0xFFF59E0B),
+                        iconTint = colors.warning,
                         title = stringResource(id = R.string.setting_notifications),
-                        onClick = onOpenNotificationConfig,
-                        showDivider = false
+                        onClick = onOpenNotificationConfig
                     )
                 }
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(spacing.space10))
             }
 
             // Section: Giao diện
-            item {
-                Text(
-                    text = if (isEn) "Appearance" else "Giao diện",
-                    modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.5.sp,
-                    color = sectionColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(surfaceColor)
-                ) {
-                    ModernSettingItem(
+            item(key = "section_appearance") {
+                SettingsSection(title = if (isEn) "Appearance" else "Giao diện", groupModifier = groupModifier) {
+                    SettingsRow(
                         icon = LucideIcons.Globe,
-                        iconTint = Color(0xFF6366F1),
+                        iconTint = colors.indigo,
                         title = stringResource(id = R.string.setting_language),
                         valueText = if (currentLanguage == "vi") stringResource(id = R.string.lang_vi) else stringResource(id = R.string.lang_en),
                         onClick = { showLanguageSheet = true }
                     )
-                    ModernSettingItem(
+                    SettingsRow(
                         icon = LucideIcons.Palette,
-                        iconTint = Color(0xFFEC4899),
+                        iconTint = colors.pink,
                         title = stringResource(id = R.string.setting_theme),
-                        valueText = themeLabel,
-                        onClick = { showThemeSheet = true },
-                        showDivider = false
+                        valueText = themeModeLabel(themeMode, isEn),
+                        onClick = { showThemeSheet = true }
                     )
                 }
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(spacing.space10))
             }
 
             // Section: Tài khoản
-            item {
-                Text(
-                    text = stringResource(id = R.string.setting_account_title),
-                    modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
-                    fontSize = 14.5.sp,
-                    color = sectionColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(surfaceColor)
-                ) {
-                    ModernSettingItem(
+            item(key = "section_account") {
+                SettingsSection(title = stringResource(id = R.string.setting_account_title), groupModifier = groupModifier) {
+                    SettingsRow(
                         icon = LucideIcons.Lock,
-                        iconTint = Color(0xFF10B981),
+                        iconTint = colors.success,
                         title = stringResource(id = R.string.acc_password_security),
                         onClick = { showChangePasswordSheet = true }
                     )
-                    ModernSettingItem(
+                    SettingsRow(
                         icon = LucideIcons.LogOut,
-                        iconTint = Color(0xFFEF4444),
+                        iconTint = colors.error,
                         title = stringResource(id = R.string.setting_logout),
                         onClick = { showLogoutSheet = true },
-                        titleColor = Color(0xFFEF4444),
-                        showChevron = false,
-                        showDivider = false
+                        titleColor = colors.error,
+                        showChevron = false
                     )
                 }
             }
@@ -827,77 +728,23 @@ fun SettingScreen(
         if (showLanguageSheet) {
             MobileNativeBottomSheet(
                 title = stringResource(id = R.string.setting_choose_language),
-                isDark = isDark,
                 onDismiss = { showLanguageSheet = false }
             ) {
-                val cardBg = if (isDark) Color(0xFF242F41) else Color.White
-                val dividerColor = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(cardBg)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                LocaleManager.setLocale(context, "vi")
-                                currentLanguage = "vi"
+                OptionsCard {
+                    LanguageOptions.forEach { option ->
+                        SelectableOptionRow(
+                            label = stringResource(id = option.labelRes),
+                            isSelected = currentLanguage == option.code,
+                            onClick = {
+                                LocaleManager.setLocale(context, option.code)
+                                currentLanguage = option.code
                                 showLanguageSheet = false
-                                (context as? android.app.Activity)?.recreate()
+                                (context as? Activity)?.recreate()
+                            },
+                            leading = {
+                                Text(text = option.flag, style = MaterialTheme.typography.titleLarge)
                             }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "🇻🇳", fontSize = 20.sp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(id = R.string.lang_vi),
-                            fontSize = 15.sp,
-                            fontWeight = if (currentLanguage == "vi") FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (currentLanguage == "vi") BrandAccent else textColor,
-                            modifier = Modifier.weight(1f)
                         )
-                        if (currentLanguage == "vi") {
-                            Icon(
-                                imageVector = LucideIcons.Check,
-                                contentDescription = null,
-                                tint = BrandAccent,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                LocaleManager.setLocale(context, "en")
-                                currentLanguage = "en"
-                                showLanguageSheet = false
-                                (context as? android.app.Activity)?.recreate()
-                            }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(text = "🇺🇸", fontSize = 20.sp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = stringResource(id = R.string.lang_en),
-                            fontSize = 15.sp,
-                            fontWeight = if (currentLanguage == "en") FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (currentLanguage == "en") BrandAccent else textColor,
-                            modifier = Modifier.weight(1f)
-                        )
-                        if (currentLanguage == "en") {
-                            Icon(
-                                imageVector = LucideIcons.Check,
-                                contentDescription = null,
-                                tint = BrandAccent,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
                     }
                 }
             }
@@ -907,68 +754,27 @@ fun SettingScreen(
         if (showThemeSheet) {
             MobileNativeBottomSheet(
                 title = stringResource(id = R.string.setting_theme),
-                isDark = isDark,
                 onDismiss = { showThemeSheet = false }
             ) {
-                val cardBg = if (isDark) Color(0xFF242F41) else Color.White
-                val dividerColor = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
-
-                val options = listOf(
-                    Triple(0, if (isEn) "Light" else "Sáng", Pair(LucideIcons.Sun, Color(0xFFF59E0B))),
-                    Triple(1, if (isEn) "Dark" else "Tối", Pair(LucideIcons.Moon, Color(0xFF6366F1))),
-                    Triple(2, if (isEn) "System" else "Hệ thống", Pair(LucideIcons.Monitor, BrandAccent))
-                )
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(cardBg)
-                ) {
-                    options.forEachIndexed { idx, (modeValue, label, iconPair) ->
-                        val (iconVec, badgeColor) = iconPair
-                        val isSelected = themeMode == modeValue
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    ThemeManager.setThemeMode(modeValue)
-                                    showThemeSheet = false
-                                }
-                                .padding(horizontal = 16.dp, vertical = 13.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(badgeColor),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = iconVec,
-                                    contentDescription = label,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = label,
-                                fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                color = if (isSelected) BrandAccent else textColor,
-                                modifier = Modifier.weight(1f)
-                            )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = LucideIcons.Check,
-                                    contentDescription = null,
-                                    tint = BrandAccent,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                OptionsCard {
+                    ThemeModes.forEach { mode ->
+                        val label = themeModeLabel(mode, isEn)
+                        val (icon, badgeColor) = when (mode) {
+                            ThemeManager.MODE_LIGHT -> LucideIcons.Sun to colors.warning
+                            ThemeManager.MODE_DARK -> LucideIcons.Moon to colors.indigo
+                            else -> LucideIcons.Monitor to colors.accent
                         }
+                        SelectableOptionRow(
+                            label = label,
+                            isSelected = themeMode == mode,
+                            onClick = {
+                                ThemeManager.setThemeMode(mode)
+                                showThemeSheet = false
+                            },
+                            leading = {
+                                IconBadge(icon = icon, backgroundColor = badgeColor, contentDescription = label)
+                            }
+                        )
                     }
                 }
             }
@@ -977,11 +783,11 @@ fun SettingScreen(
         // Password Change Sheet matching MobileSettingsPage.vue
         if (showChangePasswordSheet) {
             MobilePasswordChangeSheet(
-                isDark = isDark,
+                viewModel = viewModel,
                 onDismiss = { showChangePasswordSheet = false },
                 onSuccess = {
                     showChangePasswordSheet = false
-                    onLogoutClick(true)
+                    onLogoutClick()
                 }
             )
         }
@@ -990,213 +796,236 @@ fun SettingScreen(
         if (showLogoutSheet) {
             MobileNativeBottomSheet(
                 title = stringResource(id = R.string.dialog_logout_title),
-                isDark = isDark,
                 onDismiss = { showLogoutSheet = false }
             ) {
-                val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFEF4444).copy(alpha = 0.14f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.LogOut,
-                            contentDescription = null,
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(28.dp)
-                        )
+                ConfirmSheetMessage(
+                    icon = LucideIcons.LogOut,
+                    accentColor = colors.error,
+                    title = if (isEn) "Log out of your account?" else "Bạn muốn đăng xuất?",
+                    message = if (isEn) {
+                        "Your current session will end and you will need to sign in again to continue."
+                    } else {
+                        "Phiên làm việc hiện tại sẽ kết thúc và bạn cần đăng nhập lại để tiếp tục sử dụng."
                     }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = if (isEn) "Log out of your account?" else "Bạn muốn đăng xuất?",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = textColor
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (isEn) {
-                            "Your current session will end and you will need to sign in again to continue."
-                        } else {
-                            "Phiên làm việc hiện tại sẽ kết thúc và bạn cần đăng nhập lại để tiếp tục sử dụng."
-                        },
-                        fontSize = 14.sp,
-                        color = subTextColor,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(cancelBtnBg)
-                            .clickable { showLogoutSheet = false },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = stringResource(id = R.string.dialog_btn_cancel),
-                            color = textColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFFEF4444))
-                            .clickable {
-                                showLogoutSheet = false
-                                onLogoutClick(false)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = stringResource(id = R.string.setting_logout),
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
+                )
+                Spacer(modifier = Modifier.height(spacing.space14))
+                SheetActionButtons(
+                    cancelText = stringResource(id = R.string.dialog_btn_cancel),
+                    confirmText = stringResource(id = R.string.setting_logout),
+                    onCancel = { showLogoutSheet = false },
+                    onConfirm = {
+                        showLogoutSheet = false
+                        onLogoutClick()
+                    },
+                    confirmColor = colors.error
+                )
             }
         }
     }
 }
 
+/** Thẻ vuông phía trên trang Cài đặt (.top-cards-grid): icon badge lớn + nhãn */
 @Composable
-private fun MobileNativeBottomSheet(
-    title: String,
-    isDark: Boolean,
-    onDismiss: () -> Unit,
-    content: @Composable () -> Unit
+private fun SettingTopCard(
+    icon: ImageVector,
+    iconBackground: Color,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
-    val sheetBg = if (isDark) Color(0xFF172033) else Color(0xFFF2F2F7)
-    val closeBtnBg = if (isDark) Color(0xFF263449) else Color(0xFFE2E8F0)
-    val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
-
-    com.tenli.oneview.ui.component.MobileFullScreenOverlay(
-        onDismissRequest = onDismiss
+    val spacing = MaterialTheme.spacing
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(spacing.radiusMedium))
+            .background(MaterialTheme.colorScheme.surface)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = spacing.space16, horizontal = spacing.space14),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    ),
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                color = sheetBg
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 10.dp, bottom = 20.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .width(36.dp)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(if (isDark) Color.White.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.15f))
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = title,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = titleColor
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(closeBtnBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.X,
-                                contentDescription = "Đóng",
-                                tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                    content()
-                }
-            }
+        IconBadge(
+            icon = icon,
+            backgroundColor = iconBackground,
+            contentDescription = label,
+            size = spacing.iconExtraLarge,
+            iconSize = spacing.iconMedium,
+            cornerRadius = spacing.radiusRegular
+        )
+        Spacer(modifier = Modifier.height(spacing.space10))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/** Tiêu đề nhóm cài đặt (chữ phụ, đậm vừa) */
+@Composable
+private fun SettingsSectionHeader(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.appColors.textMuted,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+/** Khối thẻ bo góc chứa các hàng cài đặt */
+@Composable
+private fun SettingsGroupCard(
+    modifier: Modifier = Modifier,
+    background: Color = MaterialTheme.colorScheme.surface,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusMedium))
+            .background(background),
+        content = content
+    )
+}
+
+/** Thẻ danh sách lựa chọn trong bottom sheet (ngôn ngữ, giao diện, mật khẩu) */
+@Composable
+private fun OptionsCard(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusRegular))
+            .background(MaterialTheme.appColors.surfaceRaised),
+        content = content
+    )
+}
+
+/** Header + thẻ nhóm của trang Cài đặt, giới hạn độ rộng trên màn hình lớn */
+@Composable
+private fun SettingsSection(
+    title: String,
+    groupModifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    Column(modifier = Modifier.widthIn(max = spacing.contentMaxWidth).fillMaxWidth()) {
+        SettingsSectionHeader(
+            text = title,
+            modifier = Modifier.padding(start = spacing.space14, end = spacing.space10, top = spacing.space2, bottom = spacing.space8)
+        )
+        SettingsGroupCard(modifier = groupModifier, content = content)
+    }
+}
+
+/** Hàng chọn 1 giá trị trong sheet: [leading] + nhãn + dấu check khi được chọn */
+@Composable
+private fun SelectableOptionRow(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    leading: @Composable () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val accent = MaterialTheme.appColors.accent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space16, vertical = spacing.space14),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        leading()
+        Spacer(modifier = Modifier.width(spacing.space12))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (isSelected) accent else MaterialTheme.colorScheme.onBackground,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (isSelected) {
+            Icon(
+                imageVector = LucideIcons.Check,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(spacing.iconSmallMedium)
+            )
         }
+    }
+}
+
+/** Nội dung sheet xác nhận: icon badge lớn + tiêu đề + mô tả (căn giữa) */
+@Composable
+private fun ConfirmSheetMessage(
+    icon: ImageVector,
+    accentColor: Color,
+    title: String,
+    message: String
+) {
+    val spacing = MaterialTheme.spacing
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = spacing.space20, vertical = spacing.space12),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        IconBadge(
+            icon = icon,
+            backgroundColor = accentColor.copy(alpha = CONFIRM_BADGE_BG_ALPHA),
+            size = spacing.avatarLarge,
+            iconSize = spacing.space28,
+            cornerRadius = spacing.radiusMedium,
+            tint = accentColor
+        )
+        Spacer(modifier = Modifier.height(spacing.space14))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(spacing.space6))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.appColors.textMuted,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+private fun hasOsNotificationPermission(context: Context): Boolean {
+    val enabledByManager = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        enabledByManager &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    } else {
+        enabledByManager
     }
 }
 
 @Composable
 private fun MobileNotificationConfigScreen(
-    isDark: Boolean,
+    viewModel: MainViewModel,
     onBackClick: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
-    val bsApi = remember { LoginAuthClient.create(BsApi::class.java) }
+    val state by viewModel.notificationConfigState.collectAsStateWithLifecycle()
 
-    fun checkOsNotificationPermission(): Boolean {
-        val enabledByManager = NotificationManagerCompat.from(context).areNotificationsEnabled()
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            enabledByManager &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        } else {
-            enabledByManager
-        }
-    }
-
-    var hasOsPermission by remember { mutableStateOf(checkOsNotificationPermission()) }
+    var hasOsPermission by remember { mutableStateOf(hasOsNotificationPermission(context)) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasOsPermission = checkOsNotificationPermission()
+                hasOsPermission = hasOsNotificationPermission(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1218,7 +1047,7 @@ private fun MobileNotificationConfigScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        hasOsPermission = checkOsNotificationPermission()
+        hasOsPermission = hasOsNotificationPermission(context)
         if (!granted && !hasOsPermission) {
             openAppNotificationSettings()
         }
@@ -1234,84 +1063,20 @@ private fun MobileNotificationConfigScreen(
         }
     }
 
-    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
-    val hasCachedPref = remember { GlobalData.preferences.contains("push_notifications_enabled") }
-    var isLoading by remember { mutableStateOf(!hasCachedPref) }
-    var isSaving by remember { mutableStateOf(false) }
-    var pushEnabled by remember {
-        mutableStateOf(GlobalData.preferences.getBoolean("push_notifications_enabled", true))
-    }
+    val isEn = rememberIsEnglish()
     var pendingPushState by remember { mutableStateOf<Boolean?>(null) }
 
     val applyPushNotificationChange: (Boolean) -> Unit = { nextVal ->
         if (nextVal && !hasOsPermission) {
             requestOrOpenPermission()
         }
-        pushEnabled = nextVal
-        isSaving = true
-        GlobalData.preferences.edit()
-            .putBoolean("push_notifications_enabled", nextVal)
-            .apply()
-        scope.launch {
-            try {
-                val resp = bsApi.updateUserNotificationSettings(
-                    UserNotificationSettingsModel(
-                        global = UserNotificationGlobalSetting(enabled = nextVal)
-                    )
-                )
-                if (resp.isSuccessful) {
-                    if (nextVal) {
-                        if (hasOsPermission) {
-                            com.tenli.oneview.ui.component.MobileTopPopupManager.success(
-                                if (isEn) "Notifications enabled successfully!" else "Đã bật thông báo thành công!"
-                            )
-                        } else {
-                            com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
-                                if (isEn) "Notification permission is not granted on this device." else "Bạn chưa cấp quyền thông báo trên thiết bị."
-                            )
-                        }
-                    } else {
-                        com.tenli.oneview.ui.component.MobileTopPopupManager.info(
-                            if (isEn) "Notifications disabled." else "Đã tắt nhận thông báo."
-                        )
-                    }
-                } else {
-                    com.tenli.oneview.ui.component.MobileTopPopupManager.error(
-                        if (isEn) "Failed to save notification settings" else "Không thể lưu cấu hình thông báo"
-                    )
-                }
-            } catch (_: Exception) {
-                com.tenli.oneview.ui.component.MobileTopPopupManager.error(
-                    if (isEn) "Failed to save notification settings" else "Không thể lưu cấu hình thông báo"
-                )
-            } finally {
-                isSaving = false
-            }
-        }
+        viewModel.setPushNotificationsEnabled(nextVal, hasOsPermission)
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            val resp = bsApi.getUserNotificationSettings()
-            if (resp.isSuccessful) {
-                val settings = resp.body()
-                if (settings != null) {
-                    pushEnabled = settings.global.enabled
-                    GlobalData.preferences.edit()
-                        .putBoolean("push_notifications_enabled", settings.global.enabled)
-                        .apply()
-                }
-            }
-        } catch (_: Exception) {
-        } finally {
-            isLoading = false
-        }
-    }
-
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
     val backgroundColor = MaterialTheme.colorScheme.background
-    val surfaceColor = MaterialTheme.colorScheme.surface
     val titleColor = MaterialTheme.colorScheme.onBackground
-    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
 
     Column(
         modifier = Modifier
@@ -1327,36 +1092,38 @@ private fun MobileNotificationConfigScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(spacing.topBarHeight)
                 .background(backgroundColor)
-                .padding(horizontal = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = spacing.space10),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(spacing.iconButton)
                     .clip(CircleShape)
                     .clickable(onClick = onBackClick),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = LucideIcons.ChevronLeft,
-                    contentDescription = if (isEn) "Back" else "Quay lại",
+                    contentDescription = stringResource(id = R.string.common_back),
                     tint = titleColor,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(spacing.iconMedium)
                 )
             }
             Text(
-                text = if (isEn) "Notification Settings" else "Cấu hình thông báo",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = titleColor
+                text = stringResource(id = R.string.setting_notifications),
+                style = MaterialTheme.typography.titleMedium,
+                color = titleColor,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
-            Spacer(modifier = Modifier.width(34.dp))
+            Spacer(modifier = Modifier.width(spacing.iconButton))
         }
 
-        if (isLoading) {
+        if (state.isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1364,210 +1131,96 @@ private fun MobileNotificationConfigScreen(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    color = BrandAccent,
-                    modifier = Modifier.size(28.dp),
-                    strokeWidth = 2.5.dp
+                    color = colors.accent,
+                    modifier = Modifier.size(spacing.space28),
+                    strokeWidth = spacing.progressStroke
                 )
             }
         } else {
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 10.dp, vertical = 10.dp)
+                    .weight(1f),
+                contentAlignment = Alignment.TopCenter
             ) {
-                // 1. Device Permission Status Card matching MobileNotificationConfigModal.vue
-                Text(
-                    text = if (isEn) "Device Notification Permission" else "Quyền thông báo trên thiết bị",
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = subTextColor,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
-                )
                 Column(
                     modifier = Modifier
+                        .widthIn(max = spacing.contentMaxWidth)
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(surfaceColor)
+                        .verticalScroll(rememberScrollState())
+                        .navigationBarsPadding()
+                        .padding(spacing.space10)
                 ) {
-                    if (hasOsPermission) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF10B981)),
-                                contentAlignment = Alignment.Center
+                    val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space10)
+
+                    // 1. Device Permission Status Card matching MobileNotificationConfigModal.vue
+                    SettingsSectionHeader(
+                        text = if (isEn) "Device Notification Permission" else "Quyền thông báo trên thiết bị",
+                        modifier = sectionHeaderModifier
+                    )
+                    SettingsGroupCard {
+                        if (hasOsPermission) {
+                            NotificationSettingRow(
+                                icon = LucideIcons.CheckCircle,
+                                iconColor = colors.success,
+                                title = if (isEn) "Notification permission granted" else "Đã cấp quyền thông báo",
+                                subtitle = if (isEn) "This device is ready to receive alerts." else "Thiết bị này đã sẵn sàng nhận cảnh báo."
                             ) {
-                                Icon(
-                                    imageVector = LucideIcons.CheckCircle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (isEn) "Notification permission granted" else "Đã cấp quyền thông báo",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = titleColor
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (isEn) "This device is ready to receive alerts." else "Thiết bị này đã sẵn sàng nhận cảnh báo.",
-                                    fontSize = 12.5.sp,
-                                    color = subTextColor,
-                                    lineHeight = 17.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF10B981))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
+                                StatusChip(
                                     text = if (isEn) "Enabled" else "Đang bật",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                                    color = colors.success
                                 )
                             }
-                        }
-                    } else {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFFF59E0B)),
-                                contentAlignment = Alignment.Center
+                        } else {
+                            NotificationSettingRow(
+                                icon = LucideIcons.Bell,
+                                iconColor = colors.warning,
+                                title = if (isEn) "Permission not granted on device" else "Chưa cấp quyền trên thiết bị",
+                                subtitle = if (isEn) {
+                                    "Notification permission is required to receive alerts for new events."
+                                } else {
+                                    "Cần cấp quyền thông báo để nhận cảnh báo khi có sự kiện mới."
+                                }
                             ) {
-                                Icon(
-                                    imageVector = LucideIcons.Bell,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = if (isEn) "Permission not granted on device" else "Chưa cấp quyền trên thiết bị",
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = titleColor
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = if (isEn) "Notification permission is required to receive alerts for new events." else "Cần cấp quyền thông báo để nhận cảnh báo khi có sự kiện mới.",
-                                    fontSize = 12.5.sp,
-                                    color = subTextColor,
-                                    lineHeight = 17.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Box(
-                                modifier = Modifier
-                                    .height(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(BrandAccent)
-                                    .clickable(onClick = requestOrOpenPermission)
-                                    .padding(horizontal = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
+                                StatusChip(
                                     text = if (isEn) "Grant now" else "Cấp quyền ngay",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color.White
+                                    color = colors.accent,
+                                    onClick = requestOrOpenPermission
                                 )
                             }
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(spacing.space10))
 
-                // 2. System General Setting matching MobileNotificationConfigModal.vue
-                Text(
-                    text = if (isEn) "General Settings" else "Cài đặt chung",
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = subTextColor,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
-                )
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(surfaceColor)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFF59E0B)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.Bell,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = if (isEn) "Allow push notifications" else "Cho phép nhận thông báo",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = titleColor
-                            )
-                            if (!hasOsPermission && pushEnabled) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = if (isEn) "⚠️ Device permission is not granted so notifications cannot be received" else "⚠️ Thiết bị này chưa cấp quyền nên chưa thể nhận thông báo",
-                                    fontSize = 12.sp,
-                                    color = Color(0xFFF59E0B),
-                                    lineHeight = 16.sp
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Switch(
-                            checked = pushEnabled,
-                            enabled = !isSaving,
-                            onCheckedChange = { nextVal ->
-                                pendingPushState = nextVal
+                    // 2. System General Setting matching MobileNotificationConfigModal.vue
+                    SettingsSectionHeader(
+                        text = stringResource(id = R.string.setting_general),
+                        modifier = sectionHeaderModifier
+                    )
+                    SettingsGroupCard {
+                        NotificationSettingRow(
+                            icon = LucideIcons.Bell,
+                            iconColor = colors.warning,
+                            title = if (isEn) "Allow push notifications" else "Cho phép nhận thông báo",
+                            subtitle = if (!hasOsPermission && state.pushEnabled) {
+                                if (isEn) "⚠️ Device permission is not granted so notifications cannot be received" else "⚠️ Thiết bị này chưa cấp quyền nên chưa thể nhận thông báo"
+                            } else {
+                                null
                             },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = BrandAccent
+                            subtitleColor = colors.warning,
+                            subtitleTopSpacing = spacing.space4
+                        ) {
+                            Switch(
+                                checked = state.pushEnabled,
+                                enabled = !state.isSaving,
+                                onCheckedChange = { nextVal -> pendingPushState = nextVal },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = colors.onAccent,
+                                    checkedTrackColor = colors.accent
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -1576,8 +1229,7 @@ private fun MobileNotificationConfigScreen(
         // Bottom Sheet xác nhận khi bật/tắt Cho phép nhận thông báo
         val targetPushState = pendingPushState
         if (targetPushState != null) {
-            val accentColor = if (targetPushState) BrandAccent else Color(0xFFEF4444)
-            val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
+            val accentColor = if (targetPushState) colors.accent else colors.error
 
             MobileNativeBottomSheet(
                 title = if (targetPushState) {
@@ -1585,119 +1237,143 @@ private fun MobileNotificationConfigScreen(
                 } else {
                     if (isEn) "Disable notifications" else "Tắt thông báo"
                 },
-                isDark = isDark,
                 onDismiss = { pendingPushState = null }
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(accentColor.copy(alpha = 0.14f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.Bell,
-                            contentDescription = null,
-                            tint = accentColor,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = if (targetPushState) {
-                            if (isEn) "Allow push notifications?" else "Bật nhận thông báo?"
+                ConfirmSheetMessage(
+                    icon = LucideIcons.Bell,
+                    accentColor = accentColor,
+                    title = if (targetPushState) {
+                        if (isEn) "Allow push notifications?" else "Bật nhận thông báo?"
+                    } else {
+                        if (isEn) "Turn off push notifications?" else "Tắt nhận thông báo?"
+                    },
+                    message = if (targetPushState) {
+                        if (isEn) {
+                            "Your device will receive instant alerts whenever new AI events are detected."
                         } else {
-                            if (isEn) "Turn off push notifications?" else "Tắt nhận thông báo?"
-                        },
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = titleColor
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (targetPushState) {
-                            if (isEn) {
-                                "Your device will receive instant alerts whenever new AI events are detected."
-                            } else {
-                                "Thiết bị sẽ nhận cảnh báo tức thì ngay khi hệ thống phát hiện sự kiện mới."
-                            }
+                            "Thiết bị sẽ nhận cảnh báo tức thì ngay khi hệ thống phát hiện sự kiện mới."
+                        }
+                    } else {
+                        if (isEn) {
+                            "You will no longer receive push alerts for new events until you turn notifications back on."
                         } else {
-                            if (isEn) {
-                                "You will no longer receive push alerts for new events until you turn notifications back on."
-                            } else {
-                                "Bạn sẽ không nhận được thông báo đẩy khi có sự kiện mới cho đến khi bật lại."
-                            }
-                        },
-                        fontSize = 14.sp,
-                        color = subTextColor,
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(cancelBtnBg)
-                            .clickable { pendingPushState = null },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = stringResource(id = R.string.dialog_btn_cancel),
-                            color = titleColor,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                            "Bạn sẽ không nhận được thông báo đẩy khi có sự kiện mới cho đến khi bật lại."
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(accentColor)
-                            .clickable {
-                                pendingPushState = null
-                                applyPushNotificationChange(targetPushState)
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isEn) "Confirm" else "Xác nhận",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
+                )
+                Spacer(modifier = Modifier.height(spacing.space14))
+                SheetActionButtons(
+                    cancelText = stringResource(id = R.string.dialog_btn_cancel),
+                    confirmText = if (isEn) "Confirm" else "Xác nhận",
+                    onCancel = { pendingPushState = null },
+                    onConfirm = {
+                        pendingPushState = null
+                        applyPushNotificationChange(targetPushState)
+                    },
+                    confirmColor = accentColor
+                )
             }
         }
     }
 }
 
+/** Hàng trong màn hình Cấu hình thông báo: icon badge + tiêu đề/mô tả + phần tử bên phải */
+@Composable
+private fun NotificationSettingRow(
+    icon: ImageVector,
+    iconColor: Color,
+    title: String,
+    subtitle: String?,
+    subtitleColor: Color = MaterialTheme.appColors.textMuted,
+    subtitleTopSpacing: Dp = MaterialTheme.spacing.space2,
+    trailing: @Composable () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(spacing.space16),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBadge(
+            icon = icon,
+            backgroundColor = iconColor,
+            size = spacing.iconButton,
+            iconSize = spacing.iconSmallMedium,
+            cornerRadius = spacing.radiusSmallMedium
+        )
+        Spacer(modifier = Modifier.width(spacing.space14))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(subtitleTopSpacing))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subtitleColor
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(spacing.space10))
+        trailing()
+    }
+}
+
+/** Nhãn trạng thái / nút nhỏ bo góc (vd. "Đang bật", "Cấp quyền ngay") */
+@Composable
+private fun StatusChip(
+    text: String,
+    color: Color,
+    onClick: (() -> Unit)? = null
+) {
+    val spacing = MaterialTheme.spacing
+    Box(
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.heightIn(min = spacing.avatarSmall) else Modifier)
+            .clip(RoundedCornerShape(spacing.radiusSmall))
+            .background(color)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(
+                horizontal = if (onClick != null) spacing.space12 else spacing.space10,
+                vertical = spacing.space4
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.appColors.onAccent,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun passwordChangeErrorText(error: PasswordChangeError, isEn: Boolean): String = when (error) {
+    PasswordChangeError.EmptyFields -> if (isEn) "Please fill in all fields" else "Vui lòng nhập đầy đủ thông tin"
+    PasswordChangeError.TooShort -> if (isEn) "New password must be at least 6 characters" else "Mật khẩu mới phải có ít nhất 6 ký tự"
+    PasswordChangeError.Mismatch -> stringResource(id = R.string.err_passwords_mismatch)
+    PasswordChangeError.UserNotFound -> if (isEn) "User information not found" else "Không tìm thấy thông tin người dùng"
+    is PasswordChangeError.WrongCurrentPassword ->
+        if (isEn) "Current password is incorrect (${error.code})" else "Mật khẩu hiện tại không đúng (${error.code})"
+    is PasswordChangeError.Unexpected ->
+        error.message ?: if (isEn) "An error occurred while changing password" else "Có lỗi xảy ra khi đổi mật khẩu"
+}
+
 @Composable
 private fun MobilePasswordChangeSheet(
-    isDark: Boolean,
+    viewModel: MainViewModel,
     onDismiss: () -> Unit,
     onSuccess: () -> Unit
 ) {
-    val context = LocalContext.current
-    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
-    val scope = rememberCoroutineScope()
-    val vmsApi = remember { LoginAuthClient.create(VmsApi::class.java) }
+    val isEn = rememberIsEnglish()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val state by viewModel.passwordChangeState.collectAsStateWithLifecycle()
 
     val oldPasswordFocusRequester = remember { FocusRequester() }
     val newPasswordFocusRequester = remember { FocusRequester() }
@@ -1709,21 +1385,25 @@ private fun MobilePasswordChangeSheet(
     var showOld by remember { mutableStateOf(false) }
     var showNew by remember { mutableStateOf(false) }
     var showConfirm by remember { mutableStateOf(false) }
-    var errorMsg by remember { mutableStateOf<String?>(null) }
-    var isSubmitting by remember { mutableStateOf(false) }
 
-    val cardBg = if (isDark) Color(0xFF242F41) else Color.White
-    val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF1E293B)
-    val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-    val dividerColor = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFE2E8F0)
-    val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+
+    DisposableEffect(viewModel) {
+        viewModel.resetPasswordChange()
+        onDispose { viewModel.resetPasswordChange() }
+    }
+
+    val currentOnSuccess by rememberUpdatedState(onSuccess)
+    LaunchedEffect(state.isSuccess) {
+        if (state.isSuccess) currentOnSuccess()
+    }
 
     LaunchedEffect(Unit) {
-        // Chờ hiển thị rõ giao diện bottom sheet hoàn tất rồi mới focus + bật bàn phím (đồng bộ với LoginScreen)
-        delay(700)
+        delay(PASSWORD_SHEET_FOCUS_DELAY_MS)
         try {
             oldPasswordFocusRequester.requestFocus()
-            delay(100)
+            delay(KEYBOARD_SHOW_DELAY_MS)
             keyboardController?.show()
         } catch (_: Exception) {
         }
@@ -1731,47 +1411,40 @@ private fun MobilePasswordChangeSheet(
 
     MobileNativeBottomSheet(
         title = stringResource(id = R.string.acc_password_security),
-        isDark = isDark,
         onDismiss = onDismiss
     ) {
-        if (!errorMsg.isNullOrBlank()) {
+        val error = state.error
+        if (error != null) {
+            val errorShape = RoundedCornerShape(spacing.radiusSmallMedium)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(ErrorRed.copy(alpha = 0.12f))
-                    .border(1.dp, ErrorRed.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                    .padding(bottom = spacing.space12)
+                    .clip(errorShape)
+                    .background(colors.error.copy(alpha = ERROR_BOX_BG_ALPHA))
+                    .border(spacing.borderMedium, colors.error.copy(alpha = ERROR_BOX_BORDER_ALPHA), errorShape)
+                    .padding(horizontal = spacing.space12, vertical = spacing.space10)
             ) {
                 Text(
-                    text = errorMsg!!,
-                    color = ErrorRed,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
+                    text = passwordChangeErrorText(error, isEn),
+                    color = colors.error,
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
         }
 
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(cardBg)
-        ) {
+        OptionsCard {
             PasswordFieldRow(
-                badgeColor = BrandAccent,
+                badgeColor = colors.accent,
                 badgeIcon = LucideIcons.Lock,
                 placeholder = if (isEn) "Current password" else "Mật khẩu hiện tại",
                 value = oldPassword,
                 onValueChange = {
                     oldPassword = it
-                    errorMsg = null
+                    viewModel.clearPasswordChangeError()
                 },
                 isVisible = showOld,
                 onToggleVisible = { showOld = !showOld },
-                textColor = titleColor,
-                placeholderColor = subTextColor,
                 focusRequester = oldPasswordFocusRequester,
                 imeAction = ImeAction.Next,
                 onImeAction = {
@@ -1781,24 +1454,18 @@ private fun MobilePasswordChangeSheet(
                     }
                 }
             )
-            HorizontalDivider(
-                thickness = 0.7.dp,
-                color = dividerColor,
-                modifier = Modifier.padding(horizontal = 14.dp)
-            )
+            PasswordFieldDivider()
             PasswordFieldRow(
-                badgeColor = Color(0xFFF59E0B),
+                badgeColor = colors.warning,
                 badgeIcon = LucideIcons.ShieldAlert,
-                placeholder = if (isEn) "New password" else "Mật khẩu mới",
+                placeholder = stringResource(id = R.string.forgot_pass_new_pass_hint),
                 value = newPassword,
                 onValueChange = {
                     newPassword = it
-                    errorMsg = null
+                    viewModel.clearPasswordChangeError()
                 },
                 isVisible = showNew,
                 onToggleVisible = { showNew = !showNew },
-                textColor = titleColor,
-                placeholderColor = subTextColor,
                 focusRequester = newPasswordFocusRequester,
                 imeAction = ImeAction.Next,
                 onImeAction = {
@@ -1808,122 +1475,44 @@ private fun MobilePasswordChangeSheet(
                     }
                 }
             )
-            HorizontalDivider(
-                thickness = 0.7.dp,
-                color = dividerColor,
-                modifier = Modifier.padding(horizontal = 14.dp)
-            )
+            PasswordFieldDivider()
             PasswordFieldRow(
-                badgeColor = Color(0xFF10B981),
+                badgeColor = colors.success,
                 badgeIcon = LucideIcons.CheckCircle,
-                placeholder = if (isEn) "Confirm new password" else "Xác nhận mật khẩu mới",
+                placeholder = stringResource(id = R.string.forgot_pass_confirm_pass_hint),
                 value = confirmPassword,
                 onValueChange = {
                     confirmPassword = it
-                    errorMsg = null
+                    viewModel.clearPasswordChangeError()
                 },
                 isVisible = showConfirm,
                 onToggleVisible = { showConfirm = !showConfirm },
-                textColor = titleColor,
-                placeholderColor = subTextColor,
                 focusRequester = confirmPasswordFocusRequester,
                 imeAction = ImeAction.Done,
-                onImeAction = {
-                    keyboardController?.hide()
-                }
+                onImeAction = { keyboardController?.hide() }
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(spacing.space16))
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(cancelBtnBg)
-                    .clickable(enabled = !isSubmitting) { onDismiss() },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = stringResource(id = R.string.dialog_btn_cancel),
-                    color = titleColor,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(BrandAccent)
-                    .clickable(enabled = !isSubmitting) {
-                        if (oldPassword.isBlank() || newPassword.isBlank() || confirmPassword.isBlank()) {
-                            errorMsg = if (isEn) "Please fill in all fields" else "Vui lòng nhập đầy đủ thông tin"
-                            return@clickable
-                        }
-                        if (newPassword.length < 6) {
-                            errorMsg = if (isEn) "New password must be at least 6 characters" else "Mật khẩu mới phải có ít nhất 6 ký tự"
-                            return@clickable
-                        }
-                        if (newPassword != confirmPassword) {
-                            errorMsg = if (isEn) "Passwords do not match" else "Mật khẩu xác nhận không khớp"
-                            return@clickable
-                        }
-                        val userId = UserSession.userData?.id
-                        if (userId == null) {
-                            errorMsg = if (isEn) "User information not found" else "Không tìm thấy thông tin người dùng"
-                            return@clickable
-                        }
-                        isSubmitting = true
-                        scope.launch {
-                            try {
-                                val resp = vmsApi.changePassword(
-                                    ChangePasswordModel(
-                                        userId = userId,
-                                        oldPassword = oldPassword,
-                                        newPassword = newPassword
-                                    )
-                                )
-                                if (resp.isSuccessful) {
-                                    com.tenli.oneview.ui.component.MobileTopPopupManager.success(
-                                        if (isEn) "Password changed successfully!" else "Đổi mật khẩu thành công!"
-                                    )
-                                    onSuccess()
-                                } else {
-                                    errorMsg = if (isEn) "Current password is incorrect (${resp.code()})" else "Mật khẩu hiện tại không đúng (${resp.code()})"
-                                }
-                            } catch (e: Exception) {
-                                errorMsg = e.message ?: if (isEn) "An error occurred while changing password" else "Có lỗi xảy ra khi đổi mật khẩu"
-                            } finally {
-                                isSubmitting = false
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                if (isSubmitting) {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        modifier = Modifier.size(20.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text(
-                        text = if (isEn) "Confirm" else "Xác nhận",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-        }
+        SheetActionButtons(
+            cancelText = stringResource(id = R.string.dialog_btn_cancel),
+            confirmText = if (isEn) "Confirm" else "Xác nhận",
+            onCancel = onDismiss,
+            onConfirm = { viewModel.changePassword(oldPassword, newPassword, confirmPassword) },
+            enabled = !state.isSubmitting,
+            isLoading = state.isSubmitting
+        )
     }
+}
+
+@Composable
+private fun PasswordFieldDivider() {
+    HorizontalDivider(
+        thickness = MaterialTheme.spacing.borderThin,
+        color = MaterialTheme.appColors.border,
+        modifier = Modifier.padding(horizontal = MaterialTheme.spacing.space14)
+    )
 }
 
 @Composable
@@ -1935,13 +1524,24 @@ private fun PasswordFieldRow(
     onValueChange: (String) -> Unit,
     isVisible: Boolean,
     onToggleVisible: () -> Unit,
-    textColor: Color,
-    placeholderColor: Color,
     focusRequester: FocusRequester,
     imeAction: ImeAction = ImeAction.Next,
     onImeAction: () -> Unit = {}
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val textColor = colors.textTitle
+    val placeholderColor = colors.textMuted
+    val baseTextStyle = MaterialTheme.typography.bodySmall
+    val textStyle = remember(baseTextStyle, textColor) {
+        baseTextStyle.copy(color = textColor, fontWeight = FontWeight.Medium)
+    }
+    val cursorBrush = remember(colors.accent) { SolidColor(colors.accent) }
+    val keyboardOptions = remember(imeAction) {
+        KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = imeAction)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1955,24 +1555,11 @@ private fun PasswordFieldRow(
                 } catch (_: Exception) {
                 }
             }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = spacing.space14, vertical = spacing.space12),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(badgeColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = badgeIcon,
-                contentDescription = placeholder,
-                tint = Color.White,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
+        IconBadge(icon = badgeIcon, backgroundColor = badgeColor, contentDescription = placeholder)
+        Spacer(modifier = Modifier.width(spacing.space12))
         Box(
             modifier = Modifier.weight(1f),
             contentAlignment = Alignment.CenterStart
@@ -1981,28 +1568,23 @@ private fun PasswordFieldRow(
                 Text(
                     text = placeholder,
                     color = placeholderColor,
-                    fontSize = 14.sp
+                    style = baseTextStyle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
                 singleLine = true,
-                textStyle = TextStyle(
-                    color = textColor,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                visualTransformation = if (isVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = imeAction
-                ),
+                textStyle = textStyle,
+                visualTransformation = if (isVisible) VisualTransformation.None else PasswordMask,
+                keyboardOptions = keyboardOptions,
                 keyboardActions = KeyboardActions(
                     onNext = { onImeAction() },
                     onDone = { onImeAction() }
                 ),
-                cursorBrush = SolidColor(BrandAccent),
+                cursorBrush = cursorBrush,
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focusRequester)
@@ -2013,112 +1595,70 @@ private fun PasswordFieldRow(
             contentDescription = null,
             tint = placeholderColor,
             modifier = Modifier
-                .size(20.dp)
+                .size(spacing.iconRegular)
                 .clickable(onClick = onToggleVisible)
         )
     }
 }
 
+/** Hàng cài đặt (MobileSettingsPage.vue): icon badge màu + tiêu đề + giá trị + mũi tên */
 @Composable
-fun ModernSettingItem(
+private fun SettingsRow(
     icon: ImageVector,
     iconTint: Color,
     title: String,
     onClick: () -> Unit,
     titleColor: Color = MaterialTheme.colorScheme.onBackground,
     valueText: String? = null,
-    showChevron: Boolean = true,
-    showDivider: Boolean = false
+    showChevron: Boolean = true
 ) {
-    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Squircle colored icon badge matching MobileSettingsPage.vue
-            Box(
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(iconTint),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(14.dp))
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space16, vertical = spacing.space14),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Squircle colored icon badge matching MobileSettingsPage.vue
+        IconBadge(
+            icon = icon,
+            backgroundColor = iconTint,
+            size = spacing.iconLarge,
+            iconSize = spacing.iconSmallMedium
+        )
+        Spacer(modifier = Modifier.width(spacing.space14))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = titleColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        if (valueText != null) {
             Text(
-                text = title,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = titleColor,
-                modifier = Modifier.weight(1f)
+                text = valueText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .widthIn(max = SettingsValueMaxWidth)
+                    .padding(start = spacing.space8, end = spacing.space6)
             )
-            if (valueText != null) {
-                Text(
-                    text = valueText,
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                    modifier = Modifier.padding(end = 6.dp)
-                )
-            }
-            if (showChevron) {
-                Icon(
-                    imageVector = LucideIcons.ChevronRight,
-                    contentDescription = null,
-                    tint = if (isDark) Color(0xFF64748B) else Color(0xFFCBD5E1),
-                    modifier = Modifier.size(18.dp)
-                )
-            }
+        }
+        if (showChevron) {
+            Icon(
+                imageVector = LucideIcons.ChevronRight,
+                contentDescription = null,
+                tint = if (colors.isDark) Slate500 else Slate300,
+                modifier = Modifier.size(spacing.iconSmallMedium)
+            )
         }
     }
 }
 
-@Composable
-fun ThemeModeButton(
-    icon: ImageVector,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val isSystemDark = isSystemInDarkTheme()
-    val isDark = when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
-    val selectedBg = if (isDark) MaterialTheme.colorScheme.primary else Color.White
-    val selectedTint = if (isDark) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
-    val unselectedTint = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFF94A3B8)
-
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) selectedBg else Color.Transparent)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isSelected) selectedTint else unselectedTint,
-            modifier = Modifier.size(20.dp)
-        )
-    }
-}
+/** Giới hạn độ rộng giá trị bên phải hàng cài đặt để tiêu đề không bị ép mất trên máy hẹp */
+private val SettingsValueMaxWidth = 140.dp

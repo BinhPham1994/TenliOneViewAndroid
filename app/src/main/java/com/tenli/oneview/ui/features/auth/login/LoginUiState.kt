@@ -9,13 +9,9 @@ data class LoginUiState(
     val password: String = "",
     val rememberMe: Boolean = false,
     val showPassword: Boolean = false,
-    val isLoading: Boolean = false,
-    val isVietnamese: Boolean = true,
-    val isLoginActive: Boolean = false,
-    val errorMessage: String? = null
+    val isLoading: Boolean = false
 )
 
-sealed class LoginEvent {
-    object LoginSuccess : LoginEvent()
-    data class ShowError(val message: String) : LoginEvent()
+sealed interface LoginEvent {
+    data object LoginSuccess : LoginEvent
 }

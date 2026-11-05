@@ -1,6 +1,10 @@
 package com.tenli.oneview.ui.component
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -9,16 +13,18 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,21 +37,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,7 +84,6 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -83,50 +91,137 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import kotlin.math.roundToInt
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import coil.compose.AsyncImagePainter
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Precision
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.features.home.findAllBoxes
-import com.tenli.oneview.ui.theme.BackgroundDark
-import com.tenli.oneview.ui.theme.BackgroundLight
+import com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope
+import com.tenli.oneview.ui.navigation.LocalSharedTransitionScope
 import com.tenli.oneview.ui.theme.BrandAccent
+import com.tenli.oneview.ui.theme.BrandContainer
 import com.tenli.oneview.ui.theme.BrandPrimary
+import com.tenli.oneview.ui.theme.ErrorRed
+import com.tenli.oneview.ui.theme.LocalAppColors
 import com.tenli.oneview.ui.theme.LucideIcons
-import com.tenli.oneview.ui.theme.SurfaceDark
-import com.tenli.oneview.ui.theme.SurfaceLight
-import com.tenli.oneview.ui.theme.SurfaceSubtleDark
-import com.tenli.oneview.ui.theme.SurfaceSubtleLight
-import com.tenli.oneview.ui.theme.TextPrimary
-import com.tenli.oneview.ui.theme.TextPrimaryDark
-import com.tenli.oneview.ui.theme.TextSecondary
-import com.tenli.oneview.ui.theme.TextSecondaryDark
-import com.tenli.oneview.ui.theme.TextTitleLight
-import com.tenli.oneview.ui.theme.ThemeManager
+import com.tenli.oneview.ui.theme.SuccessGreen
+import com.tenli.oneview.ui.theme.SuccessGreenDeep
+import com.tenli.oneview.ui.theme.VioletAccent
+import com.tenli.oneview.ui.theme.WarningOrange
+import com.tenli.oneview.ui.theme.appColors
+import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiModuleOption
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
-import java.util.Locale
+import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+// =====================================================================================
+// Hằng số dùng chung trong file
+// =====================================================================================
 
 private val UUID_REGEX = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+/** Màu nền popup cảnh báo (.ant-message-warning #C94A08) – palette chưa có tông cam cháy này. */
+private val PopupWarningBg = Color(0xFFC94A08)
+
+/** Nền thẻ sự kiện đang được chọn trong Dark mode (#1E3A5F). Light mode dùng [BrandContainer]. */
+private val SelectedCardBgDark = Color(0xFF1E3A5F)
+
+/** Bóng chữ nhẹ trên popup màu (giữ độ đọc tốt trên nền đỏ/cam/xanh) */
+private val PopupTextStyle = TextStyle(
+    fontWeight = FontWeight.SemiBold,
+    letterSpacing = 0.2.sp,
+    shadow = Shadow(color = Color.Black.copy(alpha = 0.20f), offset = Offset(0f, 2f), blurRadius = 4f)
+)
+
+/** Gradient tối phía dưới thẻ Grid để chữ trắng luôn đọc được trên ảnh (tạo 1 lần, dùng lại cho mọi item). */
+private val GridBottomScrimBrush = Brush.verticalGradient(
+    colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.5f), Color.Black.copy(alpha = 0.9f))
+)
+
+/** Độ rộng ảnh thumbnail ở chế độ List (theo thiết kế @365dp, nhân với hệ số co giãn màn hình). */
+private val ListThumbnailBaseWidth = 156.dp
+private const val THUMBNAIL_ASPECT_RATIO = 16f / 9f
+
+/** Ảnh crop khuôn mặt trên thẻ Grid: 72x90dp (tỉ lệ 4:5) */
+private const val FACE_CROP_ASPECT_RATIO = 72f / 90f
+private const val FACE_CROP_REQUEST_WIDTH_PX = 160
+private const val FACE_CROP_REQUEST_HEIGHT_PX = 200
+
+/** Kích thước decode ảnh (px) – giới hạn để tiết kiệm RAM trong list dài */
+private const val LIST_THUMB_WIDTH_PX = 420
+private const val LIST_THUMB_HEIGHT_PX = 236
+private const val GRID_IMAGE_WIDTH_PX = 800
+private const val GRID_IMAGE_HEIGHT_PX = 450
+
+/** Độ dày khung bounding box (px) vẽ trên ảnh Grid */
+private const val BOUNDING_BOX_STROKE_PX = 3.5f
+
+/** Số dòng tối đa hiển thị trong dropdown trước khi phải cuộn */
+private const val DROPDOWN_MAX_VISIBLE_ITEMS = 6
+
+// --- Animation overlay (scrim fade trước, sheet trượt lên sau) ---
+private val OverlayEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val OverlayExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+private val ScrimEnterTransition: EnterTransition = fadeIn(animationSpec = tween(durationMillis = 200))
+private val ScrimExitTransition: ExitTransition = fadeOut(animationSpec = tween(durationMillis = 260))
+private val SheetEnterTransition: EnterTransition = slideInVertically(
+    initialOffsetY = { fullHeight -> fullHeight },
+    animationSpec = tween(durationMillis = 360, easing = OverlayEnterEasing)
+)
+private val SheetExitTransition: ExitTransition = slideOutVertically(
+    targetOffsetY = { fullHeight -> fullHeight },
+    animationSpec = tween(durationMillis = 300, easing = OverlayExitEasing)
+)
+private const val SCRIM_LEAD_MS = 130L
+private const val SHEET_EXIT_LEAD_MS = 80L
+private const val SCRIM_EXIT_MS = 280L
+
+// --- Animation popup top ---
+private val PopupEnterTransition: EnterTransition = slideInVertically(
+    initialOffsetY = { -it / 2 },
+    animationSpec = tween(durationMillis = 200, easing = OverlayEnterEasing)
+) + scaleIn(
+    initialScale = 0.96f,
+    animationSpec = tween(durationMillis = 200, easing = OverlayEnterEasing)
+) + fadeIn(animationSpec = tween(durationMillis = 160))
+private val PopupExitTransition: ExitTransition = slideOutVertically(
+    targetOffsetY = { -it / 2 },
+    animationSpec = tween(durationMillis = 170)
+) + scaleOut(
+    targetScale = 0.96f,
+    animationSpec = tween(durationMillis = 170)
+) + fadeOut(animationSpec = tween(durationMillis = 150))
+
+// --- Định dạng thời gian (java.time: thread-safe, tạo 1 lần) ---
+private val TimeSecondsFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+private val HourMinuteFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val DayMonthYearFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+
+private fun formatMillis(millis: Long, formatter: DateTimeFormatter): String =
+    formatter.format(Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()))
+
+// =====================================================================================
+// Popup thông báo phía trên màn hình
+// =====================================================================================
 
 /**
  * Phân loại màu nền Popup Top đồng bộ 100% với `src/assets/styles/notifications.css` (lines 176-230) trên PWA:
@@ -140,20 +235,20 @@ enum class MobileTopPopupType(
     val shadowColor: Color
 ) {
     ERROR(
-        bgColor = Color(0xFFEF4444),
-        shadowColor = Color(0xFFEF4444).copy(alpha = 0.45f)
+        bgColor = ErrorRed,
+        shadowColor = ErrorRed.copy(alpha = 0.45f)
     ),
     WARNING(
-        bgColor = Color(0xFFC94A08),
-        shadowColor = Color(0xFFC94A08).copy(alpha = 0.50f)
+        bgColor = PopupWarningBg,
+        shadowColor = PopupWarningBg.copy(alpha = 0.50f)
     ),
     SUCCESS(
-        bgColor = Color(0xFF15803D),
-        shadowColor = Color(0xFF15803D).copy(alpha = 0.50f)
+        bgColor = SuccessGreenDeep,
+        shadowColor = SuccessGreenDeep.copy(alpha = 0.50f)
     ),
     INFO(
-        bgColor = Color(0xFF0980EE),
-        shadowColor = Color(0xFF0980EE).copy(alpha = 0.45f)
+        bgColor = BrandAccent,
+        shadowColor = BrandAccent.copy(alpha = 0.45f)
     )
 }
 
@@ -208,11 +303,9 @@ fun MobileTopPopupHost(
     modifier: Modifier = Modifier
 ) {
     val activeMessage by MobileTopPopupManager.currentMessage.collectAsStateWithLifecycle()
-    var lastRenderedMessage by remember { mutableStateOf<MobileTopPopupMessage?>(null) }
-
-    if (activeMessage != null) {
-        lastRenderedMessage = activeMessage
-    }
+    // Giữ message cuối để còn hiển thị trong lúc animation thoát (holder thường, không phải state → không gây recompose thêm)
+    val lastRendered = remember { arrayOfNulls<MobileTopPopupMessage>(1) }
+    activeMessage?.let { lastRendered[0] = it }
 
     LaunchedEffect(activeMessage?.id) {
         val current = activeMessage ?: return@LaunchedEffect
@@ -222,92 +315,75 @@ fun MobileTopPopupHost(
         }
     }
 
+    val spacing = MaterialTheme.spacing
     Box(
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+            .padding(top = spacing.space8, start = spacing.space16, end = spacing.space16),
         contentAlignment = Alignment.TopCenter
     ) {
         AnimatedVisibility(
             visible = activeMessage != null,
-            enter = slideInVertically(
-                initialOffsetY = { -it / 2 },
-                animationSpec = tween(
-                    durationMillis = 200,
-                    easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                )
-            ) + scaleIn(
-                initialScale = 0.96f,
-                animationSpec = tween(
-                    durationMillis = 200,
-                    easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                )
-            ) + fadeIn(animationSpec = tween(durationMillis = 160)),
-            exit = slideOutVertically(
-                targetOffsetY = { -it / 2 },
-                animationSpec = tween(durationMillis = 170)
-            ) + scaleOut(
-                targetScale = 0.96f,
-                animationSpec = tween(durationMillis = 170)
-            ) + fadeOut(animationSpec = tween(durationMillis = 150))
+            enter = PopupEnterTransition,
+            exit = PopupExitTransition
         ) {
-            val msg = activeMessage ?: lastRenderedMessage
+            val msg = activeMessage ?: lastRendered[0]
             if (msg != null) {
-                val shape = RoundedCornerShape(10.dp)
-                Row(
-                    modifier = Modifier
-                        .shadow(
-                            elevation = 10.dp,
-                            shape = shape,
-                            ambientColor = msg.type.shadowColor,
-                            spotColor = msg.type.shadowColor
-                        )
-                        .clip(shape)
-                        .background(msg.type.bgColor)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { MobileTopPopupManager.dismiss() }
-                        )
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    MobileTopPopupFilledIcon(
-                        type = msg.type,
-                        cutoutColor = msg.type.bgColor
-                    )
-
-                    Text(
-                        text = msg.text,
-                        color = Color.White,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.2.sp,
-                        lineHeight = 19.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        style = TextStyle(
-                            shadow = Shadow(
-                                color = Color.Black.copy(alpha = 0.20f),
-                                offset = Offset(0f, 2f),
-                                blurRadius = 4f
-                            )
-                        )
-                    )
-                }
+                MobileTopPopupCard(msg)
             }
         }
     }
 }
 
 @Composable
+private fun MobileTopPopupCard(msg: MobileTopPopupMessage) {
+    val spacing = MaterialTheme.spacing
+    val contentColor = MaterialTheme.appColors.onAccent
+    val shape = RoundedCornerShape(spacing.radiusSmallMedium)
+    Row(
+        modifier = Modifier
+            .widthIn(max = spacing.dialogMaxWidth)
+            .shadow(
+                elevation = spacing.space10,
+                shape = shape,
+                ambientColor = msg.type.shadowColor,
+                spotColor = msg.type.shadowColor
+            )
+            .clip(shape)
+            .background(msg.type.bgColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { MobileTopPopupManager.dismiss() }
+            )
+            .padding(horizontal = spacing.space18, vertical = spacing.space8),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+    ) {
+        MobileTopPopupFilledIcon(
+            type = msg.type,
+            circleColor = contentColor,
+            cutoutColor = msg.type.bgColor
+        )
+
+        Text(
+            text = msg.text,
+            color = contentColor,
+            style = MaterialTheme.typography.bodySmall.merge(PopupTextStyle),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
 private fun MobileTopPopupFilledIcon(
     type: MobileTopPopupType,
+    circleColor: Color,
     cutoutColor: Color
 ) {
-    Canvas(modifier = Modifier.size(16.dp)) {
+    Canvas(modifier = Modifier.size(MaterialTheme.spacing.iconSmall)) {
         val w = size.width
         val h = size.height
         val radius = minOf(w, h) / 2f
@@ -315,7 +391,7 @@ private fun MobileTopPopupFilledIcon(
 
         // Solid white circle matching `.ant-message-custom-content .anticon svg { fill: #ffffff }`
         drawCircle(
-            color = Color.White,
+            color = circleColor,
             radius = radius,
             center = Offset(w / 2f, h / 2f)
         )
@@ -388,6 +464,10 @@ private fun MobileTopPopupFilledIcon(
     }
 }
 
+// =====================================================================================
+// Overlay toàn màn hình (bottom sheet / dialog tùy biến)
+// =====================================================================================
+
 private class MobileOverlayEntry(
     val key: Any,
     var content: @Composable () -> Unit
@@ -431,55 +511,55 @@ class MobileOverlayHostState {
                     if (!entry.isClosing) {
                         // Hiển thị lớp nền tối trước, sau đó mới trượt Bottom Sheet từ dưới lên
                         entry.isScrimVisible = true
-                        delay(130)
+                        delay(SCRIM_LEAD_MS)
                         if (!entry.isClosing) {
                             entry.isSheetVisible = true
                         }
                     } else {
                         // Khi đóng: trượt Bottom Sheet xuống trước một nhịp rồi làm mờ dần nền tối
                         entry.isSheetVisible = false
-                        delay(80)
+                        delay(SHEET_EXIT_LEAD_MS)
                         entry.isScrimVisible = false
-                        delay(280)
+                        delay(SCRIM_EXIT_MS)
                         entries.remove(entry)
                     }
                 }
 
-                // Lớp nền mờ toàn màn hình fade in trước / fade out sau
-                AnimatedVisibility(
-                    visible = entry.isScrimVisible,
-                    enter = fadeIn(animationSpec = tween(durationMillis = 200)),
-                    exit = fadeOut(animationSpec = tween(durationMillis = 260))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f))
-                    )
-                }
-
-                // Nội dung Bottom Sheet trượt từ dưới lên sau khi nền đã tối
-                AnimatedVisibility(
-                    visible = entry.isSheetVisible,
-                    enter = slideInVertically(
-                        initialOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(
-                            durationMillis = 360,
-                            easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                        )
-                    ),
-                    exit = slideOutVertically(
-                        targetOffsetY = { fullHeight -> fullHeight },
-                        animationSpec = tween(
-                            durationMillis = 300,
-                            easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
-                        )
-                    )
-                ) {
-                    entry.content()
-                }
+                OverlayLayers(
+                    isScrimVisible = entry.isScrimVisible,
+                    isSheetVisible = entry.isSheetVisible,
+                    content = entry.content
+                )
             }
         }
+    }
+}
+
+/** Lớp nền mờ (fade) + nội dung sheet (trượt từ dưới lên) – dùng chung cho host và chế độ fallback. */
+@Composable
+private fun OverlayLayers(
+    isScrimVisible: Boolean,
+    isSheetVisible: Boolean,
+    content: @Composable () -> Unit
+) {
+    val scrimColor = MaterialTheme.appColors.scrim
+    AnimatedVisibility(
+        visible = isScrimVisible,
+        enter = ScrimEnterTransition,
+        exit = ScrimExitTransition
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(scrimColor)
+        )
+    }
+    AnimatedVisibility(
+        visible = isSheetVisible,
+        enter = SheetEnterTransition,
+        exit = SheetExitTransition
+    ) {
+        content()
     }
 }
 
@@ -513,40 +593,15 @@ fun MobileFullScreenOverlay(
         var isSheetVisible by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) {
             isScrimVisible = true
-            delay(130)
+            delay(SCRIM_LEAD_MS)
             isSheetVisible = true
         }
         Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedVisibility(
-                visible = isScrimVisible,
-                enter = fadeIn(animationSpec = tween(durationMillis = 200)),
-                exit = fadeOut(animationSpec = tween(durationMillis = 260))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                )
-            }
-            AnimatedVisibility(
-                visible = isSheetVisible,
-                enter = slideInVertically(
-                    initialOffsetY = { fullHeight -> fullHeight },
-                    animationSpec = tween(
-                        durationMillis = 360,
-                        easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
-                    )
-                ),
-                exit = slideOutVertically(
-                    targetOffsetY = { fullHeight -> fullHeight },
-                    animationSpec = tween(
-                        durationMillis = 300,
-                        easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
-                    )
-                )
-            ) {
-                content()
-            }
+            OverlayLayers(
+                isScrimVisible = isScrimVisible,
+                isSheetVisible = isSheetVisible,
+                content = content
+            )
         }
     }
 }
@@ -556,25 +611,52 @@ fun isUuidString(value: String?): Boolean {
     return UUID_REGEX.matches(value.trim())
 }
 
+// =====================================================================================
+// Theme / ngôn ngữ
+// =====================================================================================
+
+/**
+ * Trạng thái Dark mode hiện tại của app (đã tính theo cài đặt người dùng + hệ thống trong [com.tenli.oneview.ui.theme.TenliAIoTTheme]).
+ * Đọc trực tiếp từ CompositionLocal nên không phát sinh thêm flow collector mỗi lần gọi.
+ */
 @Composable
-fun rememberIsDarkTheme(): Boolean {
-    val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val isSystemDark = isSystemInDarkTheme()
-    return when (themeMode) {
-        0 -> false
-        1 -> true
-        else -> isSystemDark
-    }
+@ReadOnlyComposable
+fun rememberIsDarkTheme(): Boolean = LocalAppColors.current.isDark
+
+/**
+ * Ngôn ngữ hiện tại có phải tiếng Anh không – được cung cấp 1 lần ở gốc cây UI bởi [ProvideAppLanguage].
+ * `null` = chưa có provider (khi đó [rememberIsEnglish] tự collect flow như cũ).
+ */
+val LocalIsEnglish = staticCompositionLocalOf<Boolean?> { null }
+
+/**
+ * Thu thập [LocaleManager.languageFlow] DUY NHẤT 1 lần và cung cấp cho toàn bộ cây con qua [LocalIsEnglish].
+ * Nên bọc ở gốc UI (MainActivity: `TenliAIoTTheme { ProvideAppLanguage { ... } }`) để mọi item trong list
+ * gọi [rememberIsEnglish] chỉ còn là 1 lần đọc CompositionLocal (không tạo coroutine/collector riêng).
+ */
+@Composable
+fun ProvideAppLanguage(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val langCode by LocaleManager.languageFlow.collectAsStateWithLifecycle(
+        initialValue = remember(context) { LocaleManager.getLocale(context) }
+    )
+    CompositionLocalProvider(LocalIsEnglish provides langCode.startsWith("en"), content = content)
 }
 
 @Composable
 fun rememberIsEnglish(): Boolean {
+    LocalIsEnglish.current?.let { return it }
+    // Fallback khi chưa bọc ProvideAppLanguage: tự collect flow (giữ hành vi cũ)
     val context = LocalContext.current
     val langCode by LocaleManager.languageFlow.collectAsStateWithLifecycle(
-        initialValue = LocaleManager.getLocale(context)
+        initialValue = remember(context) { LocaleManager.getLocale(context) }
     )
     return langCode.startsWith("en")
 }
+
+// =====================================================================================
+// Top bar
+// =====================================================================================
 
 /**
  * Top bar matching `.mobile-top-bar` in `mobile.css`
@@ -585,16 +667,15 @@ fun MobileTopBar(
     leftAction: @Composable (() -> Unit)? = null,
     rightAction: @Composable (() -> Unit)? = null
 ) {
-    val isDark = rememberIsDarkTheme()
-    val bgColor = if (isDark) BackgroundDark else BackgroundLight
-    val titleColor = if (isDark) Color.White else TextTitleLight
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp)
-            .background(bgColor)
-            .padding(horizontal = 10.dp),
+            .height(spacing.touchTarget)
+            .background(colors.pageBg)
+            .padding(horizontal = spacing.space10),
         contentAlignment = Alignment.Center
     ) {
         if (leftAction != null) {
@@ -605,13 +686,13 @@ fun MobileTopBar(
 
         Text(
             text = title,
-            color = titleColor,
-            fontSize = 18.5.sp,
-            fontWeight = FontWeight.Bold,
+            color = colors.textTitle,
+            style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 44.dp)
+            // Chừa chỗ cho nút trái/phải để tiêu đề luôn nằm giữa
+            modifier = Modifier.padding(horizontal = spacing.iconButtonLarge)
         )
 
         if (rightAction != null) {
@@ -629,30 +710,24 @@ fun MobileTopActionButton(
     hasActiveDot: Boolean = false,
     onClick: () -> Unit
 ) {
-    val isDark = rememberIsDarkTheme()
-    val iconColor = if (isDark) Color(0xFFE2E8F0) else TextPrimary
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
 
-    Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
+    TopBarIconBox(onClick = onClick, cornerRadius = spacing.radiusSmallMedium) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = iconColor,
-            modifier = Modifier.size(20.dp)
+            tint = colors.iconDefault,
+            modifier = Modifier.size(spacing.iconRegular)
         )
         if (hasActiveDot) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 5.dp, end = 5.dp)
-                    .size(8.dp)
+                    .padding(top = spacing.space5, end = spacing.space5)
+                    .size(spacing.statusDot)
                     .clip(CircleShape)
-                    .background(BrandAccent)
+                    .background(colors.accent)
             )
         }
     }
@@ -663,21 +738,75 @@ fun MobileViewToggleButton(
     isListView: Boolean,
     onToggle: () -> Unit
 ) {
-    val isDark = rememberIsDarkTheme()
-    val iconColor = if (isDark) Color(0xFFCBD5E1) else TextPrimary
-
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onToggle),
-        contentAlignment = Alignment.Center
-    ) {
+    val spacing = MaterialTheme.spacing
+    TopBarIconBox(onClick = onToggle, cornerRadius = spacing.radiusSmall) {
         Icon(
             imageVector = if (isListView) LucideIcons.LayoutGrid else LucideIcons.List,
             contentDescription = if (isListView) "Grid View" else "List View",
-            tint = iconColor,
-            modifier = Modifier.size(20.dp)
+            tint = MaterialTheme.appColors.iconDefault,
+            modifier = Modifier.size(spacing.iconRegular)
+        )
+    }
+}
+
+/** Vùng chạm vuông bo góc cho nút icon trên top bar */
+@Composable
+private fun TopBarIconBox(
+    onClick: () -> Unit,
+    cornerRadius: Dp,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(MaterialTheme.spacing.iconButton)
+            .clip(RoundedCornerShape(cornerRadius))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+        content = content
+    )
+}
+
+// =====================================================================================
+// Thẻ sự kiện (dùng trong list dài: Home, Event, EventDetail) – giữ thật nhẹ
+// =====================================================================================
+
+/** Dữ liệu hiển thị tính sẵn 1 lần cho mỗi sự kiện (không phụ thuộc ngôn ngữ). */
+@Immutable
+private class EventCardImages(
+    val cameraName: String,
+    val snapshotUrl: String?,
+    val fullImageUrl: String?,
+    val faceCropUrl: String?
+)
+
+private fun resolveCardImages(event: EventData, cameraName: String, domain: String): EventCardImages {
+    val resolvedCameraName = cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
+        ?: event.data?.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
+        ?: event.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
+        ?: ""
+    val faceUrl = AiTypeHelper.getFaceCropUrl(event, domain)
+    val snapUrl = AiTypeHelper.getSnapshotUrl(event, domain)
+    val fullUrl = AiTypeHelper.getFullImageUrl(event, domain)
+    val fullImageUrl = fullUrl.ifEmpty { snapUrl }.ifEmpty { null }
+    return EventCardImages(
+        cameraName = resolvedCameraName,
+        snapshotUrl = (faceUrl ?: snapUrl.ifEmpty { fullUrl }).ifEmpty { null },
+        fullImageUrl = fullImageUrl,
+        faceCropUrl = faceUrl?.takeIf { it.isNotBlank() && it != fullImageUrl }
+    )
+}
+
+/** Gắn shared element (ảnh sự kiện → màn chi tiết) khi được bật và có scope điều hướng. */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun Modifier.eventImageSharedElement(enabled: Boolean, eventId: Any?): Modifier {
+    if (!enabled) return this
+    val sharedTransitionScope = LocalSharedTransitionScope.current ?: return this
+    val animatedVisibilityScope = LocalAnimatedVisibilityScope.current ?: return this
+    return with(sharedTransitionScope) {
+        this@eventImageSharedElement.sharedElement(
+            sharedContentState = rememberSharedContentState(key = "event_image_$eventId"),
+            animatedVisibilityScope = animatedVisibilityScope
         )
     }
 }
@@ -685,7 +814,6 @@ fun MobileViewToggleButton(
 /**
  * Cloned from `MobileEventCard.vue` supporting both List View (`isListView = true`) and Grid/Card View (`isListView = false`).
  */
-@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun MobileEventCard(
     event: EventData,
@@ -695,331 +823,319 @@ fun MobileEventCard(
     enableSharedElement: Boolean = false,
     onClick: () -> Unit
 ) {
-    val context = LocalContext.current
     val isEn = rememberIsEnglish()
-    val isDark = rememberIsDarkTheme()
+    val colors = MaterialTheme.appColors
     val domain = UserSession.domain
     val eventKey = "${event.serviceId}_${event.id}_${event.time}"
 
-    val resolvedCameraName: String = remember(eventKey, cameraName) {
-        val fromProp = cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
-        val fromData = event.data?.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
-        val fromRoot = event.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
-        fromProp ?: fromData ?: fromRoot ?: ""
+    val images = remember(eventKey, cameraName, domain) {
+        resolveCardImages(event, cameraName, domain)
     }
 
-    val snapshotUrl = remember(eventKey, domain) {
-        val faceUrl = AiTypeHelper.getFaceCropUrl(event, domain)
-        val snapUrl = AiTypeHelper.getSnapshotUrl(event, domain)
-        val fullUrl = AiTypeHelper.getFullImageUrl(event, domain)
-        (faceUrl ?: snapUrl.ifEmpty { fullUrl }).ifEmpty { null }
+    val cardBgColor = when {
+        !isSelected -> colors.surface
+        colors.isDark -> SelectedCardBgDark
+        else -> BrandContainer
     }
 
-    val fullImageUrl = remember(eventKey, domain) {
-        val fullUrl = AiTypeHelper.getFullImageUrl(event, domain)
-        val snapUrl = AiTypeHelper.getSnapshotUrl(event, domain)
-        fullUrl.ifEmpty { snapUrl }.ifEmpty { null }
+    if (isListView) {
+        EventListCard(
+            event = event,
+            eventKey = eventKey,
+            images = images,
+            isEn = isEn,
+            cardBgColor = cardBgColor,
+            enableSharedElement = enableSharedElement,
+            onClick = onClick
+        )
+    } else {
+        EventGridCard(
+            event = event,
+            eventKey = eventKey,
+            images = images,
+            isEn = isEn,
+            cardBgColor = cardBgColor,
+            enableSharedElement = enableSharedElement,
+            onClick = onClick
+        )
     }
+}
 
-    val faceCropUrl = remember(eventKey, domain, fullImageUrl) {
-        val crop = AiTypeHelper.getFaceCropUrl(event, domain)
-        if (!crop.isNullOrBlank() && crop != fullImageUrl) crop else null
+/** Horizontal List Card matching `.mobile-event-card-horizontal` */
+@Composable
+private fun EventListCard(
+    event: EventData,
+    eventKey: String,
+    images: EventCardImages,
+    isEn: Boolean,
+    cardBgColor: Color,
+    enableSharedElement: Boolean,
+    onClick: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val typography = MaterialTheme.typography
+    val prefixSuffixColor = colors.textBody
+    val strongCameraColor = colors.textTitle
+
+    val sentenceParts = remember(eventKey, images.cameraName, isEn) {
+        AiTypeHelper.getEventSentenceParts(event, images.cameraName, isEn)
     }
-
-    val sentenceParts = remember(eventKey, resolvedCameraName, isEn) {
-        AiTypeHelper.getEventSentenceParts(event, resolvedCameraName, isEn)
-    }
-
-    val badgeLabel = remember(eventKey, isEn) {
-        AiTypeHelper.getEventBadgeLabel(event, isEn)
-    }
-
-    val badgeColor = remember(eventKey) {
-        AiTypeHelper.getAiColor(event)
-    }
-
     val relativeTime = remember(event.time, isEn) {
         AiTypeHelper.formatRelativeTime(event.time, isEn)
     }
-
-    val cardBgColor = if (isSelected) {
-        if (isDark) Color(0xFF1E3A5F) else Color(0xFFDCEBFF)
-    } else {
-        if (isDark) SurfaceDark else SurfaceLight
-    }
-
-    val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
-    val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
-
-    if (isListView) {
-        // Horizontal List Card matching `.mobile-event-card-horizontal`
-        val prefixSuffixColor = if (isDark) Color(0xFFCBD5E1) else TextPrimary
-        val strongCameraColor = if (isDark) Color.White else TextTitleLight
-        val timeAgoColor = if (isDark) TextSecondaryDark else TextSecondary
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(cardBgColor)
-                .clickable(onClick = onClick)
-                .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            var thumbModifier = Modifier
-                .width(156.dp)
-                .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(9.dp))
-                .background(if (isDark) SurfaceSubtleDark else SurfaceSubtleLight)
-
-            if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
-                with(sharedTransitionScope) {
-                    thumbModifier = thumbModifier.sharedElement(
-                        sharedContentState = rememberSharedContentState(key = "event_image_${event.id}"),
-                        animatedVisibilityScope = animatedVisibilityScope
-                    )
+    // Line 3: Camera clause ("tại CameraName")
+    val suffixAnnotated = remember(sentenceParts.cameraName, isEn, prefixSuffixColor, strongCameraColor) {
+        buildAnnotatedString {
+            val trimmed = sentenceParts.cameraName.trim()
+            if (trimmed.isEmpty() || isUuidString(trimmed) || trimmed.equals("camera", ignoreCase = true)) {
+                withStyle(SpanStyle(color = prefixSuffixColor)) {
+                    append(if (isEn) "at camera" else "tại camera")
+                }
+            } else {
+                withStyle(SpanStyle(color = prefixSuffixColor)) {
+                    append(if (isEn) "at " else "tại ")
+                }
+                withStyle(SpanStyle(color = strongCameraColor, fontWeight = FontWeight.SemiBold)) {
+                    append(trimmed)
                 }
             }
+        }
+    }
 
-            VideoFrameImage(
-                url = snapshotUrl,
-                modifier = thumbModifier,
-                contentScale = ContentScale.Crop,
-                targetWidthPx = 420,
-                targetHeightPx = 236
-            )
+    val cardShape = remember(spacing) { RoundedCornerShape(spacing.radiusCompact) }
+    val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmallMedium) }
+    val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
+    val thumbWidth = ListThumbnailBaseWidth * spacing.scaleFactor
 
-            Spacer(modifier = Modifier.width(12.dp))
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(cardShape)
+            .background(cardBgColor)
+            .clickable(onClick = onClick)
+            .padding(start = spacing.space8, top = spacing.space8, bottom = spacing.space8, end = spacing.space12),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        VideoFrameImage(
+            url = images.snapshotUrl,
+            modifier = Modifier
+                .width(thumbWidth)
+                .aspectRatio(THUMBNAIL_ASPECT_RATIO)
+                .clip(thumbShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .eventImageSharedElement(enableSharedElement, event.id),
+            contentScale = ContentScale.Crop,
+            targetWidthPx = LIST_THUMB_WIDTH_PX,
+            targetHeightPx = LIST_THUMB_HEIGHT_PX
+        )
 
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 88.dp),
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.5.dp)) {
-                    // Line 1: Prefix (e.g., "Phát hiện khuôn mặt", "Phát hiện vi phạm")
-                    if (sentenceParts.prefix.isNotEmpty()) {
-                        Text(
-                            text = sentenceParts.prefix,
-                            color = prefixSuffixColor,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+        Spacer(modifier = Modifier.width(spacing.space12))
 
-                    // Line 2: Highlighted pill subject
-                    if (sentenceParts.subject.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(sentenceParts.color)
-                                .padding(horizontal = 7.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = sentenceParts.subject,
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    // Line 3: Camera clause ("tại CameraName")
-                    val suffixAnnotated = remember(sentenceParts.cameraName, isEn, prefixSuffixColor, strongCameraColor) {
-                        buildAnnotatedString {
-                            val trimmed = sentenceParts.cameraName.trim()
-                            if (trimmed.isEmpty() || isUuidString(trimmed) || trimmed.equals("camera", ignoreCase = true)) {
-                                withStyle(SpanStyle(color = prefixSuffixColor)) {
-                                    append(if (isEn) "at camera" else "tại camera")
-                                }
-                            } else {
-                                withStyle(SpanStyle(color = prefixSuffixColor)) {
-                                    append(if (isEn) "at " else "tại ")
-                                }
-                                withStyle(SpanStyle(color = strongCameraColor, fontWeight = FontWeight.SemiBold)) {
-                                    append(trimmed)
-                                }
-                            }
-                        }
-                    }
-
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                // Cao tối thiểu bằng thumbnail để dòng thời gian luôn nằm sát đáy
+                .heightIn(min = thumbWidth / THUMBNAIL_ASPECT_RATIO),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.space3)) {
+                // Line 1: Prefix (e.g., "Phát hiện khuôn mặt", "Phát hiện vi phạm")
+                if (sentenceParts.prefix.isNotEmpty()) {
                     Text(
-                        text = suffixAnnotated,
-                        fontSize = 13.5.sp,
+                        text = sentenceParts.prefix,
+                        color = prefixSuffixColor,
+                        style = typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // Bottom row: Relative time ("5 phút trước")
+                // Line 2: Highlighted pill subject
+                if (sentenceParts.subject.isNotEmpty()) {
+                    Text(
+                        text = sentenceParts.subject,
+                        color = colors.onAccent,
+                        style = typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(pillShape)
+                            .background(sentenceParts.color)
+                            .padding(horizontal = spacing.space6, vertical = spacing.space2)
+                    )
+                }
+
                 Text(
-                    text = relativeTime,
-                    color = timeAgoColor,
-                    fontSize = 12.5.sp,
+                    text = suffixAnnotated,
+                    style = typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-        }
-    } else {
-        // Grid / Large 16:9 Card View matching `.mobile-event-card`
-        val (formattedTime, formattedDate) = remember(event.time, isEn) {
-            formatGridEventTimeAndDate(event.time, isEn)
-        }
-        val boxes = remember(eventKey) { findAllBoxes(event) }
 
-        var cardModifier = Modifier
+            // Bottom row: Relative time ("5 phút trước")
+            Text(
+                text = relativeTime,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** Grid / Large 16:9 Card View matching `.mobile-event-card` */
+@Composable
+private fun EventGridCard(
+    event: EventData,
+    eventKey: String,
+    images: EventCardImages,
+    isEn: Boolean,
+    cardBgColor: Color,
+    enableSharedElement: Boolean,
+    onClick: () -> Unit
+) {
+    val context = LocalContext.current
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val typography = MaterialTheme.typography
+    val onMedia = colors.onMedia
+
+    val badgeLabel = remember(eventKey, isEn) { AiTypeHelper.getEventBadgeLabel(event, isEn) }
+    val badgeColor = remember(eventKey) { AiTypeHelper.getAiColor(event) }
+    val (formattedTime, formattedDate) = remember(event.time, isEn) {
+        formatGridEventTimeAndDate(event.time, isEn)
+    }
+    val boxes = remember(eventKey) { findAllBoxes(event) }
+
+    val cardShape = remember(spacing) { RoundedCornerShape(spacing.radiusCompact) }
+    val faceShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmall) }
+    val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
+
+    Box(
+        modifier = Modifier
             .fillMaxWidth()
-            .aspectRatio(16f / 9f)
-            .clip(RoundedCornerShape(12.dp))
+            .aspectRatio(THUMBNAIL_ASPECT_RATIO)
+            .clip(cardShape)
             .background(cardBgColor)
             .clickable(onClick = onClick)
+            .eventImageSharedElement(enableSharedElement, event.id)
+    ) {
+        VideoFrameImage(
+            url = images.fullImageUrl,
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (boxes.isEmpty()) Modifier else Modifier.boundingBoxes(boxes)),
+            contentScale = ContentScale.Crop,
+            targetWidthPx = GRID_IMAGE_WIDTH_PX,
+            targetHeightPx = GRID_IMAGE_HEIGHT_PX
+        )
 
-        if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
-            with(sharedTransitionScope) {
-                cardModifier = cardModifier.sharedElement(
-                    sharedContentState = rememberSharedContentState(key = "event_image_${event.id}"),
-                    animatedVisibilityScope = animatedVisibilityScope
+        // Face crop overlay on TopEnd (72x90dp)
+        val faceCropUrl = images.faceCropUrl
+        if (faceCropUrl != null) {
+            val faceCropRequest = remember(faceCropUrl) {
+                ImageRequest.Builder(context)
+                    .data(faceCropUrl)
+                    .size(FACE_CROP_REQUEST_WIDTH_PX, FACE_CROP_REQUEST_HEIGHT_PX)
+                    .precision(Precision.INEXACT)
+                    .allowHardware(true)
+                    .crossfade(false)
+                    .memoryCacheKey("${faceCropUrl}_${FACE_CROP_REQUEST_WIDTH_PX}x${FACE_CROP_REQUEST_HEIGHT_PX}")
+                    .diskCacheKey(faceCropUrl)
+                    .build()
+            }
+            AsyncImage(
+                model = faceCropRequest,
+                contentDescription = "Face Crop",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(spacing.space5)
+                    .width(spacing.avatarExtraLarge)
+                    .aspectRatio(FACE_CROP_ASPECT_RATIO)
+                    .clip(faceShape)
+                    .background(colors.mediaOverlay)
+                    .border(spacing.borderMedium, onMedia.copy(alpha = 0.25f), faceShape)
+            )
+        }
+
+        // Bottom gradient overlay
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(GridBottomScrimBrush)
+                .padding(top = spacing.space24, bottom = spacing.space8, start = spacing.space10, end = spacing.space10),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(spacing.space3)
+            ) {
+                Text(
+                    text = badgeLabel,
+                    color = onMedia,
+                    style = typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(badgeColor)
+                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
+                )
+                if (images.cameraName.isNotEmpty()) {
+                    Text(
+                        text = images.cameraName,
+                        color = onMedia,
+                        style = typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(spacing.space10))
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(spacing.space2)
+            ) {
+                Text(
+                    text = formattedTime,
+                    color = onMedia,
+                    style = typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = formattedDate,
+                    color = onMedia.copy(alpha = 0.8f),
+                    style = typography.labelSmall
                 )
             }
         }
+    }
+}
 
-        Box(modifier = cardModifier) {
-            VideoFrameImage(
-                url = fullImageUrl,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .drawWithContent {
-                        drawContent()
-                        boxes.forEach { boxArr ->
-                            if (boxArr.size >= 4) {
-                                val minX = boxArr[0]
-                                val minY = boxArr[1]
-                                val maxX = boxArr[2]
-                                val maxY = boxArr[3]
-                                val w = (maxX - minX) * size.width
-                                val h = (maxY - minY) * size.height
-                                val x = minX * size.width
-                                val y = minY * size.height
-                                drawRect(
-                                    color = Color(0xFFEF4444),
-                                    topLeft = Offset(x, y),
-                                    size = Size(w, h),
-                                    style = Stroke(width = 3.5f)
-                                )
-                            }
-                        }
-                    },
-                contentScale = ContentScale.Crop,
-                targetWidthPx = 800,
-                targetHeightPx = 450
+/** Vẽ các khung bounding box (toạ độ chuẩn hoá 0..1) lên trên ảnh – chỉ chạy ở pha draw. */
+private fun Modifier.boundingBoxes(boxes: List<List<Float>>): Modifier = drawWithContent {
+    drawContent()
+    boxes.forEach { boxArr ->
+        if (boxArr.size >= 4) {
+            val minX = boxArr[0]
+            val minY = boxArr[1]
+            val maxX = boxArr[2]
+            val maxY = boxArr[3]
+            drawRect(
+                color = ErrorRed,
+                topLeft = Offset(minX * size.width, minY * size.height),
+                size = Size((maxX - minX) * size.width, (maxY - minY) * size.height),
+                style = Stroke(width = BOUNDING_BOX_STROKE_PX)
             )
-
-            // Face crop overlay on TopEnd (72x90dp)
-            if (faceCropUrl != null) {
-                val faceCropRequest = remember(faceCropUrl) {
-                    coil.request.ImageRequest.Builder(context)
-                        .data(faceCropUrl)
-                        .size(160, 200)
-                        .precision(coil.size.Precision.INEXACT)
-                        .allowHardware(true)
-                        .crossfade(false)
-                        .memoryCacheKey("${faceCropUrl}_160x200")
-                        .diskCacheKey(faceCropUrl)
-                        .build()
-                }
-                coil.compose.AsyncImage(
-                    model = faceCropRequest,
-                    contentDescription = "Face Crop",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(5.dp)
-                        .width(72.dp)
-                        .height(90.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                )
-            }
-
-            // Bottom gradient overlay
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.5f),
-                                Color.Black.copy(alpha = 0.9f)
-                            )
-                        )
-                    )
-                    .padding(top = 26.dp, bottom = 8.dp, start = 10.dp, end = 10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(3.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(badgeColor)
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = badgeLabel,
-                                color = Color.White,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (resolvedCameraName.isNotEmpty()) {
-                            Text(
-                                text = resolvedCameraName,
-                                color = Color.White,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(10.dp))
-
-                    Column(
-                        horizontalAlignment = Alignment.End,
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = formattedTime,
-                            color = Color.White,
-                            fontSize = 13.5.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = formattedDate,
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 12.sp
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -1027,23 +1143,25 @@ fun MobileEventCard(
 private fun formatGridEventTimeAndDate(timeSeconds: Double, isEn: Boolean): Pair<String, String> {
     if (timeSeconds <= 0) return Pair("", "")
     val timeMs = if (timeSeconds < 1e11) (timeSeconds * 1000).toLong() else timeSeconds.toLong()
-    val date = Date(timeMs)
-    val timeFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val dateFmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-
-    val calEvent = Calendar.getInstance().apply { timeInMillis = timeMs }
-    val calNow = Calendar.getInstance()
-    val isToday = calEvent.get(Calendar.YEAR) == calNow.get(Calendar.YEAR) &&
-        calEvent.get(Calendar.DAY_OF_YEAR) == calNow.get(Calendar.DAY_OF_YEAR)
+    val zone = ZoneId.systemDefault()
+    val dateTime = Instant.ofEpochMilli(timeMs).atZone(zone)
+    val isToday = dateTime.toLocalDate() == LocalDate.now(zone)
 
     val dateLabel = if (isToday) {
         if (isEn) "Today" else "Hôm nay"
     } else {
-        dateFmt.format(date)
+        DayMonthYearFormatter.format(dateTime)
     }
 
-    return Pair(timeFmt.format(date), dateLabel)
+    return Pair(TimeSecondsFormatter.format(dateTime), dateLabel)
 }
+
+// =====================================================================================
+// Bottom sheet bộ lọc
+// =====================================================================================
+
+/** Các ô chọn trong bộ lọc – mỗi ô có 1 dropdown neo ngay bên dưới/bên trên. */
+private enum class FilterPicker { SCOPE, TIME, CAMERA, EVENT }
 
 /**
  * Cloned from `MobileFilterBottomSheet.vue`
@@ -1066,37 +1184,48 @@ fun MobileFilterBottomSheet(
     onApply: (serviceId: Int?, timeFilter: TimeFilter, cameraUuid: String?, aiType: String?) -> Unit,
     onReset: () -> Unit
 ) {
-    val context = LocalContext.current
     val isEn = rememberIsEnglish()
     val isDark = rememberIsDarkTheme()
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
 
     var draftServiceId by remember(selectedServiceId) { mutableStateOf(selectedServiceId) }
     var draftTimeFilter by remember(selectedTimeFilter) { mutableStateOf(selectedTimeFilter) }
     var draftCameraUuid by remember(selectedCameraUuid) { mutableStateOf(selectedCameraUuid) }
     var draftAiType by remember(selectedAiType) { mutableStateOf(selectedAiType) }
-    var customPickerVersion by remember { mutableStateOf(0) }
+    var customPickerVersion by remember { mutableIntStateOf(0) }
     var showCustomDateModal by remember { mutableStateOf(false) }
     var showCustomRangeModal by remember { mutableStateOf(false) }
 
-    // Active anchored dropdown state: null, "scope", "time", "camera", "event"
-    var activePicker by remember { mutableStateOf<String?>(null) }
+    // Dropdown đang mở (null = không có)
+    var activePicker by remember { mutableStateOf<FilterPicker?>(null) }
     var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    val rowRects = remember { mutableStateMapOf<String, Rect>() }
+    val rowRects = remember { mutableStateMapOf<FilterPicker, Rect>() }
 
-    val sheetBg = if (isDark) BackgroundDark else BackgroundLight
-    val cardBg = if (isDark) SurfaceDark else SurfaceLight
-    val textColor = if (isDark) TextPrimaryDark else TextTitleLight
-    val secondaryColor = if (isDark) TextSecondaryDark else TextSecondary
+    val textColor = colors.textTitle
+    val secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    MobileFullScreenOverlay(
-        onDismissRequest = {
-            if (activePicker != null) {
-                activePicker = null
-            } else {
-                onDismiss()
-            }
+    val allSystemsLabel = if (isEn) "All systems" else "Tất cả hệ thống"
+    val allCamerasLabel = if (isEn) "All cameras" else "Tất cả camera"
+    val allEventsLabel = if (isEn) "All events" else "Tất cả sự kiện"
+
+    val dismissPickerOrSheet: () -> Unit = {
+        if (activePicker != null) activePicker = null else onDismiss()
+    }
+    val togglePicker: (FilterPicker) -> Unit = { picker ->
+        activePicker = if (activePicker == picker) null else picker
+    }
+
+    /** Ghi lại vị trí ô (so với root) để neo dropdown; chỉ ghi khi thay đổi để tránh recompose thừa. */
+    fun anchorOf(picker: FilterPicker): Modifier = Modifier.onGloballyPositioned { coords ->
+        val root = rootCoords
+        if (root != null && root.isAttached && coords.isAttached) {
+            val rect = root.localBoundingBoxOf(coords, clipBounds = false)
+            if (rowRects[picker] != rect) rowRects[picker] = rect
         }
-    ) {
+    }
+
+    MobileFullScreenOverlay(onDismissRequest = dismissPickerOrSheet) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1104,108 +1233,89 @@ fun MobileFilterBottomSheet(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {
-                        if (activePicker != null) {
-                            activePicker = null
-                        } else {
-                            onDismiss()
-                        }
-                    }
+                    onClick = dismissPickerOrSheet
                 )
         ) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(horizontal = 10.dp, vertical = 10.dp)
+                    .padding(spacing.space10)
+                    .widthIn(max = spacing.dialogMaxWidth)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(sheetBg)
+                    .clip(RoundedCornerShape(spacing.radiusExtraLarge))
+                    .background(colors.pageBg)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClick = {
-                            if (activePicker != null) {
-                                activePicker = null
-                            }
-                        }
+                        onClick = { activePicker = null }
                     )
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = spacing.space14, vertical = spacing.space12),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Drag handle
                 Box(
                     modifier = Modifier
-                        .width(36.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(if (isDark) Color.White.copy(alpha = 0.25f) else Color.Black.copy(alpha = 0.15f))
+                        .width(spacing.sheetHandleWidth)
+                        .height(spacing.space4)
+                        .clip(CircleShape)
+                        .background(colors.handle)
                 )
 
                 // Header
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 6.dp, bottom = 18.dp)
+                        .padding(top = spacing.space6, bottom = spacing.space18)
                 ) {
                     Text(
                         text = if (isEn && title == "Bộ lọc") "Filter" else title,
                         color = textColor,
-                        fontSize = 17.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.align(Alignment.Center)
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = spacing.space40)
                     )
 
-                    Box(
+                    IconBadge(
+                        icon = LucideIcons.X,
+                        backgroundColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                        contentDescription = if (isEn) "Close" else "Đóng",
+                        size = spacing.space32,
+                        iconSize = spacing.iconSmallMedium,
+                        cornerRadius = spacing.radiusMedium,
+                        tint = secondaryColor,
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .size(32.dp)
                             .clip(CircleShape)
-                            .background(if (isDark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.08f))
                             .clickable {
                                 activePicker = null
                                 onDismiss()
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.X,
-                            contentDescription = "Close",
-                            tint = secondaryColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                            }
+                    )
                 }
 
                 // Unified Filter Card
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(cardBg)
-                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(spacing.radiusMedium))
+                        .background(colors.surface)
+                        .padding(vertical = spacing.space4)
                 ) {
                     // 1. Scope / Chi nhánh
                     if (showScope && aiServices.isNotEmpty()) {
-                        val scopeLabel = aiServices.find { it.id == draftServiceId }?.name
-                            ?: if (isEn) "All systems" else "Tất cả hệ thống"
                         FilterCellRow(
                             icon = LucideIcons.MapPin,
-                            badgeColor = Color(0xFF0980EE),
-                            label = scopeLabel,
+                            badgeColor = BrandAccent,
+                            label = aiServices.find { it.id == draftServiceId }?.name ?: allSystemsLabel,
                             textColor = textColor,
                             secondaryColor = secondaryColor,
-                            isExpanded = activePicker == "scope",
-                            isDark = isDark,
-                            onClick = {
-                                activePicker = if (activePicker == "scope") null else "scope"
-                            },
-                            modifier = Modifier.onGloballyPositioned { coords ->
-                                val root = rootCoords
-                                if (root != null && root.isAttached && coords.isAttached) {
-                                    rowRects["scope"] = root.localBoundingBoxOf(coords, clipBounds = false)
-                                }
-                            }
+                            isExpanded = activePicker == FilterPicker.SCOPE,
+                            onClick = { togglePicker(FilterPicker.SCOPE) },
+                            modifier = anchorOf(FilterPicker.SCOPE)
                         )
                     }
 
@@ -1216,46 +1326,30 @@ fun MobileFilterBottomSheet(
                         }
                         FilterCellRow(
                             icon = LucideIcons.Clock,
-                            badgeColor = Color(0xFFF59E0B),
+                            badgeColor = WarningOrange,
                             label = timeLabel,
                             textColor = textColor,
                             secondaryColor = secondaryColor,
-                            isExpanded = activePicker == "time",
-                            isDark = isDark,
-                            onClick = {
-                                activePicker = if (activePicker == "time") null else "time"
-                            },
-                            modifier = Modifier.onGloballyPositioned { coords ->
-                                val root = rootCoords
-                                if (root != null && root.isAttached && coords.isAttached) {
-                                    rowRects["time"] = root.localBoundingBoxOf(coords, clipBounds = false)
-                                }
-                            }
+                            isExpanded = activePicker == FilterPicker.TIME,
+                            onClick = { togglePicker(FilterPicker.TIME) },
+                            modifier = anchorOf(FilterPicker.TIME)
                         )
                     }
 
                     // 3. Camera
                     if (showCamera) {
-                        val cameraLabel = cameras.find {
-                            (it.extra?.uuid ?: it.id.toString()) == draftCameraUuid
-                        }?.name ?: if (isEn) "All cameras" else "Tất cả camera"
+                        val cameraLabel = remember(cameras, draftCameraUuid) {
+                            cameras.find { cameraKey(it) == draftCameraUuid }?.name
+                        } ?: allCamerasLabel
                         FilterCellRow(
                             icon = LucideIcons.Video,
-                            badgeColor = Color(0xFF10B981),
+                            badgeColor = SuccessGreen,
                             label = cameraLabel,
                             textColor = textColor,
                             secondaryColor = secondaryColor,
-                            isExpanded = activePicker == "camera",
-                            isDark = isDark,
-                            onClick = {
-                                activePicker = if (activePicker == "camera") null else "camera"
-                            },
-                            modifier = Modifier.onGloballyPositioned { coords ->
-                                val root = rootCoords
-                                if (root != null && root.isAttached && coords.isAttached) {
-                                    rowRects["camera"] = root.localBoundingBoxOf(coords, clipBounds = false)
-                                }
-                            }
+                            isExpanded = activePicker == FilterPicker.CAMERA,
+                            onClick = { togglePicker(FilterPicker.CAMERA) },
+                            modifier = anchorOf(FilterPicker.CAMERA)
                         )
                     }
 
@@ -1263,85 +1357,41 @@ fun MobileFilterBottomSheet(
                     if (showEventType) {
                         val moduleLabel = activeModules.find { it.sensorType == draftAiType }?.let {
                             if (isEn) it.labelEn else it.labelVi
-                        } ?: if (isEn) "All events" else "Tất cả sự kiện"
+                        } ?: allEventsLabel
                         FilterCellRow(
                             icon = LucideIcons.ListFilter,
-                            badgeColor = Color(0xFF8B5CF6),
+                            badgeColor = VioletAccent,
                             label = moduleLabel,
                             textColor = textColor,
                             secondaryColor = secondaryColor,
-                            isExpanded = activePicker == "event",
-                            isDark = isDark,
-                            onClick = {
-                                activePicker = if (activePicker == "event") null else "event"
-                            },
-                            modifier = Modifier.onGloballyPositioned { coords ->
-                                val root = rootCoords
-                                if (root != null && root.isAttached && coords.isAttached) {
-                                    rowRects["event"] = root.localBoundingBoxOf(coords, clipBounds = false)
-                                }
-                            }
+                            isExpanded = activePicker == FilterPicker.EVENT,
+                            onClick = { togglePicker(FilterPicker.EVENT) },
+                            modifier = anchorOf(FilterPicker.EVENT)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(spacing.space16))
 
                 // Footer Buttons: Reset & Apply
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            activePicker = null
-                            draftServiceId = null
-                            draftTimeFilter = TimeFilter.TODAY
-                            draftCameraUuid = null
-                            draftAiType = null
-                            onReset()
-                            onDismiss()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = cardBg,
-                            contentColor = if (isDark) Color.White.copy(alpha = 0.8f) else Color(0xFF475569)
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp)
-                    ) {
-                        Text(
-                            text = if (isEn) "Reset" else "Đặt lại",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                FilterFooterButtons(
+                    resetText = if (isEn) "Reset" else "Đặt lại",
+                    applyText = if (isEn) "Apply" else "Áp dụng",
+                    onReset = {
+                        activePicker = null
+                        draftServiceId = null
+                        draftTimeFilter = TimeFilter.TODAY
+                        draftCameraUuid = null
+                        draftAiType = null
+                        onReset()
+                        onDismiss()
+                    },
+                    onApply = {
+                        activePicker = null
+                        onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
+                        onDismiss()
                     }
-
-                    Button(
-                        onClick = {
-                            activePicker = null
-                            onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
-                            onDismiss()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(44.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = BrandPrimary,
-                            contentColor = Color.White
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(0.dp, 0.dp, 0.dp)
-                    ) {
-                        Text(
-                            text = if (isEn) "Apply" else "Áp dụng",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
+                )
             }
 
             // Anchored Dropdown Menu right at the clicked filter cell (matching BaseSelect in MobileFilterBottomSheet.vue)
@@ -1351,17 +1401,18 @@ fun MobileFilterBottomSheet(
 
             if (currentPicker != null && anchorRect != null && rootHeightPx > 0f) {
                 when (currentPicker) {
-                    "scope" -> {
-                        val options = buildList<Pair<Int?, String>> {
-                            add(null to (if (isEn) "All systems" else "Tất cả hệ thống"))
-                            aiServices.forEach { add(it.id to it.name) }
+                    FilterPicker.SCOPE -> {
+                        val options = remember(aiServices, allSystemsLabel) {
+                            buildList<Pair<Int?, String>> {
+                                add(null to allSystemsLabel)
+                                aiServices.forEach { add(it.id to it.name) }
+                            }
                         }
                         AnchoredFilterDropdownMenu(
                             anchorRect = anchorRect,
                             rootHeightPx = rootHeightPx,
                             options = options,
                             selectedKey = draftServiceId,
-                            isDark = isDark,
                             onSelect = {
                                 draftServiceId = it
                                 draftCameraUuid = null
@@ -1369,20 +1420,21 @@ fun MobileFilterBottomSheet(
                             }
                         )
                     }
-                    "time" -> {
-                        val options = listOf(
-                            TimeFilter.TODAY to (if (isEn) "Today" else "Hôm nay"),
-                            TimeFilter.YESTERDAY to (if (isEn) "Yesterday" else "Hôm qua"),
-                            TimeFilter.LAST_7_DAYS to (if (isEn) "Last 7 days" else "7 ngày qua"),
-                            TimeFilter.CUSTOM_DATE to (if (isEn) "Select date" else "Tùy chọn ngày"),
-                            TimeFilter.CUSTOM_RANGE to (if (isEn) "Custom" else "Tùy chỉnh")
-                        )
+                    FilterPicker.TIME -> {
+                        val options = remember(isEn) {
+                            listOf(
+                                TimeFilter.TODAY to (if (isEn) "Today" else "Hôm nay"),
+                                TimeFilter.YESTERDAY to (if (isEn) "Yesterday" else "Hôm qua"),
+                                TimeFilter.LAST_7_DAYS to (if (isEn) "Last 7 days" else "7 ngày qua"),
+                                TimeFilter.CUSTOM_DATE to (if (isEn) "Select date" else "Tùy chọn ngày"),
+                                TimeFilter.CUSTOM_RANGE to (if (isEn) "Custom" else "Tùy chỉnh")
+                            )
+                        }
                         AnchoredFilterDropdownMenu(
                             anchorRect = anchorRect,
                             rootHeightPx = rootHeightPx,
                             options = options,
                             selectedKey = draftTimeFilter,
-                            isDark = isDark,
                             onSelect = { selected ->
                                 activePicker = null
                                 when (selected) {
@@ -1393,12 +1445,11 @@ fun MobileFilterBottomSheet(
                             }
                         )
                     }
-                    "camera" -> {
-                        val options = buildList<Pair<String?, String>> {
-                            add(null to (if (isEn) "All cameras" else "Tất cả camera"))
-                            cameras.forEach { cam ->
-                                val key = cam.extra?.uuid ?: cam.id.toString()
-                                add(key to cam.name)
+                    FilterPicker.CAMERA -> {
+                        val options = remember(cameras, allCamerasLabel) {
+                            buildList<Pair<String?, String>> {
+                                add(null to allCamerasLabel)
+                                cameras.forEach { cam -> add(cameraKey(cam) to cam.name) }
                             }
                         }
                         AnchoredFilterDropdownMenu(
@@ -1406,18 +1457,19 @@ fun MobileFilterBottomSheet(
                             rootHeightPx = rootHeightPx,
                             options = options,
                             selectedKey = draftCameraUuid,
-                            isDark = isDark,
                             onSelect = {
                                 draftCameraUuid = it
                                 activePicker = null
                             }
                         )
                     }
-                    "event" -> {
-                        val options = buildList<Pair<String?, String>> {
-                            add(null to (if (isEn) "All events" else "Tất cả sự kiện"))
-                            activeModules.forEach { mod ->
-                                add(mod.sensorType to (if (isEn) mod.labelEn else mod.labelVi))
+                    FilterPicker.EVENT -> {
+                        val options = remember(activeModules, isEn) {
+                            buildList<Pair<String?, String>> {
+                                add(null to allEventsLabel)
+                                activeModules.forEach { mod ->
+                                    add(mod.sensorType to (if (isEn) mod.labelEn else mod.labelVi))
+                                }
                             }
                         }
                         AnchoredFilterDropdownMenu(
@@ -1425,7 +1477,6 @@ fun MobileFilterBottomSheet(
                             rootHeightPx = rootHeightPx,
                             options = options,
                             selectedKey = draftAiType,
-                            isDark = isDark,
                             onSelect = {
                                 draftAiType = it
                                 activePicker = null
@@ -1469,6 +1520,70 @@ fun MobileFilterBottomSheet(
     }
 }
 
+/** Khóa định danh camera dùng trong bộ lọc (uuid nếu có, ngược lại id) */
+private fun cameraKey(camera: CameraModel): String = camera.extra?.uuid ?: camera.id.toString()
+
+/** Hàng 2 nút [Đặt lại] (nền thẻ) + [Áp dụng] (nền chính) ở cuối bộ lọc */
+@Composable
+private fun FilterFooterButtons(
+    resetText: String,
+    applyText: String,
+    onReset: () -> Unit,
+    onApply: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+    ) {
+        FilterFooterButton(
+            text = resetText,
+            containerColor = colors.surface,
+            contentColor = colors.textSubtle,
+            fontWeight = FontWeight.Medium,
+            onClick = onReset
+        )
+        FilterFooterButton(
+            text = applyText,
+            containerColor = BrandPrimary,
+            contentColor = colors.onAccent,
+            fontWeight = FontWeight.SemiBold,
+            onClick = onApply
+        )
+    }
+}
+
+@Composable
+private fun RowScope.FilterFooterButton(
+    text: String,
+    containerColor: Color,
+    contentColor: Color,
+    fontWeight: FontWeight,
+    onClick: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .heightIn(min = spacing.iconButtonLarge)
+            .clip(RoundedCornerShape(spacing.radiusCompact))
+            .background(containerColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space8),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = contentColor,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @Composable
 private fun FilterCellRow(
     icon: ImageVector,
@@ -1477,56 +1592,43 @@ private fun FilterCellRow(
     textColor: Color,
     secondaryColor: Color,
     isExpanded: Boolean = false,
-    isDark: Boolean = true,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activeRowBg = when {
-        !isExpanded -> Color.Transparent
-        isDark -> Color.White.copy(alpha = 0.05f)
-        else -> Color.Black.copy(alpha = 0.035f)
-    }
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val activeRowBg = if (isExpanded) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f) else Color.Transparent
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(50.dp)
+            .height(spacing.listItemHeight)
             .background(activeRowBg)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = spacing.space14),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(30.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(badgeColor),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(15.dp)
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
+        IconBadge(
+            icon = icon,
+            backgroundColor = badgeColor,
+            iconSize = spacing.iconXSmall
+        )
+        Spacer(modifier = Modifier.width(spacing.space12))
         Text(
             text = label,
             color = textColor,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.bodySmall,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        Spacer(modifier = Modifier.width(8.dp))
+        Spacer(modifier = Modifier.width(spacing.space8))
         Icon(
             imageVector = LucideIcons.ChevronDown,
             contentDescription = null,
-            tint = if (isExpanded) BrandAccent else secondaryColor,
+            tint = if (isExpanded) colors.accent else secondaryColor,
             modifier = Modifier
-                .size(16.dp)
+                .size(spacing.iconSmall)
                 .rotate(if (isExpanded) 180f else 0f)
         )
     }
@@ -1538,20 +1640,22 @@ private fun <K> AnchoredFilterDropdownMenu(
     rootHeightPx: Float,
     options: List<Pair<K, String>>,
     selectedKey: K,
-    isDark: Boolean,
     onSelect: (K) -> Unit
 ) {
     val density = LocalDensity.current
-    val dropdownBg = if (isDark) Color(0xFF1E293B) else Color.White
-    val dropdownBorder = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
-    val itemTextColor = if (isDark) Color(0xFFE2E8F0) else Color(0xFF1E293B)
-    val selectedItemBg = if (isDark) BrandAccent.copy(alpha = 0.16f) else BrandAccent.copy(alpha = 0.09f)
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val accent = colors.accent
+    val itemTextColor = colors.textTitle
+    val selectedItemBg = accent.copy(alpha = if (colors.isDark) 0.16f else 0.09f)
+    val menuShape = RoundedCornerShape(spacing.radiusCompact)
+    val itemShape = RoundedCornerShape(spacing.radiusSmall)
 
-    val itemHeightDp = 38.dp
-    val verticalPaddingDp = 8.dp
-    val maxDropdownHeightDp = 228.dp
-    val gapPx = with(density) { 4.dp.toPx() }
-    val screenEdgeMarginPx = with(density) { 14.dp.toPx() }
+    val itemHeightDp = spacing.buttonHeightSmall
+    val verticalPaddingDp = spacing.space8
+    val maxDropdownHeightDp = itemHeightDp * DROPDOWN_MAX_VISIBLE_ITEMS
+    val gapPx = with(density) { spacing.space4.toPx() }
+    val screenEdgeMarginPx = with(density) { spacing.space14.toPx() }
 
     val naturalHeightDp = (itemHeightDp * options.size + verticalPaddingDp).coerceAtMost(maxDropdownHeightDp)
     val naturalHeightPx = with(density) { naturalHeightDp.toPx() }
@@ -1574,12 +1678,13 @@ private fun <K> AnchoredFilterDropdownMenu(
     }
 
     val widthDp = with(density) { anchorRect.width.toDp() }
-    val maxHeightDp = with(density) { maxAllowedHeightPx.toDp() }.coerceAtLeast(46.dp)
+    val maxHeightDp = with(density) { maxAllowedHeightPx.toDp() }.coerceAtLeast(itemHeightDp + verticalPaddingDp)
 
     Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = dropdownBg,
-        shadowElevation = 12.dp,
+        shape = menuShape,
+        color = colors.surfaceMenu,
+        shadowElevation = spacing.space12,
+        border = BorderStroke(spacing.borderMedium, colors.border),
         modifier = Modifier
             .offset {
                 IntOffset(
@@ -1589,7 +1694,6 @@ private fun <K> AnchoredFilterDropdownMenu(
             }
             .width(widthDp)
             .heightIn(max = maxHeightDp)
-            .border(1.dp, dropdownBorder, RoundedCornerShape(12.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1599,7 +1703,7 @@ private fun <K> AnchoredFilterDropdownMenu(
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(4.dp)
+                .padding(spacing.space4)
         ) {
             items(options) { (key, label) ->
                 val isSelected = key == selectedKey
@@ -1607,29 +1711,29 @@ private fun <K> AnchoredFilterDropdownMenu(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(itemHeightDp)
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(itemShape)
                         .background(if (isSelected) selectedItemBg else Color.Transparent)
                         .clickable { onSelect(key) }
-                        .padding(horizontal = 12.dp),
+                        .padding(horizontal = spacing.space12),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
                         text = label,
-                        color = if (isSelected) BrandAccent else itemTextColor,
-                        fontSize = 14.sp,
+                        color = if (isSelected) accent else itemTextColor,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
                     if (isSelected) {
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(spacing.space8))
                         Icon(
                             imageVector = LucideIcons.Check,
                             contentDescription = null,
-                            tint = BrandAccent,
-                            modifier = Modifier.size(16.dp)
+                            tint = accent,
+                            modifier = Modifier.size(spacing.iconSmall)
                         )
                     }
                 }
@@ -1638,195 +1742,129 @@ private fun <K> AnchoredFilterDropdownMenu(
     }
 }
 
+// =====================================================================================
+// Chọn ngày / khoảng thời gian tùy chỉnh
+// =====================================================================================
+
+/**
+ * Mở DatePicker hệ thống.
+ * @param preserveTimeOfDay true = giữ giờ/phút của [currentMs]; false = giờ hiện tại (hành vi cũ của chọn 1 ngày).
+ */
+private fun showSystemDatePicker(
+    context: Context,
+    currentMs: Long,
+    preserveTimeOfDay: Boolean,
+    onResult: (Long) -> Unit
+) {
+    val cal = Calendar.getInstance().apply { timeInMillis = currentMs }
+    android.app.DatePickerDialog(
+        context,
+        { _, year, month, dayOfMonth ->
+            val c = Calendar.getInstance().apply {
+                if (preserveTimeOfDay) timeInMillis = currentMs
+                set(Calendar.YEAR, year)
+                set(Calendar.MONTH, month)
+                set(Calendar.DAY_OF_MONTH, dayOfMonth)
+            }
+            onResult(c.timeInMillis)
+        },
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH),
+        cal.get(Calendar.DAY_OF_MONTH)
+    ).show()
+}
+
+/** Mở TimePicker hệ thống (24h), giữ nguyên ngày của [currentMs]. */
+private fun showSystemTimePicker(context: Context, currentMs: Long, onResult: (Long) -> Unit) {
+    val cal = Calendar.getInstance().apply { timeInMillis = currentMs }
+    android.app.TimePickerDialog(
+        context,
+        { _, hourOfDay, minute ->
+            val c = Calendar.getInstance().apply {
+                timeInMillis = currentMs
+                set(Calendar.HOUR_OF_DAY, hourOfDay)
+                set(Calendar.MINUTE, minute)
+                set(Calendar.SECOND, 0)
+            }
+            onResult(c.timeInMillis)
+        },
+        cal.get(Calendar.HOUR_OF_DAY),
+        cal.get(Calendar.MINUTE),
+        true
+    ).show()
+}
+
 @Composable
 fun CustomDatePickerDialogModal(
     initialMillis: Long,
     isEn: Boolean,
-    isDark: Boolean,
+    @Suppress("UNUSED_PARAMETER") isDark: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (Long) -> Unit
 ) {
     val context = LocalContext.current
-    var selectedMillis by remember(initialMillis) { mutableStateOf(initialMillis) }
-    val dateFmt = remember { java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()) }
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val typography = MaterialTheme.typography
+    var selectedMillis by remember(initialMillis) { mutableLongStateOf(initialMillis) }
+    val subColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    val sheetBg = if (isDark) Color(0xFF172033) else Color(0xFFF2F2F7)
-    val closeBtnBg = if (isDark) Color(0xFF263449) else Color(0xFFE2E8F0)
-    val fieldBg = if (isDark) Color(0xFF242F41) else Color.White
-    val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
-    val textColor = if (isDark) TextPrimaryDark else TextTitleLight
-    val subColor = if (isDark) TextSecondaryDark else TextSecondary
+    MobileNativeBottomSheet(
+        title = if (isEn) "Select Date" else "Tùy chọn ngày",
+        onDismiss = onDismiss
+    ) {
+        Text(
+            text = if (isEn) "Choose a date to filter events (00:00 - 23:59)" else "Chọn ngày cần tra cứu dữ liệu (00:00 - 23:59)",
+            color = subColor,
+            style = typography.bodySmall
+        )
+        Spacer(modifier = Modifier.height(spacing.space14))
 
-    MobileFullScreenOverlay(onDismissRequest = onDismiss) {
-        Box(
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    ),
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                color = sheetBg
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 10.dp, bottom = 20.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .width(36.dp)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(if (isDark) Color.White.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.15f))
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isEn) "Select Date" else "Tùy chọn ngày",
-                            color = textColor,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(closeBtnBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.X,
-                                contentDescription = if (isEn) "Close" else "Đóng",
-                                tint = subColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = if (isEn) "Choose a date to filter events (00:00 - 23:59)" else "Chọn ngày cần tra cứu dữ liệu (00:00 - 23:59)",
-                        color = subColor,
-                        fontSize = 13.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(fieldBg)
-                            .clickable {
-                                val cal = java.util.Calendar.getInstance().apply { timeInMillis = selectedMillis }
-                                android.app.DatePickerDialog(
-                                    context,
-                                    { _, year, month, dayOfMonth ->
-                                        val c = java.util.Calendar.getInstance().apply {
-                                            set(java.util.Calendar.YEAR, year)
-                                            set(java.util.Calendar.MONTH, month)
-                                            set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
-                                        }
-                                        selectedMillis = c.timeInMillis
-                                    },
-                                    cal.get(java.util.Calendar.YEAR),
-                                    cal.get(java.util.Calendar.MONTH),
-                                    cal.get(java.util.Calendar.DAY_OF_MONTH)
-                                ).show()
-                            }
-                            .padding(horizontal = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.Clock,
-                                contentDescription = null,
-                                tint = BrandAccent,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = dateFmt.format(java.util.Date(selectedMillis)),
-                                color = textColor,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Text(
-                            text = if (isEn) "Change" else "Chọn lịch",
-                            color = BrandAccent,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(cancelBtnBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isEn) "Cancel" else "Hủy",
-                                color = textColor,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(BrandPrimary)
-                                .clickable { onConfirm(selectedMillis) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isEn) "Confirm" else "Xác nhận",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
+                .fillMaxWidth()
+                .heightIn(min = spacing.inputHeight)
+                .clip(RoundedCornerShape(spacing.radiusCompact))
+                .background(colors.surfaceRaised)
+                .clickable {
+                    showSystemDatePicker(context, selectedMillis, preserveTimeOfDay = false) { selectedMillis = it }
                 }
-            }
+                .padding(horizontal = spacing.space14),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+        ) {
+            Icon(
+                imageVector = LucideIcons.Clock,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(spacing.iconSmallMedium)
+            )
+            Text(
+                text = formatMillis(selectedMillis, DayMonthYearFormatter),
+                color = MaterialTheme.colorScheme.onBackground,
+                style = typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = if (isEn) "Change" else "Chọn lịch",
+                color = colors.accent,
+                style = typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
+            )
         }
+
+        Spacer(modifier = Modifier.height(spacing.space20))
+
+        SheetActionButtons(
+            cancelText = if (isEn) "Cancel" else "Hủy",
+            confirmText = if (isEn) "Confirm" else "Xác nhận",
+            onCancel = onDismiss,
+            onConfirm = { onConfirm(selectedMillis) },
+            confirmColor = BrandPrimary
+        )
     }
 }
 
@@ -1835,267 +1873,101 @@ fun CustomRangePickerDialogModal(
     initialFromMillis: Long,
     initialToMillis: Long,
     isEn: Boolean,
-    isDark: Boolean,
+    @Suppress("UNUSED_PARAMETER") isDark: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (Long, Long) -> Unit
 ) {
     val context = LocalContext.current
-    var fromMillis by remember(initialFromMillis) { mutableStateOf(initialFromMillis) }
-    var toMillis by remember(initialToMillis) { mutableStateOf(initialToMillis) }
-    val dateFmt = remember { java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()) }
-    val timeFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    val spacing = MaterialTheme.spacing
+    var fromMillis by remember(initialFromMillis) { mutableLongStateOf(initialFromMillis) }
+    var toMillis by remember(initialToMillis) { mutableLongStateOf(initialToMillis) }
 
-    val sheetBg = if (isDark) Color(0xFF172033) else Color(0xFFF2F2F7)
-    val closeBtnBg = if (isDark) Color(0xFF263449) else Color(0xFFE2E8F0)
-    val fieldBg = if (isDark) Color(0xFF242F41) else Color.White
-    val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
-    val textColor = if (isDark) TextPrimaryDark else TextTitleLight
-    val subColor = if (isDark) TextSecondaryDark else TextSecondary
+    MobileNativeBottomSheet(
+        title = if (isEn) "Custom Time Range" else "Tùy chỉnh thời gian",
+        onDismiss = onDismiss
+    ) {
+        RangeDateTimeRow(
+            label = if (isEn) "From" else "Từ thời gian",
+            millis = fromMillis,
+            onPickDate = { showSystemDatePicker(context, fromMillis, preserveTimeOfDay = true) { fromMillis = it } },
+            onPickTime = { showSystemTimePicker(context, fromMillis) { fromMillis = it } }
+        )
 
-    fun pickDate(currentMs: Long, onResult: (Long) -> Unit) {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = currentMs }
-        android.app.DatePickerDialog(
-            context,
-            { _, year, month, dayOfMonth ->
-                val c = java.util.Calendar.getInstance().apply {
-                    timeInMillis = currentMs
-                    set(java.util.Calendar.YEAR, year)
-                    set(java.util.Calendar.MONTH, month)
-                    set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
-                }
-                onResult(c.timeInMillis)
-            },
-            cal.get(java.util.Calendar.YEAR),
-            cal.get(java.util.Calendar.MONTH),
-            cal.get(java.util.Calendar.DAY_OF_MONTH)
-        ).show()
+        Spacer(modifier = Modifier.height(spacing.space12))
+
+        RangeDateTimeRow(
+            label = if (isEn) "To" else "Đến thời gian",
+            millis = toMillis,
+            onPickDate = { showSystemDatePicker(context, toMillis, preserveTimeOfDay = true) { toMillis = it } },
+            onPickTime = { showSystemTimePicker(context, toMillis) { toMillis = it } }
+        )
+
+        Spacer(modifier = Modifier.height(spacing.space20))
+
+        SheetActionButtons(
+            cancelText = if (isEn) "Cancel" else "Hủy",
+            confirmText = if (isEn) "Confirm" else "Xác nhận",
+            onCancel = onDismiss,
+            onConfirm = { onConfirm(fromMillis, toMillis) },
+            confirmColor = BrandPrimary
+        )
     }
+}
 
-    fun pickTime(currentMs: Long, onResult: (Long) -> Unit) {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = currentMs }
-        android.app.TimePickerDialog(
-            context,
-            { _, hourOfDay, minute ->
-                val c = java.util.Calendar.getInstance().apply {
-                    timeInMillis = currentMs
-                    set(java.util.Calendar.HOUR_OF_DAY, hourOfDay)
-                    set(java.util.Calendar.MINUTE, minute)
-                    set(java.util.Calendar.SECOND, 0)
-                }
-                onResult(c.timeInMillis)
-            },
-            cal.get(java.util.Calendar.HOUR_OF_DAY),
-            cal.get(java.util.Calendar.MINUTE),
-            true
-        ).show()
+/** Nhãn + 2 ô chọn [ngày | giờ] (chia theo weight để vừa cả màn hình 320dp) */
+@Composable
+private fun RangeDateTimeRow(
+    label: String,
+    millis: Long,
+    onPickDate: () -> Unit,
+    onPickTime: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    Text(
+        text = label,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelMedium
+    )
+    Spacer(modifier = Modifier.height(spacing.space6))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+    ) {
+        PickerField(
+            text = formatMillis(millis, DayMonthYearFormatter),
+            onClick = onPickDate,
+            modifier = Modifier.weight(1.4f)
+        )
+        PickerField(
+            text = formatMillis(millis, HourMinuteFormatter),
+            onClick = onPickTime,
+            modifier = Modifier.weight(1f)
+        )
     }
+}
 
-    MobileFullScreenOverlay(onDismissRequest = onDismiss) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss
-                ),
-            contentAlignment = Alignment.BottomCenter
-        ) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {}
-                    ),
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                color = sheetBg
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 10.dp, bottom = 20.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .width(36.dp)
-                            .height(5.dp)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(if (isDark) Color.White.copy(alpha = 0.2f) else Color.Black.copy(alpha = 0.15f))
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isEn) "Custom Time Range" else "Tùy chỉnh thời gian",
-                            color = textColor,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(closeBtnBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.X,
-                                contentDescription = if (isEn) "Close" else "Đóng",
-                                tint = subColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = if (isEn) "From" else "Từ thời gian",
-                        color = subColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1.4f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(fieldBg)
-                                .clickable { pickDate(fromMillis) { fromMillis = it } }
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = dateFmt.format(java.util.Date(fromMillis)),
-                                color = textColor,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(fieldBg)
-                                .clickable { pickTime(fromMillis) { fromMillis = it } }
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = timeFmt.format(java.util.Date(fromMillis)),
-                                color = textColor,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = if (isEn) "To" else "Đến thời gian",
-                        color = subColor,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1.4f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(fieldBg)
-                                .clickable { pickDate(toMillis) { toMillis = it } }
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = dateFmt.format(java.util.Date(toMillis)),
-                                color = textColor,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(fieldBg)
-                                .clickable { pickTime(toMillis) { toMillis = it } }
-                                .padding(horizontal = 12.dp),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = timeFmt.format(java.util.Date(toMillis)),
-                                color = textColor,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(cancelBtnBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isEn) "Cancel" else "Hủy",
-                                color = textColor,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(BrandPrimary)
-                                .clickable { onConfirm(fromMillis, toMillis) },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isEn) "Confirm" else "Xác nhận",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            }
-        }
+@Composable
+private fun PickerField(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val spacing = MaterialTheme.spacing
+    Box(
+        modifier = modifier
+            .heightIn(min = spacing.iconButtonLarge)
+            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+            .background(MaterialTheme.appColors.surfaceRaised)
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space12),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(
+            text = text,
+            color = MaterialTheme.colorScheme.onBackground,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

@@ -193,10 +193,6 @@ data class EventData(
     val data: EventDataDetail? = null
 )
 
-data class UpdateEventTimeModel(
-    val newEventTime: Long
-)
-
 // ==================== Search ====================
 
 data class ParamPlateModel(
@@ -209,132 +205,17 @@ data class DataSearchPlateModel(
     val param: ParamPlateModel
 )
 
-data class ParamFaceModel(
-    val modelName: String,
-    val embedding: List<Double>
-)
-
-data class DataSearchFaceModel(
-    val type: String,
-    val confidence: Double,
-    val param: ParamFaceModel
-)
-
-data class FeatureModel(
-    val modelName: String,
-    val embedding: List<Double>
-)
-
-data class SearchModel(
-    val objects: List<String>? = null,
-    val time: SearchTimeRange? = null,
-    val plates: List<String>? = null,
-    val faces: List<String>? = null,
-    val colors: List<String>? = null,
-    val faceConfidence: Double? = null,
-    val plateConfidence: Double? = null,
-    val advancedText: List<String>? = null,
-    val advancedTextConfidence: Double? = null,
-    val advanceImages: List<String>? = null,
-    val advanceImageConfidence: Double? = null,
-    val timeSearch: String? = null,       // '1w' | '1m' | '2m' | 'all'
-    val typeSearch: String? = null,       // 'all' | 'face' | 'plate' | 'attribute'
-    val searchMode: String? = null,       // 'fast' | 'deep'
-    val count: Int? = null
-)
-
-data class SearchTimeRange(
-    val start: Long,
-    val end: Long
-)
-
-// ==================== Model Run Response ====================
-
-data class ModelRunEmbeddingText(
-    val model: String? = null,
-    val text: List<Double>? = null,
-    @SerializedName("text_input")
-    val textInput: String? = null
-)
-
-data class ModelRunTextResponse(
-    val embeddings: ModelRunEmbeddingText? = null,
-    val time: Double? = null,
-    val id: String? = null,
-    val alias: String? = null,
-    val host: String? = null
-)
-
-data class ModelRunEmbeddingImage(
-    val model: String? = null,
-    val image: List<Double>? = null,
-    val face: List<Double>? = null
-)
-
-data class ModelRunImageResponse(
-    val embeddings: ModelRunEmbeddingImage? = null,
-    val time: Double? = null,
-    val id: String? = null,
-    val alias: String? = null,
-    val host: String? = null
-)
-
 // ==================== Confirm ====================
 
 data class Confirm(
     val isConfirmed: Boolean
 )
 
-data class DataSummary(
-    val total: Int,
-    val groups: Map<String, Int>? = null
-)
-
 // ==================== Face ====================
-
-data class FaceImageCrop(
-    val faceCropId: String? = null
-)
 
 data class Face(
     val id: Int,
     val profileId: Int
-)
-
-data class FaceEntry(
-    val items: List<Face>,
-    val isLoaded: Boolean
-)
-
-// ==================== Profile In Group ====================
-
-data class ProfileInProfileGroup(
-    val id: Int? = null,
-    val groupId: Int,
-    val profileId: Int
-)
-
-data class UpdateProfileInProfileGroup(
-    val profileId: Int,
-    val groupIds: List<Int>
-)
-
-// ==================== License Plate ====================
-
-data class LicensePlate(
-    val id: Int,
-    val uuid: String,
-    val plate: String,
-    val type: String,
-    val enabled: Boolean,
-    val name: String? = null,
-    val department: String? = null,
-    val position: String? = null
-)
-
-data class LicensePlateEntry(
-    val items: List<LicensePlate>,
-    val isLoaded: Boolean
 )
 
 // ==================== Rule ====================
@@ -372,90 +253,4 @@ data class ConditionModel(
 data class RuleObjectModel(
     val conditions: List<ConditionModel>,
     val actions: List<ActionModel>
-)
-
-data class RuleModel(
-    val id: Int,
-    val name: String,
-    val key: String? = null,
-    val enabled: Boolean? = true,
-    val rule: RuleObjectModel? = null,
-    val ruleObject: RuleObjectModel? = null,
-    val vmsId: Int? = null,
-    val serviceId: Int? = null,
-    val extra: Map<String, Any>? = null,
-    val originId: Int? = null
-)
-
-data class ScenarioModel(
-    val id: Int,
-    val name: String,
-    val extra: Map<String, Any>? = null,
-    val vmsId: Int,
-    val originId: Int
-)
-
-data class DateEventItem(
-    val time: Long,
-    val total: Int
-)
-
-data class DateEventData(
-    val time: Long,
-    val total: Int,
-    val items: List<DateEventItem> = emptyList()
-)
-
-data class BoundingBox(
-    val x: Double,
-    val y: Double,
-    val width: Double,
-    val height: Double,
-    val label: String? = null,
-    val confidence: Double? = null,
-    val color: String? = null
-)
-
-data class AlertEvent(
-    val id: String,
-    val cameraId: String,
-    val cameraName: String? = null,
-    val type: String,
-    val severity: String,
-    val timestamp: String,
-    val imageUrl: String? = null,
-    val videoUrl: String? = null,
-    val description: String? = null,
-    val status: String = "pending"
-)
-
-data class EventFilter(
-    val dateRange: List<String>? = null,
-    val cameraIds: List<Any>? = null,
-    val types: List<String>? = null,
-    val search: String? = null,
-    val severity: String? = null,
-    val limit: Int? = null,
-    val offset: Int? = null
-)
-
-data class FetchUniformDataParams(
-    val profileUUID: String? = null,
-    val onlyProfileUnknown: Any? = null,
-    val isConfirmed: Any? = null,
-    val order: String? = null,
-    val count: Int? = null,
-    val eventType: String? = null,
-    val lastId: Int? = null,
-    val from: Long? = null,
-    val to: Long? = null,
-    val fromTime: Long? = null,
-    val toTime: Long? = null,
-    val serviceId: Int? = null,
-    val cameraId: Any? = null,
-    val cameraUUID: String? = null,
-    val camerauuid: String? = null,
-    val uniformLabel: String? = null,
-    val uniformlabel: String? = null,
-    val excludeUniformLabel: Any? = null
 )

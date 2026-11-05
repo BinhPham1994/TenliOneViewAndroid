@@ -7,12 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -26,12 +26,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
@@ -39,56 +39,49 @@ import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
-import com.tenli.oneview.ui.component.rememberIsEnglish
-import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.spacing
+
+/** Khoảng trống cuối danh sách để item cuối không bị bottom navigation (nổi) che khuất */
+private val ListBottomClearance = 130.dp
+
+/** Bắt đầu tải trang tiếp khi còn cách cuối danh sách bấy nhiêu item */
+private const val LOAD_MORE_THRESHOLD = 5
+
+/** Danh sách quá ngắn (chưa đủ cuộn) thì tự tải thêm */
+private const val AUTO_FILL_MAX_ITEMS = 12
+
+private const val CONTENT_TYPE_EVENT = "event_card"
+private const val CONTENT_TYPE_STATE = "state"
+private const val CONTENT_TYPE_PAGING = "paging"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EventScreen(
     viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory),
-    listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
+    listState: LazyListState = rememberLazyListState(),
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val isEn = rememberIsEnglish()
-    var isRefreshing by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
+    val spacing = MaterialTheme.spacing
 
     LaunchedEffect(Unit) {
         viewModel.syncViewModeFromPrefs()
     }
 
-    LaunchedEffect(uiState.isLoading) {
-        if (!uiState.isLoading) {
-            isRefreshing = false
-        }
-    }
-
-    val hasActiveFilter = uiState.selectedServiceId != null ||
-        uiState.selectedFilter != TimeFilter.TODAY ||
-        uiState.selectedCameraUuid != null ||
-        uiState.selectedAiType != null
-
-    val cameraMap = remember(uiState.cameraList) {
-        uiState.cameraList.mapNotNull { cam ->
-            val uuid = cam.extra?.uuid
-            if (!uuid.isNullOrBlank()) uuid to cam.name else null
-        }.toMap()
-    }
-
-    val shouldLoadMore by remember {
+    val shouldLoadMore by remember(listState) {
         derivedStateOf {
             val layoutInfo = listState.layoutInfo
             val totalItems = layoutInfo.totalItemsCount
             val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItems > 1 && lastVisibleIndex >= totalItems - 5
+            totalItems > 1 && lastVisibleIndex >= totalItems - LOAD_MORE_THRESHOLD
         }
     }
 
     // Không truyền isLoading/isPaginating làm key để tránh vòng lặp vô hạn khi loadMore kết thúc mà events.size không đổi
     LaunchedEffect(shouldLoadMore, uiState.events.size, uiState.hasMore) {
-        if ((shouldLoadMore || uiState.events.size in 1..12) &&
+        if ((shouldLoadMore || uiState.events.size in 1..AUTO_FILL_MAX_ITEMS) &&
             uiState.hasMore &&
             !uiState.isLoading &&
             !uiState.isPaginating
@@ -109,38 +102,34 @@ fun EventScreen(
             leftAction = {
                 MobileViewToggleButton(
                     isListView = uiState.isListView,
-                    onToggle = { viewModel.toggleViewMode() }
+                    onToggle = viewModel::toggleViewMode
                 )
             },
             rightAction = {
                 MobileTopActionButton(
                     icon = LucideIcons.ListFilter,
-                    contentDescription = if (isEn) "Filter" else "Bộ lọc",
-                    hasActiveDot = hasActiveFilter,
+                    contentDescription = stringResource(id = R.string.filter_title),
+                    hasActiveDot = uiState.hasActiveFilter,
                     onClick = { showFilterSheet = true }
                 )
             }
         )
 
         PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                viewModel.fetchInitialData()
-            },
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = viewModel::refresh,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
         ) {
             LazyColumn(
                 state = listState,
-                userScrollEnabled = true,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 2.dp, bottom = 130.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(top = spacing.space2, bottom = ListBottomClearance),
+                verticalArrangement = Arrangement.spacedBy(spacing.space10)
             ) {
                 if (uiState.isLoading && uiState.events.isEmpty()) {
-                    item {
+                    item(key = "state_loading", contentType = CONTENT_TYPE_STATE) {
                         Box(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
@@ -149,31 +138,28 @@ fun EventScreen(
                         }
                     }
                 } else if (uiState.events.isEmpty()) {
-                    item {
+                    item(key = "state_empty", contentType = CONTENT_TYPE_STATE) {
                         Box(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CommonEmptyState(
-                                text = if (isEn) "No events found" else "Không tìm thấy sự kiện nào"
-                            )
+                            CommonEmptyState(text = stringResource(id = R.string.event_empty_state))
                         }
                     }
                 } else {
                     items(
                         items = uiState.events,
-                        key = { event -> "ev_${event.serviceId}_${event.id}_${event.time}" },
-                        contentType = { "event_card" }
+                        key = { event -> "ev_${event.uniqueKey()}" },
+                        contentType = { CONTENT_TYPE_EVENT }
                     ) { event ->
-                        val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
-                        Box(modifier = Modifier.padding(horizontal = 10.dp)) {
+                        Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
                             MobileEventCard(
                                 event = event,
-                                cameraName = cameraName,
+                                cameraName = uiState.cameraNameMap[event.data?.cameraUUID] ?: "Camera",
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
                                 onClick = {
-                                    com.tenli.oneview.data.local.EventCacheManager.cacheClickedEvent(
+                                    EventCacheManager.cacheClickedEvent(
                                         event = event,
                                         cameras = uiState.cameraList,
                                         aiServices = uiState.aiServices
@@ -185,17 +171,17 @@ fun EventScreen(
                     }
 
                     if (uiState.isPaginating || (uiState.hasMore && !uiState.isLoading)) {
-                        item {
+                        item(key = "paging_indicator", contentType = CONTENT_TYPE_PAGING) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(16.dp),
+                                    .padding(spacing.space16),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CircularProgressIndicator(
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp),
-                                    strokeWidth = 3.dp
+                                    modifier = Modifier.size(spacing.space28),
+                                    strokeWidth = spacing.space3
                                 )
                             }
                         }
@@ -225,9 +211,7 @@ fun EventScreen(
                     cameraUuid = cameraUuid
                 )
             },
-            onReset = {
-                viewModel.resetFilters()
-            },
+            onReset = viewModel::resetFilters,
             onDismiss = { showFilterSheet = false }
         )
     }

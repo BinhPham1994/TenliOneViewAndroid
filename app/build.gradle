@@ -4,12 +4,6 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id 'com.google.gms.google-services'
     id 'com.google.firebase.crashlytics'
-    id 'kotlin-kapt'
-    id("com.google.devtools.ksp")
-}
-
-configurations.configureEach {
-    exclude group: 'androidx.databinding', module: 'baseLibrary'
 }
 
 android {
@@ -52,8 +46,6 @@ android {
     }
 
     buildFeatures {
-        dataBinding true
-        viewBinding true
         buildConfig true
     }
 

@@ -2,6 +2,33 @@ package com.tenli.oneview.ui.utils
 
 import androidx.compose.ui.graphics.Color
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.theme.BrandActiveNavDark
+import com.tenli.oneview.ui.theme.ErrorRed
+import com.tenli.oneview.ui.theme.ErrorRedDeep
+import com.tenli.oneview.ui.theme.IndigoAccent
+import com.tenli.oneview.ui.theme.InfoSkyDeep
+import com.tenli.oneview.ui.theme.OrangeDeep
+import com.tenli.oneview.ui.theme.PurpleAccent
+import java.util.concurrent.ConcurrentHashMap
+
+// Bảng màu cố định cho từng module AI (đồng bộ với AI_MODULE_COLORS trong bản PWA)
+private val AiColorFace = Color(0xFFA07E0E)
+private val AiColorUniform = Color(0xFF267BE2)
+private val AiColorCrowd = Color(0xFF3B9D0E)
+private val AiColorHelmet = Color(0xFF198D0A)
+private val AiColorParking = Color(0xFFA50F69)
+private val AiColorGarbage = Color(0xFF9E8609)
+private val AiColorIntrusion = Color(0xFF0A9C47)
+private val AiColorEncroachment = Color(0xFFA78F08)
+private val AiColorConstruction = Color(0xFFB97B0F)
+private val AiColorWrongWay = Color(0xFFE11D48)
+private val AiColorViolence = Color(0xFF7F10AB)
+private val AiColorSmoking = Color(0xFFBB3258)
+private val AiColorPhone = Color(0xFF2F71BC)
+private val AiColorFall = Color(0xFFAD830D)
+private val AiColorGloves = Color(0xFF940D7B)
+private val AiColorHairnet = Color(0xFF627E11)
+private val AiColorDefault = Color(0xFF0F81C4)
 
 data class EventSentenceParts(
     val prefix: String,
@@ -18,6 +45,12 @@ data class AiModuleOption(
 )
 
 object AiTypeHelper {
+
+    private val REGEX_PREFIX_VI = Regex("^phát hiện\\s+", RegexOption.IGNORE_CASE)
+    private val REGEX_PREFIX_EN = Regex("^detected\\s+", RegexOption.IGNORE_CASE)
+    private val REGEX_SLASH_AMP = Regex("[/&]")
+
+    private val hexColorCache = ConcurrentHashMap<String, Color>()
 
     val activeModules: List<AiModuleOption> = listOf(
         AiModuleOption("FaceID", "logic-face", "Nhận diện khuôn mặt", "Face recognition"),
@@ -81,6 +114,89 @@ object AiTypeHelper {
         "sensor-face-masked"
     )
 
+    private val TYPE_NAME_EN_MAP = mapOf(
+        "logic-person" to "Intrusion detection",
+        "sensor-person-camera" to "Intrusion detection",
+        "logic-fire" to "Fire & smoke detection",
+        "sensor-fire-camera" to "Fire & smoke detection",
+        "sensor-smoke-camera" to "Smoke detection",
+        "logic-fall-person" to "Fall detection",
+        "sensor-fall-person-camera" to "Fall detection",
+        "logic-face" to "Face recognition",
+        "sensor-face-unknown-camera" to "Stranger detection",
+        "sensor-license-plate" to "License plate recognition",
+        "logic-uniform" to "Uniform detection",
+        "sensor-uniform-camera" to "Uniform detection",
+        "sensor-crowd-camera" to "Crowd detection",
+        "sensor-violence" to "Violence detection",
+        "sensor-smoking" to "Smoking detection",
+        "sensor-pose-camera" to "Smoking detection",
+        "sensor-phone-usage" to "Phone usage",
+        "sensor-phone-camera" to "Phone usage",
+        "sensor-vehicle-camera" to "Vehicle recognition",
+        "sensor-helmet-camera" to "No helmet violation",
+        "sensor-helmet-violation-camera" to "No helmet violation",
+        "sensor-parking-camera" to "Illegal parking",
+        "sensor-encroachment-camera" to "Sidewalk encroachment",
+        "sensor-littering-camera" to "Littering detection",
+        "sensor-construction-camera" to "Construction detection",
+        "construction-sensor-camera" to "Construction detection",
+        "sensor-crossing-tracking" to "Wrong-way driving",
+        "sensor-gloves" to "No gloves violation",
+        "sensor-hairnet" to "No safety cap",
+        "sensor-face-masked" to "No mask violation"
+    )
+
+    private val TYPE_NAME_VI_MAP = mapOf(
+        "logic-person" to "Phát hiện xâm nhập",
+        "sensor-person-camera" to "Phát hiện xâm nhập",
+        "logic-fish-out" to "Phát hiện cá koi nhảy lên bờ",
+        "sensor-fish-out-camera" to "Phát hiện cá koi nhảy lên bờ",
+        "logic-person-pond" to "Phát hiện người ngã xuống Hồ Koi",
+        "sensor-person-pond-camera" to "Phát hiện người ngã xuống Hồ Koi",
+        "sensor-person-pond-camera-v2" to "Phát hiện người ngã xuống Hồ Koi",
+        "logic-fire" to "Phát hiện Cháy & Khói",
+        "sensor-fire-camera" to "Phát hiện Cháy & Khói",
+        "sensor-smoke-camera" to "Phát hiện Khói",
+        "logic-fall-person" to "Phát hiện người ngã bất thường",
+        "sensor-fall-person-camera" to "Phát hiện người ngã bất thường",
+        "logic-power" to "Phát hiện mất điện",
+        "sensor-person-entry-exit-camera" to "Đếm người vào ra",
+        "sensor-person-dwell-camera" to "Phát hiện người ở lâu",
+        "logic-face" to "Nhận diện khuôn mặt",
+        "sensor-license-plate" to "Nhận diện biển số",
+        "sensor-face-unknown-camera" to "Người lạ",
+        "logic-uniform" to "Nhận diện trang phục",
+        "sensor-object" to "Nhận diện đối tượng",
+        "object-begin" to "Nhận diện đối tượng",
+        "object-end" to "Nhận diện đối tượng",
+        "sensor-object-tracking" to "Theo dõi đối tượng",
+        "sensor-gesture-camera" to "Nhận diện cử chỉ",
+        "sensor-heatmap-camera" to "Phân tích mật độ",
+        "sensor-crowd-camera" to "Phát hiện đông người",
+        "sensor-uniform-camera" to "Nhận diện trang phục",
+        "sensor-violence" to "Phát hiện đánh nhau",
+        "sensor-pose-camera" to "Phát hiện hút thuốc",
+        "sensor-smoking" to "Phát hiện hút thuốc",
+        "sensor-phone-camera" to "Sử dụng điện thoại",
+        "sensor-phone-usage" to "Sử dụng điện thoại",
+        "sensor-vehicle-camera" to "Nhận diện phương tiện",
+        "sensor-helmet-camera" to "Không đội mũ bảo hiểm",
+        "sensor-helmet-violation-camera" to "Không đội mũ bảo hiểm",
+        "sensor-parking-camera" to "Phát hiện dừng đỗ xe",
+        "sensor-animal-camera" to "Phát hiện động vật",
+        "sensor-weapon-camera" to "Phát hiện vũ khí",
+        "sensor-absence-tracking-camera" to "Phát hiện rời vị trí",
+        "sensor-encroachment-camera" to "Lấn chiếm vỉa hè",
+        "sensor-littering-camera" to "Phát hiện xả rác",
+        "sensor-construction-camera" to "Phát hiện thi công",
+        "construction-sensor-camera" to "Phát hiện thi công",
+        "sensor-crossing-tracking" to "Đi ngược chiều",
+        "sensor-gloves" to "Không đeo găng tay",
+        "sensor-hairnet" to "Không đội mũ bảo hộ",
+        "sensor-face-masked" to "Không đeo khẩu trang"
+    )
+
     fun isAiTypeEnabled(type: String?): Boolean {
         if (type.isNullOrBlank()) return false
         val t = type.trim()
@@ -103,16 +219,16 @@ object AiTypeHelper {
         val d = event.data
         return !t.contains("uniform") && !t.contains("clothing") && (
             t.contains("face") ||
-            t.contains("attendance") ||
-            t.contains("stranger") ||
-            d?.face != null ||
-            !d?.profileUUID.isNullOrEmpty() ||
-            !d?.profileUUIDUpper.isNullOrEmpty() ||
-            d?.profileId != null ||
-            !d?.faceCrop.isNullOrEmpty() ||
-            !d?.faceCropImageSnake.isNullOrEmpty() ||
-            !d?.faceCropImage.isNullOrEmpty()
-        )
+                t.contains("attendance") ||
+                t.contains("stranger") ||
+                d?.face != null ||
+                !d?.profileUUID.isNullOrEmpty() ||
+                !d?.profileUUIDUpper.isNullOrEmpty() ||
+                d?.profileId != null ||
+                !d?.faceCrop.isNullOrEmpty() ||
+                !d?.faceCropImageSnake.isNullOrEmpty() ||
+                !d?.faceCropImage.isNullOrEmpty()
+            )
     }
 
     fun isStranger(event: EventData): Boolean {
@@ -180,140 +296,53 @@ object AiTypeHelper {
             return extractUniformLabel(event, isEn)
         }
 
-        if (t0.contains("helmet")) return if (isEn) "No helmet" else "Không đội mũ bảo hiểm"
-        if (t0.contains("hairnet")) return if (isEn) "No safety cap" else "Không đội mũ bảo hộ"
-        if (t0.contains("face-masked") || t0.contains("no-mask") || t0.contains("mask")) {
-            return if (isEn) "No mask" else "Không đeo khẩu trang"
+        return when {
+            t0.contains("helmet") -> if (isEn) "No helmet" else "Không đội mũ bảo hiểm"
+            t0.contains("hairnet") -> if (isEn) "No safety cap" else "Không đội mũ bảo hộ"
+            t0.contains("face-masked") || t0.contains("no-mask") || t0.contains("mask") ->
+                if (isEn) "No mask" else "Không đeo khẩu trang"
+            t0.contains("glove") -> if (isEn) "No gloves" else "Không đeo găng tay"
+            t0.contains("crowd") -> if (isEn) "Crowd" else "Đám đông"
+            t0.contains("fire") || t0.contains("smoke") -> if (isEn) "Fire / Smoke" else "Cháy / Khói"
+            t0.contains("parking") -> if (isEn) "Illegal parking" else "Dừng đỗ"
+            t0.contains("lpr") || t0.contains("plate") || t0.contains("license") ->
+                if (isEn) "License plate" else "Biển số"
+            t0.contains("vehicle") || t0.contains("object-end") ->
+                if (isEn) "Vehicle" else "Phương tiện"
+            t0.contains("garbage") || t0.contains("litter") ->
+                if (isEn) "Littering" else "Xả rác"
+            t0.contains("sidewalk") || t0.contains("encroach") ->
+                if (isEn) "Encroachment" else "Lấn chiếm"
+            t0.contains("person") || t0.contains("intrusion") ->
+                if (isEn) "Intrusion" else "Xâm nhập"
+            else -> getTypeName(event.type, isEn)
         }
-        if (t0.contains("glove")) return if (isEn) "No gloves" else "Không đeo găng tay"
-        if (t0.contains("crowd")) return if (isEn) "Crowd" else "Đám đông"
-        if (t0.contains("fire") || t0.contains("smoke")) return if (isEn) "Fire / Smoke" else "Cháy / Khói"
-        if (t0.contains("parking")) return if (isEn) "Illegal parking" else "Dừng đỗ"
-        if (t0.contains("lpr") || t0.contains("plate") || t0.contains("license")) {
-            return if (isEn) "License plate" else "Biển số"
-        }
-        if (t0.contains("vehicle") || t0.contains("object-end")) {
-            return if (isEn) "Vehicle" else "Phương tiện"
-        }
-        if (t0.contains("garbage") || t0.contains("litter")) {
-            return if (isEn) "Littering" else "Xả rác"
-        }
-        if (t0.contains("sidewalk") || t0.contains("encroach")) {
-            return if (isEn) "Encroachment" else "Lấn chiếm"
-        }
-        if (t0.contains("person") || t0.contains("intrusion")) {
-            return if (isEn) "Intrusion" else "Xâm nhập"
-        }
-
-        return getTypeName(event.type, isEn)
     }
 
-    fun getEventName(event: EventData): String {
-        return getEventBadgeLabel(event, isEn = false)
-    }
+    fun getEventName(event: EventData): String = getEventBadgeLabel(event, isEn = false)
 
     fun getTypeName(type: String?, isEn: Boolean = false): String {
         if (type == null) return if (isEn) "Unknown event" else "Sự kiện không xác định"
-        if (isEn) {
-            val enMap = mapOf(
-                "logic-person" to "Intrusion detection",
-                "sensor-person-camera" to "Intrusion detection",
-                "logic-fire" to "Fire & smoke detection",
-                "sensor-fire-camera" to "Fire & smoke detection",
-                "sensor-smoke-camera" to "Smoke detection",
-                "logic-fall-person" to "Fall detection",
-                "sensor-fall-person-camera" to "Fall detection",
-                "logic-face" to "Face recognition",
-                "sensor-face-unknown-camera" to "Stranger detection",
-                "sensor-license-plate" to "License plate recognition",
-                "logic-uniform" to "Uniform detection",
-                "sensor-uniform-camera" to "Uniform detection",
-                "sensor-crowd-camera" to "Crowd detection",
-                "sensor-violence" to "Violence detection",
-                "sensor-smoking" to "Smoking detection",
-                "sensor-pose-camera" to "Smoking detection",
-                "sensor-phone-usage" to "Phone usage",
-                "sensor-phone-camera" to "Phone usage",
-                "sensor-vehicle-camera" to "Vehicle recognition",
-                "sensor-helmet-camera" to "No helmet violation",
-                "sensor-helmet-violation-camera" to "No helmet violation",
-                "sensor-parking-camera" to "Illegal parking",
-                "sensor-encroachment-camera" to "Sidewalk encroachment",
-                "sensor-littering-camera" to "Littering detection",
-                "sensor-construction-camera" to "Construction detection",
-                "construction-sensor-camera" to "Construction detection",
-                "sensor-crossing-tracking" to "Wrong-way driving",
-                "sensor-gloves" to "No gloves violation",
-                "sensor-hairnet" to "No safety cap",
-                "sensor-face-masked" to "No mask violation"
-            )
-            return enMap[type] ?: type
-        }
-        val typeMap = mapOf(
-            "logic-person" to "Phát hiện xâm nhập",
-            "sensor-person-camera" to "Phát hiện xâm nhập",
-            "logic-fish-out" to "Phát hiện cá koi nhảy lên bờ",
-            "sensor-fish-out-camera" to "Phát hiện cá koi nhảy lên bờ",
-            "logic-person-pond" to "Phát hiện người ngã xuống Hồ Koi",
-            "sensor-person-pond-camera" to "Phát hiện người ngã xuống Hồ Koi",
-            "sensor-person-pond-camera-v2" to "Phát hiện người ngã xuống Hồ Koi",
-            "logic-fire" to "Phát hiện Cháy & Khói",
-            "sensor-fire-camera" to "Phát hiện Cháy & Khói",
-            "sensor-smoke-camera" to "Phát hiện Khói",
-            "logic-fall-person" to "Phát hiện người ngã bất thường",
-            "sensor-fall-person-camera" to "Phát hiện người ngã bất thường",
-            "logic-power" to "Phát hiện mất điện",
-            "sensor-person-entry-exit-camera" to "Đếm người vào ra",
-            "sensor-person-dwell-camera" to "Phát hiện người ở lâu",
-            "logic-face" to "Nhận diện khuôn mặt",
-            "sensor-license-plate" to "Nhận diện biển số",
-            "sensor-face-unknown-camera" to "Người lạ",
-            "logic-uniform" to "Nhận diện trang phục",
-            "sensor-object" to "Nhận diện đối tượng",
-            "object-begin" to "Nhận diện đối tượng",
-            "object-end" to "Nhận diện đối tượng",
-            "sensor-object-tracking" to "Theo dõi đối tượng",
-            "sensor-gesture-camera" to "Nhận diện cử chỉ",
-            "sensor-heatmap-camera" to "Phân tích mật độ",
-            "sensor-crowd-camera" to "Phát hiện đông người",
-            "sensor-uniform-camera" to "Nhận diện trang phục",
-            "sensor-violence" to "Phát hiện đánh nhau",
-            "sensor-pose-camera" to "Phát hiện hút thuốc",
-            "sensor-smoking" to "Phát hiện hút thuốc",
-            "sensor-phone-camera" to "Sử dụng điện thoại",
-            "sensor-phone-usage" to "Sử dụng điện thoại",
-            "sensor-vehicle-camera" to "Nhận diện phương tiện",
-            "sensor-helmet-camera" to "Không đội mũ bảo hiểm",
-            "sensor-helmet-violation-camera" to "Không đội mũ bảo hiểm",
-            "sensor-parking-camera" to "Phát hiện dừng đỗ xe",
-            "sensor-animal-camera" to "Phát hiện động vật",
-            "sensor-weapon-camera" to "Phát hiện vũ khí",
-            "sensor-absence-tracking-camera" to "Phát hiện rời vị trí",
-            "sensor-encroachment-camera" to "Lấn chiếm vỉa hè",
-            "sensor-littering-camera" to "Phát hiện xả rác",
-            "sensor-construction-camera" to "Phát hiện thi công",
-            "construction-sensor-camera" to "Phát hiện thi công",
-            "sensor-crossing-tracking" to "Đi ngược chiều",
-            "sensor-gloves" to "Không đeo găng tay",
-            "sensor-hairnet" to "Không đội mũ bảo hộ",
-            "sensor-face-masked" to "Không đeo khẩu trang"
-        )
-        return typeMap[type] ?: type
+        return if (isEn) TYPE_NAME_EN_MAP[type] ?: type else TYPE_NAME_VI_MAP[type] ?: type
     }
 
     fun parseHexColor(colorStr: String?): Color? {
         if (colorStr.isNullOrBlank()) return null
         val clean = colorStr.trim().removePrefix("#")
+        if (clean.length != 6 && clean.length != 8) return null
+        hexColorCache[clean]?.let { return it }
         return try {
-            when (clean.length) {
+            val parsed = when (clean.length) {
                 6 -> Color(("FF$clean").toLong(16))
                 8 -> {
                     val rrggbb = clean.substring(0, 6)
                     val aa = clean.substring(6, 8)
                     Color(("$aa$rrggbb").toLong(16))
                 }
-                else -> null
+                else -> return null
             }
+            hexColorCache[clean] = parsed
+            parsed
         } catch (_: Exception) {
             null
         }
@@ -325,7 +354,7 @@ object AiTypeHelper {
 
         if (isFaceEvent(event)) {
             if (isStranger(event)) {
-                return Color(0xFFDC2626) // FACE_UNKNOWN
+                return ErrorRedDeep // FACE_UNKNOWN
             }
             val directColor = event.groupColor
                 ?: d?.groupColor
@@ -333,44 +362,44 @@ object AiTypeHelper {
                 ?: d?.face?.groupColor
                 ?: d?.face?.groupColorSnake
             parseHexColor(directColor)?.let { return it }
-            return Color(0xFFA07E0E) // AI_MODULE_COLORS.FACE
+            return AiColorFace
         }
 
         if (t0.contains("uniform") || t0.contains("clothing")) {
-            return if (isUniformViolation(event)) Color(0xFFEF4444) else Color(0xFF267BE2)
+            return if (isUniformViolation(event)) ErrorRed else AiColorUniform
         }
 
         return getAiColor(event.type)
     }
 
     fun getAiColor(type: String?): Color {
-        val t = type?.lowercase() ?: return Color(0xFF0F81C4)
+        val t = type?.lowercase() ?: return AiColorDefault
 
         return when {
-            t.contains("face-unknown") || t.contains("stranger") -> Color(0xFFDC2626)
-            t.contains("face-masked") || t.contains("no-mask") || t.contains("no_mask") -> Color(0xFFA855F7)
-            t.contains("face") -> Color(0xFFA07E0E)
-            t.contains("uniform") || t.contains("clothing") -> Color(0xFF267BE2)
-            t.contains("crowd") -> Color(0xFF3B9D0E)
-            t.contains("heatmap") -> Color(0xFF6366F1)
-            t.contains("lpr") || t.contains("plate") || t.contains("license") -> Color(0xFFEA580C)
-            t.contains("fire") || t.contains("smoke") -> Color(0xFFDC2626)
-            t.contains("helmet") -> Color(0xFF198D0A)
-            t.contains("parking") -> Color(0xFFA50F69)
-            t.contains("garbage") || t.contains("dumping") || t.contains("litter") -> Color(0xFF9E8609)
-            t.contains("person") || t.contains("intrusion") -> Color(0xFF0A9C47)
-            t.contains("vehicle") -> Color(0xFF0284C7)
-            t.contains("sidewalk") || t.contains("encroach") -> Color(0xFFA78F08)
-            t.contains("construction") -> Color(0xFFB97B0F)
-            t.contains("crossing") || t.contains("wrong") -> Color(0xFFE11D48)
-            t.contains("violence") || t.contains("fight") -> Color(0xFF7F10AB)
-            t.contains("smoking") || t.contains("pose") -> Color(0xFFBB3258)
-            t.contains("phone") || t.contains("calling") -> Color(0xFF2F71BC)
-            t.contains("fall") -> Color(0xFFAD830D)
-            t.contains("glove") -> Color(0xFF940D7B)
-            t.contains("hairnet") -> Color(0xFF627E11)
-            t.contains("object") || t.contains("tracking") -> Color(0xFF3B82F6)
-            else -> Color(0xFF0F81C4)
+            t.contains("face-unknown") || t.contains("stranger") -> ErrorRedDeep
+            t.contains("face-masked") || t.contains("no-mask") || t.contains("no_mask") -> PurpleAccent
+            t.contains("face") -> AiColorFace
+            t.contains("uniform") || t.contains("clothing") -> AiColorUniform
+            t.contains("crowd") -> AiColorCrowd
+            t.contains("heatmap") -> IndigoAccent
+            t.contains("lpr") || t.contains("plate") || t.contains("license") -> OrangeDeep
+            t.contains("fire") || t.contains("smoke") -> ErrorRedDeep
+            t.contains("helmet") -> AiColorHelmet
+            t.contains("parking") -> AiColorParking
+            t.contains("garbage") || t.contains("dumping") || t.contains("litter") -> AiColorGarbage
+            t.contains("person") || t.contains("intrusion") -> AiColorIntrusion
+            t.contains("vehicle") -> InfoSkyDeep
+            t.contains("sidewalk") || t.contains("encroach") -> AiColorEncroachment
+            t.contains("construction") -> AiColorConstruction
+            t.contains("crossing") || t.contains("wrong") -> AiColorWrongWay
+            t.contains("violence") || t.contains("fight") -> AiColorViolence
+            t.contains("smoking") || t.contains("pose") -> AiColorSmoking
+            t.contains("phone") || t.contains("calling") -> AiColorPhone
+            t.contains("fall") -> AiColorFall
+            t.contains("glove") -> AiColorGloves
+            t.contains("hairnet") -> AiColorHairnet
+            t.contains("object") || t.contains("tracking") -> BrandActiveNavDark
+            else -> AiColorDefault
         }
     }
 
@@ -402,22 +431,22 @@ object AiTypeHelper {
 
         fun createPart(prefix: String, subject: String, color: Color = badgeColor): EventSentenceParts {
             val cleanP = prefix.trim().lowercase()
-                .replace(Regex("^phát hiện\\s+"), "")
-                .replace(Regex("^detected\\s+"), "")
-                .replace(Regex("[/&]"), " ")
+                .replace(REGEX_PREFIX_VI, "")
+                .replace(REGEX_PREFIX_EN, "")
+                .replace(REGEX_SLASH_AMP, " ")
                 .trim()
             val cleanS = subject.trim().lowercase()
-                .replace(Regex("[/&]"), " ")
+                .replace(REGEX_SLASH_AMP, " ")
                 .trim()
 
             var finalPrefix = prefix
             if (cleanP.isNotEmpty() && cleanS.isNotEmpty() && (
                     cleanP == cleanS ||
-                    cleanS.startsWith(cleanP) ||
-                    cleanP.startsWith(cleanS) ||
-                    cleanS.contains(cleanP) ||
-                    cleanP.contains(cleanS)
-                )
+                        cleanS.startsWith(cleanP) ||
+                        cleanP.startsWith(cleanS) ||
+                        cleanS.contains(cleanP) ||
+                        cleanP.contains(cleanS)
+                    )
             ) {
                 finalPrefix = if (isEn) "Detected" else "Phát hiện"
             }
@@ -430,7 +459,6 @@ object AiTypeHelper {
             )
         }
 
-        // 1. Face / Stranger
         if (isFaceEvent(event)) {
             if (isStranger(event)) {
                 return createPart(
@@ -454,7 +482,6 @@ object AiTypeHelper {
             )
         }
 
-        // 2. Parking
         if (rawType.contains("parking")) {
             return createPart(
                 if (isEn) "Violation" else "Vi phạm",
@@ -462,7 +489,6 @@ object AiTypeHelper {
             )
         }
 
-        // 3. LPR / Vehicle
         if (rawType.contains("lpr") || rawType.contains("plate") || rawType.contains("license")) {
             val plate = data?.plate?.plate ?: data?.plate?.number ?: event.plate
             if (!plate.isNullOrBlank()) {
@@ -491,7 +517,6 @@ object AiTypeHelper {
             )
         }
 
-        // 4. Helmet
         if (rawType.contains("helmet")) {
             return createPart(
                 if (isEn) "Violation" else "Vi phạm",
@@ -499,7 +524,6 @@ object AiTypeHelper {
             )
         }
 
-        // 5. Hairnet
         if (rawType.contains("hairnet")) {
             return createPart(
                 if (isEn) "Safety violation" else "Vi phạm bảo hộ",
@@ -507,7 +531,6 @@ object AiTypeHelper {
             )
         }
 
-        // 6. Mask
         if (rawType.contains("mask")) {
             return createPart(
                 if (isEn) "Health violation" else "Vi phạm y tế",
@@ -515,7 +538,6 @@ object AiTypeHelper {
             )
         }
 
-        // 7. Gloves
         if (rawType.contains("glove")) {
             return createPart(
                 if (isEn) "Safety violation" else "Vi phạm bảo hộ",
@@ -523,16 +545,13 @@ object AiTypeHelper {
             )
         }
 
-        // 8. Uniform
         if (rawType.contains("uniform") || rawType.contains("clothing")) {
-            val subj = extractUniformLabel(event, isEn)
             return createPart(
                 if (isEn) "Uniform" else "Đồng phục",
-                subj
+                extractUniformLabel(event, isEn)
             )
         }
 
-        // 9. Intrusion
         if (rawType.contains("intrusion") || rawType == "logic-person" || rawType == "sensor-person-camera") {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -540,7 +559,6 @@ object AiTypeHelper {
             )
         }
 
-        // 10. Crowd
         if (rawType.contains("crowd")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -548,7 +566,6 @@ object AiTypeHelper {
             )
         }
 
-        // 11. Fire & Smoke
         if (rawType.contains("fire") || rawType.contains("smoke")) {
             val isSmokeOnly = rawType.contains("smoke") && !rawType.contains("fire")
             return createPart(
@@ -557,7 +574,6 @@ object AiTypeHelper {
             )
         }
 
-        // 12. Garbage / Littering
         if (rawType.contains("garbage") || rawType.contains("litter")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -565,7 +581,6 @@ object AiTypeHelper {
             )
         }
 
-        // 13. Sidewalk encroachment
         if (rawType.contains("sidewalk") || rawType.contains("encroach")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -573,7 +588,6 @@ object AiTypeHelper {
             )
         }
 
-        // 14. Wrong-way
         if (rawType.contains("wrong") || rawType.contains("crossing")) {
             return createPart(
                 if (isEn) "Violation" else "Vi phạm",
@@ -581,7 +595,6 @@ object AiTypeHelper {
             )
         }
 
-        // 15. Violence
         if (rawType.contains("violence") || rawType.contains("fight")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -589,7 +602,6 @@ object AiTypeHelper {
             )
         }
 
-        // 16. Fall
         if (rawType.contains("fall")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -597,7 +609,6 @@ object AiTypeHelper {
             )
         }
 
-        // 17. Smoking
         if (rawType.contains("smoking") || rawType.contains("pose")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -605,7 +616,6 @@ object AiTypeHelper {
             )
         }
 
-        // 18. Phone
         if (rawType.contains("phone")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -613,7 +623,6 @@ object AiTypeHelper {
             )
         }
 
-        // 19. Construction
         if (rawType.contains("construct")) {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
@@ -622,8 +631,8 @@ object AiTypeHelper {
         }
 
         val cleanLabel = badgeLabel
-            .replace(Regex("^Phát hiện\\s+", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("^Detected\\s+", RegexOption.IGNORE_CASE), "")
+            .replace(REGEX_PREFIX_VI, "")
+            .replace(REGEX_PREFIX_EN, "")
             .trim()
             .replaceFirstChar { it.uppercase() }
 
@@ -650,10 +659,17 @@ object AiTypeHelper {
         return if (isEn) "${diffYear}y ago" else "$diffYear năm trước"
     }
 
-    fun getSnapshotUrl(event: EventData, baseDomain: String): String {
+    private fun resolveMediaUrl(event: EventData, baseDomain: String, file: String?): String? {
+        if (file.isNullOrBlank()) return null
+        if (file.startsWith("http://") || file.startsWith("https://")) return file
         val domain = baseDomain.trimEnd('/')
+        if (file.startsWith("/")) return "$domain$file"
+        val containerId = event.data?.containerId ?: "0"
+        return "$domain/Data/api/Data/Media/${event.serviceId}/$containerId/$file"
+    }
+
+    fun getSnapshotUrl(event: EventData, baseDomain: String): String {
         val data = event.data ?: return ""
-        val containerId = data.containerId ?: "0"
         val t0 = event.type.lowercase()
 
         val imageFile = when {
@@ -681,28 +697,19 @@ object AiTypeHelper {
                 data.vehicle?.cropImage ?: data.objectData?.image ?: data.image
             }
             else -> data.image ?: data.cropImage
-        } ?: return ""
-
-        if (imageFile.startsWith("http://") || imageFile.startsWith("https://")) return imageFile
-        if (imageFile.startsWith("/")) return "$domain$imageFile"
-        return "$domain/Data/api/Data/Media/${event.serviceId}/$containerId/$imageFile"
+        }
+        return resolveMediaUrl(event, baseDomain, imageFile).orEmpty()
     }
 
     fun getFullImageUrl(event: EventData, baseDomain: String): String {
-        val domain = baseDomain.trimEnd('/')
         val data = event.data ?: return ""
-        val containerId = data.containerId ?: "0"
-        val imageFile = data.image ?: data.fullImage ?: data.cropImage ?: return ""
-        if (imageFile.startsWith("http://") || imageFile.startsWith("https://")) return imageFile
-        if (imageFile.startsWith("/")) return "$domain$imageFile"
-        return "$domain/Data/api/Data/Media/${event.serviceId}/$containerId/$imageFile"
+        val imageFile = data.image ?: data.fullImage ?: data.cropImage
+        return resolveMediaUrl(event, baseDomain, imageFile).orEmpty()
     }
 
     fun getFaceCropUrl(event: EventData, baseDomain: String): String? {
         if (!isFaceEvent(event)) return null
-        val domain = baseDomain.trimEnd('/')
         val data = event.data ?: return null
-        val containerId = data.containerId ?: "0"
         val cropFile = data.face?.cropImage
             ?: data.faceCrop
             ?: data.faceCropImageSnake
@@ -710,19 +717,12 @@ object AiTypeHelper {
             ?: data.cropImage
             ?: return null
         if (cropFile == data.image) return null
-        if (cropFile.startsWith("http://") || cropFile.startsWith("https://")) return cropFile
-        if (cropFile.startsWith("/")) return "$domain$cropFile"
-        return "$domain/Data/api/Data/Media/${event.serviceId}/$containerId/$cropFile"
+        return resolveMediaUrl(event, baseDomain, cropFile)
     }
 
     fun getVideoUrl(event: EventData, baseDomain: String): String? {
-        val domain = baseDomain.trimEnd('/')
         val data = event.data ?: return null
-        val containerId = data.containerId ?: "0"
-        val videoFile = data.video ?: data.videoUrl ?: data.focusVideo ?: return null
-        if (videoFile.isBlank()) return null
-        if (videoFile.startsWith("http://") || videoFile.startsWith("https://")) return videoFile
-        if (videoFile.startsWith("/")) return "$domain$videoFile"
-        return "$domain/Data/api/Data/Media/${event.serviceId}/$containerId/$videoFile"
+        val videoFile = data.video ?: data.videoUrl ?: data.focusVideo
+        return resolveMediaUrl(event, baseDomain, videoFile)
     }
 }

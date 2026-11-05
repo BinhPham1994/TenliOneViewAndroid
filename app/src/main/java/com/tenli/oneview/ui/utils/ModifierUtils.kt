@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -24,6 +25,8 @@ fun Modifier.bounceClick(
     onClick: () -> Unit
 ): Modifier = composed {
     var isPressed by remember { mutableStateOf(false) }
+    // Luôn gọi onClick mới nhất (pointerInput(Unit) chỉ khởi tạo 1 lần nên tránh giữ lambda cũ)
+    val currentOnClick by rememberUpdatedState(onClick)
     // Animation làm mịn chuyển động lún xuống và nảy lên
     val scale by animateFloatAsState(
         targetValue = if (isPressed) scaleDown else 1f,
@@ -50,7 +53,7 @@ fun Modifier.bounceClick(
 
                 // 3. Nếu nhấc ngón tay lên hợp lệ -> Gọi hàm onClick
                 if (up != null) {
-                    onClick()
+                    currentOnClick()
                 }
             }
         }

@@ -20,9 +20,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import com.tenli.oneview.ui.component.VideoPlayer
+import com.tenli.oneview.ui.theme.appColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,10 +33,11 @@ fun PlaybackDetailScreen(
     cameraName: String,
     onBack: () -> Unit
 ) {
+    val colors = MaterialTheme.appColors
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { 
+                title = {
                     Column {
                         Text(
                             text = cameraName.ifEmpty { "Playback" },
@@ -55,19 +56,19 @@ fun PlaybackDetailScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Black,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
+                    containerColor = colors.mediaBg,
+                    titleContentColor = colors.onMedia,
+                    navigationIconContentColor = colors.onMedia
                 )
             )
         },
-        containerColor = Color.Black
+        containerColor = colors.mediaBg
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Color.Black),
+                .background(colors.mediaBg),
             contentAlignment = Alignment.Center
         ) {
             if (videoLink.isNotEmpty()) {
@@ -79,7 +80,7 @@ fun PlaybackDetailScreen(
                     )
                 }
             } else {
-                Text("Không có đường dẫn video", color = Color.White)
+                Text("Không có đường dẫn video", color = colors.onMedia)
             }
         }
     }

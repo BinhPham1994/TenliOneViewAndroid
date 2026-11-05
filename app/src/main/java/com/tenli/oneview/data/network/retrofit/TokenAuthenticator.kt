@@ -9,7 +9,6 @@ import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.ui.utils.AppKeys
 import okhttp3.Authenticator
 import okhttp3.Credentials
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -32,12 +31,15 @@ class TokenAuthenticator : Authenticator {
         private const val TAG = "TokenAuthenticator"
         private val lock = Any()
 
-        // Dùng chung 1 OkHttpClient cho re-login (không có Authenticator) để tránh tạo mới thread pool mỗi lần 401
+        private const val LOGIN_TIMEOUT_SEC = 15L
+        private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        // Client re-login (không có Authenticator để tránh vòng lặp), dùng chung pool/thread với LoginAuthClient
         private val loginClient: OkHttpClient by lazy {
-            OkHttpClient.Builder()
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
+            LoginAuthClient.baseClient.newBuilder()
+                .connectTimeout(LOGIN_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .readTimeout(LOGIN_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .writeTimeout(LOGIN_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .build()
         }
     }
@@ -55,11 +57,7 @@ class TokenAuthenticator : Authenticator {
             return null
         }
 
-        val currentDomainHost = UserSession.domain.toHttpUrlOrNull()?.host
-        val defaultDomainHost = BuildConfig.DOMAIN_CLOUD.toHttpUrlOrNull()?.host
-        val isMainBackendHost = (currentDomainHost != null && reqUrl.host == currentDomainHost) ||
-                (defaultDomainHost != null && reqUrl.host == defaultDomainHost)
-        if (!isMainBackendHost) {
+        if (!HostResolver.isMainBackendHost(reqUrl.host)) {
             return null
         }
 
@@ -127,7 +125,7 @@ class TokenAuthenticator : Authenticator {
 
         val gson = LoginAuthClient.gson
         val jsonBody = gson.toJson(LogInModel(username = username, password = password))
-        val body = jsonBody.toRequestBody("application/json; charset=utf-8".toMediaType())
+        val body = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
 
         val request = Request.Builder()
             .url(loginUrl)

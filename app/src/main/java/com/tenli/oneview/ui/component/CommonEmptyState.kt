@@ -18,39 +18,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.tenli.oneview.ui.theme.spacing
+
+/** Độ mờ của icon trạng thái rỗng */
+private const val EMPTY_ICON_ALPHA = 0.4f
 
 @Composable
 fun CommonEmptyState(
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Rounded.Inbox, // Mặc định là icon Inbox
     text: String = "Không có dữ liệu",      // Mặc định nếu không truyền text
-    iconSize: Dp = 64.dp
+    iconSize: Dp = MaterialTheme.spacing.iconHuge
 ) {
+    val spacing = MaterialTheme.spacing
+    val contentColor = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 40.dp),
+            .padding(horizontal = spacing.space40),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            tint = contentColor.copy(alpha = EMPTY_ICON_ALPHA),
             modifier = Modifier.size(iconSize)
         )
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(spacing.space6))
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 14.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium
-            ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            lineHeight = 20.sp // Giúp text 2 dòng dễ đọc hơn
+            // bodyMedium có lineHeight 20sp giúp text 2 dòng dễ đọc hơn
+            style = MaterialTheme.typography.bodyMedium,
+            color = contentColor,
+            textAlign = TextAlign.Center
         )
     }
 }

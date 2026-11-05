@@ -1,7 +1,6 @@
 package com.tenli.oneview.model.network
 
 import androidx.compose.runtime.Immutable
-import com.google.gson.annotations.SerializedName
 
 @Immutable
 data class VMSServiceModel(
@@ -11,25 +10,6 @@ data class VMSServiceModel(
     val publicHost: String,
     val apiKey: String,
     val extra: Map<String, Any>? = null
-)
-
-data class AuthTokenModel(
-    val id: Int,
-    val name: String,
-    val token: String,
-    val userId: Int,
-    val isAdmin: Boolean
-)
-
-data class AuthTokenRequest(
-    val name: String = "Auth Token",
-    val username: String,
-    val password: String
-)
-
-data class UserGroupModel(
-    val id: Int,
-    val name: String
 )
 
 data class VisualMonitoringFeatures(
@@ -95,35 +75,6 @@ data class AiEventPermissions(
 data class UserExtra(
     val permissions: UserPermissions? = null,
     val extraData: Map<String, Any>? = null
-)
-
-data class UserModel(
-    val id: Int,
-    val username: String,
-    val password: String? = null,
-    val name: String,
-    val extra: UserExtra? = null
-)
-
-data class UserInGroupModel(
-    val id: Int,
-    val userId: Int,
-    val groupId: Int
-)
-
-data class SystemSettingModel(
-    val settings: Map<String, Any>? = null
-)
-
-data class StorageModel(
-    val id: Int,
-    val name: String,
-    val path: String,
-    val limitSize: Long,
-    val level: Int,
-    val extra: Map<String, Any>? = null,
-    val vmsId: Int,
-    val storageId: Int
 )
 
 data class StorageStatusModel(
@@ -234,20 +185,6 @@ data class LiveStreamModel(
     val videoCodecTag: String = ""
 )
 
-data class RecordStreamRequest(
-    val id: String? = null,
-    val rtsp: String? = null
-)
-
-data class RecordStreamModel(
-    val id: String,
-    val rtsp: String? = null,
-    val state: String = "connecting", // 'connecting' | 'connected' | 'error'
-    val link: String? = null,
-    val fallbackLinks: List<String>? = null,
-    val videoCodecTag: String? = null
-)
-
 data class VideoModel(
     val time: String,
     val videoLink: String,
@@ -259,73 +196,7 @@ data class VideoModel(
     val duration: Double? = null
 )
 
-data class DeviceDiscoveryModel(
-    val xml: String
-)
-
-data class DeviceServiceRequest(
-    @SerializedName("addr", alternate = ["url"])
-    val addr: String,
-    val username: String = "",
-    val password: String = "",
-    val xml: String
-) {
-    val url: String get() = addr
-}
-
-data class DeviceServiceResponse(
-    val xml: String? = null,
-    val status: Int? = null
-)
-
-data class PermanentLinkModel(
-    val id: Int,
-    val name: String,
-    val cameraId: Int,
-    val path: String,
-    val localLink: String,
-    val privateLink: String,
-    val publicLink: String,
-    val vmsId: Int,
-    val permanentLinkId: Int
-)
-
-data class CameraGroupAccessModel(
-    val id: Int,
-    val userGroupId: Int,
-    val cameraGroupId: Int
-)
-
-data class CameraServiceModel(
-    val id: Int,
-    val apiKey: String,
-    val publicHost: String
-)
-
-data class CameraViewModel(
-    val id: Int,
-    val name: String,
-    val path: String,
-    val userId: Int,
-    val data: CameraViewData
-)
-
-data class CameraViewData(
-    val liveCameraNodeIds: List<CellData>,
-    val gridSize: Int,
-    val services: List<CameraServiceModel>
-)
-
 data class ReportLinkModel(
-    val link: String
-)
-
-data class ReportLinkEntry(
-    val item: ReportLinkModel,
-    val isLoaded: Boolean
-)
-
-data class VideoLinkModel(
     val link: String
 )
 
@@ -333,26 +204,11 @@ data class CameraImageLinkModel(
     val link: String
 )
 
-data class MergeInfo(
-    val startIndex: Int,
-    val indexes: List<Int>
-)
-
-data class CellData(
-    val cameraId: String? = null,
-    val merge: MergeInfo? = null,
-    val isBlinking: Boolean? = null
-)
-
 // ==================== Auth ====================
 
 data class LogInModel(
     val username: String,
     val password: String
-)
-
-data class LogOutModel(
-    val token: String
 )
 
 data class TokenModel(
@@ -365,9 +221,4 @@ data class ChangePasswordModel(
     val userId: Int,
     val oldPassword: String,
     val newPassword: String
-)
-
-data class ResetPasswordModel(
-    val userId: Int,
-    val password: String
 )

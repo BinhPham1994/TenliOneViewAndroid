@@ -51,3 +51,17 @@ val AppTypography = Typography(
         fontWeight = FontWeight.Medium, fontSize = 12.sp, lineHeight = 16.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     )
 )
+
+// --- Kiểu chữ mở rộng (ngoài bộ Material 3) – dùng qua MaterialTheme.typography.caption / .micro ---
+private val CaptionTextStyle = TextStyle(
+    fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+)
+private val MicroTextStyle = TextStyle(
+    fontWeight = FontWeight.SemiBold, fontSize = 10.sp, lineHeight = 12.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+)
+
+/** Chú thích nhỏ: timestamp, badge, meta (11sp) */
+val Typography.caption: TextStyle get() = CaptionTextStyle
+
+/** Chữ siêu nhỏ: nhãn trên ảnh, badge số (10sp) */
+val Typography.micro: TextStyle get() = MicroTextStyle

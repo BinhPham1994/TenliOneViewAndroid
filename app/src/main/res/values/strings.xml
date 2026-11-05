@@ -631,4 +631,15 @@
     <string name="lbl_alarm_notifications">Thông báo báo động</string>
     <string name="lbl_receive_full_notifications">Nhận đầy đủ thông báo</string>
     <string name="camera_grid_full">Lưới đang phát đã đầy, không thể phát thêm!</string>
+    <!-- System notifications / channels -->
+    <string name="notif_channel_event_name">Cảnh báo AI</string>
+    <string name="notif_channel_event_desc">Thông báo khi phát hiện người, cháy, hoặc khuôn mặt</string>
+    <string name="notif_channel_call_name">Cuộc gọi cảnh báo</string>
+    <string name="notif_channel_call_desc">Kênh dành riêng cho cuộc gọi khẩn cấp từ AI</string>
+    <string name="notif_channel_keep_alive_name">Dịch vụ chạy nền Tenli</string>
+    <string name="notif_keep_alive_title">Hệ thống bảo vệ đang chạy</string>
+    <string name="notif_keep_alive_text">Tenli AIoT luôn sẵn sàng nhận cảnh báo 24/7</string>
+    <string name="notif_default_title">Cảnh báo</string>
+    <string name="notif_missed_call_title">Cuộc gọi nhỡ: %1$s</string>
+    <string name="notif_missed_call_text">Phát hiện lúc: %1$s…</string>
 </resources>
