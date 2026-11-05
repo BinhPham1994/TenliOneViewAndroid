@@ -527,6 +527,15 @@ fun rememberIsDarkTheme(): Boolean {
     }
 }
 
+@Composable
+fun rememberIsEnglish(): Boolean {
+    val context = LocalContext.current
+    val langCode by LocaleManager.languageFlow.collectAsStateWithLifecycle(
+        initialValue = LocaleManager.getLocale(context)
+    )
+    return langCode.startsWith("en")
+}
+
 /**
  * Top bar matching `.mobile-top-bar` in `mobile.css`
  */
@@ -647,7 +656,7 @@ fun MobileEventCard(
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val isEn = remember { LocaleManager.getLocale(context).startsWith("en") }
+    val isEn = rememberIsEnglish()
     val isDark = rememberIsDarkTheme()
     val domain = UserSession.domain
     val eventKey = "${event.serviceId}_${event.id}_${event.time}"
@@ -1018,7 +1027,7 @@ fun MobileFilterBottomSheet(
     onReset: () -> Unit
 ) {
     val context = LocalContext.current
-    val isEn = remember { LocaleManager.getLocale(context).startsWith("en") }
+    val isEn = rememberIsEnglish()
     val isDark = rememberIsDarkTheme()
 
     var draftServiceId by remember(selectedServiceId) { mutableStateOf(selectedServiceId) }

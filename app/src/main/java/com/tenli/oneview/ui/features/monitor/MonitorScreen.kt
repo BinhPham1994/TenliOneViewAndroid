@@ -104,6 +104,7 @@ import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.theme.BrandAccent
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.ThemeManager
@@ -121,6 +122,7 @@ fun MonitorScreen(
     onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isEn = rememberIsEnglish()
     val context = LocalContext.current
     val activity = LocalContext.current as? Activity
     val coroutineScope = rememberCoroutineScope()
@@ -219,12 +221,13 @@ fun MonitorScreen(
         MonitorViewModel.computeGroupTreeRows(uiState)
     }
 
-    val sheetVmsTitle = remember(uiState.treeData, uiState.sheetVmsKey, uiState.activeVmsKey) {
+    val sheetVmsTitle = remember(uiState.treeData, uiState.sheetVmsKey, uiState.activeVmsKey, isEn) {
+        val defaultTitle = if (isEn) "Select camera group" else "Chọn nhóm camera"
         val targetKey = uiState.sheetVmsKey.ifEmpty { uiState.activeVmsKey }
         val vmsNode = uiState.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
             .firstOrNull { it.key == targetKey }
             ?: uiState.treeData.filterIsInstance<CameraTreeNode.VMSNode>().firstOrNull()
-        vmsNode?.vms?.name?.ifBlank { "Chọn nhóm camera" } ?: "Chọn nhóm camera"
+        vmsNode?.vms?.name?.ifBlank { defaultTitle } ?: defaultTitle
     }
 
     val displayedCameraItems = remember(
@@ -321,7 +324,7 @@ fun MonitorScreen(
                         .padding(bottom = 80.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CommonEmptyState(text = "Không có camera nào")
+                    CommonEmptyState(text = if (isEn) "No cameras available" else "Không có camera nào")
                 }
             } else {
                 // 1. Live Video Stage Card (.mobile-live-stage-card)
@@ -493,7 +496,7 @@ fun MonitorScreen(
                                     ) {
                                         Icon(
                                             imageVector = LucideIcons.Search,
-                                            contentDescription = "Tìm camera",
+                                            contentDescription = if (isEn) "Search camera" else "Tìm camera",
                                             tint = if (isDark) BrandAccent else Color(0xFF64748B),
                                             modifier = Modifier.size(15.dp)
                                         )
@@ -504,7 +507,7 @@ fun MonitorScreen(
                                         ) {
                                             if (uiState.searchQuery.isEmpty()) {
                                                 Text(
-                                                    text = "Tìm camera...",
+                                                    text = if (isEn) "Search camera..." else "Tìm camera...",
                                                     color = placeholderColor,
                                                     fontSize = 13.sp
                                                 )
@@ -532,7 +535,7 @@ fun MonitorScreen(
                                             ) {
                                                 Icon(
                                                     imageVector = LucideIcons.X,
-                                                    contentDescription = "Xóa tìm kiếm",
+                                                    contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm",
                                                     tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                                                     modifier = Modifier.size(11.dp)
                                                 )
@@ -623,7 +626,11 @@ fun MonitorScreen(
                                     ) {
                                         Icon(
                                             imageVector = LucideIcons.ChevronDown,
-                                            contentDescription = if (isControlsExpanded) "Thu gọn bộ lọc" else "Mở rộng bộ lọc",
+                                            contentDescription = if (isEn) {
+                                                if (isControlsExpanded) "Collapse filters" else "Expand filters"
+                                            } else {
+                                                if (isControlsExpanded) "Thu gọn bộ lọc" else "Mở rộng bộ lọc"
+                                            },
                                             tint = if (isControlsExpanded || hasActiveCustomControl) BrandAccent else mutedText,
                                             modifier = Modifier
                                                 .size(15.dp)
@@ -742,7 +749,9 @@ fun MonitorScreen(
                                     .padding(16.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CommonEmptyState(text = "Không tìm thấy camera phù hợp")
+                                CommonEmptyState(
+                                    text = if (isEn) "No matching cameras found" else "Không tìm thấy camera phù hợp"
+                                )
                             }
                         } else {
                             LazyVerticalGrid(
@@ -1112,6 +1121,7 @@ private fun MobileCameraSnapshotCard(
 
             // .cam-card-overlay-badge -> .cam-playing-badge
             if (isPlaying) {
+                val isEn = rememberIsEnglish()
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -1126,7 +1136,7 @@ private fun MobileCameraSnapshotCard(
                     ) {
                         PlayingEqualizerBars()
                         Text(
-                            text = "Đang xem",
+                            text = if (isEn) "Playing" else "Đang xem",
                             color = Color.White,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -1322,13 +1332,14 @@ private fun MobileGroupFilterBottomSheet(
 
                 // Sheet Body
                 if (rows.isEmpty()) {
+                    val isEn = rememberIsEnglish()
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(160.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CommonEmptyState(text = "Không có nhóm camera con")
+                        CommonEmptyState(text = if (isEn) "No camera subgroups" else "Không có nhóm camera con")
                     }
                 } else {
                     LazyColumn(
@@ -1550,6 +1561,7 @@ fun CameraGridItem(
 
         // Error Overlay (chạm để tải lại luồng live giống reloadStream trong LiveVideoView.vue)
         if (hasError) {
+            val isEn = rememberIsEnglish()
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1562,9 +1574,9 @@ fun CameraGridItem(
                 contentAlignment = Alignment.Center
             ) {
                 val errorMsg = when {
-                    selectedCamera.streamUrl.startsWith("error://no-video") -> "Không có tín hiệu"
-                    selectedCamera.streamUrl.startsWith("error://failed") -> "Lỗi kết nối camera"
-                    else -> "Lỗi tải video"
+                    selectedCamera.streamUrl.startsWith("error://no-video") -> if (isEn) "No signal" else "Không có tín hiệu"
+                    selectedCamera.streamUrl.startsWith("error://failed") -> if (isEn) "Camera connection error" else "Lỗi kết nối camera"
+                    else -> if (isEn) "Video load error" else "Lỗi tải video"
                 }
                 CommonEmptyState(text = errorMsg)
             }

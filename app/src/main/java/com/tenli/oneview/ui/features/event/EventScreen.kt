@@ -39,6 +39,7 @@ import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.theme.LucideIcons
 
@@ -50,6 +51,7 @@ fun EventScreen(
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isEn = rememberIsEnglish()
     var isRefreshing by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
@@ -113,7 +115,7 @@ fun EventScreen(
             rightAction = {
                 MobileTopActionButton(
                     icon = LucideIcons.ListFilter,
-                    contentDescription = "Bộ lọc",
+                    contentDescription = if (isEn) "Filter" else "Bộ lọc",
                     hasActiveDot = hasActiveFilter,
                     onClick = { showFilterSheet = true }
                 )
@@ -152,7 +154,9 @@ fun EventScreen(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CommonEmptyState(text = "Không tìm thấy sự kiện nào")
+                            CommonEmptyState(
+                                text = if (isEn) "No events found" else "Không tìm thấy sự kiện nào"
+                            )
                         }
                     }
                 } else {

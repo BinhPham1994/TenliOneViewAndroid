@@ -94,19 +94,20 @@ class LoginViewModel(
         val email = _uiState.value.email.trim()
         val domain = _uiState.value.domain.trim()
         val password = _uiState.value.password
+        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(getApplication()).startsWith("en")
         
         if (domain.isEmpty()) {
-            MobileTopPopupManager.error("Vui lòng nhập domain dự án")
+            MobileTopPopupManager.error(if (isEn) "Please enter project domain" else "Vui lòng nhập domain dự án")
             return
         }
         
         if (email.isEmpty()) {
-            MobileTopPopupManager.error("Vui lòng nhập tên đăng nhập")
+            MobileTopPopupManager.error(if (isEn) "Please enter username" else "Vui lòng nhập tên đăng nhập")
             return
         }
 
         if (password.isEmpty()) {
-            MobileTopPopupManager.error("Vui lòng nhập mật khẩu")
+            MobileTopPopupManager.error(if (isEn) "Please enter password" else "Vui lòng nhập mật khẩu")
             return
         }
 
@@ -124,31 +125,31 @@ class LoginViewModel(
                         handleLoginSuccess(loginData, domain)
                         _event.emit(LoginEvent.LoginSuccess)
                     } else {
-                        MobileTopPopupManager.error("Dữ liệu phản hồi rỗng")
+                        MobileTopPopupManager.error(if (isEn) "Empty response data" else "Dữ liệu phản hồi rỗng")
                     }
                 } else {
                     val exception = result.exceptionOrNull()
                     val errorMsg = exception?.message ?: "Unknown error"
                     
                     val msg = if (errorMsg.contains("failed with code 401") || errorMsg.contains("failed with code 400") || errorMsg.contains("Failed to authenticate")) {
-                        "Thông tin đăng nhập không chính xác"
+                        if (isEn) "Invalid login credentials" else "Thông tin đăng nhập không chính xác"
                     } else if (exception is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
-                        "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
+                        if (isEn) "Cannot connect to server. Please check your connection." else "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
                     } else if (exception is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
-                        "Kết nối mạng quá hạn, vui lòng thử lại."
+                        if (isEn) "Connection timed out, please try again." else "Kết nối mạng quá hạn, vui lòng thử lại."
                     } else {
-                        "Thông tin đăng nhập không chính xác"
+                        if (isEn) "Invalid login credentials" else "Thông tin đăng nhập không chính xác"
                     }
                     MobileTopPopupManager.error(msg)
                 }
             } catch (e: Exception) {
                 val errorMsg = e.message ?: ""
                 val msg = if (e is java.net.UnknownHostException || errorMsg.contains("Unable to resolve host")) {
-                    "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
+                    if (isEn) "Cannot connect to server. Please check your connection." else "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
                 } else if (e is java.net.SocketTimeoutException || errorMsg.contains("timeout")) {
-                    "Kết nối mạng quá hạn, vui lòng thử lại."
+                    if (isEn) "Connection timed out, please try again." else "Kết nối mạng quá hạn, vui lòng thử lại."
                 } else {
-                    "Có lỗi xảy ra, vui lòng thử lại sau."
+                    if (isEn) "An error occurred, please try again later." else "Có lỗi xảy ra, vui lòng thử lại sau."
                 }
                 MobileTopPopupManager.error(msg)
             } finally {

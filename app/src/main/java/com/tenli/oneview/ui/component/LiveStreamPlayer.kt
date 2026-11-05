@@ -255,6 +255,7 @@ fun LiveStreamPlayer(
         )
 
         if (showInternalOverlay && !isPlaying) {
+            val isEn = rememberIsEnglish()
             Box(Modifier.fillMaxSize(), Alignment.Center) {
                 if (isError) {
                     androidx.compose.foundation.layout.Column(
@@ -263,13 +264,13 @@ fun LiveStreamPlayer(
                     ) {
                         androidx.compose.material3.Icon(
                             imageVector = Icons.Outlined.Videocam,
-                            contentDescription = "Lỗi phát",
+                            contentDescription = if (isEn) "Playback error" else "Lỗi phát",
                             tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.size(48.dp)
                         )
                         androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
                         androidx.compose.material3.Text(
-                            text = "Không thể phát video",
+                            text = if (isEn) "Cannot play video" else "Không thể phát video",
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                         )

@@ -52,6 +52,7 @@ import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
@@ -67,6 +68,7 @@ fun HomeScreen(
     onEventClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isEn = rememberIsEnglish()
     var isRefreshing by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
@@ -102,7 +104,7 @@ fun HomeScreen(
             rightAction = {
                 MobileTopActionButton(
                     icon = LucideIcons.ListFilter,
-                    contentDescription = "Bộ lọc",
+                    contentDescription = if (isEn) "Filter" else "Bộ lọc",
                     hasActiveDot = hasActiveFilter,
                     onClick = { showFilterSheet = true }
                 )
@@ -203,7 +205,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             MobileStatCard(
-                                label = "TỔNG SỰ KIỆN",
+                                label = if (isEn) "TOTAL EVENTS" else "TỔNG SỰ KIỆN",
                                 mainValue = totalEventsStr,
                                 subValue = null,
                                 accentColor = Color(0xFF0980EE),
@@ -212,7 +214,7 @@ fun HomeScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             MobileStatCard(
-                                label = "CAMERA HOẠT ĐỘNG",
+                                label = if (isEn) "ONLINE CAMERAS" else "CAMERA HOẠT ĐỘNG",
                                 mainValue = onlineCameras.toString(),
                                 subValue = "/$totalCameras",
                                 accentColor = Color(0xFF10B981),
@@ -226,7 +228,7 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             MobileStatCard(
-                                label = "BÀI AI ĐANG CHẠY",
+                                label = if (isEn) "ACTIVE AI TASKS" else "BÀI AI ĐANG CHẠY",
                                 mainValue = uiState.runningAiTasks.toString(),
                                 subValue = "/${uiState.totalAiTasks}",
                                 accentColor = Color(0xFFA855F7),
@@ -235,7 +237,7 @@ fun HomeScreen(
                                 modifier = Modifier.weight(1f)
                             )
                             MobileStatCard(
-                                label = "CAMERA GHI HÌNH",
+                                label = if (isEn) "RECORDING CAMERAS" else "CAMERA GHI HÌNH",
                                 mainValue = recordingCameras.toString(),
                                 subValue = "/$totalCameras",
                                 accentColor = Color(0xFF0EA5E9),
@@ -258,7 +260,7 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Sự kiện gần đây",
+                            text = if (isEn) "Recent events" else "Sự kiện gần đây",
                             fontSize = 17.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
@@ -292,7 +294,9 @@ fun HomeScreen(
                                 .height(220.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            CommonEmptyState(text = "Không có sự kiện nào trong khoảng thời gian này")
+                            CommonEmptyState(
+                                text = if (isEn) "No events in this time range" else "Không có sự kiện nào trong khoảng thời gian này"
+                            )
                         }
                     }
                 } else {
