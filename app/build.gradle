@@ -24,7 +24,7 @@ android {
         versionName "1.0.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         
-        manifestPlaceholders = [appName: "AI OneView",
+        manifestPlaceholders = [appName: "Tenli OneView",
                                 appIcon: "@mipmap/app_icon"]
         buildConfigField "String", "DOMAIN_CLOUD", "\"https://app.tenli.ai/api/v1/\""
         buildConfigField "String", "CLIENT_ID", "\"ysJhBedR7PDrVRpE\""

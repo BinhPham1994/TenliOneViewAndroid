@@ -56,13 +56,17 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
         UserSession.clear()
         
         val prefs = GlobalData.preferences
+        val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
         prefs.edit().apply {
             remove(AppKeys.ACCESS_TOKEN_KEY)
             remove(AppKeys.REFRESH_TOKEN_KEY)
             remove(AppKeys.USER_DATA_KEY)
-            remove(AppKeys.USERNAME_KEY)
-            remove(AppKeys.PASSWORD_KEY)
-            remove("DOMAIN_KEY")
+            remove(AppKeys.GROUP_ID)
+            remove(AppKeys.GROUP_ID_CAMERA)
+            if (!rememberMe) {
+                remove(AppKeys.USERNAME_KEY)
+                remove(AppKeys.PASSWORD_KEY)
+            }
             apply()
         }
         

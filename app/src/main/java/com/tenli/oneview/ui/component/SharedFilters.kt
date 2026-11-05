@@ -55,6 +55,10 @@ fun TimeFilterDropdown(
     onFilterSelected: (TimeFilter) -> Unit
 ) {
     var showBottomSheet by remember { mutableStateOf(false) }
+    var showCustomDateModal by remember { mutableStateOf(false) }
+    var showCustomRangeModal by remember { mutableStateOf(false) }
+    var customPickerVersion by remember { mutableStateOf(0) }
+    val isDark = rememberIsDarkTheme()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
@@ -74,8 +78,11 @@ fun TimeFilterDropdown(
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
+            val labelText = remember(selectedFilter, customPickerVersion) {
+                TimeFilter.formatDisplayLabel(selectedFilter, false)
+            }
             Text(
-                text = selectedFilter.title,
+                text = labelText,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onBackground
             )
@@ -147,7 +154,11 @@ fun TimeFilterDropdown(
                                             .background(if (isSelected) BrandPrimary.copy(alpha = 0.1f) else Color.Transparent)
                                             .clickable {
                                                 showBottomSheet = false
-                                                onFilterSelected(filter)
+                                                when (filter) {
+                                                    TimeFilter.CUSTOM_DATE -> showCustomDateModal = true
+                                                    TimeFilter.CUSTOM_RANGE -> showCustomRangeModal = true
+                                                    else -> onFilterSelected(filter)
+                                                }
                                             }
                                             .padding(16.dp),
                                         verticalAlignment = Alignment.CenterVertically
@@ -175,6 +186,37 @@ fun TimeFilterDropdown(
                     }
                 }
             }
+        }
+
+        if (showCustomDateModal) {
+            CustomDatePickerDialogModal(
+                initialMillis = TimeFilter.customDateStartMs,
+                isEn = false,
+                isDark = isDark,
+                onDismiss = { showCustomDateModal = false },
+                onConfirm = { pickedMillis ->
+                    TimeFilter.setCustomDate(pickedMillis)
+                    customPickerVersion++
+                    showCustomDateModal = false
+                    onFilterSelected(TimeFilter.CUSTOM_DATE)
+                }
+            )
+        }
+
+        if (showCustomRangeModal) {
+            CustomRangePickerDialogModal(
+                initialFromMillis = TimeFilter.customRangeFromMs,
+                initialToMillis = TimeFilter.customRangeToMs,
+                isEn = false,
+                isDark = isDark,
+                onDismiss = { showCustomRangeModal = false },
+                onConfirm = { fromMillis, toMillis ->
+                    TimeFilter.setCustomRange(fromMillis, toMillis)
+                    customPickerVersion++
+                    showCustomRangeModal = false
+                    onFilterSelected(TimeFilter.CUSTOM_RANGE)
+                }
+            )
         }
     }
 }

@@ -59,7 +59,7 @@ object EventCacheManager {
         val servicePart = serviceId?.toString() ?: "all"
         val aiTypePart = aiType ?: "all"
         val cameraPart = cameraUuid ?: "all"
-        return "${filter.name}_${servicePart}_${aiTypePart}_${cameraPart}"
+        return "${TimeFilter.cacheKeyToken(filter)}_${servicePart}_${aiTypePart}_${cameraPart}"
     }
 
     fun cacheInMemory(

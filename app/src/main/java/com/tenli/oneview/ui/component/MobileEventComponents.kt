@@ -388,20 +388,34 @@ private fun MobileTopPopupFilledIcon(
     }
 }
 
+private class MobileOverlayEntry(
+    val key: Any,
+    var content: @Composable () -> Unit
+) {
+    var isVisible by mutableStateOf(false)
+    var isClosing by mutableStateOf(false)
+}
+
 class MobileOverlayHostState {
-    private val entries = mutableStateListOf<Pair<Any, @Composable () -> Unit>>()
+    private val entries = mutableStateListOf<MobileOverlayEntry>()
 
     fun show(key: Any, content: @Composable () -> Unit) {
-        val idx = entries.indexOfFirst { it.first == key }
+        val idx = entries.indexOfFirst { it.key == key }
         if (idx >= 0) {
-            entries[idx] = key to content
+            entries[idx].content = content
+            entries[idx].isClosing = false
+            entries[idx].isVisible = true
         } else {
-            entries.add(key to content)
+            entries.add(MobileOverlayEntry(key, content))
         }
     }
 
     fun hide(key: Any) {
-        entries.removeAll { it.first == key }
+        val idx = entries.indexOfFirst { it.key == key }
+        if (idx >= 0) {
+            entries[idx].isClosing = true
+            entries[idx].isVisible = false
+        }
     }
 
     val hasOverlays: Boolean
@@ -409,8 +423,54 @@ class MobileOverlayHostState {
 
     @Composable
     fun Content() {
-        entries.forEach { (_, entryContent) ->
-            entryContent()
+        entries.forEach { entry ->
+            androidx.compose.runtime.key(entry.key) {
+                LaunchedEffect(entry.key) {
+                    if (!entry.isClosing) {
+                        entry.isVisible = true
+                    }
+                }
+                LaunchedEffect(entry.isClosing) {
+                    if (entry.isClosing) {
+                        delay(330)
+                        entries.remove(entry)
+                    }
+                }
+
+                // Lớp nền mờ toàn màn hình fade in / fade out mượt mà
+                AnimatedVisibility(
+                    visible = entry.isVisible,
+                    enter = fadeIn(animationSpec = tween(durationMillis = 300)),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 280))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f))
+                    )
+                }
+
+                // Nội dung Bottom Sheet trượt từ dưới lên khi hiện và trượt từ trên xuống khi ẩn
+                AnimatedVisibility(
+                    visible = entry.isVisible,
+                    enter = slideInVertically(
+                        initialOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = tween(
+                            durationMillis = 380,
+                            easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                        )
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { fullHeight -> fullHeight },
+                        animationSpec = tween(
+                            durationMillis = 320,
+                            easing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+                        )
+                    )
+                ) {
+                    entry.content()
+                }
+            }
         }
     }
 }
@@ -441,7 +501,13 @@ fun MobileFullScreenOverlay(
             }
         }
     } else {
-        content()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+        ) {
+            content()
+        }
     }
 }
 
@@ -627,8 +693,11 @@ fun MobileEventCard(
         AiTypeHelper.formatRelativeTime(event.time, isEn)
     }
 
-    val cardBgColor = if (isDark) SurfaceDark else SurfaceLight
-    val selectedBorderColor = if (isDark) BrandAccent else BrandPrimary
+    val cardBgColor = if (isSelected) {
+        if (isDark) Color(0xFF1E3A5F) else Color(0xFFDCEBFF)
+    } else {
+        if (isDark) SurfaceDark else SurfaceLight
+    }
 
     val sharedTransitionScope = com.tenli.oneview.ui.navigation.LocalSharedTransitionScope.current
     val animatedVisibilityScope = com.tenli.oneview.ui.navigation.LocalAnimatedVisibilityScope.current
@@ -644,10 +713,6 @@ fun MobileEventCard(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .background(cardBgColor)
-                .then(
-                    if (isSelected) Modifier.border(1.5.dp, selectedBorderColor, RoundedCornerShape(12.dp))
-                    else Modifier
-                )
                 .clickable(onClick = onClick)
                 .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -764,10 +829,6 @@ fun MobileEventCard(
             .aspectRatio(16f / 9f)
             .clip(RoundedCornerShape(12.dp))
             .background(cardBgColor)
-            .then(
-                if (isSelected) Modifier.border(1.5.dp, selectedBorderColor, RoundedCornerShape(12.dp))
-                else Modifier
-            )
             .clickable(onClick = onClick)
 
         if (enableSharedElement && sharedTransitionScope != null && animatedVisibilityScope != null) {
@@ -964,6 +1025,9 @@ fun MobileFilterBottomSheet(
     var draftTimeFilter by remember(selectedTimeFilter) { mutableStateOf(selectedTimeFilter) }
     var draftCameraUuid by remember(selectedCameraUuid) { mutableStateOf(selectedCameraUuid) }
     var draftAiType by remember(selectedAiType) { mutableStateOf(selectedAiType) }
+    var customPickerVersion by remember { mutableStateOf(0) }
+    var showCustomDateModal by remember { mutableStateOf(false) }
+    var showCustomRangeModal by remember { mutableStateOf(false) }
 
     // Active anchored dropdown state: null, "scope", "time", "camera", "event"
     var activePicker by remember { mutableStateOf<String?>(null) }
@@ -988,7 +1052,6 @@ fun MobileFilterBottomSheet(
             modifier = Modifier
                 .fillMaxSize()
                 .onGloballyPositioned { rootCoords = it }
-                .background(Color.Black.copy(alpha = 0.38f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -1099,11 +1162,8 @@ fun MobileFilterBottomSheet(
 
                     // 2. Time Range
                     if (showTime) {
-                        val timeLabel = when (draftTimeFilter) {
-                            TimeFilter.TODAY -> if (isEn) "Today" else "Hôm nay"
-                            TimeFilter.YESTERDAY -> if (isEn) "Yesterday" else "Hôm qua"
-                            TimeFilter.LAST_7_DAYS -> if (isEn) "Last 7 days" else "7 ngày qua"
-                            TimeFilter.LAST_30_DAYS -> if (isEn) "Last 30 days" else "30 ngày qua"
+                        val timeLabel = remember(draftTimeFilter, customPickerVersion, isEn) {
+                            TimeFilter.formatDisplayLabel(draftTimeFilter, isEn)
                         }
                         FilterCellRow(
                             icon = LucideIcons.Clock,
@@ -1265,7 +1325,8 @@ fun MobileFilterBottomSheet(
                             TimeFilter.TODAY to (if (isEn) "Today" else "Hôm nay"),
                             TimeFilter.YESTERDAY to (if (isEn) "Yesterday" else "Hôm qua"),
                             TimeFilter.LAST_7_DAYS to (if (isEn) "Last 7 days" else "7 ngày qua"),
-                            TimeFilter.LAST_30_DAYS to (if (isEn) "Last 30 days" else "30 ngày qua")
+                            TimeFilter.CUSTOM_DATE to (if (isEn) "Select date" else "Tùy chọn ngày"),
+                            TimeFilter.CUSTOM_RANGE to (if (isEn) "Custom" else "Tùy chỉnh")
                         )
                         AnchoredFilterDropdownMenu(
                             anchorRect = anchorRect,
@@ -1273,9 +1334,13 @@ fun MobileFilterBottomSheet(
                             options = options,
                             selectedKey = draftTimeFilter,
                             isDark = isDark,
-                            onSelect = {
-                                draftTimeFilter = it
+                            onSelect = { selected ->
                                 activePicker = null
+                                when (selected) {
+                                    TimeFilter.CUSTOM_DATE -> showCustomDateModal = true
+                                    TimeFilter.CUSTOM_RANGE -> showCustomRangeModal = true
+                                    else -> draftTimeFilter = selected
+                                }
                             }
                         )
                     }
@@ -1319,6 +1384,37 @@ fun MobileFilterBottomSheet(
                         )
                     }
                 }
+            }
+
+            if (showCustomDateModal) {
+                CustomDatePickerDialogModal(
+                    initialMillis = TimeFilter.customDateStartMs,
+                    isEn = isEn,
+                    isDark = isDark,
+                    onDismiss = { showCustomDateModal = false },
+                    onConfirm = { pickedMillis ->
+                        TimeFilter.setCustomDate(pickedMillis)
+                        draftTimeFilter = TimeFilter.CUSTOM_DATE
+                        customPickerVersion++
+                        showCustomDateModal = false
+                    }
+                )
+            }
+
+            if (showCustomRangeModal) {
+                CustomRangePickerDialogModal(
+                    initialFromMillis = TimeFilter.customRangeFromMs,
+                    initialToMillis = TimeFilter.customRangeToMs,
+                    isEn = isEn,
+                    isDark = isDark,
+                    onDismiss = { showCustomRangeModal = false },
+                    onConfirm = { fromMillis, toMillis ->
+                        TimeFilter.setCustomRange(fromMillis, toMillis)
+                        draftTimeFilter = TimeFilter.CUSTOM_RANGE
+                        customPickerVersion++
+                        showCustomRangeModal = false
+                    }
+                )
             }
         }
     }
@@ -1485,6 +1581,367 @@ private fun <K> AnchoredFilterDropdownMenu(
                             contentDescription = null,
                             tint = BrandAccent,
                             modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CustomDatePickerDialogModal(
+    initialMillis: Long,
+    isEn: Boolean,
+    isDark: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    val context = LocalContext.current
+    var selectedMillis by remember(initialMillis) { mutableStateOf(initialMillis) }
+    val dateFmt = remember { java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()) }
+
+    val cardBg = if (isDark) SurfaceDark else SurfaceLight
+    val fieldBg = if (isDark) Color.White.copy(alpha = 0.06f) else Color(0xFFF3F4F7)
+    val textColor = if (isDark) TextPrimaryDark else TextTitleLight
+    val subColor = if (isDark) TextSecondaryDark else TextSecondary
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = cardBg,
+            shadowElevation = 16.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = if (isEn) "Select Date" else "Tùy chọn ngày",
+                    color = textColor,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = if (isEn) "Choose a date to filter events (00:00 - 23:59)" else "Chọn ngày cần tra cứu dữ liệu (00:00 - 23:59)",
+                    color = subColor,
+                    fontSize = 13.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(fieldBg)
+                        .clickable {
+                            val cal = java.util.Calendar.getInstance().apply { timeInMillis = selectedMillis }
+                            android.app.DatePickerDialog(
+                                context,
+                                { _, year, month, dayOfMonth ->
+                                    val c = java.util.Calendar.getInstance().apply {
+                                        set(java.util.Calendar.YEAR, year)
+                                        set(java.util.Calendar.MONTH, month)
+                                        set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                                    }
+                                    selectedMillis = c.timeInMillis
+                                },
+                                cal.get(java.util.Calendar.YEAR),
+                                cal.get(java.util.Calendar.MONTH),
+                                cal.get(java.util.Calendar.DAY_OF_MONTH)
+                            ).show()
+                        }
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.Clock,
+                            contentDescription = null,
+                            tint = BrandAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = dateFmt.format(java.util.Date(selectedMillis)),
+                            color = textColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Text(
+                        text = if (isEn) "Change" else "Chọn lịch",
+                        color = BrandAccent,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = fieldBg,
+                            contentColor = subColor
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(0.dp)
+                    ) {
+                        Text(
+                            text = if (isEn) "Cancel" else "Hủy",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Button(
+                        onClick = { onConfirm(selectedMillis) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = Color.White
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(0.dp)
+                    ) {
+                        Text(
+                            text = if (isEn) "Confirm" else "Xác nhận",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CustomRangePickerDialogModal(
+    initialFromMillis: Long,
+    initialToMillis: Long,
+    isEn: Boolean,
+    isDark: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Long, Long) -> Unit
+) {
+    val context = LocalContext.current
+    var fromMillis by remember(initialFromMillis) { mutableStateOf(initialFromMillis) }
+    var toMillis by remember(initialToMillis) { mutableStateOf(initialToMillis) }
+    val dateFmt = remember { java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()) }
+    val timeFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+
+    val cardBg = if (isDark) SurfaceDark else SurfaceLight
+    val fieldBg = if (isDark) Color.White.copy(alpha = 0.06f) else Color(0xFFF3F4F7)
+    val textColor = if (isDark) TextPrimaryDark else TextTitleLight
+    val subColor = if (isDark) TextSecondaryDark else TextSecondary
+
+    fun pickDate(currentMs: Long, onResult: (Long) -> Unit) {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = currentMs }
+        android.app.DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val c = java.util.Calendar.getInstance().apply {
+                    timeInMillis = currentMs
+                    set(java.util.Calendar.YEAR, year)
+                    set(java.util.Calendar.MONTH, month)
+                    set(java.util.Calendar.DAY_OF_MONTH, dayOfMonth)
+                }
+                onResult(c.timeInMillis)
+            },
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH),
+            cal.get(java.util.Calendar.DAY_OF_MONTH)
+        ).show()
+    }
+
+    fun pickTime(currentMs: Long, onResult: (Long) -> Unit) {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = currentMs }
+        android.app.TimePickerDialog(
+            context,
+            { _, hourOfDay, minute ->
+                val c = java.util.Calendar.getInstance().apply {
+                    timeInMillis = currentMs
+                    set(java.util.Calendar.HOUR_OF_DAY, hourOfDay)
+                    set(java.util.Calendar.MINUTE, minute)
+                    set(java.util.Calendar.SECOND, 0)
+                }
+                onResult(c.timeInMillis)
+            },
+            cal.get(java.util.Calendar.HOUR_OF_DAY),
+            cal.get(java.util.Calendar.MINUTE),
+            true
+        ).show()
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = cardBg,
+            shadowElevation = 16.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                Text(
+                    text = if (isEn) "Custom Time Range" else "Tùy chỉnh thời gian",
+                    color = textColor,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = if (isEn) "From" else "Từ thời gian",
+                    color = subColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1.4f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(fieldBg)
+                            .clickable { pickDate(fromMillis) { fromMillis = it } }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = dateFmt.format(java.util.Date(fromMillis)),
+                            color = textColor,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(fieldBg)
+                            .clickable { pickTime(fromMillis) { fromMillis = it } }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = timeFmt.format(java.util.Date(fromMillis)),
+                            color = textColor,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (isEn) "To" else "Đến thời gian",
+                    color = subColor,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1.4f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(fieldBg)
+                            .clickable { pickDate(toMillis) { toMillis = it } }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = dateFmt.format(java.util.Date(toMillis)),
+                            color = textColor,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(fieldBg)
+                            .clickable { pickTime(toMillis) { toMillis = it } }
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            text = timeFmt.format(java.util.Date(toMillis)),
+                            color = textColor,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = fieldBg,
+                            contentColor = subColor
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(0.dp)
+                    ) {
+                        Text(
+                            text = if (isEn) "Cancel" else "Hủy",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Button(
+                        onClick = { onConfirm(fromMillis, toMillis) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandPrimary,
+                            contentColor = Color.White
+                        ),
+                        elevation = ButtonDefaults.buttonElevation(0.dp)
+                    ) {
+                        Text(
+                            text = if (isEn) "Confirm" else "Xác nhận",
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }

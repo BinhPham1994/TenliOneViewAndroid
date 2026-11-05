@@ -36,7 +36,7 @@ object HomeCacheManager {
 
     private fun cacheKey(filter: TimeFilter, serviceId: Int?): String {
         val servicePart = serviceId?.toString() ?: "all"
-        return "${filter.name}_${servicePart}"
+        return "${TimeFilter.cacheKeyToken(filter)}_${servicePart}"
     }
 
     private fun getCacheFile(context: Context, filter: TimeFilter, serviceId: Int?): File {

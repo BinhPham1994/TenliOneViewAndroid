@@ -57,7 +57,18 @@ class MainViewModel(
             _uiState.update { it.copy(isLoading = true) }
 
             UserSession.clear()
-            GlobalData.preferences.edit { clear() }
+            val rememberMe = GlobalData.preferences.getBoolean(com.tenli.oneview.ui.utils.AppKeys.REMEMBER_ME_KEY, false)
+            GlobalData.preferences.edit {
+                remove(com.tenli.oneview.ui.utils.AppKeys.ACCESS_TOKEN_KEY)
+                remove(com.tenli.oneview.ui.utils.AppKeys.REFRESH_TOKEN_KEY)
+                remove(com.tenli.oneview.ui.utils.AppKeys.USER_DATA_KEY)
+                remove(com.tenli.oneview.ui.utils.AppKeys.GROUP_ID)
+                remove(com.tenli.oneview.ui.utils.AppKeys.GROUP_ID_CAMERA)
+                if (!rememberMe) {
+                    remove(com.tenli.oneview.ui.utils.AppKeys.USERNAME_KEY)
+                    remove(com.tenli.oneview.ui.utils.AppKeys.PASSWORD_KEY)
+                }
+            }
             
             // Clear all local caches
             com.tenli.oneview.data.local.HomeCacheManager.clearCache(getApplication())

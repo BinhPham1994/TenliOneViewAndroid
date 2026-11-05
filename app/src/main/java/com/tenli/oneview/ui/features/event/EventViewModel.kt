@@ -254,7 +254,9 @@ class EventViewModel(
         aiType: String?,
         cameraUuid: String? = _uiState.value.selectedCameraUuid
     ) {
-        if (_uiState.value.selectedFilter == filter &&
+        val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
+        if (!isCustom &&
+            _uiState.value.selectedFilter == filter &&
             _uiState.value.selectedServiceId == serviceId &&
             _uiState.value.selectedCameraUuid == cameraUuid &&
             _uiState.value.selectedAiType == aiType
@@ -280,39 +282,7 @@ class EventViewModel(
     }
 
     private fun getTimeRange(): Pair<Long, Long> {
-        val calendar = java.util.Calendar.getInstance()
-        val toTime: Long
-        val fromTime: Long
-
-        when (_uiState.value.selectedFilter) {
-            TimeFilter.TODAY -> {
-                toTime = calendar.timeInMillis
-                calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                calendar.set(java.util.Calendar.MINUTE, 0)
-                calendar.set(java.util.Calendar.SECOND, 0)
-                calendar.set(java.util.Calendar.MILLISECOND, 0)
-                fromTime = calendar.timeInMillis
-            }
-            TimeFilter.YESTERDAY -> {
-                calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                calendar.set(java.util.Calendar.MINUTE, 0)
-                calendar.set(java.util.Calendar.SECOND, 0)
-                calendar.set(java.util.Calendar.MILLISECOND, 0)
-                toTime = calendar.timeInMillis - 1
-                calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
-                fromTime = calendar.timeInMillis
-            }
-            TimeFilter.LAST_7_DAYS -> {
-                toTime = calendar.timeInMillis
-                calendar.add(java.util.Calendar.DAY_OF_YEAR, -7)
-                fromTime = calendar.timeInMillis
-            }
-            TimeFilter.LAST_30_DAYS -> {
-                toTime = calendar.timeInMillis
-                calendar.add(java.util.Calendar.DAY_OF_YEAR, -30)
-                fromTime = calendar.timeInMillis
-            }
-        }
+        val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(_uiState.value.selectedFilter)
         return Pair(fromTime / 1000, toTime / 1000)
     }
 

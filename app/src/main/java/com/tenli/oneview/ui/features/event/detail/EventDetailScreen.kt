@@ -184,6 +184,9 @@ fun EventDetailScreen(
     var expandedCropUrl by remember(eventId) { mutableStateOf<String?>(null) }
     var showConfirmReportDialog by remember(eventId) { mutableStateOf(false) }
     var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
+    var showCustomDateModal by remember(eventId) { mutableStateOf(false) }
+    var showCustomRangeModal by remember(eventId) { mutableStateOf(false) }
+    var customPickerVersion by remember(eventId) { mutableStateOf(0) }
 
     val listState = rememberLazyListState()
     val haptic = LocalHapticFeedback.current
@@ -637,7 +640,7 @@ fun EventDetailScreen(
 
                     // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
                     // Supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
-                    val mediaViewportBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
+                    val mediaViewportBg = cardBgColor
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1285,6 +1288,21 @@ fun EventDetailScreen(
                                                     val currentPainter = painter
                                                     val state = currentPainter.state
                                                     if (state is AsyncImagePainter.State.Success) {
+                                                        val isThisCropExpanded = expandedCropUrl == url
+                                                        var keepPopupMounted by remember(url) { mutableStateOf(false) }
+                                                        var animateIn by remember(url) { mutableStateOf(false) }
+
+                                                        LaunchedEffect(isThisCropExpanded) {
+                                                            if (isThisCropExpanded) {
+                                                                keepPopupMounted = true
+                                                                animateIn = true
+                                                            } else if (keepPopupMounted) {
+                                                                animateIn = false
+                                                                kotlinx.coroutines.delay(180)
+                                                                keepPopupMounted = false
+                                                            }
+                                                        }
+
                                                         Box {
                                                             androidx.compose.foundation.Image(
                                                                 painter = currentPainter,
@@ -1304,9 +1322,29 @@ fun EventDetailScreen(
                                                                 contentScale = ContentScale.Crop
                                                             )
 
-                                                            if (expandedCropUrl == url) {
+                                                            if (keepPopupMounted) {
+                                                                val popupScale by animateFloatAsState(
+                                                                    targetValue = if (animateIn) 1f else 0.65f,
+                                                                    animationSpec = tween(
+                                                                        durationMillis = if (animateIn) 240 else 170,
+                                                                        easing = if (animateIn) {
+                                                                            CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                                                                        } else {
+                                                                            CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+                                                                        }
+                                                                    ),
+                                                                    label = "cropZoomScale"
+                                                                )
+                                                                val popupAlpha by animateFloatAsState(
+                                                                    targetValue = if (animateIn) 1f else 0f,
+                                                                    animationSpec = tween(durationMillis = if (animateIn) 200 else 160),
+                                                                    label = "cropZoomAlpha"
+                                                                )
+                                                                val shadowPadPx = with(density) { 10.dp.roundToPx() }
+
                                                                 Popup(
-                                                                    alignment = Alignment.Center,
+                                                                    alignment = Alignment.CenterEnd,
+                                                                    offset = IntOffset(x = shadowPadPx, y = 0),
                                                                     onDismissRequest = { expandedCropUrl = null }
                                                                 ) {
                                                                     val intrinsicSize = currentPainter.intrinsicSize
@@ -1321,16 +1359,27 @@ fun EventDetailScreen(
                                                                         Modifier.size(156.dp)
                                                                     }
 
-                                                                    androidx.compose.foundation.Image(
-                                                                        painter = currentPainter,
-                                                                        contentDescription = "Zoomed Crop",
-                                                                        modifier = imgModifier
-                                                                            .shadow(16.dp, RoundedCornerShape(12.dp))
-                                                                            .clip(RoundedCornerShape(12.dp))
-                                                                            .background(Color(0xFF0F172A))
-                                                                            .clickable { expandedCropUrl = null },
-                                                                        contentScale = ContentScale.Fit
-                                                                    )
+                                                                    Box(
+                                                                        modifier = Modifier
+                                                                            .padding(10.dp)
+                                                                            .graphicsLayer {
+                                                                                scaleX = popupScale
+                                                                                scaleY = popupScale
+                                                                                alpha = popupAlpha
+                                                                                transformOrigin = TransformOrigin(1f, 0.5f)
+                                                                            }
+                                                                    ) {
+                                                                        androidx.compose.foundation.Image(
+                                                                            painter = currentPainter,
+                                                                            contentDescription = "Zoomed Crop",
+                                                                            modifier = imgModifier
+                                                                                .shadow(16.dp, RoundedCornerShape(12.dp))
+                                                                                .clip(RoundedCornerShape(12.dp))
+                                                                                .background(Color(0xFF0F172A))
+                                                                                .clickable { expandedCropUrl = null },
+                                                                            contentScale = ContentScale.Fit
+                                                                        )
+                                                                    }
                                                                 }
                                                             }
                                                         }
@@ -1360,8 +1409,8 @@ fun EventDetailScreen(
                                         // Download Image Button (.download-btn)
                                         PwaActionButton(
                                             icon = LucideIcons.Download,
-                                            tint = if (isDark) Color(0xFF38BDF8) else Color(0xFF0284C7),
-                                            bgColor = if (isDark) Color(0xFF0284C7).copy(alpha = 0.16f) else Color(0xFFE0F2FE),
+                                            tint = Color.White,
+                                            bgColor = Color(0xFF0980EE),
                                             onClick = {
                                                 val imgUrl = getEventImageUrl(event) ?: cropUrls.firstOrNull()
                                                 if (!imgUrl.isNullOrBlank()) {
@@ -1381,8 +1430,8 @@ fun EventDetailScreen(
                                         // Share Event Button (.share-btn)
                                         PwaActionButton(
                                             icon = LucideIcons.Share2,
-                                            tint = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
-                                            bgColor = if (isDark) Color(0xFF10B981).copy(alpha = 0.16f) else Color(0xFFD1FAE5),
+                                            tint = Color.White,
+                                            bgColor = Color(0xFF10B981),
                                             onClick = {
                                                 val imgUrl = getEventImageUrl(event).orEmpty()
                                                 val shareText = buildString {
@@ -1404,8 +1453,8 @@ fun EventDetailScreen(
                                         if (canShowRelatedPlates) {
                                             PwaActionButton(
                                                 icon = LucideIcons.Barcode,
-                                                tint = if (uiState.showRelatedPlates) Color.White else if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706),
-                                                bgColor = if (uiState.showRelatedPlates) Color(0xFFD97706) else if (isDark) Color(0xFFF59E0B).copy(alpha = 0.16f) else Color(0xFFFEF3C7),
+                                                tint = Color.White,
+                                                bgColor = if (uiState.showRelatedPlates) Color(0xFFD97706) else Color(0xFFF59E0B),
                                                 onClick = {
                                                     viewModel.toggleRelatedLicensePlates()
                                                 }
@@ -1415,8 +1464,8 @@ fun EventDetailScreen(
                                         // Report Wrong Event Button (.report-btn)
                                         PwaActionButton(
                                             icon = LucideIcons.AlertTriangle,
-                                            tint = ErrorRed,
-                                            bgColor = if (isDark) ErrorRed.copy(alpha = 0.16f) else Color(0xFFFEE2E2),
+                                            tint = Color.White,
+                                            bgColor = ErrorRed,
                                             onClick = {
                                                 showConfirmReportDialog = true
                                             }
@@ -1597,8 +1646,11 @@ fun EventDetailScreen(
                                             tint = sectionHeaderColor,
                                             modifier = Modifier.size(16.dp)
                                         )
+                                        val periodDisplayLabel = remember(uiState.selectedJourneyPeriod, customPickerVersion, isEn) {
+                                            uiState.selectedJourneyPeriod.formatDisplayLabel(isEn)
+                                        }
                                         Text(
-                                            text = if (isEn) uiState.selectedJourneyPeriod.labelEn else uiState.selectedJourneyPeriod.labelVi,
+                                            text = periodDisplayLabel,
                                             fontSize = 14.5.sp,
                                             fontWeight = FontWeight.Medium,
                                             color = if (isDark) TextPrimaryDark else TextPrimary
@@ -1645,11 +1697,46 @@ fun EventDetailScreen(
                                             },
                                             onClick = {
                                                 showPeriodMenu = false
-                                                viewModel.setJourneyPeriod(period)
+                                                when (period) {
+                                                    JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
+                                                    JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
+                                                    else -> viewModel.setJourneyPeriod(period)
+                                                }
                                             }
                                         )
                                     }
                                 }
+                            }
+
+                            if (showCustomDateModal) {
+                                com.tenli.oneview.ui.component.CustomDatePickerDialogModal(
+                                    initialMillis = com.tenli.oneview.ui.features.home.TimeFilter.customDateStartMs,
+                                    isEn = isEn,
+                                    isDark = isDark,
+                                    onDismiss = { showCustomDateModal = false },
+                                    onConfirm = { pickedMillis ->
+                                        com.tenli.oneview.ui.features.home.TimeFilter.setCustomDate(pickedMillis)
+                                        customPickerVersion++
+                                        showCustomDateModal = false
+                                        viewModel.setJourneyPeriod(JourneyPeriod.CUSTOM_DATE)
+                                    }
+                                )
+                            }
+
+                            if (showCustomRangeModal) {
+                                com.tenli.oneview.ui.component.CustomRangePickerDialogModal(
+                                    initialFromMillis = com.tenli.oneview.ui.features.home.TimeFilter.customRangeFromMs,
+                                    initialToMillis = com.tenli.oneview.ui.features.home.TimeFilter.customRangeToMs,
+                                    isEn = isEn,
+                                    isDark = isDark,
+                                    onDismiss = { showCustomRangeModal = false },
+                                    onConfirm = { fromMillis, toMillis ->
+                                        com.tenli.oneview.ui.features.home.TimeFilter.setCustomRange(fromMillis, toMillis)
+                                        customPickerVersion++
+                                        showCustomRangeModal = false
+                                        viewModel.setJourneyPeriod(JourneyPeriod.CUSTOM_RANGE)
+                                    }
+                                )
                             }
                         }
                     }
@@ -1700,41 +1787,18 @@ fun EventDetailScreen(
                                     .fillMaxWidth()
                                     .padding(horizontal = 10.dp, vertical = 5.dp)
                             ) {
-                                // Highlighted background matching .mobile-history-card-item.is-active (#e8f3ff in light, #1b2e4b in dark)
-                                if (isActive) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(if (isDark) Color(0xFF1B2E4B) else Color(0xFFE8F3FF))
-                                    ) {
-                                        MobileEventCard(
-                                            event = relEv,
-                                            cameraName = relCamName,
-                                            isListView = true,
-                                            isSelected = true,
-                                            enableSharedElement = false,
-                                            onClick = {
-                                                viewModel.selectBaseEvent(relEv)
-                                                selectedTab = EventMediaTab.EVENT_IMAGE
-                                                expandedCropUrl = null
-                                            }
-                                        )
+                                MobileEventCard(
+                                    event = relEv,
+                                    cameraName = relCamName,
+                                    isListView = true,
+                                    isSelected = isActive,
+                                    enableSharedElement = false,
+                                    onClick = {
+                                        viewModel.selectBaseEvent(relEv)
+                                        selectedTab = EventMediaTab.EVENT_IMAGE
+                                        expandedCropUrl = null
                                     }
-                                } else {
-                                    MobileEventCard(
-                                        event = relEv,
-                                        cameraName = relCamName,
-                                        isListView = true,
-                                        isSelected = false,
-                                        enableSharedElement = false,
-                                        onClick = {
-                                            viewModel.selectBaseEvent(relEv)
-                                            selectedTab = EventMediaTab.EVENT_IMAGE
-                                            expandedCropUrl = null
-                                        }
-                                    )
-                                }
+                                )
                             }
                         }
 

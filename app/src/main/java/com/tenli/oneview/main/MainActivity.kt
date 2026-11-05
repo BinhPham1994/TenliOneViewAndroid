@@ -425,8 +425,14 @@ fun PermissionExplanationDialog(
             }
         },
         dismissButton = {
-            TextButton(
+            Button(
                 onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.outlineVariant,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
@@ -434,7 +440,7 @@ fun PermissionExplanationDialog(
             ) {
                 Text(
                     text = "Để sau",
-                    color = MaterialTheme.colorScheme.outline
+                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                 )
             }
         }

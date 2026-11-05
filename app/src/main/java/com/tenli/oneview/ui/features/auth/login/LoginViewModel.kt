@@ -14,6 +14,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.model.network.LoginResponseData
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.util.DispatcherProvider
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -38,25 +39,35 @@ class LoginViewModel(
     private var notifyToken: String = ""
 
     init {
-        val savedDomain = GlobalData.preferences.getString("DOMAIN_KEY", "") ?: ""
-        val savedUser = GlobalData.preferences.getString(AppKeys.USERNAME_KEY, "") ?: ""
-        val savedPass = GlobalData.preferences.getString(AppKeys.PASSWORD_KEY, "") ?: ""
-        if (savedDomain.isNotEmpty() || savedUser.isNotEmpty()) {
-            _uiState.update {
-                it.copy(
-                    domain = savedDomain,
-                    email = savedUser,
-                    password = savedPass,
-                    isLoginActive = savedDomain.isNotEmpty() && savedUser.isNotEmpty() && savedPass.isNotEmpty()
-                )
-            }
-        }
+        loadSavedCredentials()
         viewModelScope.launch {
             try {
                 notifyToken = FirebaseMessaging.getInstance().token.await()
             } catch (_: Exception) {
             }
         }
+    }
+
+    fun loadSavedCredentials() {
+        val rememberMe = GlobalData.preferences.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
+        val savedDomain = GlobalData.preferences.getString("DOMAIN_KEY", "") ?: ""
+        val savedUser = if (rememberMe) GlobalData.preferences.getString(AppKeys.USERNAME_KEY, "") ?: "" else ""
+        val savedPass = if (rememberMe) GlobalData.preferences.getString(AppKeys.PASSWORD_KEY, "") ?: "" else ""
+        _uiState.update {
+            it.copy(
+                domain = savedDomain,
+                email = savedUser,
+                password = savedPass,
+                rememberMe = rememberMe,
+                showPassword = false,
+                errorMessage = null,
+                isLoginActive = savedDomain.isNotEmpty() && savedUser.isNotEmpty() && savedPass.isNotEmpty()
+            )
+        }
+    }
+
+    fun onRememberMeChanged(rememberMe: Boolean) {
+        _uiState.update { it.copy(rememberMe = rememberMe) }
     }
 
     fun onDomainChanged(domain: String) {
@@ -85,17 +96,17 @@ class LoginViewModel(
         val password = _uiState.value.password
         
         if (domain.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Vui lòng nhập domain dự án") }
+            MobileTopPopupManager.error("Vui lòng nhập domain dự án")
             return
         }
         
         if (email.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Vui lòng nhập tên đăng nhập") }
+            MobileTopPopupManager.error("Vui lòng nhập tên đăng nhập")
             return
         }
 
         if (password.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Vui lòng nhập mật khẩu") }
+            MobileTopPopupManager.error("Vui lòng nhập mật khẩu")
             return
         }
 
@@ -113,7 +124,7 @@ class LoginViewModel(
                         handleLoginSuccess(loginData, domain)
                         _event.emit(LoginEvent.LoginSuccess)
                     } else {
-                        _uiState.update { it.copy(errorMessage = "Dữ liệu phản hồi rỗng") }
+                        MobileTopPopupManager.error("Dữ liệu phản hồi rỗng")
                     }
                 } else {
                     val exception = result.exceptionOrNull()
@@ -128,7 +139,7 @@ class LoginViewModel(
                     } else {
                         "Thông tin đăng nhập không chính xác"
                     }
-                    _uiState.update { it.copy(errorMessage = msg) }
+                    MobileTopPopupManager.error(msg)
                 }
             } catch (e: Exception) {
                 val errorMsg = e.message ?: ""
@@ -139,7 +150,7 @@ class LoginViewModel(
                 } else {
                     "Có lỗi xảy ra, vui lòng thử lại sau."
                 }
-                _uiState.update { it.copy(errorMessage = msg) }
+                MobileTopPopupManager.error(msg)
             } finally {
                 _uiState.update { it.copy(isLoading = false) }
             }
@@ -150,6 +161,7 @@ class LoginViewModel(
 
     private fun handleLoginSuccess(loginData: LoginResponseData, domain: String) {
         val formattedDomain = if (!domain.startsWith("http://") && !domain.startsWith("https://")) "http://$domain" else domain
+        val rememberMe = _uiState.value.rememberMe
         UserSession.apply {
             userData = loginData.target
             accessToken = loginData.credential.accessToken
@@ -164,6 +176,7 @@ class LoginViewModel(
             putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
             putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
             putString("DOMAIN_KEY", formattedDomain)
+            putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
             putString(AppKeys.USERNAME_KEY, _uiState.value.email)
             putString(AppKeys.PASSWORD_KEY, _uiState.value.password)
         }

@@ -37,11 +37,119 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
-enum class TimeFilter(val title: String) {
-    TODAY("Hôm nay"),
-    YESTERDAY("Hôm qua"),
-    LAST_7_DAYS("7 ngày qua"),
-    LAST_30_DAYS("30 ngày qua")
+enum class TimeFilter(val title: String, val titleEn: String = title) {
+    TODAY("Hôm nay", "Today"),
+    YESTERDAY("Hôm qua", "Yesterday"),
+    LAST_7_DAYS("7 ngày qua", "Last 7 days"),
+    CUSTOM_DATE("Tùy chọn ngày", "Select date"),
+    CUSTOM_RANGE("Tùy chỉnh", "Custom");
+
+    companion object {
+        @Volatile
+        var customDateStartMs: Long = run {
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            cal.timeInMillis
+        }
+
+        @Volatile
+        var customDateEndMs: Long = run {
+            val cal = Calendar.getInstance()
+            cal.set(Calendar.HOUR_OF_DAY, 23)
+            cal.set(Calendar.MINUTE, 59)
+            cal.set(Calendar.SECOND, 59)
+            cal.set(Calendar.MILLISECOND, 999)
+            cal.timeInMillis
+        }
+
+        @Volatile
+        var customRangeFromMs: Long = System.currentTimeMillis() - 24L * 3600L * 1000L
+
+        @Volatile
+        var customRangeToMs: Long = System.currentTimeMillis()
+
+        fun setCustomDate(dayMillis: Long) {
+            val cal = Calendar.getInstance().apply { timeInMillis = dayMillis }
+            cal.set(Calendar.HOUR_OF_DAY, 0)
+            cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0)
+            cal.set(Calendar.MILLISECOND, 0)
+            customDateStartMs = cal.timeInMillis
+            cal.set(Calendar.HOUR_OF_DAY, 23)
+            cal.set(Calendar.MINUTE, 59)
+            cal.set(Calendar.SECOND, 59)
+            cal.set(Calendar.MILLISECOND, 999)
+            customDateEndMs = cal.timeInMillis
+        }
+
+        fun setCustomRange(fromMillis: Long, toMillis: Long) {
+            if (fromMillis <= toMillis) {
+                customRangeFromMs = fromMillis
+                customRangeToMs = toMillis
+            } else {
+                customRangeFromMs = toMillis
+                customRangeToMs = fromMillis
+            }
+        }
+
+        fun cacheKeyToken(filter: TimeFilter): String {
+            return when (filter) {
+                CUSTOM_DATE -> "${filter.name}_${customDateStartMs}"
+                CUSTOM_RANGE -> "${filter.name}_${customRangeFromMs}_${customRangeToMs}"
+                else -> filter.name
+            }
+        }
+
+        fun resolveTimeRangeMillis(filter: TimeFilter): Pair<Long, Long> {
+            val calendar = Calendar.getInstance()
+            return when (filter) {
+                TODAY -> {
+                    val toTime = calendar.timeInMillis
+                    calendar.set(Calendar.HOUR_OF_DAY, 0)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
+                    Pair(calendar.timeInMillis, toTime)
+                }
+                YESTERDAY -> {
+                    calendar.set(Calendar.HOUR_OF_DAY, 0)
+                    calendar.set(Calendar.MINUTE, 0)
+                    calendar.set(Calendar.SECOND, 0)
+                    calendar.set(Calendar.MILLISECOND, 0)
+                    val toTime = calendar.timeInMillis - 1
+                    calendar.add(Calendar.DAY_OF_YEAR, -1)
+                    Pair(calendar.timeInMillis, toTime)
+                }
+                LAST_7_DAYS -> {
+                    val toTime = calendar.timeInMillis
+                    calendar.add(Calendar.DAY_OF_YEAR, -7)
+                    Pair(calendar.timeInMillis, toTime)
+                }
+                CUSTOM_DATE -> Pair(customDateStartMs, customDateEndMs)
+                CUSTOM_RANGE -> Pair(customRangeFromMs, customRangeToMs)
+            }
+        }
+
+        fun formatDisplayLabel(filter: TimeFilter, isEn: Boolean): String {
+            val dateFmt = java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault())
+            val dateTimeFmt = java.text.SimpleDateFormat("dd/MM HH:mm", java.util.Locale.getDefault())
+            return when (filter) {
+                TODAY -> if (isEn) TODAY.titleEn else TODAY.title
+                YESTERDAY -> if (isEn) YESTERDAY.titleEn else YESTERDAY.title
+                LAST_7_DAYS -> if (isEn) LAST_7_DAYS.titleEn else LAST_7_DAYS.title
+                CUSTOM_DATE -> {
+                    val prefix = if (isEn) CUSTOM_DATE.titleEn else CUSTOM_DATE.title
+                    "$prefix (${dateFmt.format(java.util.Date(customDateStartMs))})"
+                }
+                CUSTOM_RANGE -> {
+                    "${dateTimeFmt.format(java.util.Date(customRangeFromMs))} - ${dateTimeFmt.format(java.util.Date(customRangeToMs))}"
+                }
+            }
+        }
+    }
 }
 
 data class HomeUiState(
@@ -248,7 +356,8 @@ class HomeViewModel(
     }
 
     fun setTimeFilter(filter: TimeFilter) {
-        if (_uiState.value.selectedFilter == filter) return
+        val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
+        if (!isCustom && _uiState.value.selectedFilter == filter) return
         _uiState.update { it.copy(selectedFilter = filter) }
         fetchDashboardData()
     }
@@ -260,7 +369,8 @@ class HomeViewModel(
     }
 
     fun applyFilters(filter: TimeFilter, serviceId: Int?) {
-        if (_uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
+        val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
+        if (!isCustom && _uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
         _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId) }
         fetchDashboardData()
     }
@@ -300,39 +410,7 @@ class HomeViewModel(
             }
 
             try {
-                val calendar = Calendar.getInstance()
-                val toTime: Long
-                val fromTime: Long
-
-                when (filter) {
-                    TimeFilter.TODAY -> {
-                        toTime = calendar.timeInMillis
-                        calendar.set(Calendar.HOUR_OF_DAY, 0)
-                        calendar.set(Calendar.MINUTE, 0)
-                        calendar.set(Calendar.SECOND, 0)
-                        calendar.set(Calendar.MILLISECOND, 0)
-                        fromTime = calendar.timeInMillis
-                    }
-                    TimeFilter.YESTERDAY -> {
-                        calendar.set(Calendar.HOUR_OF_DAY, 0)
-                        calendar.set(Calendar.MINUTE, 0)
-                        calendar.set(Calendar.SECOND, 0)
-                        calendar.set(Calendar.MILLISECOND, 0)
-                        toTime = calendar.timeInMillis - 1
-                        calendar.add(Calendar.DAY_OF_YEAR, -1)
-                        fromTime = calendar.timeInMillis
-                    }
-                    TimeFilter.LAST_7_DAYS -> {
-                        toTime = calendar.timeInMillis
-                        calendar.add(Calendar.DAY_OF_YEAR, -7)
-                        fromTime = calendar.timeInMillis
-                    }
-                    TimeFilter.LAST_30_DAYS -> {
-                        toTime = calendar.timeInMillis
-                        calendar.add(Calendar.DAY_OF_YEAR, -30)
-                        fromTime = calendar.timeInMillis
-                    }
-                }
+                val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
 
                 // 2. Gọi song song tất cả các API Dashboard để rút ngắn thời gian phản hồi xuống 1 RTT duy nhất
                 coroutineScope {

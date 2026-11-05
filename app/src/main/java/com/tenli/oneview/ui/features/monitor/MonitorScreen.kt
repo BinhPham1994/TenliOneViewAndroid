@@ -1181,7 +1181,6 @@ private fun MobileGroupFilterBottomSheet(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF020617).copy(alpha = 0.55f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,

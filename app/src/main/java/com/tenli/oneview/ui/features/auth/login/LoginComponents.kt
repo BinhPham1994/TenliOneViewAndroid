@@ -1,6 +1,8 @@
 package com.tenli.oneview.ui.features.auth.login
 
 import androidx.annotation.DrawableRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,9 +71,9 @@ fun LoginInputField(
     onPasswordToggle: (() -> Unit)? = null,
     onClear: () -> Unit,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
-    keyboardActions: KeyboardActions = KeyboardActions.Default
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    focusRequester: FocusRequester = remember { FocusRequester() }
 ) {
-    val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     var isFocused by remember { mutableStateOf(false) }
 
@@ -85,17 +87,12 @@ fun LoginInputField(
 
     // Exact colors from MobileLoginPage.vue (.premium-input)
     val inputBg = if (isDark) Color.White.copy(alpha = 0.04f) else Color(0xFFF3F4F7)
-    val borderColor = when {
-        isFocused -> BrandAccent // #0980EE
-        isDark -> Color.White.copy(alpha = 0.10f)
-        else -> Color.Black.copy(alpha = 0.08f)
-    }
     val leadingIconTint = when {
         isFocused -> BrandAccent // #0980EE
-        isDark -> Color(0xFF64748B)
-        else -> Color(0xFFCBD5E1)
+        isDark -> Color(0xFF94A3B8)
+        else -> Color(0xFF475569)
     }
-    val placeholderColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569).copy(alpha = 0.85f)
+    val placeholderColor = if (isDark) Color(0xFF78879E) else Color(0xFF94A3B8)
     val textColor = if (isDark) Color.White else Color(0xFF1E293B)
     val actionIconTint = if (isDark) Color(0xFF94A3B8) else Color(0xFF475569)
 
@@ -107,7 +104,6 @@ fun LoginInputField(
             .height(52.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(inputBg, RoundedCornerShape(14.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(14.dp))
             .focusRequester(focusRequester)
             .onFocusChanged { isFocused = it.isFocused },
         textStyle = MaterialTheme.typography.bodyMedium.copy(

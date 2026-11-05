@@ -45,7 +45,7 @@ fun VideoPlayer(
     val context = LocalContext.current
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
     val isDark = rememberIsDarkTheme()
-    val containerBg = if (isDark) Color(0xFF1E293B) else Color(0xFFE8ECF2)
+    val containerBg = if (isDark) com.tenli.oneview.ui.theme.SurfaceDark else com.tenli.oneview.ui.theme.SurfaceLight
 
     val exoPlayer = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {

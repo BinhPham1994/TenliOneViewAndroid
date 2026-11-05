@@ -7,6 +7,7 @@ data class LoginUiState(
     val domain: String = "",
     val email: String = "",
     val password: String = "",
+    val rememberMe: Boolean = false,
     val showPassword: Boolean = false,
     val isLoading: Boolean = false,
     val isVietnamese: Boolean = true,

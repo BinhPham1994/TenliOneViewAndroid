@@ -21,6 +21,7 @@ import com.tenli.oneview.model.network.Confirm
 import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.ParamPlateModel
+import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -39,7 +40,34 @@ import java.util.Locale
 enum class JourneyPeriod(val code: String, val labelVi: String, val labelEn: String) {
     TODAY("1d", "Hôm nay", "Today"),
     YESTERDAY("2d", "Hôm qua", "Yesterday"),
-    LAST_7_DAYS("7d", "7 ngày qua", "Last 7 days")
+    LAST_7_DAYS("7d", "7 ngày qua", "Last 7 days"),
+    CUSTOM_DATE("custom_date", "Tùy chọn ngày", "Select date"),
+    CUSTOM_RANGE("custom_range", "Tùy chỉnh", "Custom");
+
+    fun formatDisplayLabel(isEn: Boolean): String {
+        val dateFmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+        val dateTimeFmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
+        return when (this) {
+            TODAY -> if (isEn) labelEn else labelVi
+            YESTERDAY -> if (isEn) labelEn else labelVi
+            LAST_7_DAYS -> if (isEn) labelEn else labelVi
+            CUSTOM_DATE -> {
+                val prefix = if (isEn) labelEn else labelVi
+                "$prefix (${dateFmt.format(Date(TimeFilter.customDateStartMs))})"
+            }
+            CUSTOM_RANGE -> {
+                "${dateTimeFmt.format(Date(TimeFilter.customRangeFromMs))} - ${dateTimeFmt.format(Date(TimeFilter.customRangeToMs))}"
+            }
+        }
+    }
+
+    fun cacheCode(): String {
+        return when (this) {
+            CUSTOM_DATE -> "${code}_${TimeFilter.customDateStartMs}"
+            CUSTOM_RANGE -> "${code}_${TimeFilter.customRangeFromMs}_${TimeFilter.customRangeToMs}"
+            else -> code
+        }
+    }
 }
 
 data class EventDetailUiState(
@@ -278,7 +306,8 @@ class EventDetailViewModel(
     }
 
     fun setJourneyPeriod(period: JourneyPeriod) {
-        if (_uiState.value.selectedJourneyPeriod == period) return
+        val isCustom = period == JourneyPeriod.CUSTOM_DATE || period == JourneyPeriod.CUSTOM_RANGE
+        if (!isCustom && _uiState.value.selectedJourneyPeriod == period) return
         _uiState.update { it.copy(selectedJourneyPeriod = period) }
         loadRelatedEvents()
     }
@@ -312,6 +341,12 @@ class EventDetailViewModel(
                 cal.set(Calendar.MILLISECOND, 0)
                 Pair(cal.timeInMillis / 1000, nowSec)
             }
+            JourneyPeriod.CUSTOM_DATE -> {
+                Pair(TimeFilter.customDateStartMs / 1000, TimeFilter.customDateEndMs / 1000)
+            }
+            JourneyPeriod.CUSTOM_RANGE -> {
+                Pair(TimeFilter.customRangeFromMs / 1000, TimeFilter.customRangeToMs / 1000)
+            }
         }
     }
 
@@ -325,7 +360,7 @@ class EventDetailViewModel(
     fun loadRelatedEvents() {
         val targetEvent = _uiState.value.event ?: _uiState.value.baseEvent ?: return
         val period = _uiState.value.selectedJourneyPeriod
-        val cachedRelated = EventCacheManager.getRelatedEventsInMemory(targetEvent.id, period.code)
+        val cachedRelated = EventCacheManager.getRelatedEventsInMemory(targetEvent.id, period.cacheCode())
 
         relatedEventsJob?.cancel()
         relatedEventsJob = viewModelScope.launch {
@@ -475,7 +510,7 @@ class EventDetailViewModel(
                 }
 
                 val sorted = filtered.sortedByDescending { it.time }
-                EventCacheManager.cacheRelatedEventsInMemory(targetEvent.id, period.code, sorted)
+                EventCacheManager.cacheRelatedEventsInMemory(targetEvent.id, period.cacheCode(), sorted)
                 _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
             } catch (e: CancellationException) {
                 throw e
