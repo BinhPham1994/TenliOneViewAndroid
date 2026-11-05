@@ -69,17 +69,7 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
-        val cacheKeyStr = remember(url, targetWidthPx, targetHeightPx) {
-            if (url.isNullOrBlank()) null else "${url}_${targetWidthPx}x${targetHeightPx}"
-        }
-        val prewarmedBitmap = remember(cacheKeyStr) {
-            cacheKeyStr?.let { key ->
-                coil.Coil.imageLoader(context).memoryCache
-                    ?.get(coil.memory.MemoryCache.Key(key))
-                    ?.bitmap
-                    ?.takeIf { !it.isRecycled }
-            }
-        }
+        val bgModifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
         val imageRequest = remember(url, targetWidthPx, targetHeightPx) {
             if (url.isNullOrBlank()) {
                 null
@@ -97,31 +87,21 @@ fun VideoFrameImage(
             }
         }
 
-        Box(
-            modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
-        ) {
-            if (prewarmedBitmap != null) {
-                val imageBitmap = remember(prewarmedBitmap) { prewarmedBitmap.asImageBitmap() }
-                Image(
-                    bitmap = imageBitmap,
-                    contentDescription = "Event Image",
-                    contentScale = contentScale,
-                    modifier = Modifier.fillMaxSize()
-                )
-            } else if (imageRequest != null) {
-                coil.compose.AsyncImage(
-                    model = imageRequest,
-                    contentDescription = "Event Image",
-                    contentScale = contentScale,
-                    modifier = Modifier.fillMaxSize(),
-                    onError = {
-                        if (effectiveKey.isNotEmpty()) {
-                            VideoFrameCache.knownVideoUrls.add(effectiveKey)
-                        }
-                        isVideoFallback = true
+        if (imageRequest != null) {
+            coil.compose.AsyncImage(
+                model = imageRequest,
+                contentDescription = "Event Image",
+                contentScale = contentScale,
+                modifier = bgModifier,
+                onError = {
+                    if (effectiveKey.isNotEmpty()) {
+                        VideoFrameCache.knownVideoUrls.add(effectiveKey)
                     }
-                )
-            }
+                    isVideoFallback = true
+                }
+            )
+        } else {
+            Box(modifier = bgModifier)
         }
     } else {
         // Here we handle the video frame extraction

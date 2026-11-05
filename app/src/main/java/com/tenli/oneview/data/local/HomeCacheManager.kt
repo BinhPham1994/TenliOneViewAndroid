@@ -49,10 +49,14 @@ object HomeCacheManager {
     private const val MAX_PRELOAD_EVENTS = 5
     private const val NETWORK_PRELOAD_TIMEOUT_MS = 2_200L
 
+    private const val PREF_VIEW_MODE = "home_recent_events_view_mode"
+    private const val STATUS_DISK_WRITE_MIN_INTERVAL_MS = 30_000L
+
     private val gson get() = LoginAuthClient.gson
 
     // RAM Cache giúp hiển thị tức thì (0ms) ngay từ frame đầu tiên khi mở app hoặc chuyển bộ lọc
     private val inMemoryHomeCache = ConcurrentHashMap<String, CachedHomeData>()
+    @Volatile private var lastStatusDiskWriteAt: Long = 0L
 
     private fun cacheKey(filter: TimeFilter, serviceId: Int?): String {
         val servicePart = serviceId?.toString() ?: "all"
@@ -92,6 +96,7 @@ object HomeCacheManager {
         val appContext = context.applicationContext
         val imageLoader = Coil.imageLoader(appContext)
         val memCache = imageLoader.memoryCache
+        val isListView = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
         val targetEvents = events
             .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
             .take(MAX_PRELOAD_EVENTS)
@@ -124,29 +129,28 @@ object HomeCacheManager {
                 requests.add(builder.build())
             }
 
-            enqueueIfNeeded(snapshotUrl, LIST_THUMB_WIDTH_PX, LIST_THUMB_HEIGHT_PX)
-            enqueueIfNeeded(fullImageUrl, GRID_IMAGE_WIDTH_PX, GRID_IMAGE_HEIGHT_PX)
-            enqueueIfNeeded(faceCropUrl, FACE_CROP_REQUEST_WIDTH_PX, FACE_CROP_REQUEST_HEIGHT_PX)
+            // Chỉ decode đúng kích thước của chế độ xem hiện tại (List hoặc Grid) để giảm 2/3 lượng giải mã Bitmap lúc mở app
+            if (isListView) {
+                enqueueIfNeeded(snapshotUrl, LIST_THUMB_WIDTH_PX, LIST_THUMB_HEIGHT_PX)
+            } else {
+                enqueueIfNeeded(fullImageUrl, GRID_IMAGE_WIDTH_PX, GRID_IMAGE_HEIGHT_PX)
+                enqueueIfNeeded(faceCropUrl, FACE_CROP_REQUEST_WIDTH_PX, FACE_CROP_REQUEST_HEIGHT_PX)
+            }
         }
 
         if (requests.isEmpty()) return
 
-        withContext(Dispatchers.IO) {
-            if (diskOnly) {
+        if (diskOnly) {
+            withContext(Dispatchers.IO) {
                 coroutineScope {
                     requests.map { req ->
                         async { runCatching { imageLoader.execute(req) } }
                     }.awaitAll()
                 }
-            } else {
-                withTimeoutOrNull(NETWORK_PRELOAD_TIMEOUT_MS) {
-                    coroutineScope {
-                        requests.map { req ->
-                            async { runCatching { imageLoader.execute(req) } }
-                        }.awaitAll()
-                    }
-                }
             }
+        } else {
+            // Tải bất đồng bộ vào cache của Coil, không chặn luồng cập nhật State của giao diện
+            requests.forEach { req -> imageLoader.enqueue(req) }
         }
     }
 
@@ -184,8 +188,12 @@ object HomeCacheManager {
             recordStatusMap = mergedRec
         )
         inMemoryHomeCache[defaultKey] = updated
-        withContext(Dispatchers.IO) {
-            JsonFileStore.write(gson, getCacheFile(context, TimeFilter.TODAY, null), updated)
+        val now = System.currentTimeMillis()
+        if (now - lastStatusDiskWriteAt >= STATUS_DISK_WRITE_MIN_INTERVAL_MS) {
+            lastStatusDiskWriteAt = now
+            withContext(Dispatchers.IO) {
+                JsonFileStore.write(gson, getCacheFile(context, TimeFilter.TODAY, null), updated)
+            }
         }
     }
 

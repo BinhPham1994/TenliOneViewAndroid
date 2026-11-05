@@ -14,8 +14,9 @@ import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.utils.AppKeys
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -32,8 +33,8 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Đọc phiên đăng nhập đã lưu + nạp sẵn dữ liệu & ảnh cache của Trang chủ lên RAM trên IO thread
-     * trước khi tắt Splash screen hệ thống để Frame 1 của Trang chủ hiển thị đầy đủ dữ liệu ngay lập tức.
+     * Đọc phiên đăng nhập đã lưu + chỉ nạp nhanh dữ liệu Trang chủ lên RAM (~10ms) trước khi tắt Splash screen
+     * để mở vào Trang chủ tức thì; cache của các tab Sự kiện & Trực tiếp được nạp ngầm ở nền không chặn mở app.
      */
     private fun restoreSessionAndNavigate() {
         viewModelScope.launch {
@@ -42,10 +43,10 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 UserSession.ensureRestored(GlobalData.preferences)
                 val loggedIn = UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
                 if (loggedIn) {
-                    coroutineScope {
-                        launch { runCatching { HomeCacheManager.preloadDefaultCache(app) } }
-                        launch { runCatching { EventCacheManager.preloadDefaultCache(app) } }
-                        launch { runCatching { MonitorCacheManager.preloadDefaultCache(app) } }
+                    runCatching { HomeCacheManager.preloadDefaultCache(app) }
+                    backgroundPreloadScope.launch {
+                        runCatching { EventCacheManager.preloadDefaultCache(app) }
+                        runCatching { MonitorCacheManager.preloadDefaultCache(app) }
                     }
                 }
                 loggedIn
@@ -89,6 +90,8 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     companion object {
+        private val backgroundPreloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[APPLICATION_KEY] as Application

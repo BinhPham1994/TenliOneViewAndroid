@@ -225,7 +225,8 @@ class HomeViewModel(
     private var realtimeRefreshJob: Job? = null
     private var trailingNotifyJob: Job? = null
     private var followUpStatsJob: Job? = null
-    @Volatile private var lastRealtimeRefreshAt: Long = 0L
+    @Volatile private var lastRealtimeRefreshAt: Long = System.currentTimeMillis()
+    @Volatile private var isHomeTabActive: Boolean = true
 
     init {
         fetchDashboardData()
@@ -282,6 +283,17 @@ class HomeViewModel(
         val savedIsList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
         if (_uiState.value.isListView != savedIsList) {
             _uiState.update { it.copy(isListView = savedIsList) }
+        }
+    }
+
+    fun setHomeTabActive(active: Boolean) {
+        if (isHomeTabActive == active) return
+        isHomeTabActive = active
+        if (active && _uiState.value.selectedFilter != TimeFilter.YESTERDAY) {
+            val elapsed = System.currentTimeMillis() - lastRealtimeRefreshAt
+            if (elapsed >= POLL_INTERVAL_MS / 2) {
+                scheduleRealtimeRefresh()
+            }
         }
     }
 
@@ -349,7 +361,8 @@ class HomeViewModel(
         viewModelScope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
-                if (_uiState.value.selectedFilter != TimeFilter.YESTERDAY) {
+                if (isHomeTabActive && _uiState.value.selectedFilter != TimeFilter.YESTERDAY) {
+                    lastRealtimeRefreshAt = System.currentTimeMillis()
                     refreshRealtimeStatsAndEvents()
                 }
             }
@@ -635,8 +648,13 @@ class HomeViewModel(
             val serviceId = _uiState.value.selectedServiceId
 
             // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate) khi chưa phải thao tác kéo refresh
+            val alreadyWarmFromInit = !isUserRefresh &&
+                !_uiState.value.isLoading &&
+                _uiState.value.recentEvents.isNotEmpty() &&
+                filter == TimeFilter.TODAY &&
+                serviceId == null
             val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
-            if (!isUserRefresh) {
+            if (!isUserRefresh && !alreadyWarmFromInit) {
                 if (cachedData != null) {
                     HomeCacheManager.preloadEventThumbnails(
                         context = getApplication(),

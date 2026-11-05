@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -25,8 +26,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.network.ApiProvider
@@ -62,9 +67,12 @@ fun AppNavigation(
     onEventNavConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val currentBackStackEntry by navController.currentBackStackEntryAsState()
+    val isPlaybackDetailActive = currentBackStackEntry?.destination?.route?.startsWith("playback_detail") == true
     var activeEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var lastEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var skipExitAnimation by remember { mutableStateOf(false) }
+    val isOverlayActive = activeEventDetailId != null || isPlaybackDetailActive
 
     LaunchedEffect(pendingEventNav) {
         val nav = pendingEventNav ?: return@LaunchedEffect
@@ -116,6 +124,7 @@ fun AppNavigation(
                     ) {
                         CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                             MainScreen(
+                                isOverlayActive = isOverlayActive,
                                 onLogoutRequest = onLogoutRequest,
                                 onNavigateToEventDetail = { eventId ->
                                     skipExitAnimation = false
@@ -200,13 +209,25 @@ fun AppNavigation(
                         val eventDetailOverlayHostState = remember(displayEventId) {
                             com.tenli.oneview.ui.component.MobileOverlayHostState()
                         }
+                        val eventDetailViewModelStoreOwner = remember(displayEventId) {
+                            object : ViewModelStoreOwner {
+                                override val viewModelStore: ViewModelStore = ViewModelStore()
+                            }
+                        }
+                        DisposableEffect(eventDetailViewModelStoreOwner) {
+                            onDispose {
+                                eventDetailViewModelStoreOwner.viewModelStore.clear()
+                            }
+                        }
                         CompositionLocalProvider(
                             LocalAnimatedVisibilityScope provides this@AnimatedVisibility,
+                            LocalViewModelStoreOwner provides eventDetailViewModelStoreOwner,
                             com.tenli.oneview.ui.component.LocalMobileOverlayHost provides eventDetailOverlayHostState
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
                                 EventDetailScreen(
                                     eventId = displayEventId,
+                                    isClosing = activeEventDetailId == null,
                                     onBack = {
                                         skipExitAnimation = false
                                         activeEventDetailId = null

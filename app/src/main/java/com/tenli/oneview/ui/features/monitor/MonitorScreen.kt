@@ -142,15 +142,44 @@ fun MonitorScreen(
     // Thu gọn mặc định các ô lọc, chọn lưới 1x1/2x2 để giao diện gọn gàng
     var isControlsExpanded by remember { mutableStateOf(false) }
 
-    var wasDeactivated by remember { mutableStateOf(true) }
-    LaunchedEffect(isTabActive) {
-        viewModel.setMonitorTabActive(isTabActive)
-        if (!isTabActive) {
-            wasDeactivated = true
-            fullscreenIndex = null
-            isGridFullscreen = false
-        } else if (wasDeactivated) {
-            wasDeactivated = false
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isLifecycleResumed by remember {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> isLifecycleResumed = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    isLifecycleResumed = false
+                    viewModel.setMonitorTabActive(false)
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setMonitorTabActive(false)
+        }
+    }
+
+    val effectiveTabActive = isTabActive && isLifecycleResumed
+    // Chờ hiệu ứng trượt chuyển tab (260ms) hoàn tất rồi mới khởi tạo ExoPlayer / poll luồng live để trượt tab mượt 60fps;
+    // khi rời tab hoặc mở màn hình khác đè lên thì ngắt luồng live ngay lập tức (0ms).
+    var isStreamStageReady by remember { mutableStateOf(false) }
+    LaunchedEffect(effectiveTabActive) {
+        if (!effectiveTabActive) {
+            isStreamStageReady = false
+            viewModel.setMonitorTabActive(false)
+            if (!isTabActive) {
+                fullscreenIndex = null
+                isGridFullscreen = false
+            }
+        } else {
+            delay(260L)
+            isStreamStageReady = true
+            viewModel.setMonitorTabActive(true)
             viewModel.refreshActiveStreams()
             viewModel.loadVisibleCameraSnapshots()
         }
@@ -166,35 +195,12 @@ fun MonitorScreen(
         }
     }
 
-    LaunchedEffect(uiState.error, isTabActive) {
+    LaunchedEffect(uiState.error, effectiveTabActive) {
         uiState.error?.let {
-            if (isTabActive) {
+            if (effectiveTabActive) {
                 MobileTopPopupManager.error(it)
             }
             viewModel.clearError()
-        }
-    }
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val currentIsTabActive by rememberUpdatedState(isTabActive)
-    DisposableEffect(lifecycleOwner) {
-        var isFirstResume = true
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.setMonitorTabActive(currentIsTabActive)
-                if (isFirstResume) {
-                    isFirstResume = false
-                } else if (currentIsTabActive) {
-                    viewModel.refreshActiveStreams()
-                    viewModel.loadVisibleCameraSnapshots()
-                }
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                viewModel.setMonitorTabActive(false)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
 
@@ -327,7 +333,7 @@ fun MonitorScreen(
                             if (selectedCam != null) {
                                 CameraGridItem(
                                     selectedCamera = selectedCam,
-                                    isTabActive = isTabActive,
+                                    isTabActive = isStreamStageReady && effectiveTabActive,
                                     onClick = {},
                                     onRetryClick = { viewModel.retryCameraStream(0) },
                                     onSuccess = { viewModel.resetRetryCount(0) },
@@ -370,7 +376,7 @@ fun MonitorScreen(
                         // 2x2 Grid (.mobile-grid-2x2 with 2.dp gap) - giữ nguyên instance khi phóng to/thu nhỏ
                         LiveGrid2x2Stage(
                             uiState = uiState,
-                            isTabActive = isTabActive,
+                            isTabActive = isStreamStageReady && effectiveTabActive,
                             panelBg = panelBg,
                             gridDividerBg = gridDividerBg,
                             onCellTap = { viewModel.handleCellTap(it) },
@@ -714,6 +720,7 @@ fun MonitorScreen(
                                     MobileCameraSnapshotCard(
                                         camera = item.camera,
                                         isPlaying = isPlaying,
+                                        isTabActive = effectiveTabActive,
                                         hasSnapKey = hasSnapKey,
                                         snapshotUrl = snapUrl,
                                         onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
@@ -900,6 +907,7 @@ private fun GridOptionButton(
 private fun MobileCameraSnapshotCard(
     camera: CameraModel,
     isPlaying: Boolean,
+    isTabActive: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
     onSnapshotError: () -> Unit,
@@ -918,6 +926,7 @@ private fun MobileCameraSnapshotCard(
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
     val nameColor = if (isPlaying) colors.accent else colors.textTitle
 
+    var imageLoadState by remember(snapshotUrl) { mutableIntStateOf(0) } // 0 = loading, 1 = loaded, 2 = error
     val imageRequest = remember(snapshotUrl) {
         if (snapshotUrl.isNullOrEmpty()) {
             null
@@ -928,6 +937,8 @@ private fun MobileCameraSnapshotCard(
                 .precision(Precision.INEXACT)
                 .allowHardware(true)
                 .crossfade(false)
+                .memoryCacheKey("${snapshotUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}")
+                .diskCacheKey(snapshotUrl)
                 .build()
         }
     }
@@ -948,46 +959,41 @@ private fun MobileCameraSnapshotCard(
             contentAlignment = Alignment.Center
         ) {
             if (imageRequest != null) {
-                SubcomposeAsyncImage(
+                AsyncImage(
                     model = imageRequest,
                     contentDescription = camera.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            WaveDotsLoading(
-                                dotSize = spacing.space6,
-                                dotColor = colors.accent,
-                                maxOffset = spacing.space6
-                            )
-                        }
-                    },
-                    error = {
-                        LaunchedEffect(snapshotUrl) {
+                    onSuccess = { imageLoadState = 1 },
+                    onError = {
+                        if (imageLoadState != 2) {
+                            imageLoadState = 2
                             onSnapshotError()
-                        }
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.ImageOff,
-                                contentDescription = null,
-                                tint = noImageTint,
-                                modifier = Modifier.size(spacing.iconMedium)
-                            )
                         }
                     }
                 )
+                if (imageLoadState == 0 && isTabActive) {
+                    WaveDotsLoading(
+                        dotSize = spacing.space6,
+                        dotColor = colors.accent,
+                        maxOffset = spacing.space6
+                    )
+                } else if (imageLoadState == 2) {
+                    Icon(
+                        imageVector = LucideIcons.ImageOff,
+                        contentDescription = null,
+                        tint = noImageTint,
+                        modifier = Modifier.size(spacing.iconMedium)
+                    )
+                }
             } else if (!hasSnapKey) {
-                WaveDotsLoading(
-                    dotSize = spacing.space6,
-                    dotColor = colors.accent,
-                    maxOffset = spacing.space6
-                )
+                if (isTabActive) {
+                    WaveDotsLoading(
+                        dotSize = spacing.space6,
+                        dotColor = colors.accent,
+                        maxOffset = spacing.space6
+                    )
+                }
             } else {
                 Icon(
                     imageVector = LucideIcons.ImageOff,
@@ -1012,7 +1018,9 @@ private fun MobileCameraSnapshotCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(spacing.space5)
                     ) {
-                        PlayingEqualizerBars()
+                        if (isTabActive) {
+                            PlayingEqualizerBars()
+                        }
                         Text(
                             text = if (isEn) "Playing" else "Đang xem",
                             color = colors.onAccent,
@@ -1528,7 +1536,9 @@ fun CameraGridItem(
                         }
                     )
                 }
-                WaveDotsLoading(dotColor = colors.accent)
+                if (isTabActive) {
+                    WaveDotsLoading(dotColor = colors.accent)
+                }
             }
         }
 
