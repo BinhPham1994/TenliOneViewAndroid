@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.navigation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -22,16 +23,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.ui.features.event.detail.EventDetailScreen
 import com.tenli.oneview.ui.features.main.MainScreen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-/** Thời gian chờ ngắn sau khi giao diện chính hiện lên ở lần mở app mới (cold start) trước khi trượt màn Chi tiết sự kiện lên */
-private const val COLD_START_EVENT_DETAIL_DELAY_MS = 420L
+/**
+ * Thời gian chờ sau khi frame đầu tiên của Trang chủ đã vẽ xong ở lần mở app mới (cold start)
+ * (bao gồm thời gian hiệu ứng mở cửa sổ của hệ thống ~350ms + khoảng nghỉ ~600ms để mắt người dùng
+ * nhìn rõ Trang chủ ổn định rồi mới trượt màn Chi tiết sự kiện lên).
+ */
+private const val COLD_START_EVENT_DETAIL_DELAY_MS = 950L
 
 @Immutable
 data class PendingEventNav(
@@ -61,7 +71,20 @@ fun AppNavigation(
         val parsed = nav.eventId.toIntOrNull()
         if (parsed != null) {
             if (nav.isColdStart) {
-                // App vừa mở mới: để giao diện chính (MainScreen) hiện ổn định trước rồi mới trượt nhẹ màn Chi tiết sự kiện lên
+                // Trong lúc chờ hiển thị Trang chủ, tải sẵn dữ liệu chi tiết sự kiện vào RAM ở nền để khi trượt lên có dữ liệu ngay
+                launch(Dispatchers.IO) {
+                    if (EventCacheManager.getEventInMemory(parsed) == null) {
+                        val response = runCatching {
+                            ApiProvider.eventApi.getDataList(lastId = parsed + 1, count = 1)
+                        }.getOrNull()
+                        val first = response?.body()?.firstOrNull()
+                        if (first != null && first.id == parsed) {
+                            EventCacheManager.cacheInMemory(events = listOf(first))
+                        }
+                    }
+                }
+                // Đợi frame đầu tiên của Trang chủ thực sự vẽ lên màn hình rồi mới bắt đầu đếm nhịp nghỉ
+                withFrameNanos { }
                 delay(COLD_START_EVENT_DETAIL_DELAY_MS)
             }
             skipExitAnimation = false
@@ -76,10 +99,20 @@ fun AppNavigation(
             LocalSharedTransitionScope provides this@SharedTransitionLayout
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                NavHost(navController = navController, startDestination = "main") {
+                NavHost(
+                    navController = navController,
+                    startDestination = "main",
+                    enterTransition = { EnterTransition.None },
+                    exitTransition = { ExitTransition.None },
+                    popEnterTransition = { EnterTransition.None },
+                    popExitTransition = { ExitTransition.None }
+                ) {
                     composable(
                         route = "main",
-                        popEnterTransition = { EnterTransition.None }
+                        enterTransition = { EnterTransition.None },
+                        exitTransition = { ExitTransition.None },
+                        popEnterTransition = { EnterTransition.None },
+                        popExitTransition = { ExitTransition.None }
                     ) {
                         CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                             MainScreen(

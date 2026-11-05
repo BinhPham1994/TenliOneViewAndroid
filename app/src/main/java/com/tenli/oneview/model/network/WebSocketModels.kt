@@ -33,6 +33,7 @@ data class RecordState(
 
 data class CameraInfo(
     val id: Int,
+    val state: String? = null,
     val main: StreamState? = null,
     val sub: StreamState? = null,
     val recorder: RecordState? = null

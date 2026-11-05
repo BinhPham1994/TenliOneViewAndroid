@@ -15,6 +15,7 @@ import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -31,14 +32,23 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Đọc phiên đăng nhập đã lưu (SharedPreferences + parse JSON UserData) trên IO thread.
-     * Splash screen hệ thống được giữ trong lúc destination còn là [SplashDestination.Loading].
+     * Đọc phiên đăng nhập đã lưu + nạp sẵn dữ liệu & ảnh cache của Trang chủ lên RAM trên IO thread
+     * trước khi tắt Splash screen hệ thống để Frame 1 của Trang chủ hiển thị đầy đủ dữ liệu ngay lập tức.
      */
     private fun restoreSessionAndNavigate() {
         viewModelScope.launch {
+            val app = getApplication<Application>()
             val hasSession = withContext(Dispatchers.IO) {
                 UserSession.ensureRestored(GlobalData.preferences)
-                UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
+                val loggedIn = UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
+                if (loggedIn) {
+                    coroutineScope {
+                        launch { runCatching { HomeCacheManager.preloadDefaultCache(app) } }
+                        launch { runCatching { EventCacheManager.preloadDefaultCache(app) } }
+                        launch { runCatching { MonitorCacheManager.preloadDefaultCache(app) } }
+                    }
+                }
+                loggedIn
             }
             _uiState.update {
                 it.copy(destination = if (hasSession) SplashDestination.Main else SplashDestination.Login)

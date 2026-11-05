@@ -44,9 +44,14 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
             }
         }
 
-        // Send initial state
-        val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
-        trySend(capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true)
+        // Send initial state and seed onlineNetworks so initial callbacks don't cause a false offline flicker
+        val activeNetwork = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+        val isInitiallyOnline = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        if (isInitiallyOnline && activeNetwork != null) {
+            onlineNetworks.add(activeNetwork)
+        }
+        trySend(isInitiallyOnline)
 
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)

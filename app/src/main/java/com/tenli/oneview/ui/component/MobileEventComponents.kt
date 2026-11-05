@@ -163,14 +163,14 @@ private const val THUMBNAIL_ASPECT_RATIO = 16f / 9f
 
 /** Ảnh crop khuôn mặt trên thẻ Grid: 72x90dp (tỉ lệ 4:5) */
 private const val FACE_CROP_ASPECT_RATIO = 72f / 90f
-private const val FACE_CROP_REQUEST_WIDTH_PX = 160
-private const val FACE_CROP_REQUEST_HEIGHT_PX = 200
+internal const val FACE_CROP_REQUEST_WIDTH_PX = 160
+internal const val FACE_CROP_REQUEST_HEIGHT_PX = 200
 
 /** Kích thước decode ảnh (px) – giới hạn để tiết kiệm RAM trong list dài */
-private const val LIST_THUMB_WIDTH_PX = 420
-private const val LIST_THUMB_HEIGHT_PX = 236
-private const val GRID_IMAGE_WIDTH_PX = 800
-private const val GRID_IMAGE_HEIGHT_PX = 450
+internal const val LIST_THUMB_WIDTH_PX = 420
+internal const val LIST_THUMB_HEIGHT_PX = 236
+internal const val GRID_IMAGE_WIDTH_PX = 800
+internal const val GRID_IMAGE_HEIGHT_PX = 450
 
 /** Độ dày khung bounding box (px) vẽ trên ảnh Grid */
 private const val BOUNDING_BOX_STROKE_PX = 3.5f
@@ -907,6 +907,7 @@ private fun EventListCard(
     val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmallMedium) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
     val thumbWidth = ListThumbnailBaseWidth * spacing.scaleFactor
+    val thumbHeight = thumbWidth / THUMBNAIL_ASPECT_RATIO
 
     Row(
         modifier = Modifier
@@ -921,7 +922,7 @@ private fun EventListCard(
             url = images.snapshotUrl,
             modifier = Modifier
                 .width(thumbWidth)
-                .aspectRatio(THUMBNAIL_ASPECT_RATIO)
+                .height(thumbHeight)
                 .clip(thumbShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .eventImageSharedElement(enableSharedElement, event.id),
@@ -935,11 +936,11 @@ private fun EventListCard(
         Column(
             modifier = Modifier
                 .weight(1f)
-                // Cao tối thiểu bằng thumbnail để dòng thời gian luôn nằm sát đáy
-                .heightIn(min = thumbWidth / THUMBNAIL_ASPECT_RATIO),
+                // Cố định chiều cao bằng đúng thumbnail để thẻ 2 dòng, 3 dòng hay 4 dòng đều cao bằng nhau tuyệt đối (không gây xô dịch danh sách)
+                .height(thumbHeight),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.space3)) {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
                 // Line 1: Prefix (e.g., "Phát hiện khuôn mặt", "Phát hiện vi phạm")
                 if (sentenceParts.prefix.isNotEmpty()) {
                     Text(
@@ -1037,21 +1038,11 @@ private fun EventGridCard(
         // Face crop overlay on TopEnd (72x90dp)
         val faceCropUrl = images.faceCropUrl
         if (faceCropUrl != null) {
-            val faceCropRequest = remember(faceCropUrl) {
-                ImageRequest.Builder(context)
-                    .data(faceCropUrl)
-                    .size(FACE_CROP_REQUEST_WIDTH_PX, FACE_CROP_REQUEST_HEIGHT_PX)
-                    .precision(Precision.INEXACT)
-                    .allowHardware(true)
-                    .crossfade(false)
-                    .memoryCacheKey("${faceCropUrl}_${FACE_CROP_REQUEST_WIDTH_PX}x${FACE_CROP_REQUEST_HEIGHT_PX}")
-                    .diskCacheKey(faceCropUrl)
-                    .build()
-            }
-            AsyncImage(
-                model = faceCropRequest,
-                contentDescription = "Face Crop",
+            VideoFrameImage(
+                url = faceCropUrl,
                 contentScale = ContentScale.Crop,
+                targetWidthPx = FACE_CROP_REQUEST_WIDTH_PX,
+                targetHeightPx = FACE_CROP_REQUEST_HEIGHT_PX,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(spacing.space5)
@@ -1236,168 +1227,173 @@ fun MobileFilterBottomSheet(
                     onClick = dismissPickerOrSheet
                 )
         ) {
-            Column(
+            Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(spacing.space10)
-                    .widthIn(max = spacing.dialogMaxWidth)
+                    .widthIn(max = spacing.contentMaxWidth)
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(spacing.radiusExtraLarge))
-                    .background(colors.pageBg)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = { activePicker = null }
-                    )
-                    .padding(horizontal = spacing.space14, vertical = spacing.space12),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    ),
+                shape = RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge),
+                color = colors.surfaceGrouped
             ) {
-                // Drag handle
-                Box(
-                    modifier = Modifier
-                        .width(spacing.sheetHandleWidth)
-                        .height(spacing.sheetHandleHeight)
-                        .clip(CircleShape)
-                        .background(colors.handle)
-                )
-
-                Spacer(modifier = Modifier.height(spacing.space10))
-
-                // Header: Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    IconBadge(
-                        icon = LucideIcons.ListFilter,
-                        backgroundColor = colors.accent,
-                        size = spacing.avatarLarge,
-                        iconSize = spacing.space28,
-                        cornerRadius = spacing.radiusMedium,
-                        tint = Color.White,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = spacing.space4)
-                    )
-
-                    SheetCloseButton(
-                        onClick = {
-                            activePicker = null
-                            onDismiss()
-                        },
-                        modifier = Modifier.align(Alignment.TopEnd)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(spacing.space14))
-
-                Text(
-                    text = if (isEn && title == "Bộ lọc") "Filter" else title,
-                    color = colors.textStrong,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = spacing.space8)
-                        .padding(bottom = spacing.space16)
-                )
-
-                // Unified Filter Card
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(spacing.radiusMedium))
-                        .background(colors.surface)
-                        .padding(vertical = spacing.space4)
+                        .navigationBarsPadding()
+                        .padding(horizontal = spacing.space16)
+                        .padding(top = spacing.space10, bottom = spacing.space20),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // 1. Scope / Chi nhánh
-                    if (showScope && aiServices.isNotEmpty()) {
-                        FilterCellRow(
-                            icon = LucideIcons.MapPin,
-                            badgeColor = BrandAccent,
-                            label = aiServices.find { it.id == draftServiceId }?.name ?: allSystemsLabel,
-                            textColor = textColor,
-                            secondaryColor = secondaryColor,
-                            isExpanded = activePicker == FilterPicker.SCOPE,
-                            onClick = { togglePicker(FilterPicker.SCOPE) },
-                            modifier = anchorOf(FilterPicker.SCOPE)
-                        )
-                    }
+                    // Drag handle
+                    Box(
+                        modifier = Modifier
+                            .width(spacing.sheetHandleWidth)
+                            .height(spacing.sheetHandleHeight)
+                            .clip(CircleShape)
+                            .background(colors.handle)
+                    )
 
-                    // 2. Time Range
-                    if (showTime) {
-                        val timeLabel = remember(draftTimeFilter, customPickerVersion, isEn) {
-                            TimeFilter.formatDisplayLabel(draftTimeFilter, isEn)
-                        }
-                        FilterCellRow(
-                            icon = LucideIcons.Clock,
-                            badgeColor = WarningOrange,
-                            label = timeLabel,
-                            textColor = textColor,
-                            secondaryColor = secondaryColor,
-                            isExpanded = activePicker == FilterPicker.TIME,
-                            onClick = { togglePicker(FilterPicker.TIME) },
-                            modifier = anchorOf(FilterPicker.TIME)
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(spacing.space10))
 
-                    // 3. Camera
-                    if (showCamera) {
-                        val cameraLabel = remember(cameras, draftCameraUuid) {
-                            cameras.find { cameraKey(it) == draftCameraUuid }?.name
-                        } ?: allCamerasLabel
-                        FilterCellRow(
-                            icon = LucideIcons.Video,
-                            badgeColor = SuccessGreen,
-                            label = cameraLabel,
-                            textColor = textColor,
-                            secondaryColor = secondaryColor,
-                            isExpanded = activePicker == FilterPicker.CAMERA,
-                            onClick = { togglePicker(FilterPicker.CAMERA) },
-                            modifier = anchorOf(FilterPicker.CAMERA)
-                        )
-                    }
-
-                    // 4. AI Event Type
-                    if (showEventType) {
-                        val moduleLabel = activeModules.find { it.sensorType == draftAiType }?.let {
-                            if (isEn) it.labelEn else it.labelVi
-                        } ?: allEventsLabel
-                        FilterCellRow(
+                    // Header: Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        IconBadge(
                             icon = LucideIcons.ListFilter,
-                            badgeColor = VioletAccent,
-                            label = moduleLabel,
-                            textColor = textColor,
-                            secondaryColor = secondaryColor,
-                            isExpanded = activePicker == FilterPicker.EVENT,
-                            onClick = { togglePicker(FilterPicker.EVENT) },
-                            modifier = anchorOf(FilterPicker.EVENT)
+                            backgroundColor = colors.accent,
+                            size = spacing.avatarLarge,
+                            iconSize = spacing.space28,
+                            cornerRadius = spacing.radiusMedium,
+                            tint = Color.White,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = spacing.space4)
+                        )
+
+                        SheetCloseButton(
+                            onClick = {
+                                activePicker = null
+                                onDismiss()
+                            },
+                            modifier = Modifier.align(Alignment.TopEnd)
                         )
                     }
-                }
 
-                Spacer(modifier = Modifier.height(spacing.space16))
+                    Spacer(modifier = Modifier.height(spacing.space14))
 
-                // Footer Buttons: Reset & Apply
-                FilterFooterButtons(
-                    resetText = if (isEn) "Reset" else "Đặt lại",
-                    applyText = if (isEn) "Apply" else "Áp dụng",
-                    onReset = {
-                        activePicker = null
-                        draftServiceId = null
-                        draftTimeFilter = TimeFilter.TODAY
-                        draftCameraUuid = null
-                        draftAiType = null
-                        onReset()
-                        onDismiss()
-                    },
-                    onApply = {
-                        activePicker = null
-                        onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
-                        onDismiss()
+                    Text(
+                        text = if (isEn && title == "Bộ lọc") "Filter" else title,
+                        color = colors.textStrong,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space8)
+                            .padding(bottom = spacing.space16)
+                    )
+
+                    // Unified Filter Card
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .background(colors.surfaceRaised)
+                            .padding(vertical = spacing.space4)
+                    ) {
+                        // 1. Scope / Chi nhánh
+                        if (showScope && aiServices.isNotEmpty()) {
+                            FilterCellRow(
+                                icon = LucideIcons.MapPin,
+                                badgeColor = BrandAccent,
+                                label = aiServices.find { it.id == draftServiceId }?.name ?: allSystemsLabel,
+                                textColor = textColor,
+                                secondaryColor = secondaryColor,
+                                isExpanded = activePicker == FilterPicker.SCOPE,
+                                onClick = { togglePicker(FilterPicker.SCOPE) },
+                                modifier = anchorOf(FilterPicker.SCOPE)
+                            )
+                        }
+
+                        // 2. Time Range
+                        if (showTime) {
+                            val timeLabel = remember(draftTimeFilter, customPickerVersion, isEn) {
+                                TimeFilter.formatDisplayLabel(draftTimeFilter, isEn)
+                            }
+                            FilterCellRow(
+                                icon = LucideIcons.Clock,
+                                badgeColor = WarningOrange,
+                                label = timeLabel,
+                                textColor = textColor,
+                                secondaryColor = secondaryColor,
+                                isExpanded = activePicker == FilterPicker.TIME,
+                                onClick = { togglePicker(FilterPicker.TIME) },
+                                modifier = anchorOf(FilterPicker.TIME)
+                            )
+                        }
+
+                        // 3. Camera
+                        if (showCamera) {
+                            val cameraLabel = remember(cameras, draftCameraUuid) {
+                                cameras.find { cameraKey(it) == draftCameraUuid }?.name
+                            } ?: allCamerasLabel
+                            FilterCellRow(
+                                icon = LucideIcons.Video,
+                                badgeColor = SuccessGreen,
+                                label = cameraLabel,
+                                textColor = textColor,
+                                secondaryColor = secondaryColor,
+                                isExpanded = activePicker == FilterPicker.CAMERA,
+                                onClick = { togglePicker(FilterPicker.CAMERA) },
+                                modifier = anchorOf(FilterPicker.CAMERA)
+                            )
+                        }
+
+                        // 4. AI Event Type
+                        if (showEventType) {
+                            val moduleLabel = activeModules.find { it.sensorType == draftAiType }?.let {
+                                if (isEn) it.labelEn else it.labelVi
+                            } ?: allEventsLabel
+                            FilterCellRow(
+                                icon = LucideIcons.ListFilter,
+                                badgeColor = VioletAccent,
+                                label = moduleLabel,
+                                textColor = textColor,
+                                secondaryColor = secondaryColor,
+                                isExpanded = activePicker == FilterPicker.EVENT,
+                                onClick = { togglePicker(FilterPicker.EVENT) },
+                                modifier = anchorOf(FilterPicker.EVENT)
+                            )
+                        }
                     }
-                )
+
+                    Spacer(modifier = Modifier.height(spacing.space16))
+
+                    // Footer Buttons: Reset & Apply
+                    FilterFooterButtons(
+                        resetText = if (isEn) "Reset" else "Đặt lại",
+                        applyText = if (isEn) "Apply" else "Áp dụng",
+                        onReset = {
+                            activePicker = null
+                            draftServiceId = null
+                            draftTimeFilter = TimeFilter.TODAY
+                            draftCameraUuid = null
+                            draftAiType = null
+                            onReset()
+                            onDismiss()
+                        },
+                        onApply = {
+                            activePicker = null
+                            onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
+                            onDismiss()
+                        }
+                    )
+                }
             }
 
             // Anchored Dropdown Menu right at the clicked filter cell (matching BaseSelect in MobileFilterBottomSheet.vue)
@@ -1545,16 +1541,16 @@ private fun FilterFooterButtons(
     ) {
         FilterFooterButton(
             text = resetText,
-            containerColor = colors.surface,
-            contentColor = colors.textSubtle,
-            fontWeight = FontWeight.Medium,
+            containerColor = colors.buttonSecondaryBg,
+            contentColor = colors.textStrong,
+            fontWeight = FontWeight.SemiBold,
             onClick = onReset
         )
         FilterFooterButton(
             text = applyText,
-            containerColor = BrandPrimary,
+            containerColor = colors.accent,
             contentColor = colors.onAccent,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             onClick = onApply
         )
     }

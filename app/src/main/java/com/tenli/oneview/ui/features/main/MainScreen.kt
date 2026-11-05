@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -52,7 +53,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -341,8 +341,117 @@ fun MainScreen(
 
     CompositionLocalProvider(LocalMobileOverlayHost provides overlayHostState) {
         val isEn = rememberIsEnglish()
-        Scaffold(
-            topBar = {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .pointerInput(Unit) {
+                    val edgeBufferPx = SwipeEdgeBuffer.toPx()
+                    val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
+                    val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
+                    val minFlickDistPx = SwipeMinFlickDistance.toPx()
+                    val minDragDistPx = SwipeMinDragDistance.toPx()
+                    val longDragDistPx = SwipeLongDragDistance.toPx()
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val widthPx = size.width.toFloat()
+                        val heightPx = size.height.toFloat()
+                        val startX = down.position.x
+                        val startY = down.position.y
+
+                        // Ignore touches near screen left/right edges for system back gesture,
+                        // or in the bottom navigation bar zone, or when video is in fullscreen
+                        if (!showBottomBarState ||
+                            showNotificationConfigPageState ||
+                            overlayHostState.hasOverlays ||
+                            startX < edgeBufferPx ||
+                            startX > widthPx - edgeBufferPx ||
+                            startY > heightPx - bottomNavExclusionPx
+                        ) {
+                            return@awaitEachGesture
+                        }
+
+                        val startTime = down.uptimeMillis
+                        var endTime = startTime
+                        var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
+                        var lastX = startX
+                        var lastY = startY
+
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            endTime = change.uptimeMillis
+
+                            if (change.changedToUpIgnoreConsumed()) {
+                                lastX = change.position.x
+                                lastY = change.position.y
+                                if (gestureDirection == 1) {
+                                    change.consume()
+                                }
+                                break
+                            }
+
+                            if (!change.pressed) break
+
+                            lastX = change.position.x
+                            lastY = change.position.y
+                            val dx = lastX - startX
+                            val dy = lastY - startY
+
+                            if (gestureDirection == 0) {
+                                if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
+                                    gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
+                                }
+                            }
+
+                            if (gestureDirection == 2) {
+                                // Locked to vertical scrolling -> let child LazyColumn handle it
+                                break
+                            } else if (gestureDirection == 1) {
+                                // Consume horizontal drag so child views don't trigger accidental clicks
+                                change.consume()
+                            }
+                        }
+
+                        if (gestureDirection == 1) {
+                            val diffX = lastX - startX
+                            val diffY = lastY - startY
+                            val absX = abs(diffX)
+                            val absY = abs(diffY)
+                            val elapsed = (endTime - startTime).coerceAtLeast(1L)
+                            val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
+
+                            // Match MobileLayout.vue thresholds:
+                            // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
+                            // 2. Drag: distance >= 45dp && elapsed <= 700ms
+                            // 3. Long drag: distance >= 90dp
+                            val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
+                            val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
+                            val isLongDrag = absX >= longDragDistPx
+
+                            if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
+                                val currIdx = OrderedMainTabs.indexOf(currentTabState)
+                                if (currIdx != -1) {
+                                    if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
+                                        // Swipe right-to-left -> next tab
+                                        switchToTab(OrderedMainTabs[currIdx + 1], true)
+                                    } else if (diffX > 0f && currIdx > 0) {
+                                        // Swipe left-to-right -> previous tab
+                                        switchToTab(OrderedMainTabs[currIdx - 1], true)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .zIndex(1f)
+            ) {
                 AnimatedVisibility(visible = uiState.isOffline) {
                     Box(
                         modifier = Modifier
@@ -360,121 +469,14 @@ fun MainScreen(
                         )
                     }
                 }
-            }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background)
-                    .pointerInput(Unit) {
-                        val edgeBufferPx = SwipeEdgeBuffer.toPx()
-                        val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
-                        val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
-                        val minFlickDistPx = SwipeMinFlickDistance.toPx()
-                        val minDragDistPx = SwipeMinDragDistance.toPx()
-                        val longDragDistPx = SwipeLongDragDistance.toPx()
 
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                            val widthPx = size.width.toFloat()
-                            val heightPx = size.height.toFloat()
-                            val startX = down.position.x
-                            val startY = down.position.y
-
-                            // Ignore touches near screen left/right edges for system back gesture,
-                            // or in the bottom navigation bar zone, or when video is in fullscreen
-                            if (!showBottomBarState ||
-                                showNotificationConfigPageState ||
-                                overlayHostState.hasOverlays ||
-                                startX < edgeBufferPx ||
-                                startX > widthPx - edgeBufferPx ||
-                                startY > heightPx - bottomNavExclusionPx
-                            ) {
-                                return@awaitEachGesture
-                            }
-
-                            val startTime = down.uptimeMillis
-                            var endTime = startTime
-                            var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
-                            var lastX = startX
-                            var lastY = startY
-
-                            while (true) {
-                                val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                endTime = change.uptimeMillis
-
-                                if (change.changedToUpIgnoreConsumed()) {
-                                    lastX = change.position.x
-                                    lastY = change.position.y
-                                    if (gestureDirection == 1) {
-                                        change.consume()
-                                    }
-                                    break
-                                }
-
-                                if (!change.pressed) break
-
-                                lastX = change.position.x
-                                lastY = change.position.y
-                                val dx = lastX - startX
-                                val dy = lastY - startY
-
-                                if (gestureDirection == 0) {
-                                    if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                        gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
-                                    }
-                                }
-
-                                if (gestureDirection == 2) {
-                                    // Locked to vertical scrolling -> let child LazyColumn handle it
-                                    break
-                                } else if (gestureDirection == 1) {
-                                    // Consume horizontal drag so child views don't trigger accidental clicks
-                                    change.consume()
-                                }
-                            }
-
-                            if (gestureDirection == 1) {
-                                val diffX = lastX - startX
-                                val diffY = lastY - startY
-                                val absX = abs(diffX)
-                                val absY = abs(diffY)
-                                val elapsed = (endTime - startTime).coerceAtLeast(1L)
-                                val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
-
-                                // Match MobileLayout.vue thresholds:
-                                // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
-                                // 2. Drag: distance >= 45dp && elapsed <= 700ms
-                                // 3. Long drag: distance >= 90dp
-                                val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
-                                val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
-                                val isLongDrag = absX >= longDragDistPx
-
-                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
-                                    val currIdx = OrderedMainTabs.indexOf(currentTabState)
-                                    if (currIdx != -1) {
-                                        if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
-                                            // Swipe right-to-left -> next tab
-                                            switchToTab(OrderedMainTabs[currIdx + 1], true)
-                                        } else if (diffX > 0f && currIdx > 0) {
-                                            // Swipe left-to-right -> previous tab
-                                            switchToTab(OrderedMainTabs[currIdx - 1], true)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-            ) {
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
                 // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
                 // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = innerPadding.calculateTopPadding())
-                        .zIndex(1f)
+                        .fillMaxWidth()
+                        .weight(1f)
                 ) {
                     OrderedMainTabs.forEach { tab ->
                         Box(
@@ -541,52 +543,52 @@ fun MainScreen(
                         }
                     }
                 }
+            }
 
-                if (showBottomBar) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .zIndex(10f)
-                    ) {
-                        MainBottomNavigation(
-                            currentTab = uiState.currentTab,
-                            onTabClick = onBottomTabClick,
-                            onScrollToTop = scrollTabToTop
-                        )
-                    }
+            if (showBottomBar) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .zIndex(10f)
+                ) {
+                    MainBottomNavigation(
+                        currentTab = uiState.currentTab,
+                        onTabClick = onBottomTabClick,
+                        onScrollToTop = scrollTabToTop
+                    )
                 }
+            }
 
-                // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)
-                AnimatedVisibility(
-                    visible = showNotificationConfigPage,
+            // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)
+            AnimatedVisibility(
+                visible = showNotificationConfigPage,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .zIndex(30f),
+                enter = slideInHorizontally(
+                    initialOffsetX = { fullWidth -> fullWidth },
+                    animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
+                ),
+                exit = slideOutHorizontally(
+                    targetOffsetX = { fullWidth -> fullWidth },
+                    animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
+                )
+            ) {
+                MobileNotificationConfigScreen(
+                    viewModel = viewModel,
+                    onBackClick = onCloseNotificationConfig
+                )
+            }
+
+            // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
+            if (overlayHostState.hasOverlays) {
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = innerPadding.calculateTopPadding())
-                        .zIndex(30f),
-                    enter = slideInHorizontally(
-                        initialOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
-                    ),
-                    exit = slideOutHorizontally(
-                        targetOffsetX = { fullWidth -> fullWidth },
-                        animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
-                    )
+                        .zIndex(50f)
                 ) {
-                    MobileNotificationConfigScreen(
-                        viewModel = viewModel,
-                        onBackClick = onCloseNotificationConfig
-                    )
-                }
-
-                // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
-                if (overlayHostState.hasOverlays) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .zIndex(50f)
-                    ) {
-                        overlayHostState.Content()
-                    }
+                    overlayHostState.Content()
                 }
             }
         }

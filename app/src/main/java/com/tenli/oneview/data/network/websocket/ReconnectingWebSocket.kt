@@ -33,7 +33,8 @@ abstract class ReconnectingWebSocket(
     protected val gson: Gson,
     private val scope: CoroutineScope,
     private val logTag: String,
-    private val subscribeTopic: String
+    private val subscribeTopic: String,
+    private val preserveExistingUrlToken: Boolean = false
 ) {
     @Volatile private var webSocket: WebSocket? = null
     /** URL gốc (chưa chuẩn hóa) – được chuẩn hóa lại mỗi lần connect để luôn theo domain/token hiện tại */
@@ -41,9 +42,11 @@ abstract class ReconnectingWebSocket(
     @Volatile private var isConnected = false
     @Volatile private var isConnecting = false
     @Volatile private var manuallyDisconnected = false
+    @Volatile private var hasReceivedMessage = false
     private val lock = Any()
 
     @Volatile private var heartbeatJob: Job? = null
+    @Volatile private var subscribeRetryJob: Job? = null
     @Volatile private var reconnectJob: Job? = null
     @Volatile private var reconnectDelay = INITIAL_RECONNECT_DELAY_MS
 
@@ -61,8 +64,11 @@ abstract class ReconnectingWebSocket(
             }
 
             manuallyDisconnected = false
+            hasReceivedMessage = false
             reconnectJob?.cancel()
             reconnectJob = null
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = null
             stopHeartbeat()
 
             // Đóng kết nối cũ (nếu có) trước khi mở socket mới để tránh rò rỉ socket song song
@@ -73,8 +79,9 @@ abstract class ReconnectingWebSocket(
             runCatching { oldSocket?.cancel() }
 
             rawUrl = urlStr
+            val finalUrl = appendTokenToUrl(protocolUrl, preserveExistingToken = preserveExistingUrlToken)
             if (BuildConfig.DEBUG) Log.d(logTag, "Connecting: $protocolUrl")
-            val request = Request.Builder().url(appendTokenToUrl(protocolUrl)).build()
+            val request = Request.Builder().url(finalUrl).build()
             webSocket = client.newWebSocket(request, Listener())
         }
     }
@@ -91,7 +98,10 @@ abstract class ReconnectingWebSocket(
             manuallyDisconnected = true
             isConnecting = false
             isConnected = false
+            hasReceivedMessage = false
             stopHeartbeat()
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = null
             reconnectJob?.cancel()
             reconnectJob = null
             val ws = webSocket
@@ -118,14 +128,26 @@ abstract class ReconnectingWebSocket(
             if (BuildConfig.DEBUG) Log.d(logTag, "Connected")
             isConnecting = false
             isConnected = true
+            hasReceivedMessage = false
             reconnectDelay = INITIAL_RECONNECT_DELAY_MS
             reconnectJob?.cancel()
             send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
+            // Khớp websocketReport.ts: gửi lại subscribe 1 lần sau 3.5s nếu chưa nhận dữ liệu
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = scope.launch {
+                delay(SUBSCRIBE_RETRY_DELAY_MS)
+                if (isCurrent(webSocket) && isConnected && !hasReceivedMessage) {
+                    send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
+                }
+            }
             startHeartbeat()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (!isCurrent(webSocket)) return
+            hasReceivedMessage = true
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = null
             try {
                 onTextMessage(text)
             } catch (e: Exception) {
@@ -149,6 +171,9 @@ abstract class ReconnectingWebSocket(
     private fun handleDisconnect() {
         isConnecting = false
         isConnected = false
+        hasReceivedMessage = false
+        subscribeRetryJob?.cancel()
+        subscribeRetryJob = null
         stopHeartbeat()
         webSocket = null
         if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
@@ -192,8 +217,10 @@ abstract class ReconnectingWebSocket(
         private const val RECONNECT_JITTER_MS = 1_000L
         private const val BACKOFF_MULTIPLIER = 1.5
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val SUBSCRIBE_RETRY_DELAY_MS = 3_500L
         private val PING_MESSAGE = mapOf("action" to "ping")
         private val TOKEN_PARAM_REGEX = Regex("([?&])token=[^&]*(&|$)")
+        private val EXISTING_TOKEN_VALUE_REGEX = Regex("[?&]token=([^&]+)")
         private val TRAILING_SEPARATOR_REGEX = Regex("[?&]$")
 
         /** Bỏ hậu tố /api/v1 của domain cloud để lấy gốc server */
@@ -223,8 +250,18 @@ abstract class ReconnectingWebSocket(
             return toWsScheme(absolute)
         }
 
-        /** Thay/gắn tham số token mới nhất vào URL */
-        fun appendTokenToUrl(normalizedUrl: String): String {
+        /**
+         * Thay/gắn tham số token mới nhất vào URL.
+         * Nếu [preserveExistingToken] = true (dành cho ReportLink của VMS nhánh có sẵn token riêng),
+         * giữ nguyên token có sẵn trong URL giống websocketReport.ts dòng 103-107.
+         */
+        fun appendTokenToUrl(normalizedUrl: String, preserveExistingToken: Boolean = false): String {
+            if (preserveExistingToken) {
+                val existingToken = EXISTING_TOKEN_VALUE_REGEX.find(normalizedUrl)?.groupValues?.getOrNull(1)?.trim()
+                if (!existingToken.isNullOrEmpty()) {
+                    return normalizedUrl
+                }
+            }
             val token = UserSession.accessToken
             val base = normalizedUrl
                 .replace(TOKEN_PARAM_REGEX) { m -> if (m.groupValues[2].isNotEmpty()) m.groupValues[1] else "" }
@@ -242,7 +279,7 @@ class WebSocketNotifyClient(
     gson: Gson,
     scope: CoroutineScope,
     private val onMessageReceived: (com.tenli.oneview.model.network.NotifyData) -> Unit
-) : ReconnectingWebSocket(client, gson, scope, "WebSocketNotify", "notify") {
+) : ReconnectingWebSocket(client, gson, scope, "WebSocketNotify", "notify", preserveExistingUrlToken = false) {
     override fun onTextMessage(text: String) {
         gson.fromJson(text, com.tenli.oneview.model.network.NotifyData::class.java)?.let(onMessageReceived)
     }
@@ -255,7 +292,7 @@ class WebSocketReportClient(
     gson: Gson,
     scope: CoroutineScope,
     private val onMessageReceived: (com.tenli.oneview.model.network.ReportPayload, Int) -> Unit
-) : ReconnectingWebSocket(client, gson, scope, "WebSocketReport-$vmsId", "report") {
+) : ReconnectingWebSocket(client, gson, scope, "WebSocketReport-$vmsId", "report", preserveExistingUrlToken = true) {
     override fun onTextMessage(text: String) {
         gson.fromJson(text, com.tenli.oneview.model.network.ReportPayload::class.java)?.let { onMessageReceived(it, vmsId) }
     }

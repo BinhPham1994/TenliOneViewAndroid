@@ -1139,9 +1139,7 @@ private fun MobileGroupFilterBottomSheet(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = onDismiss
-                )
-                .navigationBarsPadding()
-                .padding(horizontal = spacing.space10, vertical = spacing.space10),
+                ),
             contentAlignment = Alignment.BottomCenter
         ) {
             Column(
@@ -1149,20 +1147,16 @@ private fun MobileGroupFilterBottomSheet(
                     .widthIn(max = spacing.contentMaxWidth)
                     .fillMaxWidth()
                     .heightIn(max = GroupFilterSheetMaxHeight)
-                    .clip(RoundedCornerShape(spacing.radiusLarge))
-                    .background(colors.surface)
-                    .border(spacing.borderMedium, colors.border, RoundedCornerShape(spacing.radiusLarge))
+                    .clip(RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge))
+                    .background(colors.surfaceGrouped)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         onClick = {}
                     )
-                    .padding(
-                        start = spacing.space10,
-                        end = spacing.space10,
-                        top = spacing.space10,
-                        bottom = spacing.space12
-                    )
+                    .navigationBarsPadding()
+                    .padding(horizontal = spacing.space16)
+                    .padding(top = spacing.space10, bottom = spacing.space20)
             ) {
                 // Sheet Header (drag handle + icon ở giữa + tiêu đề căn giữa + nút đóng)
                 Box(
@@ -1194,15 +1188,15 @@ private fun MobileGroupFilterBottomSheet(
                             .align(Alignment.TopEnd)
                             .size(spacing.avatarSmall)
                             .clip(CircleShape)
-                            .background(colors.controlBg)
+                            .background(colors.closeButtonBg)
                             .clickable(onClick = onDismiss),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = LucideIcons.X,
                             contentDescription = if (isEn) "Close" else "Đóng",
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(spacing.iconSmallMedium)
+                            tint = colors.textSubtle,
+                            modifier = Modifier.size(spacing.iconSmall)
                         )
                     }
                 }
@@ -1219,7 +1213,7 @@ private fun MobileGroupFilterBottomSheet(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
                         .padding(horizontal = spacing.space8)
-                        .padding(bottom = spacing.space12)
+                        .padding(bottom = spacing.space16)
                 )
 
                 // Sheet Body
@@ -1227,14 +1221,20 @@ private fun MobileGroupFilterBottomSheet(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(GroupFilterEmptyHeight),
+                            .height(GroupFilterEmptyHeight)
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .background(colors.surfaceRaised),
                         contentAlignment = Alignment.Center
                     ) {
                         CommonEmptyState(text = if (isEn) "No camera groups" else "Không có nhóm camera")
                     }
                 } else {
                     LazyColumn(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .background(colors.surfaceRaised)
+                            .padding(vertical = spacing.space4),
                         verticalArrangement = Arrangement.spacedBy(spacing.space2)
                     ) {
                         // Top option: "Tất cả camera" / "All cameras"

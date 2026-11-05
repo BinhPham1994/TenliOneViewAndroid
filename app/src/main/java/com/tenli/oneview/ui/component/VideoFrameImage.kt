@@ -69,6 +69,17 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
+        val cacheKeyStr = remember(url, targetWidthPx, targetHeightPx) {
+            if (url.isNullOrBlank()) null else "${url}_${targetWidthPx}x${targetHeightPx}"
+        }
+        val prewarmedBitmap = remember(cacheKeyStr) {
+            cacheKeyStr?.let { key ->
+                coil.Coil.imageLoader(context).memoryCache
+                    ?.get(coil.memory.MemoryCache.Key(key))
+                    ?.bitmap
+                    ?.takeIf { !it.isRecycled }
+            }
+        }
         val imageRequest = remember(url, targetWidthPx, targetHeightPx) {
             if (url.isNullOrBlank()) {
                 null
@@ -76,6 +87,7 @@ fun VideoFrameImage(
                 coil.request.ImageRequest.Builder(context)
                     .data(url)
                     .size(targetWidthPx, targetHeightPx)
+                    .scale(coil.size.Scale.FILL)
                     .precision(coil.size.Precision.INEXACT)
                     .allowHardware(true)
                     .crossfade(false)
@@ -88,7 +100,15 @@ fun VideoFrameImage(
         Box(
             modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            if (imageRequest != null) {
+            if (prewarmedBitmap != null) {
+                val imageBitmap = remember(prewarmedBitmap) { prewarmedBitmap.asImageBitmap() }
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = "Event Image",
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (imageRequest != null) {
                 coil.compose.AsyncImage(
                     model = imageRequest,
                     contentDescription = "Event Image",

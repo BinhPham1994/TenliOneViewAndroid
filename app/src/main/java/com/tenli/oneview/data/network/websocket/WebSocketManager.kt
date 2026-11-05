@@ -3,6 +3,7 @@ package com.tenli.oneview.data.network.websocket
 import android.util.Log
 import com.google.gson.Gson
 import com.tenli.oneview.BuildConfig
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.CameraInfo
@@ -73,8 +74,18 @@ class WebSocketManager(
     private val captureStatusLabelMap = HashMap<String, StatusLabel>()
     private val recordStatusLabelMap = HashMap<String, StatusLabel>()
     private val captureRedLatchSet = HashSet<String>()
+    private val pendingCameraStateMap = HashMap<String, PendingCameraState>()
+    private val latestCameraReports = ConcurrentHashMap<Int, List<CameraInfo>>()
 
     data class StatusLabel(val color: String, val label: String)
+
+    private data class PendingCameraState(
+        var statusColor: String,
+        var captureStatus: StatusLabel,
+        var recordStatus: StatusLabel,
+        var count: Int,
+        val firstSeenAt: Long
+    )
 
     /**
      * Gọi từ Application khi app chuyển foreground/background (đếm Activity started).
@@ -202,32 +213,163 @@ class WebSocketManager(
     }
 
     /**
-     * Khớp hoàn toàn với useReportHandler.ts của PWA:
-     * - captureState = cam.main?.state ?: cam.sub?.state
+     * Khớp hoàn toàn với applyCameraReport() trong useReportHandler.ts của PWA:
+     * - captureState = cam.main?.state ?: cam.sub?.state ?: cam.state
      * - recordState = cam.recorder?.state
-     * - captureStatus.color ("green" | "orange" | "red") lưu vào cameraStatusMap
-     * - recordStatus.color ("green" | "orange" | "red") lưu vào recordStatusMap
+     * - rawStatusColor = "green" (nếu cả capture & record đều green), "red" (nếu 1 trong 2 là red), ngược lại "orange"
+     * - Ánh xạ đủ các khoá theo cả cam.id lẫn matchedCam.id / matchedCam.cameraId trong cameraList.
      */
-    private fun handleCameraReport(items: List<CameraInfo>, vmsId: Int) = synchronized(reportLock) {
+    private fun handleCameraReport(items: List<CameraInfo>, vmsId: Int) {
+        latestCameraReports[vmsId] = items
+        synchronized(reportLock) {
+            applyCameraReportLocked(items, vmsId, forceImmediate = false)
+        }
+    }
+
+    /**
+     * Gọi sau khi cameraList được tải xong để gán lại trạng thái report đã nhận trước đó
+     * cho tất cả khoá cam-{vmsId}-{id} và cam-{vmsId}-{cameraId} (khớp ensureCameraListWatcher trong useReportHandler.ts).
+     */
+    fun reapplyCameraReports() {
+        if (latestCameraReports.isEmpty()) return
+        synchronized(reportLock) {
+            for ((vmsId, items) in latestCameraReports) {
+                if (items.isNotEmpty()) {
+                    applyCameraReportLocked(items, vmsId, forceImmediate = true)
+                }
+            }
+        }
+    }
+
+    private fun applyCameraReportLocked(
+        items: List<CameraInfo>,
+        vmsId: Int,
+        forceImmediate: Boolean
+    ) {
         val nextCamMap = _cameraStatusMap.value.toMutableMap()
         val nextRecMap = _recordStatusMap.value.toMutableMap()
+        val knownCameras = EventCacheManager.getCamerasInMemory()
+        val now = System.currentTimeMillis()
+
+        fun applyStatusToKey(
+            targetKey: String,
+            statusColor: String,
+            captureStatus: StatusLabel,
+            recordStatus: StatusLabel
+        ) {
+            nextCamMap[targetKey] = statusColor
+            captureStatusLabelMap[targetKey] = captureStatus
+            nextRecMap[targetKey] = recordStatus.color
+            recordStatusLabelMap[targetKey] = recordStatus
+        }
 
         for (cam in items) {
-            if (cam.main == null && cam.sub == null && cam.recorder == null) continue
+            val captureState = cam.main?.state ?: cam.sub?.state ?: cam.state
+            val recordState = cam.recorder?.state
+            if (cam.main == null && cam.sub == null && cam.recorder == null && captureState == null) continue
 
-            val key = "cam-$vmsId-${cam.id}"
-            val captureStatus = getCaptureStatus(cam.main?.state ?: cam.sub?.state, key)
-            val recordStatus = getRecordStatus(cam.recorder?.state, key)
+            val rawKey = "cam-$vmsId-${cam.id}"
+            if (captureState == "connected") {
+                captureRedLatchSet.remove(rawKey)
+            } else if (captureState == "error") {
+                captureRedLatchSet.add(rawKey)
+            }
 
-            captureStatusLabelMap[key] = captureStatus
-            recordStatusLabelMap[key] = recordStatus
+            val rawCaptureStatus = getCaptureStatus(captureState, rawKey)
+            val rawRecordStatus = getRecordStatus(recordState, rawKey)
+            val rawStatusColor = when {
+                rawCaptureStatus.color == "green" && rawRecordStatus.color == "green" -> "green"
+                rawCaptureStatus.color == "red" || rawRecordStatus.color == "red" -> "red"
+                else -> "orange"
+            }
 
-            nextCamMap[key] = captureStatus.color
-            nextRecMap[key] = recordStatus.color
+            var finalStatusColor = rawStatusColor
+            var finalCaptureStatus = rawCaptureStatus
+            var finalRecordStatus = rawRecordStatus
 
+            val existingColor = nextCamMap[rawKey]
+            val existingCapture = captureStatusLabelMap[rawKey]
+            val existingRecord = recordStatusLabelMap[rawKey]
+            val isDefinitiveCaptureTransition = captureState == "connected" || captureState == "error"
+
+            if (!forceImmediate &&
+                !isDefinitiveCaptureTransition &&
+                existingColor != null &&
+                existingCapture != null &&
+                existingRecord != null
+            ) {
+                val hasChanged = existingColor != rawStatusColor ||
+                    existingCapture.color != rawCaptureStatus.color ||
+                    existingRecord.color != rawRecordStatus.color
+                if (!hasChanged) {
+                    pendingCameraStateMap.remove(rawKey)
+                    finalStatusColor = existingColor
+                    finalCaptureStatus = existingCapture
+                    finalRecordStatus = existingRecord
+                } else {
+                    val pending = pendingCameraStateMap[rawKey]
+                    if (pending != null) {
+                        pending.count += 1
+                        pending.statusColor = rawStatusColor
+                        pending.captureStatus = rawCaptureStatus
+                        pending.recordStatus = rawRecordStatus
+                        val elapsed = now - pending.firstSeenAt
+                        if (pending.count >= STATUS_DOWNGRADE_MIN_COUNT || elapsed >= STATUS_DOWNGRADE_MIN_MS) {
+                            pendingCameraStateMap.remove(rawKey)
+                        } else {
+                            finalStatusColor = existingColor
+                            finalCaptureStatus = existingCapture
+                            finalRecordStatus = existingRecord
+                        }
+                    } else {
+                        pendingCameraStateMap[rawKey] = PendingCameraState(
+                            statusColor = rawStatusColor,
+                            captureStatus = rawCaptureStatus,
+                            recordStatus = rawRecordStatus,
+                            count = 1,
+                            firstSeenAt = now
+                        )
+                        finalStatusColor = existingColor
+                        finalCaptureStatus = existingCapture
+                        finalRecordStatus = existingRecord
+                    }
+                }
+            } else {
+                pendingCameraStateMap.remove(rawKey)
+            }
+
+            applyStatusToKey(rawKey, finalStatusColor, finalCaptureStatus, finalRecordStatus)
             if (vmsId == LOCAL_VMS_ID) {
-                nextCamMap["cam-${cam.id}"] = captureStatus.color
-                nextRecMap["cam-${cam.id}"] = recordStatus.color
+                applyStatusToKey("cam-${cam.id}", finalStatusColor, finalCaptureStatus, finalRecordStatus)
+            }
+
+            if (knownCameras.isNotEmpty()) {
+                for (matchedCam in knownCameras) {
+                    val cVmsId = matchedCam.vmsId
+                    if (cVmsId != vmsId) continue
+                    val isMatch = if (vmsId == LOCAL_VMS_ID) {
+                        matchedCam.id == cam.id || (matchedCam.cameraId != 0 && matchedCam.cameraId == cam.id)
+                    } else {
+                        (matchedCam.cameraId != 0 && matchedCam.cameraId == cam.id) || matchedCam.id == cam.id
+                    }
+                    if (!isMatch) continue
+
+                    val primaryId = if (cVmsId == LOCAL_VMS_ID) {
+                        matchedCam.id
+                    } else if (matchedCam.cameraId != 0) {
+                        matchedCam.cameraId
+                    } else {
+                        matchedCam.id
+                    }
+                    applyStatusToKey("cam-$cVmsId-$primaryId", finalStatusColor, finalCaptureStatus, finalRecordStatus)
+                    applyStatusToKey("cam-$cVmsId-${matchedCam.id}", finalStatusColor, finalCaptureStatus, finalRecordStatus)
+                    if (matchedCam.cameraId != 0) {
+                        applyStatusToKey("cam-$cVmsId-${matchedCam.cameraId}", finalStatusColor, finalCaptureStatus, finalRecordStatus)
+                    }
+                    if (cVmsId == LOCAL_VMS_ID) {
+                        applyStatusToKey("cam-${matchedCam.id}", finalStatusColor, finalCaptureStatus, finalRecordStatus)
+                    }
+                }
             }
         }
 
@@ -237,8 +379,12 @@ class WebSocketManager(
     }
 
     private fun getCaptureStatus(state: String?, key: String): StatusLabel {
+        val prev = captureStatusLabelMap[key]
         if (state == null) {
-            return captureStatusLabelMap[key] ?: STATUS_DISCONNECTED
+            if (key in captureRedLatchSet || prev?.color == "red") {
+                return STATUS_CONNECTION_ERROR
+            }
+            return prev ?: STATUS_DISCONNECTED
         }
         return when (state) {
             "connected" -> {
@@ -249,7 +395,7 @@ class WebSocketManager(
                 captureRedLatchSet.add(key)
                 STATUS_CONNECTION_ERROR
             }
-            else -> if (key in captureRedLatchSet) STATUS_CONNECTION_ERROR else STATUS_DISCONNECTED
+            else -> if (key in captureRedLatchSet || prev?.color == "red") STATUS_CONNECTION_ERROR else STATUS_DISCONNECTED
         }
     }
 
@@ -280,6 +426,7 @@ class WebSocketManager(
 
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()
+        latestCameraReports.clear()
 
         _storageStatusMap.value = emptyMap()
         _cameraStatusMap.value = emptyMap()
@@ -288,6 +435,7 @@ class WebSocketManager(
             captureStatusLabelMap.clear()
             recordStatusLabelMap.clear()
             captureRedLatchSet.clear()
+            pendingCameraStateMap.clear()
         }
     }
 
@@ -299,6 +447,8 @@ class WebSocketManager(
         const val TOPIC_APP_RESUMED = "app_resumed"
         /** Thời gian chờ trước khi đóng socket khi app vào nền (tránh đóng/mở liên tục khi chuyển app nhanh) */
         private const val BACKGROUND_GRACE_MS = 30_000L
+        private const val STATUS_DOWNGRADE_MIN_COUNT = 2
+        private const val STATUS_DOWNGRADE_MIN_MS = 4_000L
 
         private val STATUS_CONNECTED = StatusLabel("green", "Connected")
         private val STATUS_CONNECTION_ERROR = StatusLabel("red", "Connection Error")

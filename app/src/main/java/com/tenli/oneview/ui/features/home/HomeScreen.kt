@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,7 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,7 +53,6 @@ import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
-import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.theme.BrandAccent
@@ -131,8 +131,7 @@ fun HomeScreen(
                 state = listState,
                 userScrollEnabled = true,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = spacing.space2, bottom = HomeBottomContentPadding),
-                verticalArrangement = Arrangement.spacedBy(spacing.space10)
+                contentPadding = PaddingValues(top = spacing.space2, bottom = HomeBottomContentPadding)
             ) {
                 // 2x2 Stat Grid matching MobileHomePage.vue (số liệu đã tính sẵn trên background thread của ViewModel)
                 item(key = "home_stat_grid", contentType = "stat_grid") {
@@ -195,21 +194,35 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = spacing.space10)
-                            .padding(top = spacing.space6),
+                            .padding(
+                                start = spacing.space16,
+                                end = spacing.space12,
+                                top = spacing.space14,
+                                bottom = spacing.space6
+                            ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = if (isEn) "Recent events" else "Sự kiện gần đây",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
-                        MobileViewToggleButton(
-                            isListView = uiState.isListView,
-                            onToggle = viewModel::toggleViewMode
-                        )
+                        Box(
+                            modifier = Modifier
+                                .size(spacing.iconButtonSmall)
+                                .clip(RoundedCornerShape(spacing.radiusSmall))
+                                .clickable(onClick = viewModel::toggleViewMode),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.isListView) LucideIcons.LayoutGrid else LucideIcons.List,
+                                contentDescription = if (uiState.isListView) "Grid View" else "List View",
+                                tint = colors.iconDefault,
+                                modifier = Modifier.size(spacing.iconSmallMedium)
+                            )
+                        }
                     }
                 }
 
@@ -241,13 +254,17 @@ fun HomeScreen(
                         }
                     }
                 } else {
-                    items(
+                    itemsIndexed(
                         items = recentFiveEvents,
-                        key = { event -> "home_ev_${event.serviceId}_${event.id}_${event.time}" },
-                        contentType = { "event_card" }
-                    ) { event ->
+                        key = { index, _ -> "home_ev_slot_$index" },
+                        contentType = { _, _ -> "event_card" }
+                    ) { index, event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
-                        Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = spacing.space10)
+                                .padding(top = if (index == 0) 0.dp else spacing.space10)
+                        ) {
                             MobileEventCard(
                                 event = event,
                                 cameraName = cameraName,
