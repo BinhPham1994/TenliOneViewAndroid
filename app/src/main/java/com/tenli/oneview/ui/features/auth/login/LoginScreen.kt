@@ -212,32 +212,34 @@ private fun LoginContent(
     }
 
     Scaffold(containerColor = colors.pageBg) { padding ->
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { focusManager.clearFocus() })
+                }
+        ) {
+            // 1. Footer cố định ở dưới cùng màn hình (.mobile-login-footer "🇻🇳 MAKE IN VIETNAM")
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = padding.calculateBottomPadding() + spacing.space16)
+            ) {
+                LoginFooter()
+            }
+
+            // 2. Thẻ đăng nhập căn giữa màn hình (tự đẩy lên mượt mà khi bàn phím bật)
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
                     .consumeWindowInsets(padding)
                     .imePadding()
-                    .pointerInput(Unit) {
-                        detectTapGestures(onTap = { focusManager.clearFocus() })
-                    }
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = spacing.space24, vertical = spacing.space20),
+                    .padding(horizontal = spacing.space24, vertical = spacing.space56),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                // 1. Language & Theme switchers bên ngoài thẻ (MobileLoginPage.vue .mobile-login-top-actions)
-                LoginSettingsBar(
-                    isVietnamese = isVietnamese,
-                    onSetLanguage = onSetLanguage,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = spacing.dialogMaxWidth)
-                        .padding(bottom = spacing.space12, end = spacing.space4)
-                )
-
-                // 2. Thẻ đăng nhập căn giữa (MobileLoginPage.vue .glass-card)
                 LoginCard(modifier = Modifier.widthIn(max = spacing.dialogMaxWidth)) {
                     LoginHeader(isVietnamese = isVietnamese)
                     Spacer(modifier = Modifier.height(spacing.space32))
@@ -295,12 +297,20 @@ private fun LoginContent(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(spacing.space28))
-
-                // 3. Footer bên ngoài thẻ (.mobile-login-footer "🇻🇳 MAKE IN VIETNAM")
-                LoginFooter()
             }
+
+            // 3. Cụm đổi Ngôn ngữ & Giao diện cố định ở góc trên bên phải màn hình
+            LoginSettingsBar(
+                isVietnamese = isVietnamese,
+                onSetLanguage = onSetLanguage,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(
+                        top = padding.calculateTopPadding() + spacing.space12,
+                        end = spacing.space24
+                    )
+                    .zIndex(10f)
+            )
 
             // Global Top Popup Notification Host (chuẩn hóa hiển thị lỗi ở popup top)
             MobileTopPopupHost(
