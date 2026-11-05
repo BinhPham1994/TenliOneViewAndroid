@@ -14,9 +14,7 @@ import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.utils.AppKeys
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -33,23 +31,14 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Đọc phiên đăng nhập đã lưu + chỉ nạp nhanh dữ liệu Trang chủ lên RAM (~10ms) trước khi tắt Splash screen
-     * để mở vào Trang chủ tức thì; cache của các tab Sự kiện & Trực tiếp được nạp ngầm ở nền không chặn mở app.
+     * Đọc phiên đăng nhập đã lưu (SharedPreferences + parse JSON UserData) trên IO thread.
+     * Splash screen hệ thống được giữ trong lúc destination còn là [SplashDestination.Loading].
      */
     private fun restoreSessionAndNavigate() {
         viewModelScope.launch {
-            val app = getApplication<Application>()
             val hasSession = withContext(Dispatchers.IO) {
                 UserSession.ensureRestored(GlobalData.preferences)
-                val loggedIn = UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
-                if (loggedIn) {
-                    runCatching { HomeCacheManager.preloadDefaultCache(app) }
-                    backgroundPreloadScope.launch {
-                        runCatching { EventCacheManager.preloadDefaultCache(app) }
-                        runCatching { MonitorCacheManager.preloadDefaultCache(app) }
-                    }
-                }
-                loggedIn
+                UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
             }
             _uiState.update {
                 it.copy(destination = if (hasSession) SplashDestination.Main else SplashDestination.Login)
@@ -90,8 +79,6 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     companion object {
-        private val backgroundPreloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[APPLICATION_KEY] as Application

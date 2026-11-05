@@ -53,6 +53,7 @@ import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.theme.BrandAccent
@@ -256,7 +257,7 @@ fun HomeScreen(
                 } else {
                     itemsIndexed(
                         items = recentFiveEvents,
-                        key = { index, _ -> "home_ev_slot_$index" },
+                        key = { _, event -> "home_ev_${event.serviceId}_${event.id}_${event.time}" },
                         contentType = { _, _ -> "event_card" }
                     ) { index, event ->
                         val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"

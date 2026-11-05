@@ -163,14 +163,14 @@ private const val THUMBNAIL_ASPECT_RATIO = 16f / 9f
 
 /** Ảnh crop khuôn mặt trên thẻ Grid: 72x90dp (tỉ lệ 4:5) */
 private const val FACE_CROP_ASPECT_RATIO = 72f / 90f
-internal const val FACE_CROP_REQUEST_WIDTH_PX = 160
-internal const val FACE_CROP_REQUEST_HEIGHT_PX = 200
+private const val FACE_CROP_REQUEST_WIDTH_PX = 160
+private const val FACE_CROP_REQUEST_HEIGHT_PX = 200
 
 /** Kích thước decode ảnh (px) – giới hạn để tiết kiệm RAM trong list dài */
-internal const val LIST_THUMB_WIDTH_PX = 420
-internal const val LIST_THUMB_HEIGHT_PX = 236
-internal const val GRID_IMAGE_WIDTH_PX = 800
-internal const val GRID_IMAGE_HEIGHT_PX = 450
+private const val LIST_THUMB_WIDTH_PX = 420
+private const val LIST_THUMB_HEIGHT_PX = 236
+private const val GRID_IMAGE_WIDTH_PX = 800
+private const val GRID_IMAGE_HEIGHT_PX = 450
 
 /** Độ dày khung bounding box (px) vẽ trên ảnh Grid */
 private const val BOUNDING_BOX_STROKE_PX = 3.5f
@@ -907,7 +907,6 @@ private fun EventListCard(
     val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmallMedium) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
     val thumbWidth = ListThumbnailBaseWidth * spacing.scaleFactor
-    val thumbHeight = thumbWidth / THUMBNAIL_ASPECT_RATIO
 
     Row(
         modifier = Modifier
@@ -922,7 +921,7 @@ private fun EventListCard(
             url = images.snapshotUrl,
             modifier = Modifier
                 .width(thumbWidth)
-                .height(thumbHeight)
+                .aspectRatio(THUMBNAIL_ASPECT_RATIO)
                 .clip(thumbShape)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .eventImageSharedElement(enableSharedElement, event.id),
@@ -936,11 +935,11 @@ private fun EventListCard(
         Column(
             modifier = Modifier
                 .weight(1f)
-                // Cố định chiều cao bằng đúng thumbnail để thẻ 2 dòng, 3 dòng hay 4 dòng đều cao bằng nhau tuyệt đối (không gây xô dịch danh sách)
-                .height(thumbHeight),
+                // Cao tối thiểu bằng thumbnail để dòng thời gian luôn nằm sát đáy
+                .heightIn(min = thumbWidth / THUMBNAIL_ASPECT_RATIO),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
+            Column(verticalArrangement = Arrangement.spacedBy(spacing.space3)) {
                 // Line 1: Prefix (e.g., "Phát hiện khuôn mặt", "Phát hiện vi phạm")
                 if (sentenceParts.prefix.isNotEmpty()) {
                     Text(
@@ -1038,11 +1037,21 @@ private fun EventGridCard(
         // Face crop overlay on TopEnd (72x90dp)
         val faceCropUrl = images.faceCropUrl
         if (faceCropUrl != null) {
-            VideoFrameImage(
-                url = faceCropUrl,
+            val faceCropRequest = remember(faceCropUrl) {
+                ImageRequest.Builder(context)
+                    .data(faceCropUrl)
+                    .size(FACE_CROP_REQUEST_WIDTH_PX, FACE_CROP_REQUEST_HEIGHT_PX)
+                    .precision(Precision.INEXACT)
+                    .allowHardware(true)
+                    .crossfade(false)
+                    .memoryCacheKey("${faceCropUrl}_${FACE_CROP_REQUEST_WIDTH_PX}x${FACE_CROP_REQUEST_HEIGHT_PX}")
+                    .diskCacheKey(faceCropUrl)
+                    .build()
+            }
+            AsyncImage(
+                model = faceCropRequest,
+                contentDescription = "Face Crop",
                 contentScale = ContentScale.Crop,
-                targetWidthPx = FACE_CROP_REQUEST_WIDTH_PX,
-                targetHeightPx = FACE_CROP_REQUEST_HEIGHT_PX,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(spacing.space5)

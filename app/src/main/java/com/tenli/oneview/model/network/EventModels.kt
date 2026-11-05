@@ -40,6 +40,7 @@ data class FaceData(
     val groupColorSnake: String? = null
 )
 
+@Immutable
 data class PlateData(
     val plate: String? = null,
     val number: String? = null,
@@ -54,6 +55,7 @@ data class PlateData(
     val vehicleType: String? = null
 )
 
+@Immutable
 data class AttributeData(
     val label: Int = 0,
     val cropImage: String? = null,
@@ -61,11 +63,13 @@ data class AttributeData(
     val cropBox: List<Double>? = null
 )
 
+@Immutable
 data class BoxData(
     val box: List<Double>? = null,
     val time: Double = 0.0
 )
 
+@Immutable
 data class UniformData(
     val image: String? = null,
     val cropBox: List<Double>? = null,
@@ -77,6 +81,7 @@ data class UniformData(
     val isViolation: Boolean? = null
 )
 
+@Immutable
 data class ObjectData(
     val image: String? = null,
     val cropBox: List<Double>? = null,
@@ -88,6 +93,7 @@ data class ObjectData(
     val plate: String? = null
 )
 
+@Immutable
 data class WeaponData(
     val image: String? = null,
     val label: String? = null,

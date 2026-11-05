@@ -534,21 +534,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (isMonitorTabActive == active) return
         isMonitorTabActive = active
         if (!active) {
-            // Dừng mọi vòng poll LiveStream / retry và xoá link ws dùng 1 lần để giải phóng hoàn toàn luồng live khi rời tab hoặc vào nền
+            // Dừng mọi vòng poll LiveStream / retry khi màn hình không hiển thị hoặc app vào nền
             for (i in 0 until SLOT_COUNT) cancelStreamJob(i)
             snapshotLookupJob?.cancel()
-            _uiState.update { state ->
-                if (state.selectedCameras.none { it != null && it.streamUrl.isNotEmpty() }) {
-                    state
-                } else {
-                    state.copy(
-                        selectedCameras = state.selectedCameras.map { cam ->
-                            if (cam == null || cam.streamUrl.isEmpty()) cam
-                            else cam.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
-                        }
-                    )
-                }
-            }
         }
     }
 
@@ -752,9 +740,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (immediateUpdates.isNotEmpty()) {
                 _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + immediateUpdates) }
             }
-            if (isMonitorTabActive) {
-                toFetch.forEach { fetchCardSnapshot(it, force = false) }
-            }
+            toFetch.forEach { fetchCardSnapshot(it, force = false) }
         }
     }
 

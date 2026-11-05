@@ -1,5 +1,6 @@
 package com.tenli.oneview.ui.utils
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
@@ -30,6 +31,7 @@ private val AiColorGloves = Color(0xFF940D7B)
 private val AiColorHairnet = Color(0xFF627E11)
 private val AiColorDefault = Color(0xFF0F81C4)
 
+@Immutable
 data class EventSentenceParts(
     val prefix: String,
     val subject: String,
@@ -37,6 +39,7 @@ data class EventSentenceParts(
     val cameraName: String
 )
 
+@Immutable
 data class AiModuleOption(
     val key: String,
     val sensorType: String,

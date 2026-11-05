@@ -36,7 +36,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -53,6 +52,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -192,7 +192,6 @@ private fun themeModeLabel(mode: Int, isEn: Boolean): String = when (mode) {
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
-    isOverlayActive: Boolean = false,
     onLogoutRequest: () -> Unit,
     onNavigateToEventDetail: (Int) -> Unit = {},
     onNavigateToPlaybackDetail: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
@@ -211,49 +210,44 @@ fun MainScreen(
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
+    // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
+    val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
+    val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
 
-    var mountedTabs by remember { mutableStateOf(setOf(uiState.currentTab)) }
     var activeTab by remember { mutableStateOf(uiState.currentTab) }
     var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
     var slideDirection by remember { mutableIntStateOf(1) }
     val transitionProgress = remember { Animatable(1f) }
 
-    // Khi mới mở app, chỉ mount Trang chủ ở Frame 1 để mở app cực nhanh;
-    // sau khi Trang chủ đã vẽ xong ổn định thì mount lần lượt các tab còn lại ở nền để chuyển tab mượt 0ms.
-    LaunchedEffect(Unit) {
-        delay(650L)
-        if (MainTab.Event !in mountedTabs) mountedTabs = mountedTabs + MainTab.Event
-        delay(550L)
-        if (MainTab.Monitor !in mountedTabs) mountedTabs = mountedTabs + MainTab.Monitor
-        delay(450L)
-        if (MainTab.Setting !in mountedTabs) mountedTabs = mountedTabs + MainTab.Setting
-    }
-
-    LaunchedEffect(activeTab, isOverlayActive, showNotificationConfigPage) {
-        val isHomeActive = activeTab == MainTab.Home && !isOverlayActive && !showNotificationConfigPage
-        homeViewModel.setHomeTabActive(isHomeActive)
-        if (activeTab == MainTab.Home) {
-            homeViewModel.syncViewModeFromPrefs()
-        }
-    }
-
-    // Đồng bộ trường hợp currentTab được đổi từ bên ngoài (không qua switchToTab)
     LaunchedEffect(uiState.currentTab) {
         val targetTab = uiState.currentTab
-        if (targetTab != activeTab) {
-            if (targetTab !in mountedTabs) {
-                mountedTabs = mountedTabs + targetTab
-            }
-            val fromIdx = OrderedMainTabs.indexOf(activeTab)
-            val toIdx = OrderedMainTabs.indexOf(targetTab)
-            slideDirection = if (toIdx >= fromIdx) 1 else -1
-            outgoingTab = activeTab
-            activeTab = targetTab
-            transitionProgress.snapTo(0f)
+        if (targetTab != MainTab.Monitor) {
+            showBottomBar = true
+        }
+        if (targetTab != MainTab.Setting) {
+            showNotificationConfigPage = false
+        }
+        if (targetTab == MainTab.Home) {
+            homeViewModel.syncViewModeFromPrefs()
+        } else if (targetTab == MainTab.Event) {
+            eventViewModel.syncViewModeFromPrefs()
+        }
+
+        if (targetTab == activeTab) {
             transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
             outgoingTab = null
+            return@LaunchedEffect
         }
+
+        val fromIdx = OrderedMainTabs.indexOf(activeTab)
+        val toIdx = OrderedMainTabs.indexOf(targetTab)
+        slideDirection = if (toIdx >= fromIdx) 1 else -1
+        outgoingTab = activeTab
+        activeTab = targetTab
+        transitionProgress.snapTo(0f)
+        transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
+        outgoingTab = null
     }
 
     val currentOnLogoutRequest by rememberUpdatedState(onLogoutRequest)
@@ -314,37 +308,17 @@ fun MainScreen(
         }
     }
 
-    val activeTabState by rememberUpdatedState(activeTab)
-    val switchToTab: (MainTab, Boolean) -> Unit = remember(viewModel, haptic, scrollTabToTop, scope) {
+    val switchToTab: (MainTab, Boolean) -> Unit = remember(viewModel, haptic, scrollTabToTop) {
         { targetTab: MainTab, withHaptic: Boolean ->
-            val currentActive = activeTabState
-            if (targetTab != currentActive) {
+            if (targetTab != currentTabState) {
                 showBottomBar = true
-                if (targetTab != MainTab.Setting) {
-                    showNotificationConfigPage = false
-                }
                 if (withHaptic) {
                     try {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     } catch (_: Exception) {
                     }
                 }
-                if (targetTab !in mountedTabs) {
-                    mountedTabs = mountedTabs + targetTab
-                }
-                val fromIdx = OrderedMainTabs.indexOf(currentActive)
-                val toIdx = OrderedMainTabs.indexOf(targetTab)
-                slideDirection = if (toIdx >= fromIdx) 1 else -1
-                outgoingTab = currentActive
-                activeTab = targetTab
                 viewModel.onTabSelected(targetTab)
-                scope.launch {
-                    transitionProgress.snapTo(0f)
-                    transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
-                    if (activeTab == targetTab) {
-                        outgoingTab = null
-                    }
-                }
             } else {
                 scrollTabToTop(targetTab)
             }
@@ -367,117 +341,8 @@ fun MainScreen(
 
     CompositionLocalProvider(LocalMobileOverlayHost provides overlayHostState) {
         val isEn = rememberIsEnglish()
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
-                .pointerInput(Unit) {
-                    val edgeBufferPx = SwipeEdgeBuffer.toPx()
-                    val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
-                    val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
-                    val minFlickDistPx = SwipeMinFlickDistance.toPx()
-                    val minDragDistPx = SwipeMinDragDistance.toPx()
-                    val longDragDistPx = SwipeLongDragDistance.toPx()
-
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                        val widthPx = size.width.toFloat()
-                        val heightPx = size.height.toFloat()
-                        val startX = down.position.x
-                        val startY = down.position.y
-
-                        // Ignore touches near screen left/right edges for system back gesture,
-                        // or in the bottom navigation bar zone, or when video is in fullscreen
-                        if (!showBottomBarState ||
-                            showNotificationConfigPageState ||
-                            overlayHostState.hasOverlays ||
-                            startX < edgeBufferPx ||
-                            startX > widthPx - edgeBufferPx ||
-                            startY > heightPx - bottomNavExclusionPx
-                        ) {
-                            return@awaitEachGesture
-                        }
-
-                        val startTime = down.uptimeMillis
-                        var endTime = startTime
-                        var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
-                        var lastX = startX
-                        var lastY = startY
-
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            endTime = change.uptimeMillis
-
-                            if (change.changedToUpIgnoreConsumed()) {
-                                lastX = change.position.x
-                                lastY = change.position.y
-                                if (gestureDirection == 1) {
-                                    change.consume()
-                                }
-                                break
-                            }
-
-                            if (!change.pressed) break
-
-                            lastX = change.position.x
-                            lastY = change.position.y
-                            val dx = lastX - startX
-                            val dy = lastY - startY
-
-                            if (gestureDirection == 0) {
-                                if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                    gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
-                                }
-                            }
-
-                            if (gestureDirection == 2) {
-                                // Locked to vertical scrolling -> let child LazyColumn handle it
-                                break
-                            } else if (gestureDirection == 1) {
-                                // Consume horizontal drag so child views don't trigger accidental clicks
-                                change.consume()
-                            }
-                        }
-
-                        if (gestureDirection == 1) {
-                            val diffX = lastX - startX
-                            val diffY = lastY - startY
-                            val absX = abs(diffX)
-                            val absY = abs(diffY)
-                            val elapsed = (endTime - startTime).coerceAtLeast(1L)
-                            val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
-
-                            // Match MobileLayout.vue thresholds:
-                            // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
-                            // 2. Drag: distance >= 45dp && elapsed <= 700ms
-                            // 3. Long drag: distance >= 90dp
-                            val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
-                            val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
-                            val isLongDrag = absX >= longDragDistPx
-
-                            if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
-                                val currIdx = OrderedMainTabs.indexOf(currentTabState)
-                                if (currIdx != -1) {
-                                    if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
-                                        // Swipe right-to-left -> next tab
-                                        switchToTab(OrderedMainTabs[currIdx + 1], true)
-                                    } else if (diffX > 0f && currIdx > 0) {
-                                        // Swipe left-to-right -> previous tab
-                                        switchToTab(OrderedMainTabs[currIdx - 1], true)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .zIndex(1f)
-            ) {
+        Scaffold(
+            topBar = {
                 AnimatedVisibility(visible = uiState.isOffline) {
                     Box(
                         modifier = Modifier
@@ -495,141 +360,233 @@ fun MainScreen(
                         )
                     }
                 }
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .pointerInput(Unit) {
+                        val edgeBufferPx = SwipeEdgeBuffer.toPx()
+                        val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
+                        val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
+                        val minFlickDistPx = SwipeMinFlickDistance.toPx()
+                        val minDragDistPx = SwipeMinDragDistance.toPx()
+                        val longDragDistPx = SwipeLongDragDistance.toPx()
 
-                // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
-                // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
-                // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                ) {
-                    OrderedMainTabs.forEach { tab ->
-                        if (tab in mountedTabs) {
-                            androidx.compose.runtime.key(tab.route) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .zIndex(
-                                            when (tab) {
-                                                activeTab -> 2f
-                                                outgoingTab -> 1f
-                                                else -> 0f
-                                            }
-                                        )
-                                        .layout { measurable, constraints ->
-                                            val placeable = measurable.measure(constraints)
-                                            layout(placeable.width, placeable.height) {
-                                                // Đọc animation value ở pha placement (không gây recompose mỗi frame)
-                                                val currentOutgoing = outgoingTab
-                                                if (tab == activeTab || tab == currentOutgoing) {
-                                                    val progress = transitionProgress.value
-                                                    val offsetX = when (tab) {
-                                                        activeTab -> if (currentOutgoing != null) {
-                                                            (slideDirection * (1f - progress) * placeable.width).toInt()
-                                                        } else {
-                                                            0
-                                                        }
-                                                        else -> (-slideDirection * progress * placeable.width).toInt()
-                                                    }
-                                                    placeable.placeRelativeWithLayer(offsetX, 0)
-                                                }
-                                            }
-                                        }
-                                ) {
-                                    saveableStateHolder.SaveableStateProvider(key = tab.route) {
-                                        when (tab) {
-                                            MainTab.Home -> HomeScreen(
-                                                viewModel = homeViewModel,
-                                                listState = homeListState,
-                                                onEventClick = onHomeEventClick
-                                            )
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                            val widthPx = size.width.toFloat()
+                            val heightPx = size.height.toFloat()
+                            val startX = down.position.x
+                            val startY = down.position.y
 
-                                            MainTab.Event -> {
-                                                val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
-                                                LaunchedEffect(activeTab == MainTab.Event) {
-                                                    if (activeTab == MainTab.Event) {
-                                                        eventViewModel.syncViewModeFromPrefs()
-                                                    }
-                                                }
-                                                EventScreen(
-                                                    viewModel = eventViewModel,
-                                                    listState = eventListState,
-                                                    onEventClick = onEventIdClick
-                                                )
-                                            }
+                            // Ignore touches near screen left/right edges for system back gesture,
+                            // or in the bottom navigation bar zone, or when video is in fullscreen
+                            if (!showBottomBarState ||
+                                showNotificationConfigPageState ||
+                                overlayHostState.hasOverlays ||
+                                startX < edgeBufferPx ||
+                                startX > widthPx - edgeBufferPx ||
+                                startY > heightPx - bottomNavExclusionPx
+                            ) {
+                                return@awaitEachGesture
+                            }
 
-                                            MainTab.Monitor -> {
-                                                val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
-                                                MonitorScreen(
-                                                    viewModel = monitorViewModel,
-                                                    listState = monitorState,
-                                                    isTabActive = activeTab == MainTab.Monitor && !isOverlayActive && !showNotificationConfigPage,
-                                                    onEventClick = onEventIdClick,
-                                                    onPlaybackClick = onPlaybackClick,
-                                                    onFullscreenChange = onMonitorFullscreenChange
-                                                )
-                                            }
+                            val startTime = down.uptimeMillis
+                            var endTime = startTime
+                            var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
+                            var lastX = startX
+                            var lastY = startY
 
-                                            MainTab.Setting -> SettingScreen(
-                                                viewModel = viewModel,
-                                                listState = settingListState,
-                                                onLogoutClick = onLogoutClick,
-                                                onOpenNotificationConfig = onOpenNotificationConfig
-                                            )
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                endTime = change.uptimeMillis
+
+                                if (change.changedToUpIgnoreConsumed()) {
+                                    lastX = change.position.x
+                                    lastY = change.position.y
+                                    if (gestureDirection == 1) {
+                                        change.consume()
+                                    }
+                                    break
+                                }
+
+                                if (!change.pressed) break
+
+                                lastX = change.position.x
+                                lastY = change.position.y
+                                val dx = lastX - startX
+                                val dy = lastY - startY
+
+                                if (gestureDirection == 0) {
+                                    if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
+                                        gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
+                                    }
+                                }
+
+                                if (gestureDirection == 2) {
+                                    // Locked to vertical scrolling -> let child LazyColumn handle it
+                                    break
+                                } else if (gestureDirection == 1) {
+                                    // Consume horizontal drag so child views don't trigger accidental clicks
+                                    change.consume()
+                                }
+                            }
+
+                            if (gestureDirection == 1) {
+                                val diffX = lastX - startX
+                                val diffY = lastY - startY
+                                val absX = abs(diffX)
+                                val absY = abs(diffY)
+                                val elapsed = (endTime - startTime).coerceAtLeast(1L)
+                                val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
+
+                                // Match MobileLayout.vue thresholds:
+                                // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
+                                // 2. Drag: distance >= 45dp && elapsed <= 700ms
+                                // 3. Long drag: distance >= 90dp
+                                val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
+                                val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
+                                val isLongDrag = absX >= longDragDistPx
+
+                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
+                                    val currIdx = OrderedMainTabs.indexOf(currentTabState)
+                                    if (currIdx != -1) {
+                                        if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
+                                            // Swipe right-to-left -> next tab
+                                            switchToTab(OrderedMainTabs[currIdx + 1], true)
+                                        } else if (diffX > 0f && currIdx > 0) {
+                                            // Swipe left-to-right -> previous tab
+                                            switchToTab(OrderedMainTabs[currIdx - 1], true)
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }
-
-            if (showBottomBar) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .zIndex(10f)
-                ) {
-                    MainBottomNavigation(
-                        currentTab = uiState.currentTab,
-                        onTabClick = onBottomTabClick,
-                        onScrollToTop = scrollTabToTop
-                    )
-                }
-            }
-
-            // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)
-            AnimatedVisibility(
-                visible = showNotificationConfigPage,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .zIndex(30f),
-                enter = slideInHorizontally(
-                    initialOffsetX = { fullWidth -> fullWidth },
-                    animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
-                ),
-                exit = slideOutHorizontally(
-                    targetOffsetX = { fullWidth -> fullWidth },
-                    animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
-                )
             ) {
-                MobileNotificationConfigScreen(
-                    viewModel = viewModel,
-                    onBackClick = onCloseNotificationConfig
-                )
-            }
-
-            // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
-            if (overlayHostState.hasOverlays) {
+                // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
+                // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
+                // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(50f)
+                        .padding(top = innerPadding.calculateTopPadding())
+                        .zIndex(1f)
                 ) {
-                    overlayHostState.Content()
+                    OrderedMainTabs.forEach { tab ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(
+                                    when (tab) {
+                                        activeTab -> 2f
+                                        outgoingTab -> 1f
+                                        else -> 0f
+                                    }
+                                )
+                                .layout { measurable, constraints ->
+                                    val placeable = measurable.measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        // Đọc animation value ở pha placement (không gây recompose mỗi frame)
+                                        val currentOutgoing = outgoingTab
+                                        if (tab == activeTab || tab == currentOutgoing) {
+                                            val progress = transitionProgress.value
+                                            val offsetX = when (tab) {
+                                                activeTab -> if (currentOutgoing != null) {
+                                                    (slideDirection * (1f - progress) * placeable.width).toInt()
+                                                } else {
+                                                    0
+                                                }
+                                                else -> (-slideDirection * progress * placeable.width).toInt()
+                                            }
+                                            placeable.placeRelativeWithLayer(offsetX, 0)
+                                        }
+                                    }
+                                }
+                        ) {
+                            saveableStateHolder.SaveableStateProvider(key = tab.route) {
+                                when (tab) {
+                                    MainTab.Home -> HomeScreen(
+                                        viewModel = homeViewModel,
+                                        listState = homeListState,
+                                        onEventClick = onHomeEventClick
+                                    )
+
+                                    MainTab.Event -> EventScreen(
+                                        viewModel = eventViewModel,
+                                        listState = eventListState,
+                                        onEventClick = onEventIdClick
+                                    )
+
+                                    MainTab.Monitor -> MonitorScreen(
+                                        viewModel = monitorViewModel,
+                                        listState = monitorState,
+                                        isTabActive = uiState.currentTab == MainTab.Monitor,
+                                        onEventClick = onEventIdClick,
+                                        onPlaybackClick = onPlaybackClick,
+                                        onFullscreenChange = onMonitorFullscreenChange
+                                    )
+
+                                    MainTab.Setting -> SettingScreen(
+                                        viewModel = viewModel,
+                                        listState = settingListState,
+                                        onLogoutClick = onLogoutClick,
+                                        onOpenNotificationConfig = onOpenNotificationConfig
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (showBottomBar) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .zIndex(10f)
+                    ) {
+                        MainBottomNavigation(
+                            currentTab = uiState.currentTab,
+                            onTabClick = onBottomTabClick,
+                            onScrollToTop = scrollTabToTop
+                        )
+                    }
+                }
+
+                // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)
+                AnimatedVisibility(
+                    visible = showNotificationConfigPage,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
+                        .zIndex(30f),
+                    enter = slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
+                    ),
+                    exit = slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
+                    )
+                ) {
+                    MobileNotificationConfigScreen(
+                        viewModel = viewModel,
+                        onBackClick = onCloseNotificationConfig
+                    )
+                }
+
+                // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
+                if (overlayHostState.hasOverlays) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(50f)
+                    ) {
+                        overlayHostState.Content()
+                    }
                 }
             }
         }

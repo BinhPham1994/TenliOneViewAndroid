@@ -69,7 +69,6 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
-        val bgModifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
         val imageRequest = remember(url, targetWidthPx, targetHeightPx) {
             if (url.isNullOrBlank()) {
                 null
@@ -77,7 +76,6 @@ fun VideoFrameImage(
                 coil.request.ImageRequest.Builder(context)
                     .data(url)
                     .size(targetWidthPx, targetHeightPx)
-                    .scale(coil.size.Scale.FILL)
                     .precision(coil.size.Precision.INEXACT)
                     .allowHardware(true)
                     .crossfade(false)
@@ -87,21 +85,23 @@ fun VideoFrameImage(
             }
         }
 
-        if (imageRequest != null) {
-            coil.compose.AsyncImage(
-                model = imageRequest,
-                contentDescription = "Event Image",
-                contentScale = contentScale,
-                modifier = bgModifier,
-                onError = {
-                    if (effectiveKey.isNotEmpty()) {
-                        VideoFrameCache.knownVideoUrls.add(effectiveKey)
+        Box(
+            modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            if (imageRequest != null) {
+                coil.compose.AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "Event Image",
+                    contentScale = contentScale,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = {
+                        if (effectiveKey.isNotEmpty()) {
+                            VideoFrameCache.knownVideoUrls.add(effectiveKey)
+                        }
+                        isVideoFallback = true
                     }
-                    isVideoFallback = true
-                }
-            )
-        } else {
-            Box(modifier = bgModifier)
+                )
+            }
         }
     } else {
         // Here we handle the video frame extraction

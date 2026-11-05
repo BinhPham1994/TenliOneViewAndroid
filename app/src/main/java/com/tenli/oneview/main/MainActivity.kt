@@ -49,7 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -105,8 +104,6 @@ class MainActivity : ComponentActivity() {
 
     private val splashViewModel: SplashViewModel by viewModels { SplashViewModel.Factory }
     private var pendingEventNav by mutableStateOf<PendingEventNav?>(null)
-    @Volatile
-    private var isContentReadyToDraw = false
 
     private val appUpdateManager: AppUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
 
@@ -125,7 +122,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         splashScreen.setKeepOnScreenCondition {
-            splashViewModel.uiState.value.destination is SplashDestination.Loading || !isContentReadyToDraw
+            splashViewModel.uiState.value.destination is SplashDestination.Loading
         }
 
         // Chỉ kiểm tra cập nhật ở lần tạo đầu (không lặp lại khi recreate do đổi ngôn ngữ)
@@ -144,9 +141,7 @@ class MainActivity : ComponentActivity() {
                     when (uiState.destination) {
                         is SplashDestination.Login -> {
                             Surface(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .onPlaced { isContentReadyToDraw = true },
+                                modifier = Modifier.fillMaxSize(),
                                 color = MaterialTheme.colorScheme.background
                             ) {
                                 LoginScreen(onLoginSuccess = splashViewModel::navigateToMain)
@@ -154,23 +149,17 @@ class MainActivity : ComponentActivity() {
                         }
 
                         is SplashDestination.Main -> {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .onPlaced { isContentReadyToDraw = true }
-                            ) {
-                                AppNavigation(
-                                    onLogoutRequest = splashViewModel::logout,
-                                    pendingEventNav = pendingEventNav,
-                                    onEventNavConsumed = {
-                                        pendingEventNav = null
-                                        intent.clearEventIdExtras()
-                                    }
-                                )
+                            AppNavigation(
+                                onLogoutRequest = splashViewModel::logout,
+                                pendingEventNav = pendingEventNav,
+                                onEventNavConsumed = {
+                                    pendingEventNav = null
+                                    intent.clearEventIdExtras()
+                                }
+                            )
 
-                                // Vẽ sau AppNavigation để các dialog xin quyền nằm trên cùng (và BackHandler được ưu tiên)
-                                StartupPermissionDialogs()
-                            }
+                            // Vẽ sau AppNavigation để các dialog xin quyền nằm trên cùng (và BackHandler được ưu tiên)
+                            StartupPermissionDialogs()
                         }
 
                         is SplashDestination.Loading -> { /* Keep Splash */ }

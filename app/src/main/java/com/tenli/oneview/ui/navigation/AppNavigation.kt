@@ -3,7 +3,6 @@ package com.tenli.oneview.ui.navigation
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -24,29 +22,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.ViewModelStore
-import androidx.lifecycle.ViewModelStoreOwner
-import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.tenli.oneview.data.local.EventCacheManager
-import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.ui.features.event.detail.EventDetailScreen
 import com.tenli.oneview.ui.features.main.MainScreen
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
-/**
- * Thời gian chờ sau khi frame đầu tiên của Trang chủ đã vẽ xong ở lần mở app mới (cold start)
- * (bao gồm thời gian hiệu ứng mở cửa sổ của hệ thống ~350ms + khoảng nghỉ ~600ms để mắt người dùng
- * nhìn rõ Trang chủ ổn định rồi mới trượt màn Chi tiết sự kiện lên).
- */
-private const val COLD_START_EVENT_DETAIL_DELAY_MS = 950L
+/** Thời gian chờ ngắn sau khi giao diện chính hiện lên ở lần mở app mới (cold start) trước khi trượt màn Chi tiết sự kiện lên */
+private const val COLD_START_EVENT_DETAIL_DELAY_MS = 750L
 
 @Immutable
 data class PendingEventNav(
@@ -67,32 +52,16 @@ fun AppNavigation(
     onEventNavConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
-    val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    val isPlaybackDetailActive = currentBackStackEntry?.destination?.route?.startsWith("playback_detail") == true
     var activeEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var lastEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var skipExitAnimation by remember { mutableStateOf(false) }
-    val isOverlayActive = activeEventDetailId != null || isPlaybackDetailActive
 
     LaunchedEffect(pendingEventNav) {
         val nav = pendingEventNav ?: return@LaunchedEffect
         val parsed = nav.eventId.toIntOrNull()
         if (parsed != null) {
             if (nav.isColdStart) {
-                // Trong lúc chờ hiển thị Trang chủ, tải sẵn dữ liệu chi tiết sự kiện vào RAM ở nền để khi trượt lên có dữ liệu ngay
-                launch(Dispatchers.IO) {
-                    if (EventCacheManager.getEventInMemory(parsed) == null) {
-                        val response = runCatching {
-                            ApiProvider.eventApi.getDataList(lastId = parsed + 1, count = 1)
-                        }.getOrNull()
-                        val first = response?.body()?.firstOrNull()
-                        if (first != null && first.id == parsed) {
-                            EventCacheManager.cacheInMemory(events = listOf(first))
-                        }
-                    }
-                }
-                // Đợi frame đầu tiên của Trang chủ thực sự vẽ lên màn hình rồi mới bắt đầu đếm nhịp nghỉ
-                withFrameNanos { }
+                // App vừa mở mới: để giao diện chính (MainScreen) hiện ổn định trước rồi mới trượt nhẹ màn Chi tiết sự kiện lên
                 delay(COLD_START_EVENT_DETAIL_DELAY_MS)
             }
             skipExitAnimation = false
@@ -107,24 +76,13 @@ fun AppNavigation(
             LocalSharedTransitionScope provides this@SharedTransitionLayout
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                NavHost(
-                    navController = navController,
-                    startDestination = "main",
-                    enterTransition = { EnterTransition.None },
-                    exitTransition = { ExitTransition.None },
-                    popEnterTransition = { EnterTransition.None },
-                    popExitTransition = { ExitTransition.None }
-                ) {
+                NavHost(navController = navController, startDestination = "main") {
                     composable(
                         route = "main",
-                        enterTransition = { EnterTransition.None },
-                        exitTransition = { ExitTransition.None },
-                        popEnterTransition = { EnterTransition.None },
-                        popExitTransition = { ExitTransition.None }
+                        popEnterTransition = { EnterTransition.None }
                     ) {
                         CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                             MainScreen(
-                                isOverlayActive = isOverlayActive,
                                 onLogoutRequest = onLogoutRequest,
                                 onNavigateToEventDetail = { eventId ->
                                     skipExitAnimation = false
@@ -209,25 +167,13 @@ fun AppNavigation(
                         val eventDetailOverlayHostState = remember(displayEventId) {
                             com.tenli.oneview.ui.component.MobileOverlayHostState()
                         }
-                        val eventDetailViewModelStoreOwner = remember(displayEventId) {
-                            object : ViewModelStoreOwner {
-                                override val viewModelStore: ViewModelStore = ViewModelStore()
-                            }
-                        }
-                        DisposableEffect(eventDetailViewModelStoreOwner) {
-                            onDispose {
-                                eventDetailViewModelStoreOwner.viewModelStore.clear()
-                            }
-                        }
                         CompositionLocalProvider(
                             LocalAnimatedVisibilityScope provides this@AnimatedVisibility,
-                            LocalViewModelStoreOwner provides eventDetailViewModelStoreOwner,
                             com.tenli.oneview.ui.component.LocalMobileOverlayHost provides eventDetailOverlayHostState
                         ) {
                             Box(modifier = Modifier.fillMaxSize()) {
                                 EventDetailScreen(
                                     eventId = displayEventId,
-                                    isClosing = activeEventDetailId == null,
                                     onBack = {
                                         skipExitAnimation = false
                                         activeEventDetailId = null

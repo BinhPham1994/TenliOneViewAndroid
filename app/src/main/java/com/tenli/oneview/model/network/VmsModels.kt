@@ -84,20 +84,24 @@ data class StorageStatusModel(
     val available: Long
 )
 
+@Immutable
 data class TimeRange(
     val from: Long,
     val to: Long
 )
 
+@Immutable
 data class RecordSchedule(
     val repeat: List<List<TimeRange>>
 )
 
+@Immutable
 data class Location(
     val latitude: Double? = null,
     val longitude: Double? = null
 )
 
+@Immutable
 data class CameraOnvifModel(
     val ip: String,
     val port: Any? = null,
@@ -117,6 +121,7 @@ data class CameraOnvifModel(
     val hardwareId: String? = null
 )
 
+@Immutable
 data class CameraGeoConfig(
     val mountType: String? = null, // 'fixed' | 'ptz'
     val mountHeight: Double? = null,
@@ -132,6 +137,7 @@ data class CameraGeoConfig(
     val tiltOffset: Double? = null
 )
 
+@Immutable
 data class CameraLatestReport(
     val issues: List<String>? = null
 )

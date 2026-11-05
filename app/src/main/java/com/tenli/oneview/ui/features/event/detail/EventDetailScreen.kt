@@ -236,7 +236,6 @@ private class GestureBounds {
 @Composable
 fun EventDetailScreen(
     eventId: Int,
-    isClosing: Boolean = false,
     onBack: () -> Unit,
     onSwipeDismissed: () -> Unit = onBack,
     viewModel: EventDetailViewModel = viewModel(
@@ -529,7 +528,6 @@ fun EventDetailScreen(
                         // Supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
                         MediaViewport(
                             selectedTab = selectedTab,
-                            isClosing = isClosing,
                             eventId = event.id,
                             display = display,
                             originalVideoLoading = uiState.originalVideoLoading,
@@ -943,7 +941,6 @@ private fun MediaTabSelector(
 @Composable
 private fun MediaViewport(
     selectedTab: EventMediaTab,
-    isClosing: Boolean,
     eventId: Int,
     display: EventDetailDisplay,
     originalVideoLoading: Boolean,
@@ -978,15 +975,7 @@ private fun MediaViewport(
             },
             label = "mediaViewportTransition"
         ) { activeMediaTab ->
-            if (isClosing) {
-                // Khi người dùng bấm đóng / vuốt đóng màn chi tiết sự kiện, giải phóng ExoPlayer ngay lập tức
-                // và hiển thị ảnh sự kiện nhẹ nhàng trong suốt thời gian sheet trượt xuống.
-                EventImageWithBoxes(
-                    imageUrl = display.imageUrl,
-                    boxes = display.boxes,
-                    isEn = isEn
-                )
-            } else when (activeMediaTab) {
+            when (activeMediaTab) {
                 EventMediaTab.EVENT_IMAGE -> EventImageWithBoxes(
                     imageUrl = display.imageUrl,
                     boxes = display.boxes,
