@@ -268,7 +268,8 @@ class EventViewModel(
                 selectedFilter = filter,
                 selectedServiceId = serviceId,
                 selectedCameraUuid = cameraUuid,
-                selectedAiType = aiType
+                selectedAiType = aiType,
+                isRefreshing = false
             )
         }
         // Đổi bộ lọc chỉ cần tải lại sự kiện; danh sách camera / AI service đã có thì dùng lại

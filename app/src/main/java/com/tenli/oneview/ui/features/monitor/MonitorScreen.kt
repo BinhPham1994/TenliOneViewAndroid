@@ -93,6 +93,7 @@ import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LiveStreamPlayer
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.ui.component.MobileTopActionButton
@@ -1163,35 +1164,30 @@ private fun MobileGroupFilterBottomSheet(
                         bottom = spacing.space12
                     )
             ) {
-                // Sheet Header (drag handle + title + close button)
+                // Sheet Header (drag handle + icon ở giữa + tiêu đề căn giữa + nút đóng)
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = spacing.space10)
-                ) {
-                    Column(
+                        .align(Alignment.CenterHorizontally)
+                        .width(spacing.sheetHandleWidth)
+                        .height(spacing.sheetHandleHeight)
+                        .clip(CircleShape)
+                        .background(colors.handle)
+                )
+
+                Spacer(modifier = Modifier.height(spacing.space10))
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    IconBadge(
+                        icon = LucideIcons.ListFilter,
+                        backgroundColor = colors.accent,
+                        size = spacing.avatarLarge,
+                        iconSize = spacing.space28,
+                        cornerRadius = spacing.radiusMedium,
+                        tint = Color.White,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = spacing.iconButton),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(spacing.sheetHandleWidth)
-                                .height(spacing.sheetHandleHeight)
-                                .clip(CircleShape)
-                                .background(colors.handle)
-                        )
-                        Spacer(modifier = Modifier.height(spacing.space10))
-                        Text(
-                            text = title,
-                            color = colors.textStrong,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                            .align(Alignment.TopCenter)
+                            .padding(top = spacing.space4)
+                    )
 
                     Box(
                         modifier = Modifier
@@ -1210,6 +1206,21 @@ private fun MobileGroupFilterBottomSheet(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(spacing.space14))
+
+                Text(
+                    text = title,
+                    color = colors.textStrong,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(horizontal = spacing.space8)
+                        .padding(bottom = spacing.space12)
+                )
 
                 // Sheet Body
                 if (rows.isEmpty() && totalAllCamerasCount == 0) {

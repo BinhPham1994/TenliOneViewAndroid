@@ -2,13 +2,11 @@ package com.tenli.oneview.data.network.retrofit
 
 import android.util.Log
 import androidx.core.content.edit
-import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.ui.utils.AppKeys
 import okhttp3.Authenticator
-import okhttp3.Credentials
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -49,10 +47,12 @@ class TokenAuthenticator : Authenticator {
         val path = reqUrl.encodedPath
 
         // Đồng bộ với isAuthBypassUrl trong api.ts của PWA:
-        // Không retry re-login cho LogIn, LogOut, notification-tokens hoặc host ngoài (AI/VMS service riêng dùng apiKey)
+        // Không retry re-login cho LogIn, LogOut, DELETE notification-tokens (lúc logout) hoặc host ngoài
+        val isUnregisterToken = path.contains("/notification-tokens", ignoreCase = true) &&
+            response.request.method.equals("DELETE", ignoreCase = true)
         if (path.contains("LogIn", ignoreCase = true) ||
             path.contains("LogOut", ignoreCase = true) ||
-            path.contains("/notification-tokens", ignoreCase = true)
+            isUnregisterToken
         ) {
             return null
         }
@@ -130,7 +130,6 @@ class TokenAuthenticator : Authenticator {
         val request = Request.Builder()
             .url(loginUrl)
             .post(body)
-            .header("Authorization", Credentials.basic(BuildConfig.CLIENT_ID, BuildConfig.CLIENT_SECRET))
             .header("Content-Type", "application/json")
             .build()
 

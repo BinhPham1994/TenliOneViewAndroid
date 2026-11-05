@@ -20,10 +20,6 @@ android {
         
         manifestPlaceholders = [appName: "Tenli OneView",
                                 appIcon: "@mipmap/app_icon"]
-        buildConfigField "String", "DOMAIN_CLOUD", "\"https://app.tenli.ai/api/v1/\""
-        buildConfigField "String", "CLIENT_ID", "\"ysJhBedR7PDrVRpE\""
-        buildConfigField "String", "CLIENT_SECRET", "\"v9TaVZo2ZrdjtSwHCWvXM6Nt31m3bEef\""
-        buildConfigField "String", "WEB_CLIENT_ID", "\"139855279628-ec70h3thpk1u9p49u76bf9st2p26ghgb.apps.googleusercontent.com\""
     }
 
     packaging {
@@ -106,6 +102,14 @@ dependencies {
 
     // 9. Utils & Workers
     implementation 'androidx.work:work-runtime-ktx:2.11.2'
+
+    // 10. CameraX & QR Scanner
+    def camerax_version = "1.4.1"
+    implementation "androidx.camera:camera-core:$camerax_version"
+    implementation "androidx.camera:camera-camera2:$camerax_version"
+    implementation "androidx.camera:camera-lifecycle:$camerax_version"
+    implementation "androidx.camera:camera-view:$camerax_version"
+    implementation "com.google.zxing:core:3.5.3"
 
     // 11. Testing & Debug
     debugImplementation "androidx.compose.ui:ui-tooling:$compose_version"

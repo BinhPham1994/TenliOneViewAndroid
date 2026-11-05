@@ -7,7 +7,6 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
@@ -417,7 +416,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private fun getBaseDomain(): String {
         var base = UserSession.domain
-            .ifEmpty { BuildConfig.DOMAIN_CLOUD }
             .trim()
             .trimEnd('/')
         if (base.endsWith("/api/v1")) {

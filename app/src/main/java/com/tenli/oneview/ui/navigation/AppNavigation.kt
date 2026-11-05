@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -27,6 +28,17 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.tenli.oneview.ui.features.event.detail.EventDetailScreen
 import com.tenli.oneview.ui.features.main.MainScreen
+import kotlinx.coroutines.delay
+
+/** Thời gian chờ ngắn sau khi giao diện chính hiện lên ở lần mở app mới (cold start) trước khi trượt màn Chi tiết sự kiện lên */
+private const val COLD_START_EVENT_DETAIL_DELAY_MS = 420L
+
+@Immutable
+data class PendingEventNav(
+    val eventId: String,
+    val isColdStart: Boolean,
+    val triggerId: Long = System.nanoTime()
+)
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 val LocalSharedTransitionScope = compositionLocalOf<SharedTransitionScope?> { null }
@@ -36,20 +48,27 @@ val LocalAnimatedVisibilityScope = compositionLocalOf<AnimatedVisibilityScope?> 
 @Composable
 fun AppNavigation(
     onLogoutRequest: () -> Unit,
-    initialEventId: String? = null
+    pendingEventNav: PendingEventNav? = null,
+    onEventNavConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     var activeEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var lastEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var skipExitAnimation by remember { mutableStateOf(false) }
 
-    LaunchedEffect(initialEventId) {
-        val parsed = initialEventId?.toIntOrNull()
+    LaunchedEffect(pendingEventNav) {
+        val nav = pendingEventNav ?: return@LaunchedEffect
+        val parsed = nav.eventId.toIntOrNull()
         if (parsed != null) {
+            if (nav.isColdStart) {
+                // App vừa mở mới: để giao diện chính (MainScreen) hiện ổn định trước rồi mới trượt nhẹ màn Chi tiết sự kiện lên
+                delay(COLD_START_EVENT_DETAIL_DELAY_MS)
+            }
             skipExitAnimation = false
             lastEventDetailId = parsed
             activeEventDetailId = parsed
         }
+        onEventNavConsumed()
     }
 
     SharedTransitionLayout {

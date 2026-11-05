@@ -1,6 +1,5 @@
 package com.tenli.oneview.firebase
 
-import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
@@ -14,26 +13,61 @@ import com.google.firebase.messaging.RemoteMessage
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.TenliApp
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.service.NotificationChannels
 import kotlinx.coroutines.launch
 
-@SuppressLint("MissingFirebaseInstanceTokenRefresh")
 class EventMessagingService : FirebaseMessagingService() {
 
-    override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        val data = remoteMessage.data
-        if (BuildConfig.DEBUG) Log.d(TAG, "FCM data: $data")
-        val isCall = data["makeCall"] == "true"
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        Log.i(FcmTokenManager.LOG_TAG, "=== [EventMessagingService.onNewToken] token=$token ===")
+        FcmTokenManager.onNewToken(token)
+    }
 
-        val title = data["title"] ?: remoteMessage.notification?.title ?: getString(R.string.notif_default_title)
-        val body = data["body"] ?: remoteMessage.notification?.body ?: ""
-        val imageUrl = data["imageUrl"]
-        val eventId = data["eId"] ?: ""
+    override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        // Đảm bảo phiên đăng nhập (domain + accessToken) đã được nạp vào RAM kể cả khi app đang bị kill
+        UserSession.ensureRestored()
+
+        val data = remoteMessage.data
+        val notif = remoteMessage.notification
+        Log.i(
+            FcmTokenManager.LOG_TAG,
+            "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
+        )
+        val isCall = data["makeCall"].equals("true", ignoreCase = true) ||
+            data["alarmMode"].equals("call", ignoreCase = true)
+
+        val title = data["title"]
+            ?: remoteMessage.notification?.title
+            ?: getString(R.string.notif_default_title)
+        val body = data["body"]
+            ?: data["message"]
+            ?: data["content"]
+            ?: remoteMessage.notification?.body
+            ?: ""
+        val rawImageUrl = data["imageUrl"]
+            ?: data["image"]
+            ?: data["snapshotUrl"]
+            ?: data["image_url"]
+            ?: data["picture"]
+            ?: remoteMessage.notification?.imageUrl?.toString()
+        val imageUrl = resolveNotificationImageUrl(rawImageUrl)
+        val eventId = (data["eId"] ?: data["eventId"] ?: data["event_id"] ?: data["id"]).orEmpty()
+
+        Log.i(
+            FcmTokenManager.LOG_TAG,
+            "[XỬ LÝ NOTIFY] isCall=$isCall | eventId=$eventId | title='$title' | body='$body' | imageUrl=$imageUrl"
+        )
 
         if (isCall) {
             // Firebase tự động cung cấp sentTime (miliseconds)
-            val delay = System.currentTimeMillis() - remoteMessage.sentTime
+            val delay = if (remoteMessage.sentTime > 0L) {
+                System.currentTimeMillis() - remoteMessage.sentTime
+            } else {
+                0L
+            }
             if (delay > MISSED_CALL_THRESHOLD_MS) {
                 showMissedCallNotification(title, body, imageUrl, eventId)
             } else {
@@ -44,16 +78,34 @@ class EventMessagingService : FirebaseMessagingService() {
         }
     }
 
+    /**
+     * Chuẩn hoá URL ảnh thông báo: nếu backend gửi đường dẫn tương đối (vd. `/Data/...`, `/files/download/...`),
+     * ghép với `UserSession.domain` để Coil và `ImageAuthInterceptor` tải được ảnh kèm Bearer token.
+     */
+    private fun resolveNotificationImageUrl(rawUrl: String?): String? {
+        val trimmed = rawUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true)
+        ) {
+            return trimmed
+        }
+        val base = UserSession.domain.trim().trimEnd('/')
+        if (base.isEmpty()) return trimmed
+        return "$base/${trimmed.trimStart('/')}"
+    }
+
     private fun getSafeNotificationId(eId: String, offset: Int = 0): Int {
         return if (eId.isNotEmpty()) eId.hashCode() + offset else (System.currentTimeMillis().toInt() + offset)
     }
 
-    /** Intent mở chi tiết sự kiện trong MainActivity */
+    /** Intent mở chi tiết sự kiện trong MainActivity (giữ nguyên instance đang mở nếu có) */
     private fun eventDetailPendingIntent(eId: String, requestCode: Int, fromNotification: Boolean): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(EXTRA_EVENT_ID, eId)
             if (fromNotification) putExtra(EXTRA_FROM_NOTIFICATION, true)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
             this, requestCode, intent,
@@ -109,9 +161,14 @@ class EventMessagingService : FirebaseMessagingService() {
 
     private fun notifySafely(manager: NotificationManagerCompat, id: Int, builder: NotificationCompat.Builder) {
         try {
+            val areEnabled = manager.areNotificationsEnabled()
             manager.notify(id, builder.build())
+            Log.i(
+                FcmTokenManager.LOG_TAG,
+                "✅ [HIỂN THỊ NOTIFY LÊN TRAY] notificationId=$id | areNotificationsEnabled=$areEnabled"
+            )
         } catch (e: SecurityException) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Missing notification permission: ${e.message}")
+            Log.e(FcmTokenManager.LOG_TAG, "❌ [THIẾU QUYỀN POST_NOTIFICATIONS] ${e.message}", e)
         }
     }
 

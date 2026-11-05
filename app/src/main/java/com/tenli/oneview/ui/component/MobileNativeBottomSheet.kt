@@ -3,11 +3,9 @@ package com.tenli.oneview.ui.component
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,8 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.tenli.oneview.R
 import com.tenli.oneview.ui.theme.LucideIcons
@@ -39,14 +40,16 @@ import com.tenli.oneview.ui.theme.spacing
 
 /**
  * Bottom sheet kiểu iOS (MobileSettingsPage.vue) hiển thị qua [MobileFullScreenOverlay]:
- * thanh kéo + tiêu đề + nút đóng tròn, chạm ra ngoài để đóng.
+ * thanh kéo + icon badge ở giữa trên cùng + tiêu đề căn giữa + nút đóng tròn, chạm ra ngoài để đóng.
  *
  * Trên màn hình rộng (tablet/foldable/landscape) sheet được giới hạn độ rộng
  * [com.tenli.oneview.ui.theme.Dimensions.contentMaxWidth] và căn giữa.
  */
 @Composable
 fun MobileNativeBottomSheet(
-    title: String,
+    title: String? = null,
+    icon: ImageVector? = null,
+    iconColor: Color = MaterialTheme.appColors.accent,
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit
 ) {
@@ -93,26 +96,52 @@ fun MobileNativeBottomSheet(
                             .clip(CircleShape)
                             .background(colors.handle)
                     )
-                    Spacer(modifier = Modifier.height(spacing.space14))
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = spacing.space14),
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space12),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    if (!title.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(spacing.space10))
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            IconBadge(
+                                icon = icon ?: LucideIcons.Settings,
+                                backgroundColor = iconColor,
+                                size = spacing.avatarLarge,
+                                iconSize = spacing.space28,
+                                cornerRadius = spacing.radiusMedium,
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = spacing.space4)
+                            )
+                            SheetCloseButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(spacing.space14))
                         Text(
                             text = title,
-                            style = MaterialTheme.typography.titleSmall,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = colors.textTitle,
+                            color = colors.textStrong,
+                            textAlign = TextAlign.Center,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = spacing.space8)
+                                .padding(bottom = spacing.space16)
                         )
-                        SheetCloseButton(onClick = onDismiss)
+                        content()
+                    } else {
+                        Spacer(modifier = Modifier.height(spacing.space10))
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                content()
+                            }
+                            SheetCloseButton(
+                                onClick = onDismiss,
+                                modifier = Modifier.align(Alignment.TopEnd)
+                            )
+                        }
                     }
-                    content()
                 }
             }
         }
@@ -135,7 +164,7 @@ fun SheetCloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Icon(
             imageVector = LucideIcons.X,
             contentDescription = stringResource(id = R.string.dialog_btn_close),
-            tint = colors.textMuted,
+            tint = colors.textSubtle,
             modifier = Modifier.size(spacing.iconSmall)
         )
     }

@@ -197,7 +197,9 @@ class CallComingActivity : ComponentActivity() {
             Intent(this, MainActivity::class.java).apply {
                 putExtra(EXTRA_EVENT_ID, eventId)
                 putExtra(EXTRA_FROM_CALL, true)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
         )
         finish()

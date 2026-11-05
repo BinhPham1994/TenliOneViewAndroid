@@ -21,8 +21,29 @@ object UserSession {
 
     private val gson by lazy { Gson() }
 
+    private const val DOMAIN_KEY = "DOMAIN_KEY"
+
     fun hasSavedCredentials(): Boolean =
         savedUsername.isNotEmpty() && savedPassword.isNotEmpty() && domain.isNotEmpty()
+
+    /**
+     * Khôi phục phiên đăng nhập từ [SharedPreferences] nếu RAM đang trống
+     * (vd. khi tiến trình được hệ thống khởi chạy ngầm để nhận FCM push hoặc chạy Worker).
+     */
+    @Synchronized
+    fun ensureRestored(prefs: SharedPreferences? = runCatching { GlobalData.preferences }.getOrNull()) {
+        val sp = prefs ?: return
+        if (accessToken.isNotEmpty() || refreshToken.isNotEmpty()) return
+        accessToken = sp.getString(AppKeys.ACCESS_TOKEN_KEY, "").orEmpty()
+        refreshToken = sp.getString(AppKeys.REFRESH_TOKEN_KEY, "").orEmpty()
+        domain = sp.getString(DOMAIN_KEY, "").orEmpty()
+        savedUsername = sp.getString(AppKeys.USERNAME_KEY, "").orEmpty()
+        savedPassword = sp.getString(AppKeys.PASSWORD_KEY, "").orEmpty()
+        val userDataJson = sp.getString(AppKeys.USER_DATA_KEY, null)
+        if (!userDataJson.isNullOrEmpty() && userData == null) {
+            userData = runCatching { gson.fromJson(userDataJson, UserData::class.java) }.getOrNull()
+        }
+    }
 
     fun clear() {
         userData = null

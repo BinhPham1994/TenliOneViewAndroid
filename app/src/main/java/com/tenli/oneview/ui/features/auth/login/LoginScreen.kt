@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -46,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,12 +56,16 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -72,9 +79,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
@@ -105,7 +114,7 @@ private const val LANG_EN = "en"
 
 private val LoginLogoSize = 84.dp
 private val TitleLetterSpacing = (-0.5).sp
-private val FooterLetterSpacing = 0.5.sp
+private val FooterLetterSpacing = 0.sp
 private const val FOOTER_TEXT_ALPHA = 0.65f
 private const val CARD_SHADOW_AMBIENT_DARK = 0.45f
 private const val CARD_SHADOW_AMBIENT_LIGHT = 0.18f
@@ -165,17 +174,25 @@ private fun LoginContent(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val domainFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
     var currentStep by remember { mutableIntStateOf(STEP_DOMAIN) }
     var isTermsAccepted by remember { mutableStateOf(false) }
+    var showQrScanner by remember { mutableStateOf(false) }
+    var isDomainFromQr by remember { mutableStateOf(false) }
+    var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val isVietnamese = !rememberIsEnglish()
 
     BackHandler(enabled = currentStep == STEP_CREDENTIALS) {
         focusManager.clearFocus()
         keyboardController?.hide()
+        if (isDomainFromQr) {
+            onDomainChange("")
+            isDomainFromQr = false
+        }
         currentStep = STEP_DOMAIN
     }
 
@@ -200,6 +217,7 @@ private fun LoginContent(
                 if (isVietnamese) "Vui lòng nhập domain dự án" else "Please enter project domain"
             )
         } else {
+            isDomainFromQr = false
             focusManager.clearFocus()
             keyboardController?.hide()
             currentStep = STEP_CREDENTIALS
@@ -240,7 +258,13 @@ private fun LoginContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                LoginCard(modifier = Modifier.widthIn(max = spacing.dialogMaxWidth)) {
+                LoginCard(
+                    modifier = Modifier
+                        .widthIn(max = spacing.dialogMaxWidth)
+                        .onGloballyPositioned { coords ->
+                            cardTopInRootPx = coords.positionInRoot().y
+                        }
+                ) {
                     LoginHeader(isVietnamese = isVietnamese)
                     Spacer(modifier = Modifier.height(spacing.space32))
 
@@ -254,7 +278,7 @@ private fun LoginContent(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             if (step == STEP_DOMAIN) {
-                                // BƯỚC 1: Chỉ nhập Domain dự án + Nút Tiếp tục
+                                // BƯỚC 1: Nhập Domain dự án hoặc Quét mã QR + Nút Tiếp tục
                                 LoginInputField(
                                     value = uiState.domain,
                                     onValueChange = onDomainChange,
@@ -276,6 +300,16 @@ private fun LoginContent(
                                     text = if (isVietnamese) "Tiếp tục" else "Continue",
                                     onClick = onNextStep,
                                     active = uiState.domain.isNotBlank()
+                                )
+                                Spacer(modifier = Modifier.height(spacing.space12))
+                                LoginSecondaryButton(
+                                    text = if (isVietnamese) "Quét mã QR" else "Scan QR Code",
+                                    icon = Icons.Outlined.QrCodeScanner,
+                                    onClick = {
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
+                                        showQrScanner = true
+                                    }
                                 )
                             } else {
                                 // BƯỚC 2: Nhập Tài khoản & Mật khẩu (không hiển thị lại dòng domain)
@@ -299,18 +333,34 @@ private fun LoginContent(
                 }
             }
 
-            // 3. Cụm đổi Ngôn ngữ & Giao diện cố định ở góc trên bên phải màn hình
-            LoginSettingsBar(
-                isVietnamese = isVietnamese,
-                onSetLanguage = onSetLanguage,
+            // 3. Cụm đổi Ngôn ngữ & Giao diện: cố định ở góc trên phải, khi cuộn form lên gần chạm thì đẩy lên cùng thành 1 khối và cắt ẩn ngay tại mép thanh trạng thái
+            val settingsBaseTopDp = padding.calculateTopPadding() + spacing.space12
+            val settingsPushUpOffsetPx = with(density) {
+                val baseTopPx = settingsBaseTopDp.toPx()
+                val settingsBarHeightPx = spacing.space32.toPx()
+                val minGapPx = spacing.space12.toPx()
+                val maxAllowedTopPx = cardTopInRootPx - minGapPx - settingsBarHeightPx
+                (maxAllowedTopPx - baseTopPx).coerceAtMost(0f).roundToInt()
+            }
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(
-                        top = padding.calculateTopPadding() + spacing.space12,
-                        end = spacing.space24
-                    )
+                    .fillMaxWidth()
+                    .padding(top = padding.calculateTopPadding())
+                    .clipToBounds()
                     .zIndex(10f)
-            )
+            ) {
+                LoginSettingsBar(
+                    isVietnamese = isVietnamese,
+                    onSetLanguage = onSetLanguage,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(
+                            top = spacing.space12,
+                            end = spacing.space24
+                        )
+                        .offset { IntOffset(0, settingsPushUpOffsetPx) }
+                )
+            }
 
             // Global Top Popup Notification Host (chuẩn hóa hiển thị lỗi ở popup top)
             MobileTopPopupHost(
@@ -318,6 +368,21 @@ private fun LoginContent(
                     .align(Alignment.TopCenter)
                     .zIndex(100f)
             )
+
+            if (showQrScanner) {
+                QrScannerModal(
+                    isVietnamese = isVietnamese,
+                    onDismiss = { showQrScanner = false },
+                    onValidDomainScanned = { scannedDomain ->
+                        showQrScanner = false
+                        isDomainFromQr = true
+                        onDomainChange(scannedDomain)
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                        currentStep = STEP_CREDENTIALS
+                    }
+                )
+            }
         }
     }
 }

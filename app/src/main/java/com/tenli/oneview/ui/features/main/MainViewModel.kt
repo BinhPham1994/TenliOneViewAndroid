@@ -8,7 +8,6 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
@@ -17,6 +16,7 @@ import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.websocket.WebSocketManager
+import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.model.network.ChangePasswordModel
 import com.tenli.oneview.model.network.UserNotificationGlobalSetting
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
@@ -68,11 +68,14 @@ class MainViewModel(
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
 
-                // Reconnect WebSockets when coming back online or starting MainViewModel
+                // Reconnect WebSockets & đồng bộ FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
                 if (isOnline && UserSession.accessToken.isNotEmpty()) {
-                    val baseUrl = UserSession.domain.ifEmpty { BuildConfig.DOMAIN_CLOUD }
-                    webSocketManager.connectNotify(baseUrl)
-                    webSocketManager.connectAllReports()
+                    val baseUrl = UserSession.domain.trim()
+                    if (baseUrl.isNotEmpty()) {
+                        webSocketManager.connectNotify(baseUrl)
+                        webSocketManager.connectAllReports()
+                    }
+                    FcmTokenManager.registerDevicePushTokenAsync(force = true)
                 }
             }
         }
@@ -85,6 +88,8 @@ class MainViewModel(
     fun logout() {
         if (logoutJob?.isActive == true) return
         logoutJob = viewModelScope.launch {
+            // Huỷ đăng ký FCM token trên server trước khi xoá UserSession.accessToken (giống tenli-oneview auth.ts)
+            FcmTokenManager.unregisterDevicePushToken()
             UserSession.clear()
 
             // Xóa token/prefs + cache cục bộ (đọc/ghi file) trên IO để không chặn Main thread
@@ -162,6 +167,13 @@ class MainViewModel(
                         global = UserNotificationGlobalSetting(enabled = enabled)
                     )
                 )
+                if (resp.isSuccessful) {
+                    if (enabled) {
+                        FcmTokenManager.registerDevicePushToken(force = true)
+                    } else {
+                        FcmTokenManager.unregisterDevicePushToken()
+                    }
+                }
                 when {
                     !resp.isSuccessful -> MobileTopPopupManager.error(saveFailedMsg)
                     !enabled -> MobileTopPopupManager.info(
@@ -236,6 +248,7 @@ class MainViewModel(
                     )
                 )
                 if (resp.isSuccessful) {
+                    FcmTokenManager.unregisterDevicePushToken()
                     MobileTopPopupManager.success(
                         localized("Password changed successfully!", "Đổi mật khẩu thành công!")
                     )

@@ -1257,45 +1257,51 @@ fun MobileFilterBottomSheet(
                 Box(
                     modifier = Modifier
                         .width(spacing.sheetHandleWidth)
-                        .height(spacing.space4)
+                        .height(spacing.sheetHandleHeight)
                         .clip(CircleShape)
                         .background(colors.handle)
                 )
 
-                // Header
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = spacing.space6, bottom = spacing.space18)
-                ) {
-                    Text(
-                        text = if (isEn && title == "Bộ lọc") "Filter" else title,
-                        color = textColor,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                Spacer(modifier = Modifier.height(spacing.space10))
+
+                // Header: Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    IconBadge(
+                        icon = LucideIcons.ListFilter,
+                        backgroundColor = colors.accent,
+                        size = spacing.avatarLarge,
+                        iconSize = spacing.space28,
+                        cornerRadius = spacing.radiusMedium,
+                        tint = Color.White,
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .padding(horizontal = spacing.space40)
+                            .align(Alignment.TopCenter)
+                            .padding(top = spacing.space4)
                     )
 
-                    IconBadge(
-                        icon = LucideIcons.X,
-                        backgroundColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                        contentDescription = if (isEn) "Close" else "Đóng",
-                        size = spacing.space32,
-                        iconSize = spacing.iconSmallMedium,
-                        cornerRadius = spacing.radiusMedium,
-                        tint = secondaryColor,
-                        modifier = Modifier
-                            .align(Alignment.CenterEnd)
-                            .clip(CircleShape)
-                            .clickable {
-                                activePicker = null
-                                onDismiss()
-                            }
+                    SheetCloseButton(
+                        onClick = {
+                            activePicker = null
+                            onDismiss()
+                        },
+                        modifier = Modifier.align(Alignment.TopEnd)
                     )
                 }
+
+                Spacer(modifier = Modifier.height(spacing.space14))
+
+                Text(
+                    text = if (isEn && title == "Bộ lọc") "Filter" else title,
+                    color = colors.textStrong,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = spacing.space8)
+                        .padding(bottom = spacing.space16)
+                )
 
                 // Unified Filter Card
                 Column(
@@ -1811,12 +1817,16 @@ fun CustomDatePickerDialogModal(
 
     MobileNativeBottomSheet(
         title = if (isEn) "Select Date" else "Tùy chọn ngày",
+        icon = LucideIcons.Clock,
+        iconColor = WarningOrange,
         onDismiss = onDismiss
     ) {
         Text(
             text = if (isEn) "Choose a date to filter events (00:00 - 23:59)" else "Chọn ngày cần tra cứu dữ liệu (00:00 - 23:59)",
             color = subColor,
-            style = typography.bodySmall
+            style = typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(spacing.space14))
 
@@ -1884,6 +1894,8 @@ fun CustomRangePickerDialogModal(
 
     MobileNativeBottomSheet(
         title = if (isEn) "Custom Time Range" else "Tùy chỉnh thời gian",
+        icon = LucideIcons.Clock,
+        iconColor = WarningOrange,
         onDismiss = onDismiss
     ) {
         RangeDateTimeRow(

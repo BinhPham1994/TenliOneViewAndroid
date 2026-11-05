@@ -163,8 +163,6 @@ private const val SWIPE_HORIZONTAL_DOMINANCE = 1.25f
 private const val SCROLL_TO_TOP_JUMP_THRESHOLD = 12
 private const val SCROLL_TO_TOP_JUMP_TARGET = 8
 
-/** Độ trong suốt nền icon badge trong sheet xác nhận */
-private const val CONFIRM_BADGE_BG_ALPHA = 0.14f
 private const val ERROR_BOX_BG_ALPHA = 0.12f
 private const val ERROR_BOX_BORDER_ALPHA = 0.25f
 
@@ -728,6 +726,8 @@ fun SettingScreen(
         if (showLanguageSheet) {
             MobileNativeBottomSheet(
                 title = stringResource(id = R.string.setting_choose_language),
+                icon = LucideIcons.Globe,
+                iconColor = colors.indigo,
                 onDismiss = { showLanguageSheet = false }
             ) {
                 OptionsCard {
@@ -754,6 +754,8 @@ fun SettingScreen(
         if (showThemeSheet) {
             MobileNativeBottomSheet(
                 title = stringResource(id = R.string.setting_theme),
+                icon = LucideIcons.Palette,
+                iconColor = colors.pink,
                 onDismiss = { showThemeSheet = false }
             ) {
                 OptionsCard {
@@ -795,7 +797,7 @@ fun SettingScreen(
         // Logout Confirmation Sheet matching MobileSettingsPage.vue
         if (showLogoutSheet) {
             MobileNativeBottomSheet(
-                title = stringResource(id = R.string.dialog_logout_title),
+                title = null,
                 onDismiss = { showLogoutSheet = false }
             ) {
                 ConfirmSheetMessage(
@@ -960,7 +962,7 @@ private fun SelectableOptionRow(
     }
 }
 
-/** Nội dung sheet xác nhận: icon badge lớn + tiêu đề + mô tả (căn giữa) */
+/** Nội dung sheet xác nhận: icon badge lớn ở giữa trên cùng + tiêu đề + mô tả rõ nét */
 @Composable
 private fun ConfirmSheetMessage(
     icon: ImageVector,
@@ -969,33 +971,35 @@ private fun ConfirmSheetMessage(
     message: String
 ) {
     val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = spacing.space20, vertical = spacing.space12),
+            .padding(horizontal = spacing.space12)
+            .padding(top = spacing.space4, bottom = spacing.space8),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         IconBadge(
             icon = icon,
-            backgroundColor = accentColor.copy(alpha = CONFIRM_BADGE_BG_ALPHA),
+            backgroundColor = accentColor,
             size = spacing.avatarLarge,
             iconSize = spacing.space28,
             cornerRadius = spacing.radiusMedium,
-            tint = accentColor
+            tint = Color.White
         )
         Spacer(modifier = Modifier.height(spacing.space14))
         Text(
             text = title,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
+            color = colors.textStrong,
             textAlign = TextAlign.Center
         )
-        Spacer(modifier = Modifier.height(spacing.space6))
+        Spacer(modifier = Modifier.height(spacing.space16))
         Text(
             text = message,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.appColors.textMuted,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textBody,
             textAlign = TextAlign.Center
         )
     }
@@ -1232,11 +1236,7 @@ private fun MobileNotificationConfigScreen(
             val accentColor = if (targetPushState) colors.accent else colors.error
 
             MobileNativeBottomSheet(
-                title = if (targetPushState) {
-                    if (isEn) "Enable notifications" else "Bật thông báo"
-                } else {
-                    if (isEn) "Disable notifications" else "Tắt thông báo"
-                },
+                title = null,
                 onDismiss = { pendingPushState = null }
             ) {
                 ConfirmSheetMessage(
@@ -1411,6 +1411,8 @@ private fun MobilePasswordChangeSheet(
 
     MobileNativeBottomSheet(
         title = stringResource(id = R.string.acc_password_security),
+        icon = LucideIcons.Lock,
+        iconColor = colors.success,
         onDismiss = onDismiss
     ) {
         val error = state.error

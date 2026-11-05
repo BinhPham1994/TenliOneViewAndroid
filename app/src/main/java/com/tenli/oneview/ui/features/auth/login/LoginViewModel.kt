@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
+import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.model.network.LoginResponseData
 import com.tenli.oneview.ui.component.MobileTopPopupManager
@@ -184,6 +185,8 @@ class LoginViewModel(
                 putString(AppKeys.PASSWORD_KEY, password)
             }
         }
+        // Đăng ký ngay FCM token cho tài khoản vừa đăng nhập (chạy ngầm, không chặn điều hướng vào màn chính)
+        FcmTokenManager.registerDevicePushTokenAsync(force = true)
     }
 
     companion object {

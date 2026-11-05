@@ -159,6 +159,29 @@ data class UserNotificationSettingsModel(
     var globalScripts: List<Any>? = null
 )
 
+data class NotificationTokenRegisterModel(
+    val token: String,
+    val type: String = "firebase",
+    val status: Int = 1,
+    @SerializedName("client_id")
+    val clientId: String = "oneview-web"
+)
+
+data class FirebaseConfigModel(
+    val apiKey: String? = null,
+    val projectId: String? = null,
+    val authDomain: String? = null,
+    val messagingSenderId: String? = null,
+    val appId: String? = null,
+    val storageBucket: String? = null,
+    val measurementId: String? = null,
+    val vapidKey: String? = null
+)
+
+data class PublicConfigModel(
+    val firebase: FirebaseConfigModel? = null
+)
+
 // ==================== Uniform Config & Labels ====================
 
 data class UniformLabelUiConfig(

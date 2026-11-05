@@ -8,7 +8,6 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
@@ -584,7 +583,6 @@ class EventDetailViewModel(
             return trimmed
         }
         val base = UserSession.domain
-            .ifEmpty { BuildConfig.DOMAIN_CLOUD }
             .trim()
             .trimEnd('/')
             .removeSuffix("/api/v1")

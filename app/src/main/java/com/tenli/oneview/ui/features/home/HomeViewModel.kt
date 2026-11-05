@@ -167,6 +167,7 @@ enum class TimeFilter(val title: String, val titleEn: String = title) {
 
 data class HomeUiState(
     val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val selectedFilter: TimeFilter = TimeFilter.TODAY,
     val selectedServiceId: Int? = null,
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
@@ -362,20 +363,20 @@ class HomeViewModel(
     fun setTimeFilter(filter: TimeFilter) {
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter) return
-        _uiState.update { it.copy(selectedFilter = filter) }
+        _uiState.update { it.copy(selectedFilter = filter, isRefreshing = false) }
         fetchDashboardData()
     }
 
     fun setServiceFilter(serviceId: Int?) {
         if (_uiState.value.selectedServiceId == serviceId) return
-        _uiState.update { it.copy(selectedServiceId = serviceId) }
+        _uiState.update { it.copy(selectedServiceId = serviceId, isRefreshing = false) }
         fetchDashboardData()
     }
 
     fun applyFilters(filter: TimeFilter, serviceId: Int?) {
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
-        _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId) }
+        _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId, isRefreshing = false) }
         fetchDashboardData()
     }
 
@@ -383,34 +384,41 @@ class HomeViewModel(
         applyFilters(TimeFilter.TODAY, null)
     }
 
-    fun fetchDashboardData() {
+    fun refresh() {
+        _uiState.update { it.copy(isRefreshing = true) }
+        fetchDashboardData(isUserRefresh = true)
+    }
+
+    fun fetchDashboardData(isUserRefresh: Boolean = false) {
         dashboardJob?.cancel()
         dashboardJob = viewModelScope.launch {
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
 
-            // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate)
+            // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate) khi chưa phải thao tác kéo refresh
             val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
-            if (cachedData != null) {
-                val updatedFromCache = withContext(Dispatchers.Default) {
-                    val cur = _uiState.value
-                    cur.copy(
-                        isLoading = false,
-                        error = null,
-                        overviewStats = cachedData.overviewStats,
-                        eventsByType = cachedData.eventsByType,
-                        cameraList = cachedData.cameraList.ifEmpty { cur.cameraList },
-                        aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
-                        recentEvents = cachedData.recentEvents
-                            .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
-                            .take(MAX_RECENT_EVENTS),
-                        runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else cur.runningAiTasks,
-                        totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
-                    ).withRecomputedMetrics()
+            if (!isUserRefresh) {
+                if (cachedData != null) {
+                    val updatedFromCache = withContext(Dispatchers.Default) {
+                        val cur = _uiState.value
+                        cur.copy(
+                            isLoading = false,
+                            error = null,
+                            overviewStats = cachedData.overviewStats,
+                            eventsByType = cachedData.eventsByType,
+                            cameraList = cachedData.cameraList.ifEmpty { cur.cameraList },
+                            aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
+                            recentEvents = cachedData.recentEvents
+                                .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
+                                .take(MAX_RECENT_EVENTS),
+                            runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else cur.runningAiTasks,
+                            totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
+                        ).withRecomputedMetrics()
+                    }
+                    _uiState.value = updatedFromCache
+                } else {
+                    _uiState.update { it.copy(isLoading = true, error = null) }
                 }
-                _uiState.value = updatedFromCache
-            } else {
-                _uiState.update { it.copy(isLoading = true, error = null) }
             }
 
             try {
@@ -556,6 +564,7 @@ class HomeViewModel(
                     val nextState = withContext(Dispatchers.Default) {
                         _uiState.value.copy(
                             isLoading = false,
+                            isRefreshing = false,
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,
                             cameraList = cameraList,
@@ -589,6 +598,7 @@ class HomeViewModel(
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isRefreshing = false,
                         error = if (cachedData == null) e.toUserFriendlyMessage() else null
                     )
                 }

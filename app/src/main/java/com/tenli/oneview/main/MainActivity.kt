@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -69,6 +70,7 @@ import com.google.android.play.core.appupdate.AppUpdateOptions
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
+import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.ui.component.ProvideAppLanguage
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
 import com.tenli.oneview.ui.component.rememberIsEnglish
@@ -76,31 +78,32 @@ import com.tenli.oneview.ui.features.auth.login.LoginScreen
 import com.tenli.oneview.ui.features.splash.SplashDestination
 import com.tenli.oneview.ui.features.splash.SplashViewModel
 import com.tenli.oneview.ui.navigation.AppNavigation
+import com.tenli.oneview.ui.navigation.PendingEventNav
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.ui.utils.PermissionUtils
-import kotlinx.coroutines.delay
 
 private const val TAG = "MainActivity"
 
-/** Extra mở chi tiết sự kiện (FCM notification / màn cuộc gọi gửi "EVENT_ID") */
-private const val EXTRA_EVENT_ID = "EVENT_ID"
-private const val EXTRA_OPEN_EVENT_DETAIL = "OPEN_EVENT_DETAIL"
-
-/** Thời gian giữ eventId để AppNavigation kịp điều hướng trước khi xoá khỏi intent */
-private const val EVENT_ID_CONSUME_DELAY_MS = 1000L
-
-private const val PERMISSION_ICON_BG_ALPHA = 0.14f
+/** Các khoá extra mở chi tiết sự kiện (từ FCM data, notification hệ thống hoặc màn cuộc gọi) */
+private val EVENT_ID_EXTRA_KEYS = arrayOf(
+    "OPEN_EVENT_DETAIL",
+    "EVENT_ID",
+    "eId",
+    "eventId",
+    "event_id",
+    "id"
+)
 
 private val CHINESE_OEM_KEYWORDS = listOf("xiaomi", "oppo", "vivo", "huawei")
 
 class MainActivity : ComponentActivity() {
 
     private val splashViewModel: SplashViewModel by viewModels { SplashViewModel.Factory }
-    private var startEventId by mutableStateOf<String?>(null)
+    private var pendingEventNav by mutableStateOf<PendingEventNav?>(null)
 
     private val appUpdateManager: AppUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
 
@@ -123,8 +126,12 @@ class MainActivity : ComponentActivity() {
         }
 
         // Chỉ kiểm tra cập nhật ở lần tạo đầu (không lặp lại khi recreate do đổi ngôn ngữ)
-        if (savedInstanceState == null) checkUpdate()
-        startEventId = intent.extractEventId()
+        if (savedInstanceState == null) {
+            checkUpdate()
+            intent.extractEventId()?.let { rawId ->
+                pendingEventNav = PendingEventNav(eventId = rawId, isColdStart = true)
+            }
+        }
 
         setContent {
             TenliAIoTTheme {
@@ -144,20 +151,15 @@ class MainActivity : ComponentActivity() {
                         is SplashDestination.Main -> {
                             AppNavigation(
                                 onLogoutRequest = splashViewModel::logout,
-                                initialEventId = startEventId
+                                pendingEventNav = pendingEventNav,
+                                onEventNavConsumed = {
+                                    pendingEventNav = null
+                                    intent.clearEventIdExtras()
+                                }
                             )
 
                             // Vẽ sau AppNavigation để các dialog xin quyền nằm trên cùng (và BackHandler được ưu tiên)
                             StartupPermissionDialogs()
-
-                            LaunchedEffect(startEventId) {
-                                if (startEventId != null) {
-                                    delay(EVENT_ID_CONSUME_DELAY_MS)
-                                    startEventId = null
-                                    intent.removeExtra(EXTRA_EVENT_ID)
-                                    intent.removeExtra(EXTRA_OPEN_EVENT_DETAIL)
-                                }
-                            }
                         }
 
                         is SplashDestination.Loading -> { /* Keep Splash */ }
@@ -174,7 +176,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.extractEventId()?.let { startEventId = it }
+        intent.extractEventId()?.let { rawId ->
+            // App đang mở sẵn → điều hướng hiển thị ngay chi tiết sự kiện mà không mở lại app
+            pendingEventNav = PendingEventNav(eventId = rawId, isColdStart = false)
+            intent.clearEventIdExtras()
+        }
     }
 
     override fun onResume() {
@@ -211,7 +217,13 @@ class MainActivity : ComponentActivity() {
 }
 
 private fun Intent.extractEventId(): String? =
-    (getStringExtra(EXTRA_OPEN_EVENT_DETAIL) ?: getStringExtra(EXTRA_EVENT_ID))?.takeIf { it.isNotBlank() }
+    EVENT_ID_EXTRA_KEYS.firstNotNullOfOrNull { key ->
+        getStringExtra(key)?.takeIf { it.isNotBlank() }
+    }
+
+private fun Intent.clearEventIdExtras() {
+    EVENT_ID_EXTRA_KEYS.forEach { removeExtra(it) }
+}
 
 private enum class StartupPermissionDialog { NONE, NOTIFICATION, OVERLAY, BATTERY }
 
@@ -233,8 +245,12 @@ private fun StartupPermissionDialogs() {
 
     fun refreshDialogs() {
         if (isRequestingNotification) return
+        val hasNotificationPerm = PermissionUtils.isNotificationEnabled(context)
+        if (hasNotificationPerm) {
+            FcmTokenManager.registerDevicePushTokenAsync(force = false)
+        }
         activeDialog = when {
-            !PermissionUtils.isNotificationEnabled(context) -> StartupPermissionDialog.NOTIFICATION
+            !hasNotificationPerm -> StartupPermissionDialog.NOTIFICATION
             !Settings.canDrawOverlays(context) -> StartupPermissionDialog.OVERLAY
             !PermissionUtils.isIgnoringBattery(context) -> StartupPermissionDialog.BATTERY
             else -> StartupPermissionDialog.NONE
@@ -243,8 +259,11 @@ private fun StartupPermissionDialogs() {
 
     val notificationLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) {
+    ) { granted ->
         isRequestingNotification = false
+        if (granted) {
+            FcmTokenManager.registerDevicePushTokenAsync(force = false)
+        }
         refreshDialogs()
     }
 
@@ -272,11 +291,12 @@ private fun StartupPermissionDialogs() {
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
         )
     }
+    val strongTextColor = MaterialTheme.appColors.textStrong
 
     when (activeDialog) {
         StartupPermissionDialog.NOTIFICATION -> PermissionExplanationDialog(
             title = if (isEn) "Enable Alert Notifications" else "Bật thông báo cảnh báo",
-            description = remember(isEn) { notificationDescription(isEn) },
+            description = remember(isEn, strongTextColor) { notificationDescription(isEn, strongTextColor) },
             onConfirm = openAppDetails,
             onDismiss = dismiss
         )
@@ -288,7 +308,9 @@ private fun StartupPermissionDialogs() {
                 isChinesePhone -> "Quyền chạy nền đặc biệt"
                 else -> "Quyền hiển thị cuộc gọi"
             },
-            description = remember(isEn, isChinesePhone) { overlayDescription(isEn, isChinesePhone, manufacturer) },
+            description = remember(isEn, isChinesePhone, strongTextColor) {
+                overlayDescription(isEn, isChinesePhone, manufacturer, strongTextColor)
+            },
             onConfirm = {
                 dismiss()
                 if (isChinesePhone) {
@@ -304,7 +326,7 @@ private fun StartupPermissionDialogs() {
 
         StartupPermissionDialog.BATTERY -> PermissionExplanationDialog(
             title = if (isEn) "Keep Connection Active" else "Duy trì kết nối",
-            description = remember(isEn) { batteryDescription(isEn) },
+            description = remember(isEn, strongTextColor) { batteryDescription(isEn, strongTextColor) },
             onConfirm = openAppDetails,
             onDismiss = dismiss
         )
@@ -313,19 +335,20 @@ private fun StartupPermissionDialogs() {
     }
 }
 
-/** Ghép chuỗi có các đoạn in đậm: phần tử ở vị trí lẻ (1, 3, 5...) được in đậm. */
-private fun boldSegments(vararg segments: String): AnnotatedString = buildAnnotatedString {
+/** Ghép chuỗi có các đoạn in đậm: phần tử ở vị trí lẻ (1, 3, 5...) được in đậm rõ nét. */
+private fun boldSegments(strongColor: Color, vararg segments: String): AnnotatedString = buildAnnotatedString {
     segments.forEachIndexed { index, text ->
         if (index % 2 == 1) {
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(text) }
+            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = strongColor)) { append(text) }
         } else {
             append(text)
         }
     }
 }
 
-private fun notificationDescription(isEn: Boolean): AnnotatedString = if (isEn) {
+private fun notificationDescription(isEn: Boolean, strongColor: Color): AnnotatedString = if (isEn) {
     boldSegments(
+        strongColor,
         "Notification permission is disabled. You ",
         "will not receive emergency alert calls and notifications",
         " from the AI system.\n\nPlease tap ",
@@ -336,6 +359,7 @@ private fun notificationDescription(isEn: Boolean): AnnotatedString = if (isEn) 
     )
 } else {
     boldSegments(
+        strongColor,
         "Quyền thông báo đang bị tắt. Điều này sẽ khiến bạn ",
         "không thể nhận được cuộc gọi và tin nhắn cảnh báo khẩn cấp",
         " từ hệ thống AI.\n\nVui lòng nhấn ",
@@ -346,34 +370,44 @@ private fun notificationDescription(isEn: Boolean): AnnotatedString = if (isEn) 
     )
 }
 
-private fun overlayDescription(isEn: Boolean, isChinesePhone: Boolean, manufacturer: String): AnnotatedString {
+private fun overlayDescription(
+    isEn: Boolean,
+    isChinesePhone: Boolean,
+    manufacturer: String,
+    strongColor: Color
+): AnnotatedString {
     val brand = manufacturer.uppercase()
     return when {
         isEn && isChinesePhone -> boldSegments(
+            strongColor,
             "To receive reliable alert calls on ", brand, " devices, please enable:\n\n• ",
             "Show on Lock screen", "\n\n• ",
             "Autostart", "\n\n• ",
             "Display pop-up windows"
         )
         isEn -> boldSegments(
+            strongColor,
             "To display alert screens immediately during emergencies, please allow:\n\n• ",
             "Display over other apps"
         )
         isChinesePhone -> boldSegments(
+            strongColor,
             "Để nhận cuộc gọi cảnh báo ổn định trên máy ", brand, ", vui lòng bật các mục sau:\n\n• ",
             "Hiển thị trên màn hình khóa", "\n\n• ",
             "Tự khởi chạy", "\n\n• ",
             "Hiển thị cửa sổ pop-up"
         )
         else -> boldSegments(
+            strongColor,
             "Để màn hình cảnh báo hiển thị ngay lập tức khi có sự kiện khẩn cấp, vui lòng cho phép mục:\n\n• ",
             "Hiển thị trên các ứng dụng khác"
         )
     }
 }
 
-private fun batteryDescription(isEn: Boolean): AnnotatedString = if (isEn) {
+private fun batteryDescription(isEn: Boolean, strongColor: Color): AnnotatedString = if (isEn) {
     boldSegments(
+        strongColor,
         "To avoid missing alerts while your phone is asleep, please:\n\n• Select ",
         "App battery usage",
         " (or Battery).\n\n• Choose ",
@@ -382,6 +416,7 @@ private fun batteryDescription(isEn: Boolean): AnnotatedString = if (isEn) {
     )
 } else {
     boldSegments(
+        strongColor,
         "Để không bỏ lỡ cảnh báo khi điện thoại đang ở chế độ ngủ, vui lòng thực hiện:\n\n• Chọn mục ",
         "Mức sử dụng Pin của ứng dụng",
         " (hoặc Pin).\n\n• Tích chọn chế độ ",
@@ -426,33 +461,42 @@ fun PermissionExplanationDialog(
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = spacing.space16)
-                        .padding(top = spacing.space10, bottom = spacing.space20)
+                        .padding(top = spacing.space10, bottom = spacing.space20),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
                             .width(spacing.sheetHandleWidth)
                             .height(spacing.sheetHandleHeight)
                             .clip(CircleShape)
                             .background(colors.handle)
                     )
-                    Spacer(modifier = Modifier.height(spacing.space14))
+                    Spacer(modifier = Modifier.height(spacing.space10))
 
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = spacing.space14),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên
+                    Box(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = title,
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.textTitle,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
                         Box(
                             modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = spacing.space4)
+                                .size(spacing.avatarLarge)
+                                .clip(RoundedCornerShape(spacing.radiusMedium))
+                                .background(colors.accent),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(spacing.space28)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
                                 .size(spacing.avatarSmall)
                                 .clip(CircleShape)
                                 .background(colors.closeButtonBg)
@@ -462,43 +506,40 @@ fun PermissionExplanationDialog(
                             Icon(
                                 imageVector = LucideIcons.X,
                                 contentDescription = if (isEn) "Close" else "Đóng",
-                                tint = colors.textMuted,
+                                tint = colors.textSubtle,
                                 modifier = Modifier.size(spacing.iconSmall)
                             )
                         }
                     }
 
-                    Column(
+                    Spacer(modifier = Modifier.height(spacing.space14))
+
+                    // Dưới icon là Tiêu đề căn giữa rõ nét
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textStrong,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = spacing.space12, vertical = spacing.space8),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(spacing.avatarLarge)
-                                .clip(RoundedCornerShape(spacing.radiusMedium))
-                                .background(colors.accent.copy(alpha = PERMISSION_ICON_BG_ALPHA)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = colors.accent,
-                                modifier = Modifier.size(spacing.space28)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(spacing.space14))
-                        Text(
-                            text = description,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textMuted,
-                            textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
+                            .padding(horizontal = spacing.space8)
+                    )
 
                     Spacer(modifier = Modifier.height(spacing.space16))
+
+                    // Dưới tiêu đề là Nội dung với màu chữ rõ ràng, độ tương phản cao
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textBody,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space8)
+                    )
+
+                    Spacer(modifier = Modifier.height(spacing.space20))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -515,7 +556,7 @@ fun PermissionExplanationDialog(
                         ) {
                             Text(
                                 text = if (isEn) "Later" else "Để sau",
-                                color = colors.textTitle,
+                                color = colors.textStrong,
                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
                             )
                         }

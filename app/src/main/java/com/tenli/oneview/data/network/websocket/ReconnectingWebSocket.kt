@@ -216,7 +216,7 @@ abstract class ReconnectingWebSocket(
             val trimmed = rawUrl.trim()
             if (trimmed.isEmpty()) return ""
             val absolute = if (trimmed.startsWith("/")) {
-                stripApiSuffix(UserSession.domain.ifEmpty { BuildConfig.DOMAIN_CLOUD }) + trimmed
+                stripApiSuffix(UserSession.domain) + trimmed
             } else {
                 trimmed
             }

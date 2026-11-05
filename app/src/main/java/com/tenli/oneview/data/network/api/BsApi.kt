@@ -3,13 +3,18 @@ package com.tenli.oneview.data.network.api
 import com.tenli.oneview.model.network.BsProfileGroupModel
 import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.NotificationTokenRegisterModel
+import com.tenli.oneview.model.network.PublicConfigModel
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.QueryMap
 
@@ -58,4 +63,13 @@ interface BsApi {
 
     @PUT("ts/api/v1/user/settings/notification_settings")
     suspend fun updateUserNotificationSettings(@Body model: UserNotificationSettingsModel): Response<UserNotificationSettingsModel>
+
+    @POST("ts/api/v1/notification-tokens")
+    suspend fun registerNotificationToken(@Body payload: NotificationTokenRegisterModel): Response<Any>
+
+    @DELETE("ts/api/v1/notification-tokens/{token}")
+    suspend fun unregisterNotificationToken(@Path("token") token: String): Response<Any>
+
+    @GET("ts/api/v1/config/public")
+    suspend fun getPublicConfig(@Query("client_id") clientId: String = "oneview-web"): Response<PublicConfigModel>
 }

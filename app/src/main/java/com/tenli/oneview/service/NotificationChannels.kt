@@ -9,18 +9,19 @@ import android.media.RingtoneManager
 import com.tenli.oneview.R
 
 /**
- * Khai báo tập trung các Notification Channel của app (trước đây tạo rải rác ở TenliApp + KeepAliveService).
+ * Khai báo tập trung các Notification Channel của app.
  */
 object NotificationChannels {
     const val EVENT = "ai_event_channel"
     const val EMERGENCY_CALL = "emergency_call_channel"
-    const val KEEP_ALIVE = "keep_alive_channel"
+    private const val LEGACY_KEEP_ALIVE = "keep_alive_channel"
 
     private val CALL_VIBRATION_PATTERN = longArrayOf(0, 1000, 500, 1000)
 
     /** Tạo (hoặc cập nhật tên/mô tả theo ngôn ngữ) toàn bộ channel. An toàn khi gọi nhiều lần. */
     fun createAll(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        runCatching { manager.deleteNotificationChannel(LEGACY_KEEP_ALIVE) }
 
         val eventChannel = NotificationChannel(
             EVENT,
@@ -50,13 +51,7 @@ object NotificationChannels {
             setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)
         }
 
-        val keepAliveChannel = NotificationChannel(
-            KEEP_ALIVE,
-            context.getString(R.string.notif_channel_keep_alive_name),
-            NotificationManager.IMPORTANCE_LOW
-        )
-
-        manager.createNotificationChannels(listOf(eventChannel, callChannel, keepAliveChannel))
+        manager.createNotificationChannels(listOf(eventChannel, callChannel))
     }
 }
 

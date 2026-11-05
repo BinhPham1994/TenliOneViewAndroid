@@ -141,7 +141,7 @@ object LoginAuthClient {
 
     private val retrofit: Retrofit by lazy {
         Retrofit.Builder()
-            .baseUrl(BuildConfig.DOMAIN_CLOUD)
+            .baseUrl(HostResolver.PLACEHOLDER_BASE_URL)
             .client(client)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()

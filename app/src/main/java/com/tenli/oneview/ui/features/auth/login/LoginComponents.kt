@@ -255,6 +255,50 @@ internal fun LoginGradientButton(
     }
 }
 
+/**
+ * Nút phụ viền mảnh (dùng cho nút "Quét mã QR" ở bước nhập domain).
+ */
+@Composable
+internal fun LoginSecondaryButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val shape = RoundedCornerShape(spacing.radiusMedium)
+
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(loginControlHeight())
+            .clip(shape)
+            .background(colors.inputBg, shape),
+        shape = shape,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent,
+            contentColor = colors.textTitle
+        ),
+        contentPadding = PaddingValues(0.dp),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(spacing.iconRegular),
+            tint = colors.accent
+        )
+        Spacer(modifier = Modifier.width(spacing.space8))
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = colors.textTitle
+        )
+    }
+}
+
 /** Ô check vuông bo góc kiểu `.premium-checkbox` (không tự xử lý click – gắn qua [modifier] hoặc hàng cha). */
 @Composable
 internal fun LoginCheckbox(

@@ -89,17 +89,10 @@ fun HomeScreen(
     val isEn = rememberIsEnglish()
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    var isRefreshing by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.syncViewModeFromPrefs()
-    }
-
-    LaunchedEffect(uiState.isLoading) {
-        if (!uiState.isLoading) {
-            isRefreshing = false
-        }
     }
 
     val hasActiveFilter = uiState.selectedServiceId != null || uiState.selectedFilter != TimeFilter.TODAY
@@ -128,11 +121,8 @@ fun HomeScreen(
         )
 
         PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                viewModel.fetchDashboardData()
-            },
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = viewModel::refresh,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)

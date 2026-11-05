@@ -25,9 +25,6 @@ import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 
-/** Độ đậm nền ô icon (màu xác nhận pha loãng) */
-private const val ICON_CONTAINER_ALPHA = 0.14f
-
 /**
  * Bottom sheet xác nhận thao tác (icon + tiêu đề + mô tả + [Hủy]/[Xác nhận]).
  * Dùng chung khung [MobileNativeBottomSheet] + [SheetActionButtons].
@@ -50,25 +47,26 @@ fun AppConfirmDialog(
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
 
-    MobileNativeBottomSheet(title = title, onDismiss = onDismiss) {
-        // Body Content
+    MobileNativeBottomSheet(title = null, onDismiss = onDismiss) {
+        // Body Content: Icon ở giữa trên cùng -> Tiêu đề -> Nội dung
         Column(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = spacing.space20, vertical = spacing.space12),
+                .padding(horizontal = spacing.space12)
+                .padding(top = spacing.space4, bottom = spacing.space8),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Box(
                 modifier = Modifier
                     .size(spacing.avatarLarge)
                     .clip(RoundedCornerShape(spacing.radiusMedium))
-                    .background(confirmColor.copy(alpha = ICON_CONTAINER_ALPHA)),
+                    .background(confirmColor),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = confirmColor,
+                    tint = Color.White,
                     modifier = Modifier.size(spacing.space28)
                 )
             }
@@ -77,14 +75,14 @@ fun AppConfirmDialog(
                 text = headline ?: title,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = colors.textTitle,
+                color = colors.textStrong,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(spacing.space6))
+            Spacer(modifier = Modifier.height(spacing.space16))
             Text(
                 text = message,
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.textMuted,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textBody,
                 textAlign = TextAlign.Center
             )
         }

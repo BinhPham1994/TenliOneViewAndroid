@@ -2,7 +2,6 @@ package com.tenli.oneview
 
 import android.app.Activity
 import android.app.Application
-import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -20,11 +19,12 @@ import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.KeepAliveWorker
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.di.AppContainer
 import com.tenli.oneview.di.DefaultAppContainer
-import com.tenli.oneview.service.KeepAliveService
+import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AppKeys
@@ -71,20 +71,21 @@ class TenliApp : Application(), ImageLoaderFactory {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
             gson = GsonBuilder().serializeNulls().create()
         }
+        FcmTokenManager.init(this)
 
         // Tạo channel đồng bộ (rất nhẹ) để FCM/Service luôn có channel ngay khi cần
         NotificationChannels.createAll(this)
 
-        // Pre-warm dữ liệu cache từ ổ đĩa lên RAM ngay khi khởi tạo tiến trình ứng dụng
-        // để cả 3 màn hình chính (Trang chủ, Sự kiện, Trực tiếp) và Chi tiết sự kiện có dữ liệu 0ms ở frame đầu tiên
+        // Pre-warm phiên đăng nhập + dữ liệu cache từ ổ đĩa lên RAM ngay khi khởi tạo tiến trình ứng dụng
+        // để FCM chạy ngầm luôn có domain/token tải ảnh và cả 3 màn hình chính có dữ liệu 0ms ở frame đầu tiên
         appScope.launch {
+            runCatching { UserSession.ensureRestored(GlobalData.preferences) }
             runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) }
             runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) }
             runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) }
         }
 
         registerActivityLifecycleCallbacks(ForegroundTracker())
-        startKeepAliveService()
         setupBackgroundWorkers()
     }
 
@@ -128,10 +129,6 @@ class TenliApp : Application(), ImageLoaderFactory {
                 workRequest
             )
         }
-    }
-
-    private fun startKeepAliveService() {
-        runCatching { startForegroundService(Intent(this, KeepAliveService::class.java)) }
     }
 
     private companion object {

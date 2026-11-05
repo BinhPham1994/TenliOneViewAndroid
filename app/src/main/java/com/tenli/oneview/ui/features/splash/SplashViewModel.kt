@@ -1,7 +1,6 @@
 package com.tenli.oneview.ui.features.splash
 
 import android.app.Application
-import android.util.Log
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -14,7 +13,6 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.model.network.UserData
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,9 +20,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private const val TAG = "SplashViewModel"
-private const val DOMAIN_KEY = "DOMAIN_KEY"
 
 class SplashViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -42,20 +37,7 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     private fun restoreSessionAndNavigate() {
         viewModelScope.launch {
             val hasSession = withContext(Dispatchers.IO) {
-                val prefs = GlobalData.preferences
-                UserSession.accessToken = prefs.getString(AppKeys.ACCESS_TOKEN_KEY, "").orEmpty()
-                UserSession.refreshToken = prefs.getString(AppKeys.REFRESH_TOKEN_KEY, "").orEmpty()
-                UserSession.domain = prefs.getString(DOMAIN_KEY, "").orEmpty()
-                UserSession.savedUsername = prefs.getString(AppKeys.USERNAME_KEY, "").orEmpty()
-                UserSession.savedPassword = prefs.getString(AppKeys.PASSWORD_KEY, "").orEmpty()
-                val userDataJson = prefs.getString(AppKeys.USER_DATA_KEY, null)
-                if (!userDataJson.isNullOrEmpty()) {
-                    try {
-                        UserSession.userData = GlobalData.gson.fromJson(userDataJson, UserData::class.java)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Cannot parse saved user data", e)
-                    }
-                }
+                UserSession.ensureRestored(GlobalData.preferences)
                 UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
             }
             _uiState.update {
