@@ -140,9 +140,7 @@ fun EventScreen(
                 if (uiState.isLoading && uiState.events.isEmpty()) {
                     item {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(360.dp),
+                            modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             WaveDotsLoading()
@@ -151,12 +149,7 @@ fun EventScreen(
                 } else if (uiState.events.isEmpty()) {
                     item {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                .height(320.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface),
+                            modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
                             CommonEmptyState(text = "Không tìm thấy sự kiện nào")

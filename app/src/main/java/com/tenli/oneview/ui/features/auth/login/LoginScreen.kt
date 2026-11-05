@@ -501,7 +501,7 @@ fun LoginContent(
                         text = loginSubtitle,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.Normal
+                            fontWeight = FontWeight.Medium
                         ),
                         color = subtitleColor,
                         textAlign = TextAlign.Center
@@ -695,7 +695,7 @@ fun LoginContent(
                                 text = rememberMeText,
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Normal
+                                    fontWeight = FontWeight.Medium
                                 ),
                                 color = subtitleColor
                             )
@@ -837,7 +837,7 @@ fun LoginContent(
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     fontSize = 12.sp,
                                     lineHeight = 17.sp,
-                                    fontWeight = FontWeight.Normal,
+                                    fontWeight = FontWeight.Medium,
                                     color = subtitleColor
                                 ),
                                 modifier = Modifier.weight(1f),

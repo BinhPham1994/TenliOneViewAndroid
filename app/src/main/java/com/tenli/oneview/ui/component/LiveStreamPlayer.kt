@@ -275,10 +275,7 @@ fun LiveStreamPlayer(
                         )
                     }
                 } else {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(40.dp),
-                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary
-                    )
+                    WaveDotsLoading()
                 }
             }
         }

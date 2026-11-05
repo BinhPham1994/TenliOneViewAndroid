@@ -289,9 +289,7 @@ fun HomeScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp)
-                                .height(220.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.surface),
+                                .height(220.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             CommonEmptyState(text = "Không có sự kiện nào trong khoảng thời gian này")

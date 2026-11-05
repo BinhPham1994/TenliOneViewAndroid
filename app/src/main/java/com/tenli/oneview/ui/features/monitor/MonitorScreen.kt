@@ -7,11 +7,16 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -125,6 +130,8 @@ fun MonitorScreen(
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
     // isGridFullscreen: 2x2 grid fullscreen matching MobileLivePage.vue
     var isGridFullscreen by remember { mutableStateOf(false) }
+    // Thu gọn mặc định các ô lọc, chọn lưới 1x1/2x2 và VMS chips để giao diện gọn gàng
+    var isControlsExpanded by remember { mutableStateOf(false) }
 
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     val isSystemDark = isSystemInDarkTheme()
@@ -134,7 +141,7 @@ fun MonitorScreen(
         else -> isSystemDark
     }
 
-    var wasDeactivated by remember { mutableStateOf(false) }
+    var wasDeactivated by remember { mutableStateOf(true) }
     LaunchedEffect(isTabActive) {
         viewModel.setMonitorTabActive(isTabActive)
         if (!isTabActive) {
@@ -158,9 +165,11 @@ fun MonitorScreen(
         }
     }
 
-    LaunchedEffect(uiState.error) {
+    LaunchedEffect(uiState.error, isTabActive) {
         uiState.error?.let {
-            com.tenli.oneview.ui.component.MobileTopPopupManager.error(it)
+            if (isTabActive) {
+                com.tenli.oneview.ui.component.MobileTopPopupManager.error(it)
+            }
             viewModel.clearError()
         }
     }
@@ -453,212 +462,271 @@ fun MonitorScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 4.dp)
                         ) {
-                            // Row 1: .tree-search-bar (Search + 1x1/2x2 selector + 2x2 Fullscreen button)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            // Row 1 (Collapsible): .tree-search-bar (Search + 1x1/2x2 selector + 2x2 Fullscreen button)
+                            AnimatedVisibility(
+                                visible = isControlsExpanded,
+                                enter = expandVertically(
+                                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                                ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+                                exit = shrinkVertically(
+                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                                ) + fadeOut(animationSpec = tween(durationMillis = 150))
                             ) {
-                                // .search-input-box
                                 Row(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .height(36.dp)
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(controlBg)
-                                        .padding(horizontal = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .fillMaxWidth()
+                                        .padding(bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = LucideIcons.Search,
-                                        contentDescription = "Tìm camera",
-                                        tint = if (isDark) BrandAccent else Color(0xFF64748B),
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Box(
-                                        modifier = Modifier.weight(1f),
-                                        contentAlignment = Alignment.CenterStart
+                                    // .search-input-box
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(36.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .background(controlBg)
+                                            .padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        if (uiState.searchQuery.isEmpty()) {
-                                            Text(
-                                                text = "Tìm camera...",
-                                                color = placeholderColor,
-                                                fontSize = 13.sp
+                                        Icon(
+                                            imageVector = LucideIcons.Search,
+                                            contentDescription = "Tìm camera",
+                                            tint = if (isDark) BrandAccent else Color(0xFF64748B),
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier.weight(1f),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (uiState.searchQuery.isEmpty()) {
+                                                Text(
+                                                    text = "Tìm camera...",
+                                                    color = placeholderColor,
+                                                    fontSize = 13.sp
+                                                )
+                                            }
+                                            BasicTextField(
+                                                value = uiState.searchQuery,
+                                                onValueChange = { viewModel.setSearchQuery(it) },
+                                                singleLine = true,
+                                                textStyle = TextStyle(
+                                                    color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
+                                                    fontSize = 13.sp
+                                                ),
+                                                cursorBrush = SolidColor(BrandAccent),
+                                                modifier = Modifier.fillMaxWidth()
                                             )
                                         }
-                                        BasicTextField(
-                                            value = uiState.searchQuery,
-                                            onValueChange = { viewModel.setSearchQuery(it) },
-                                            singleLine = true,
-                                            textStyle = TextStyle(
-                                                color = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A),
-                                                fontSize = 13.sp
-                                            ),
-                                            cursorBrush = SolidColor(BrandAccent),
-                                            modifier = Modifier.fillMaxWidth()
+                                        if (uiState.searchQuery.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF94A3B8).copy(alpha = 0.2f))
+                                                    .clickable { viewModel.setSearchQuery("") },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = LucideIcons.X,
+                                                    contentDescription = "Xóa tìm kiếm",
+                                                    tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                                    modifier = Modifier.size(11.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    // .mobile-grid-selector ("1x1" / "2x2")
+                                    Row(
+                                        modifier = Modifier
+                                            .height(36.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .background(controlBg)
+                                            .padding(3.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        GridOptionButton(
+                                            label = "1x1",
+                                            isSelected = uiState.gridSize == 1,
+                                            isDark = isDark,
+                                            onClick = { viewModel.setGridSize(1) }
+                                        )
+                                        GridOptionButton(
+                                            label = "2x2",
+                                            isSelected = uiState.gridSize == 4,
+                                            isDark = isDark,
+                                            onClick = { viewModel.setGridSize(4) }
                                         )
                                     }
-                                    if (uiState.searchQuery.isNotEmpty()) {
+
+                                    // .grid-fullscreen-btn (visible when gridSize == 4)
+                                    if (uiState.gridSize == 4) {
                                         Box(
                                             modifier = Modifier
-                                                .size(18.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF94A3B8).copy(alpha = 0.2f))
-                                                .clickable { viewModel.setSearchQuery("") },
+                                                .size(36.dp)
+                                                .clip(RoundedCornerShape(9.dp))
+                                                .background(controlBg)
+                                                .clickable { isGridFullscreen = true },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = LucideIcons.X,
-                                                contentDescription = "Xóa tìm kiếm",
-                                                tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                                                modifier = Modifier.size(11.dp)
+                                                imageVector = LucideIcons.Maximize,
+                                                contentDescription = "Phóng to lưới 2x2",
+                                                tint = mutedText,
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
-                                    }
-                                }
-
-                                // .mobile-grid-selector ("1x1" / "2x2")
-                                Row(
-                                    modifier = Modifier
-                                        .height(36.dp)
-                                        .clip(RoundedCornerShape(9.dp))
-                                        .background(controlBg)
-                                        .padding(3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    GridOptionButton(
-                                        label = "1x1",
-                                        isSelected = uiState.gridSize == 1,
-                                        isDark = isDark,
-                                        onClick = { viewModel.setGridSize(1) }
-                                    )
-                                    GridOptionButton(
-                                        label = "2x2",
-                                        isSelected = uiState.gridSize == 4,
-                                        isDark = isDark,
-                                        onClick = { viewModel.setGridSize(4) }
-                                    )
-                                }
-
-                                // .grid-fullscreen-btn (visible when gridSize == 4)
-                                if (uiState.gridSize == 4) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(controlBg)
-                                            .clickable { isGridFullscreen = true },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = LucideIcons.Maximize,
-                                            contentDescription = "Phóng to lưới 2x2",
-                                            tint = mutedText,
-                                            modifier = Modifier.size(16.dp)
-                                        )
                                     }
                                 }
                             }
 
-                            // Row 2: .vms-pagination-row (VMS chips + Pagination controls)
-                            if (vmsFilterChips.isNotEmpty() || totalCameraPages > 1) {
+                            // Row 2: Toggle Arrow Button + Collapsible VMS chips + Pagination controls
+                            val arrowRotation by animateFloatAsState(
+                                targetValue = if (isControlsExpanded) 180f else 0f,
+                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                                label = "controlsToggleArrow"
+                            )
+                            val hasActiveCustomControl = uiState.searchQuery.isNotEmpty() ||
+                                uiState.selectedFilterNodeKey != "all"
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier.weight(1f),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    // .vms-chips-scroll
-                                    Row(
+                                    // Nút mũi tên đóng/mở thanh công cụ lọc, chọn lưới và VMS
+                                    Box(
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .horizontalScroll(rememberScrollState()),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                    ) {
-                                        vmsFilterChips.forEach { chip ->
-                                            VmsFilterChipButton(
-                                                chip = chip,
-                                                isDark = isDark,
-                                                panelBg = panelBg,
-                                                controlBg = controlBg,
-                                                mutedText = mutedText,
-                                                onClick = { viewModel.handleVmsChipClick(chip.key) }
+                                            .height(28.dp)
+                                            .widthIn(min = 28.dp)
+                                            .clip(RoundedCornerShape(7.dp))
+                                            .background(
+                                                if (isControlsExpanded || hasActiveCustomControl) {
+                                                    BrandAccent.copy(alpha = if (isDark) 0.20f else 0.12f)
+                                                } else {
+                                                    controlBg
+                                                }
                                             )
-                                        }
+                                            .clickable { isControlsExpanded = !isControlsExpanded }
+                                            .padding(horizontal = 7.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = LucideIcons.ChevronDown,
+                                            contentDescription = if (isControlsExpanded) "Thu gọn bộ lọc" else "Mở rộng bộ lọc",
+                                            tint = if (isControlsExpanded || hasActiveCustomControl) BrandAccent else mutedText,
+                                            modifier = Modifier
+                                                .size(15.dp)
+                                                .rotate(arrowRotation)
+                                        )
                                     }
 
-                                    // .pagination-controls
-                                    if (totalCameraPages > 1) {
+                                    // .vms-chips-scroll (chỉ hiển thị khi đã bấm mũi tên mở rộng)
+                                    AnimatedVisibility(
+                                        visible = isControlsExpanded && vmsFilterChips.isNotEmpty(),
+                                        enter = expandHorizontally(
+                                            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                                        ) + fadeIn(animationSpec = tween(durationMillis = 180)),
+                                        exit = shrinkHorizontally(
+                                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                                        ) + fadeOut(animationSpec = tween(durationMillis = 140))
+                                    ) {
                                         Row(
+                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                                         ) {
-                                            val canPrev = uiState.currentCameraPage > 1
-                                            val canNext = uiState.currentCameraPage < totalCameraPages
+                                            vmsFilterChips.forEach { chip ->
+                                                VmsFilterChipButton(
+                                                    chip = chip,
+                                                    isDark = isDark,
+                                                    panelBg = panelBg,
+                                                    controlBg = controlBg,
+                                                    mutedText = mutedText,
+                                                    onClick = { viewModel.handleVmsChipClick(chip.key) }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
 
+                                // .pagination-controls (luôn hiển thị)
+                                if (totalCameraPages > 1) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        val canPrev = uiState.currentCameraPage > 1
+                                        val canNext = uiState.currentCameraPage < totalCameraPages
+
+                                        Box(
+                                            modifier = Modifier
+                                                .height(28.dp)
+                                                .widthIn(min = 24.dp)
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(controlBg)
+                                                .alpha(if (canPrev) 1f else 0.4f)
+                                                .clickable(enabled = canPrev) { viewModel.prevCameraPage() }
+                                                .padding(horizontal = 5.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = LucideIcons.ChevronLeft,
+                                                contentDescription = "Trang trước",
+                                                tint = mutedText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+
+                                        cameraPageNumbers.forEach { page ->
+                                            val isPageActive = page == uiState.currentCameraPage
                                             Box(
                                                 modifier = Modifier
                                                     .height(28.dp)
                                                     .widthIn(min = 24.dp)
                                                     .clip(RoundedCornerShape(7.dp))
-                                                    .background(controlBg)
-                                                    .alpha(if (canPrev) 1f else 0.4f)
-                                                    .clickable(enabled = canPrev) { viewModel.prevCameraPage() }
-                                                    .padding(horizontal = 5.dp),
+                                                    .background(if (isPageActive) BrandAccent else controlBg)
+                                                    .clickable { viewModel.setCameraPage(page) }
+                                                    .padding(horizontal = 6.dp),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = LucideIcons.ChevronLeft,
-                                                    contentDescription = "Trang trước",
-                                                    tint = mutedText,
-                                                    modifier = Modifier.size(13.dp)
+                                                Text(
+                                                    text = page.toString(),
+                                                    color = if (isPageActive) Color.White else mutedText,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
                                                 )
                                             }
+                                        }
 
-                                            cameraPageNumbers.forEach { page ->
-                                                val isPageActive = page == uiState.currentCameraPage
-                                                Box(
-                                                    modifier = Modifier
-                                                        .height(28.dp)
-                                                        .widthIn(min = 24.dp)
-                                                        .clip(RoundedCornerShape(7.dp))
-                                                        .background(if (isPageActive) BrandAccent else controlBg)
-                                                        .clickable { viewModel.setCameraPage(page) }
-                                                        .padding(horizontal = 6.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Text(
-                                                        text = page.toString(),
-                                                        color = if (isPageActive) Color.White else mutedText,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold
-                                                    )
-                                                }
-                                            }
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .height(28.dp)
-                                                    .widthIn(min = 24.dp)
-                                                    .clip(RoundedCornerShape(7.dp))
-                                                    .background(controlBg)
-                                                    .alpha(if (canNext) 1f else 0.4f)
-                                                    .clickable(enabled = canNext) { viewModel.nextCameraPage() }
-                                                    .padding(horizontal = 5.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = LucideIcons.ChevronRight,
-                                                    contentDescription = "Trang sau",
-                                                    tint = mutedText,
-                                                    modifier = Modifier.size(13.dp)
-                                                )
-                                            }
+                                        Box(
+                                            modifier = Modifier
+                                                .height(28.dp)
+                                                .widthIn(min = 24.dp)
+                                                .clip(RoundedCornerShape(7.dp))
+                                                .background(controlBg)
+                                                .alpha(if (canNext) 1f else 0.4f)
+                                                .clickable(enabled = canNext) { viewModel.nextCameraPage() }
+                                                .padding(horizontal = 5.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = LucideIcons.ChevronRight,
+                                                contentDescription = "Trang sau",
+                                                tint = mutedText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
                                         }
                                     }
                                 }
@@ -1003,10 +1071,10 @@ private fun MobileCameraSnapshotCard(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                color = BrandAccent.copy(alpha = 0.85f),
-                                strokeWidth = 2.dp
+                            WaveDotsLoading(
+                                dotSize = 6.dp,
+                                dotColor = BrandAccent,
+                                maxOffset = 6.dp
                             )
                         }
                     },
@@ -1028,10 +1096,10 @@ private fun MobileCameraSnapshotCard(
                     }
                 )
             } else if (!hasSnapKey) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = BrandAccent.copy(alpha = 0.85f),
-                    strokeWidth = 2.dp
+                WaveDotsLoading(
+                    dotSize = 6.dp,
+                    dotColor = BrandAccent,
+                    maxOffset = 6.dp
                 )
             } else {
                 Icon(
@@ -1528,7 +1596,7 @@ fun CameraGridItem(
                         text = selectedCamera.camera.name,
                         color = Color.White,
                         fontSize = if (isCompact) 11.sp else 12.sp,
-                        fontWeight = FontWeight.Normal,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

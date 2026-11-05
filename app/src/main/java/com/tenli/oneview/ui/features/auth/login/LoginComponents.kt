@@ -109,7 +109,7 @@ fun LoginInputField(
         textStyle = MaterialTheme.typography.bodyMedium.copy(
             color = textColor,
             fontSize = 15.sp,
-            fontWeight = FontWeight.Normal
+            fontWeight = FontWeight.Medium
         ),
         visualTransformation = if (isPassword && !showPassword) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = keyboardOptions,
@@ -145,7 +145,7 @@ fun LoginInputField(
                             text = label,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Normal
+                                fontWeight = FontWeight.Medium
                             ),
                             color = placeholderColor,
                             maxLines = 1,

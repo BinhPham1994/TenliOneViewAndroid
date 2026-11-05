@@ -33,13 +33,13 @@ val AppTypography = Typography(
         fontWeight = FontWeight.SemiBold, fontSize = 16.sp, lineHeight = 22.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodyLarge = TextStyle(
-        fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 24.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodyMedium = TextStyle(
-        fontWeight = FontWeight.Normal, fontSize = 15.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodySmall = TextStyle(
-        fontWeight = FontWeight.Normal, fontSize = 13.5.sp, lineHeight = 18.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Medium, fontSize = 13.5.sp, lineHeight = 18.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     labelLarge = TextStyle(
         fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle

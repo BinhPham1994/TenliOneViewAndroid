@@ -1466,7 +1466,7 @@ private fun FilterCellRow(
             text = label,
             color = textColor,
             fontSize = 14.sp,
-            fontWeight = FontWeight.Normal,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -1569,7 +1569,7 @@ private fun <K> AnchoredFilterDropdownMenu(
                         text = label,
                         color = if (isSelected) BrandAccent else itemTextColor,
                         fontSize = 14.sp,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)

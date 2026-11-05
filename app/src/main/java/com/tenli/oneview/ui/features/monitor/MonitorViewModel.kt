@@ -117,7 +117,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private val streamJobs = arrayOfNulls<Job>(4)
     private val blinkJobs = arrayOfNulls<Job>(4)
-    private var isMonitorTabActive: Boolean = true
+    private var isMonitorTabActive: Boolean = false
     private val pendingSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
     private val retriedCardSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
 
@@ -1000,14 +1000,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     /**
-     * Đồng bộ xử lý chọn camera với `MonitoringPage.vue` (line 1216) & `MobileLivePage.vue`:
+     * Xử lý chọn camera trên màn hình Trực tiếp:
      * - Chế độ 1x1:
      *   + Nếu camera đang phát ở ô 0 -> nháy viền (`triggerBlink(0)`).
-     *   + Nếu ô 0 đã có camera khác đang phát -> báo lưới đã đầy (`camera.grid_full`), không ghi đè.
-     *   + Nếu ô 0 trống -> phát vào ô 0.
+     *   + Nếu bấm vào camera khác -> phát ngay camera mới vào ô 0 (`addCamera(camera, 0)`).
      * - Chế độ 2x2:
      *   + Nếu camera đã có trong 1 trong 4 ô -> chuyển `activeSlotIndex` tới ô đó và nháy viền (`triggerBlink(existingIndex)`).
-     *   + Nếu cả 4 ô đều đã có camera đang phát -> báo lưới đã đầy (`camera.grid_full`), không ghi đè.
+     *   + Nếu cả 4 ô đều đã có camera đang phát -> báo lưới đã đầy, không ghi đè.
      *   + Nếu còn ô trống -> ưu tiên đặt vào `activeSlotIndex` nếu trống, hoặc ô trống đầu tiên, sau đó chuyển `activeSlotIndex` sang ô trống tiếp theo.
      */
     fun selectCameraFromTree(
@@ -1020,16 +1019,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val currentCam0 = currentState.selectedCameras.getOrNull(0)
             if (currentCam0?.camera?.id == camera.id) {
                 triggerBlink(0)
-                return
-            }
-            if (currentCam0 != null) {
-                if (onGridFull != null) {
-                    onGridFull()
-                } else {
-                    com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
-                        "Lưới đang phát đã đầy, không thể phát thêm!"
-                    )
-                }
                 return
             }
             addCamera(camera, 0)

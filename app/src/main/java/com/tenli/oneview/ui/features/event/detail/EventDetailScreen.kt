@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -81,6 +82,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -106,6 +108,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
@@ -658,27 +661,22 @@ fun EventDetailScreen(
 
                                 val enterSlide = slideInHorizontally(
                                     animationSpec = tween(
-                                        durationMillis = 210,
-                                        delayMillis = 80,
-                                        easing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+                                        durationMillis = 250,
+                                        easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
                                     ),
                                     initialOffsetX = { fullWidth ->
-                                        if (isForward) (fullWidth * 0.30f).toInt() else -(fullWidth * 0.30f).toInt()
+                                        if (isForward) fullWidth else -fullWidth
                                     }
-                                ) + fadeIn(
-                                    animationSpec = tween(durationMillis = 160, delayMillis = 80)
                                 )
 
                                 val exitSlide = slideOutHorizontally(
                                     animationSpec = tween(
-                                        durationMillis = 85,
-                                        easing = CubicBezierEasing(0.35f, 0f, 0.7f, 0.2f)
+                                        durationMillis = 250,
+                                        easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
                                     ),
                                     targetOffsetX = { fullWidth ->
-                                        if (isForward) -(fullWidth * 0.22f).toInt() else (fullWidth * 0.22f).toInt()
+                                        if (isForward) -fullWidth else fullWidth
                                     }
-                                ) + fadeOut(
-                                    animationSpec = tween(durationMillis = 80)
                                 )
 
                                 (enterSlide togetherWith exitSlide).using(SizeTransform(clip = true))
@@ -1631,7 +1629,7 @@ fun EventDetailScreen(
                                         .height(42.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(cardBgColor)
-                                        .clickable { showPeriodMenu = true }
+                                        .clickable { showPeriodMenu = !showPeriodMenu }
                                         .padding(horizontal = 14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
@@ -1643,7 +1641,7 @@ fun EventDetailScreen(
                                         Icon(
                                             imageVector = LucideIcons.Clock,
                                             contentDescription = null,
-                                            tint = sectionHeaderColor,
+                                            tint = if (showPeriodMenu) BrandAccent else sectionHeaderColor,
                                             modifier = Modifier.size(16.dp)
                                         )
                                         val periodDisplayLabel = remember(uiState.selectedJourneyPeriod, customPickerVersion, isEn) {
@@ -1659,30 +1657,66 @@ fun EventDetailScreen(
                                     Icon(
                                         imageVector = LucideIcons.ChevronDown,
                                         contentDescription = null,
-                                        tint = sectionHeaderColor,
-                                        modifier = Modifier.size(16.dp)
+                                        tint = if (showPeriodMenu) BrandAccent else sectionHeaderColor,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .rotate(if (showPeriodMenu) 180f else 0f)
                                     )
                                 }
 
-                                DropdownMenu(
-                                    expanded = showPeriodMenu,
-                                    onDismissRequest = { showPeriodMenu = false },
-                                    modifier = Modifier
-                                        .background(cardBgColor)
-                                ) {
-                                    JourneyPeriod.values().forEach { period ->
-                                        val isPeriodSelected = uiState.selectedJourneyPeriod == period
-                                        DropdownMenuItem(
-                                            text = {
+                                if (showPeriodMenu) {
+                                    val popupOffsetY = with(density) { 46.dp.roundToPx() }
+                                    val menuBg = if (isDark) Color(0xFF1E293B) else Color.White
+                                    val menuBorder = if (isDark) Color.White.copy(alpha = 0.10f) else Color.Black.copy(alpha = 0.08f)
+                                    val selectedPillBg = BrandAccent.copy(alpha = if (isDark) 0.18f else 0.10f)
+                                    val itemTextColor = if (isDark) TextPrimaryDark else TextPrimary
+
+                                    Popup(
+                                        alignment = Alignment.TopStart,
+                                        offset = IntOffset(0, popupOffsetY),
+                                        onDismissRequest = { showPeriodMenu = false },
+                                        properties = PopupProperties(focusable = true)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .width(IntrinsicSize.Max)
+                                                .widthIn(min = 190.dp)
+                                                .shadow(
+                                                    elevation = 16.dp,
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    ambientColor = Color.Black.copy(alpha = if (isDark) 0.5f else 0.15f),
+                                                    spotColor = Color.Black.copy(alpha = if (isDark) 0.6f else 0.2f)
+                                                )
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(menuBg)
+                                                .border(1.dp, menuBorder, RoundedCornerShape(14.dp))
+                                                .padding(5.dp),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            JourneyPeriod.values().forEach { period ->
+                                                val isPeriodSelected = uiState.selectedJourneyPeriod == period
                                                 Row(
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(10.dp))
+                                                        .background(if (isPeriodSelected) selectedPillBg else Color.Transparent)
+                                                        .clickable {
+                                                            showPeriodMenu = false
+                                                            when (period) {
+                                                                JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
+                                                                JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
+                                                                else -> viewModel.setJourneyPeriod(period)
+                                                            }
+                                                        }
+                                                        .padding(horizontal = 12.dp, vertical = 8.dp),
                                                     horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
                                                     Text(
                                                         text = if (isEn) period.labelEn else period.labelVi,
-                                                        fontWeight = if (isPeriodSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isPeriodSelected) BrandAccent else if (isDark) TextPrimaryDark else TextPrimary
+                                                        fontSize = 13.5.sp,
+                                                        fontWeight = if (isPeriodSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                        color = if (isPeriodSelected) BrandAccent else itemTextColor
                                                     )
                                                     if (isPeriodSelected) {
                                                         Spacer(modifier = Modifier.width(12.dp))
@@ -1690,20 +1724,12 @@ fun EventDetailScreen(
                                                             imageVector = LucideIcons.Check,
                                                             contentDescription = null,
                                                             tint = BrandAccent,
-                                                            modifier = Modifier.size(16.dp)
+                                                            modifier = Modifier.size(15.dp)
                                                         )
                                                     }
                                                 }
-                                            },
-                                            onClick = {
-                                                showPeriodMenu = false
-                                                when (period) {
-                                                    JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
-                                                    JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
-                                                    else -> viewModel.setJourneyPeriod(period)
-                                                }
                                             }
-                                        )
+                                        }
                                     }
                                 }
                             }
@@ -1760,9 +1786,7 @@ fun EventDetailScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 10.dp)
-                                    .height(160.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(cardBgColor),
+                                    .height(160.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 CommonEmptyState(
@@ -1922,13 +1946,11 @@ private fun PlateBadgePill(
     plate: String,
     isBlacklist: Boolean
 ) {
-    val bgColor = if (isBlacklist) Color(0xFFEF4444) else Color(0xFF1E293B)
-    val borderColor = if (isBlacklist) Color(0xFFF87171) else Color(0xFF475569)
+    val bgColor = if (isBlacklist) Color(0xFFEF4444) else Color(0xFFEA580C)
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(5.dp))
             .background(bgColor)
-            .border(1.dp, borderColor, RoundedCornerShape(5.dp))
             .padding(horizontal = 8.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center
     ) {

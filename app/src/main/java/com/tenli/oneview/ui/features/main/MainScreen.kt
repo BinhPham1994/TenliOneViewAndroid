@@ -78,6 +78,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -184,16 +185,20 @@ fun MainScreen(
         MainTab.Setting -> isSettingScrolled
     }
 
-    // Keep-Alive (<keep-alive>) state + sequential mode="out-in" GPU animation state matching MobileLayout.vue
+    // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation
     val homeViewModel: com.tenli.oneview.ui.features.home.HomeViewModel = viewModel(
         factory = com.tenli.oneview.ui.features.home.HomeViewModel.Factory
     )
     val eventViewModel: com.tenli.oneview.ui.features.event.EventViewModel = viewModel(
         factory = com.tenli.oneview.ui.features.event.EventViewModel.Factory
     )
-    var displayedTab by remember { mutableStateOf(uiState.currentTab) }
-    val tabOffsetFraction = remember { Animatable(0f) }
-    val tabAlpha = remember { Animatable(1f) }
+    val monitorViewModel: com.tenli.oneview.ui.features.monitor.MonitorViewModel = viewModel(
+        factory = com.tenli.oneview.ui.features.monitor.MonitorViewModel.Factory
+    )
+    var activeTab by remember { mutableStateOf(uiState.currentTab) }
+    var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
+    var slideDirection by remember { mutableStateOf(1) }
+    val transitionProgress = remember { Animatable(1f) }
 
     LaunchedEffect(uiState.currentTab) {
         val targetTab = uiState.currentTab
@@ -203,67 +208,38 @@ fun MainScreen(
         if (targetTab != MainTab.Setting) {
             showNotificationConfigPage = false
         }
+        if (targetTab == MainTab.Home) {
+            homeViewModel.syncViewModeFromPrefs()
+        } else if (targetTab == MainTab.Event) {
+            eventViewModel.syncViewModeFromPrefs()
+        }
 
-        if (targetTab == displayedTab) {
-            coroutineScope {
-                launch {
-                    tabOffsetFraction.animateTo(
-                        targetValue = 0f,
-                        animationSpec = tween(durationMillis = 210, easing = TabEnterTransformEasing)
-                    )
-                }
-                launch {
-                    tabAlpha.animateTo(
-                        targetValue = 1f,
-                        animationSpec = tween(durationMillis = 160, easing = TabOpacityEaseOut)
-                    )
-                }
-            }
+        if (targetTab == activeTab) {
+            transitionProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 250,
+                    easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+                )
+            )
+            outgoingTab = null
             return@LaunchedEffect
         }
 
-        val fromIdx = OrderedMainTabs.indexOf(displayedTab)
+        val fromIdx = OrderedMainTabs.indexOf(activeTab)
         val toIdx = OrderedMainTabs.indexOf(targetTab)
-        val isForward = toIdx >= fromIdx
-
-        // Phase 1 (mode="out-in" Leave): Outgoing tab quickly slides out (-24% / +24%) and fades out in 90ms
-        val leaveTargetOffset = if (isForward) -0.24f else 0.24f
-        coroutineScope {
-            launch {
-                tabOffsetFraction.animateTo(
-                    targetValue = leaveTargetOffset,
-                    animationSpec = tween(durationMillis = 90, easing = TabLeaveTransformEasing)
-                )
-            }
-            launch {
-                tabAlpha.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = 80, easing = TabOpacityEaseOut)
-                )
-            }
-        }
-
-        // Swap active tab while opacity == 0 (no overlap / no double header or vertical seam)
-        displayedTab = targetTab
-        val enterStartOffset = if (isForward) 0.35f else -0.35f
-        tabOffsetFraction.snapTo(enterStartOffset)
-        tabAlpha.snapTo(0f)
-
-        // Phase 2 (mode="out-in" Enter): Incoming tab smoothly decelerates (+35% / -35% -> 0%) in 210ms
-        coroutineScope {
-            launch {
-                tabOffsetFraction.animateTo(
-                    targetValue = 0f,
-                    animationSpec = tween(durationMillis = 210, easing = TabEnterTransformEasing)
-                )
-            }
-            launch {
-                tabAlpha.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 160, easing = TabOpacityEaseOut)
-                )
-            }
-        }
+        slideDirection = if (toIdx >= fromIdx) 1 else -1
+        outgoingTab = activeTab
+        activeTab = targetTab
+        transitionProgress.snapTo(0f)
+        transitionProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = 250,
+                easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+            )
+        )
+        outgoingTab = null
     }
 
     LaunchedEffect(Unit) {
@@ -449,62 +425,96 @@ fun MainScreen(
                         }
                     }
             ) {
-                // Keep-Alive (<keep-alive>) Tab Container + Hardware-Accelerated mode="out-in" Transition
-                // Only compose displayedTab in the layout tree so inactive tabs (e.g. Monitor live player) never steal frame time during scroll
+                // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
+                // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(top = innerPadding.calculateTopPadding())
                         .zIndex(1f)
-                        .graphicsLayer {
-                            translationX = tabOffsetFraction.value * size.width
-                            alpha = tabAlpha.value
-                        }
                 ) {
-                    saveableStateHolder.SaveableStateProvider(key = displayedTab.route) {
-                        when (displayedTab) {
-                            MainTab.Home -> {
-                                HomeScreen(
-                                    viewModel = homeViewModel,
-                                    listState = homeListState,
-                                    onEventClick = { eventId ->
-                                        val id = eventId.toIntOrNull()
-                                        if (id != null) {
-                                            onNavigateToEventDetail(id)
+                    OrderedMainTabs.forEach { tab ->
+                        val isVisible = (tab == activeTab || tab == outgoingTab)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(
+                                    when (tab) {
+                                        activeTab -> 2f
+                                        outgoingTab -> 1f
+                                        else -> 0f
+                                    }
+                                )
+                                .layout { measurable, constraints ->
+                                    val placeable = measurable.measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        if (isVisible) {
+                                            val progress = transitionProgress.value
+                                            val offsetX = when (tab) {
+                                                activeTab -> {
+                                                    if (outgoingTab != null) {
+                                                        (slideDirection * (1f - progress) * placeable.width).toInt()
+                                                    } else {
+                                                        0
+                                                    }
+                                                }
+                                                outgoingTab -> {
+                                                    (-slideDirection * progress * placeable.width).toInt()
+                                                }
+                                                else -> 0
+                                            }
+                                            placeable.placeRelativeWithLayer(offsetX, 0)
                                         }
                                     }
-                                )
-                            }
-
-                            MainTab.Event -> {
-                                com.tenli.oneview.ui.features.event.EventScreen(
-                                    viewModel = eventViewModel,
-                                    listState = eventListState,
-                                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
-                                )
-                            }
-
-                            MainTab.Monitor -> {
-                                com.tenli.oneview.ui.features.monitor.MonitorScreen(
-                                    listState = monitorState,
-                                    isTabActive = (uiState.currentTab == MainTab.Monitor),
-                                    onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
-                                    onPlaybackClick = { videoLink, time, imageLink, cameraName ->
-                                        onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
-                                    },
-                                    onFullscreenChange = { isFullscreen ->
-                                        showBottomBar = !isFullscreen
+                                }
+                        ) {
+                            saveableStateHolder.SaveableStateProvider(key = tab.route) {
+                                when (tab) {
+                                    MainTab.Home -> {
+                                        HomeScreen(
+                                            viewModel = homeViewModel,
+                                            listState = homeListState,
+                                            onEventClick = { eventId ->
+                                                val id = eventId.toIntOrNull()
+                                                if (id != null) {
+                                                    onNavigateToEventDetail(id)
+                                                }
+                                            }
+                                        )
                                     }
-                                )
-                            }
 
-                            MainTab.Setting -> {
-                                SettingScreen(
-                                    listState = settingListState,
-                                    onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
-                                    onNavigateToDetail = navigateToSettingTarget,
-                                    onOpenNotificationConfig = { showNotificationConfigPage = true }
-                                )
+                                    MainTab.Event -> {
+                                        com.tenli.oneview.ui.features.event.EventScreen(
+                                            viewModel = eventViewModel,
+                                            listState = eventListState,
+                                            onEventClick = { eventId -> onNavigateToEventDetail(eventId) }
+                                        )
+                                    }
+
+                                    MainTab.Monitor -> {
+                                        com.tenli.oneview.ui.features.monitor.MonitorScreen(
+                                            viewModel = monitorViewModel,
+                                            listState = monitorState,
+                                            isTabActive = (uiState.currentTab == MainTab.Monitor),
+                                            onEventClick = { eventId -> onNavigateToEventDetail(eventId) },
+                                            onPlaybackClick = { videoLink, time, imageLink, cameraName ->
+                                                onNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
+                                            },
+                                            onFullscreenChange = { isFullscreen ->
+                                                showBottomBar = !isFullscreen
+                                            }
+                                        )
+                                    }
+
+                                    MainTab.Setting -> {
+                                        SettingScreen(
+                                            listState = settingListState,
+                                            onLogoutClick = { isChangePassword -> viewModel.logout(isChangePassword) },
+                                            onNavigateToDetail = navigateToSettingTarget,
+                                            onOpenNotificationConfig = { showNotificationConfigPage = true }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -851,7 +861,7 @@ fun SettingScreen(
                         Text(
                             text = stringResource(id = R.string.lang_vi),
                             fontSize = 15.sp,
-                            fontWeight = if (currentLanguage == "vi") FontWeight.SemiBold else FontWeight.Normal,
+                            fontWeight = if (currentLanguage == "vi") FontWeight.SemiBold else FontWeight.Medium,
                             color = if (currentLanguage == "vi") BrandAccent else textColor,
                             modifier = Modifier.weight(1f)
                         )
@@ -881,7 +891,7 @@ fun SettingScreen(
                         Text(
                             text = stringResource(id = R.string.lang_en),
                             fontSize = 15.sp,
-                            fontWeight = if (currentLanguage == "en") FontWeight.SemiBold else FontWeight.Normal,
+                            fontWeight = if (currentLanguage == "en") FontWeight.SemiBold else FontWeight.Medium,
                             color = if (currentLanguage == "en") BrandAccent else textColor,
                             modifier = Modifier.weight(1f)
                         )
@@ -951,7 +961,7 @@ fun SettingScreen(
                             Text(
                                 text = label,
                                 fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                                 color = if (isSelected) BrandAccent else textColor,
                                 modifier = Modifier.weight(1f)
                             )
@@ -1362,7 +1372,7 @@ private fun MobileNotificationConfigScreen(
                                 Text(
                                     text = "Đã cấp quyền thông báo",
                                     fontSize = 15.sp,
-                                    fontWeight = FontWeight.Normal,
+                                    fontWeight = FontWeight.Medium,
                                     color = titleColor
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
@@ -1417,7 +1427,7 @@ private fun MobileNotificationConfigScreen(
                                 Text(
                                     text = "Chưa cấp quyền trên thiết bị",
                                     fontSize = 15.sp,
-                                    fontWeight = FontWeight.Normal,
+                                    fontWeight = FontWeight.Medium,
                                     color = titleColor
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
@@ -1490,7 +1500,7 @@ private fun MobileNotificationConfigScreen(
                             Text(
                                 text = "Cho phép nhận thông báo",
                                 fontSize = 15.sp,
-                                fontWeight = FontWeight.Normal,
+                                fontWeight = FontWeight.Medium,
                                 color = titleColor
                             )
                             if (!hasOsPermission && pushEnabled) {
@@ -1596,9 +1606,11 @@ private fun MobilePasswordChangeSheet(
     val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
 
     LaunchedEffect(Unit) {
-        delay(80)
+        // Chờ hiển thị rõ giao diện bottom sheet hoàn tất rồi mới focus + bật bàn phím (đồng bộ với LoginScreen)
+        delay(700)
         try {
             oldPasswordFocusRequester.requestFocus()
+            delay(100)
             keyboardController?.show()
         } catch (_: Exception) {
         }
@@ -1865,7 +1877,8 @@ private fun PasswordFieldRow(
                 singleLine = true,
                 textStyle = TextStyle(
                     color = textColor,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium
                 ),
                 visualTransformation = if (isVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(
@@ -1938,7 +1951,7 @@ fun ModernSettingItem(
             Text(
                 text = title,
                 fontSize = 15.sp,
-                fontWeight = FontWeight.Normal,
+                fontWeight = FontWeight.Medium,
                 color = titleColor,
                 modifier = Modifier.weight(1f)
             )
@@ -1946,7 +1959,7 @@ fun ModernSettingItem(
                 Text(
                     text = valueText,
                     fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Medium,
                     color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
                     modifier = Modifier.padding(end = 6.dp)
                 )
