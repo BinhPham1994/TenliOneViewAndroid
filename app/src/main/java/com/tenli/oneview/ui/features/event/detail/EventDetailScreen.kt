@@ -178,7 +178,7 @@ fun EventDetailScreen(
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val isEn = remember { LocaleManager.getLocale(context).startsWith("en") }
+    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
     val isDark = rememberIsDarkTheme()
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -953,11 +953,9 @@ fun EventDetailScreen(
                                                     .clickable {
                                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                                                         clipboard?.setPrimaryClip(ClipData.newPlainText("plate", plateNumber))
-                                                        Toast.makeText(
-                                                            context,
-                                                            if (isEn) "Copied: $plateNumber" else "Đã sao chép biển số: $plateNumber",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
+                                                        com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                                                            if (isEn) "Copied: $plateNumber" else "Đã sao chép biển số: $plateNumber"
+                                                        )
                                                     },
                                                 contentAlignment = Alignment.Center
                                             ) {
@@ -1145,8 +1143,8 @@ fun EventDetailScreen(
                                 }
 
                                 // 6. Vehicle Attributes (Loại phương tiện, Màu xe, Hãng xe, Tốc độ)
-                                val vehicleType = remember(event, aiTaskTitle) { resolveVehicleTypeLabel(event, aiTaskTitle) }
-                                val vehicleColor = remember(event) { resolveVehicleColorLabel(event) }
+                                val vehicleType = remember(event, aiTaskTitle, isEn) { resolveVehicleTypeLabel(event, aiTaskTitle, isEn) }
+                                val vehicleColor = remember(event, isEn) { resolveVehicleColorLabel(event, isEn) }
                                 val vehicleBrand = remember(event) {
                                     (event.data?.vehicle?.brand ?: event.data?.brand ?: event.data?.vehicleBrand)?.trim().orEmpty()
                                 }
@@ -1416,11 +1414,9 @@ fun EventDetailScreen(
                                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imgUrl)))
                                                     }
                                                 } else {
-                                                    Toast.makeText(
-                                                        context,
-                                                        if (isEn) "No image available" else "Không có hình ảnh để tải về",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
+                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
+                                                        if (isEn) "No image available" else "Không có hình ảnh để tải về"
+                                                    )
                                                 }
                                             }
                                         )
@@ -1432,15 +1428,18 @@ fun EventDetailScreen(
                                             bgColor = Color(0xFF10B981),
                                             onClick = {
                                                 val imgUrl = getEventImageUrl(event).orEmpty()
+                                                val subjectText = if (isEn) "[AI Event] $aiTaskTitle" else "[Sự kiện AI] $aiTaskTitle"
                                                 val shareText = buildString {
-                                                    appendLine("[Sự kiện AI] $aiTaskTitle")
-                                                    appendLine("Vị trí: $locationText")
-                                                    appendLine("Thời gian: $formattedTime $formattedDate")
-                                                    if (imgUrl.isNotEmpty()) appendLine("Hình ảnh: $imgUrl")
+                                                    appendLine(subjectText)
+                                                    appendLine(if (isEn) "Location: $locationText" else "Vị trí: $locationText")
+                                                    appendLine(if (isEn) "Time: $formattedTime $formattedDate" else "Thời gian: $formattedTime $formattedDate")
+                                                    if (imgUrl.isNotEmpty()) {
+                                                        appendLine(if (isEn) "Image: $imgUrl" else "Hình ảnh: $imgUrl")
+                                                    }
                                                 }
                                                 val sendIntent = Intent(Intent.ACTION_SEND).apply {
                                                     type = "text/plain"
-                                                    putExtra(Intent.EXTRA_SUBJECT, "[Sự kiện AI] $aiTaskTitle")
+                                                    putExtra(Intent.EXTRA_SUBJECT, subjectText)
                                                     putExtra(Intent.EXTRA_TEXT, shareText)
                                                 }
                                                 context.startActivity(Intent.createChooser(sendIntent, if (isEn) "Share event" else "Chia sẻ sự kiện"))
@@ -1862,7 +1861,8 @@ fun EventDetailScreen(
 
     if (showConfirmReportDialog) {
         AppConfirmDialog(
-            title = if (isEn) "Report wrong event" else "Báo cáo sự kiện",
+            title = if (isEn) "Report event" else "Báo cáo sự kiện",
+            headline = if (isEn) "Report this event as false?" else "Báo cáo sự kiện sai?",
             message = if (isEn) "Are you sure you want to report this event as false?" else "Bạn có chắc chắn muốn báo cáo sự kiện này là sai?",
             confirmText = if (isEn) "Report" else "Báo cáo",
             cancelText = if (isEn) "Cancel" else "Hủy",
@@ -1873,15 +1873,13 @@ fun EventDetailScreen(
                 viewModel.reportEventAsFalse(
                     eventId = targetId,
                     onSuccess = {
-                        Toast.makeText(
-                            context,
-                            if (isEn) "Reported successfully" else "Đã báo cáo sự kiện sai",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                            if (isEn) "Reported false event successfully" else "Đã báo cáo sự kiện sai"
+                        )
                         onBack()
                     },
                     onError = { errMsg ->
-                        Toast.makeText(context, errMsg, Toast.LENGTH_SHORT).show()
+                        com.tenli.oneview.ui.component.MobileTopPopupManager.error(errMsg)
                     }
                 )
             }
@@ -2085,7 +2083,7 @@ private fun isVehicleRelatedEvent(event: EventData, plateNumber: String): Boolea
     return vehicleKeywords.any { t.contains(it) }
 }
 
-private fun resolveVehicleTypeLabel(event: EventData, taskTitle: String): String {
+private fun resolveVehicleTypeLabel(event: EventData, taskTitle: String, isEn: Boolean = false): String {
     val d = event.data ?: return ""
     val rawType = (d.vehicle?.type ?: d.vehicleTypeSnake ?: d.vehicleType ?: d.plate?.vehicleType)?.trim().orEmpty()
     if (rawType.isEmpty()) return ""
@@ -2096,39 +2094,70 @@ private fun resolveVehicleTypeLabel(event: EventData, taskTitle: String): String
     if (taskTitle.isNotEmpty() && (lower == taskTitle.lowercase() || taskTitle.lowercase().contains(lower))) {
         return ""
     }
-    val map = mapOf(
-        "car" to "Ô tô",
-        "truck" to "Xe tải",
-        "bus" to "Xe khách / Xe buýt",
-        "motorbike" to "Xe máy",
-        "motorcycle" to "Xe máy",
-        "bicycle" to "Xe đạp",
-        "bike" to "Xe máy",
-        "van" to "Xe bán tải / Van",
-        "container" to "Xe container",
-        "suv" to "Xe SUV",
-        "sedan" to "Xe Sedan"
-    )
+    val map = if (isEn) {
+        mapOf(
+            "car" to "Car",
+            "truck" to "Truck",
+            "bus" to "Bus",
+            "motorbike" to "Motorbike",
+            "motorcycle" to "Motorcycle",
+            "bicycle" to "Bicycle",
+            "bike" to "Motorbike",
+            "van" to "Van / Pickup",
+            "container" to "Container truck",
+            "suv" to "SUV",
+            "sedan" to "Sedan"
+        )
+    } else {
+        mapOf(
+            "car" to "Ô tô",
+            "truck" to "Xe tải",
+            "bus" to "Xe khách / Xe buýt",
+            "motorbike" to "Xe máy",
+            "motorcycle" to "Xe máy",
+            "bicycle" to "Xe đạp",
+            "bike" to "Xe máy",
+            "van" to "Xe bán tải / Van",
+            "container" to "Xe container",
+            "suv" to "Xe SUV",
+            "sedan" to "Xe Sedan"
+        )
+    }
     return map[lower] ?: rawType
 }
 
-private fun resolveVehicleColorLabel(event: EventData): String {
+private fun resolveVehicleColorLabel(event: EventData, isEn: Boolean = false): String {
     val d = event.data ?: return ""
     val raw = (d.vehicle?.color ?: d.color ?: d.vehicleColor)?.trim().orEmpty()
     if (raw.isEmpty()) return ""
     val lower = raw.lowercase()
-    val map = mapOf(
-        "white" to "Trắng",
-        "black" to "Đen",
-        "red" to "Đỏ",
-        "blue" to "Xanh dương",
-        "green" to "Xanh lá",
-        "yellow" to "Vàng",
-        "silver" to "Bạc",
-        "grey" to "Xám",
-        "gray" to "Xám",
-        "white_silver" to "Trắng bạc"
-    )
+    val map = if (isEn) {
+        mapOf(
+            "white" to "White",
+            "black" to "Black",
+            "red" to "Red",
+            "blue" to "Blue",
+            "green" to "Green",
+            "yellow" to "Yellow",
+            "silver" to "Silver",
+            "grey" to "Gray",
+            "gray" to "Gray",
+            "white_silver" to "Silver White"
+        )
+    } else {
+        mapOf(
+            "white" to "Trắng",
+            "black" to "Đen",
+            "red" to "Đỏ",
+            "blue" to "Xanh dương",
+            "green" to "Xanh lá",
+            "yellow" to "Vàng",
+            "silver" to "Bạc",
+            "grey" to "Xám",
+            "gray" to "Xám",
+            "white_silver" to "Trắng bạc"
+        )
+    }
     return map[lower] ?: raw
 }
 

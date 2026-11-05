@@ -308,6 +308,7 @@ fun MainScreen(
     val minFlickVelDpPerMs = 0.28f
 
     CompositionLocalProvider(com.tenli.oneview.ui.component.LocalMobileOverlayHost provides overlayHostState) {
+        val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
         Scaffold(
             topBar = {
                 AnimatedVisibility(visible = uiState.isOffline) {
@@ -319,7 +320,7 @@ fun MainScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Không có kết nối mạng. Vui lòng kiểm tra lại.",
+                            text = if (isEn) "No network connection. Please check again." else "Không có kết nối mạng. Vui lòng kiểm tra lại.",
                             color = Color.White,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold
@@ -584,13 +585,6 @@ fun MainScreen(
                         overlayHostState.Content()
                     }
                 }
-
-                // Global Top Popup Notification Host (.ant-message capsule island matching PWA notifications.css)
-                com.tenli.oneview.ui.component.MobileTopPopupHost(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .zIndex(100f)
-                )
             }
         }
     }
@@ -630,10 +624,11 @@ fun SettingScreen(
         ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
         ?: defaultMyPage
 
+    val isEn = currentLanguage.startsWith("en")
     val themeLabel = when (themeMode) {
-        0 -> "Sáng"
-        1 -> "Tối"
-        else -> "Hệ thống"
+        0 -> if (isEn) "Light" else "Sáng"
+        1 -> if (isEn) "Dark" else "Tối"
+        else -> if (isEn) "System" else "Hệ thống"
     }
 
     Column(
@@ -761,7 +756,7 @@ fun SettingScreen(
             // Section: Giao diện
             item {
                 Text(
-                    text = "Giao diện",
+                    text = if (isEn) "Appearance" else "Giao diện",
                     modifier = Modifier.padding(start = 14.dp, end = 10.dp, top = 2.dp, bottom = 8.dp),
                     fontSize = 14.5.sp,
                     color = sectionColor,
@@ -919,9 +914,9 @@ fun SettingScreen(
                 val dividerColor = if (isDark) Color.White.copy(alpha = 0.06f) else Color.Black.copy(alpha = 0.06f)
 
                 val options = listOf(
-                    Triple(0, "Sáng", Pair(LucideIcons.Sun, Color(0xFFF59E0B))),
-                    Triple(1, "Tối", Pair(LucideIcons.Moon, Color(0xFF6366F1))),
-                    Triple(2, "Hệ thống", Pair(LucideIcons.Monitor, BrandAccent))
+                    Triple(0, if (isEn) "Light" else "Sáng", Pair(LucideIcons.Sun, Color(0xFFF59E0B))),
+                    Triple(1, if (isEn) "Dark" else "Tối", Pair(LucideIcons.Moon, Color(0xFF6366F1))),
+                    Triple(2, if (isEn) "System" else "Hệ thống", Pair(LucideIcons.Monitor, BrandAccent))
                 )
 
                 Column(
@@ -998,16 +993,13 @@ fun SettingScreen(
                 isDark = isDark,
                 onDismiss = { showLogoutSheet = false }
             ) {
-                val cardBg = if (isDark) Color(0xFF242F41) else Color.White
                 val subTextColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
                 val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(cardBg)
-                        .padding(horizontal = 20.dp, vertical = 22.dp),
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Box(
@@ -1026,14 +1018,18 @@ fun SettingScreen(
                     }
                     Spacer(modifier = Modifier.height(14.dp))
                     Text(
-                        text = "Bạn muốn đăng xuất?",
+                        text = if (isEn) "Log out of your account?" else "Bạn muốn đăng xuất?",
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = textColor
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Phiên làm việc hiện tại sẽ kết thúc và bạn cần đăng nhập lại để tiếp tục sử dụng.",
+                        text = if (isEn) {
+                            "Your current session will end and you will need to sign in again to continue."
+                        } else {
+                            "Phiên làm việc hiện tại sẽ kết thúc và bạn cần đăng nhập lại để tiếp tục sử dụng."
+                        },
                         fontSize = 14.sp,
                         color = subTextColor,
                         textAlign = TextAlign.Center
@@ -1238,11 +1234,60 @@ private fun MobileNotificationConfigScreen(
         }
     }
 
+    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
     val hasCachedPref = remember { GlobalData.preferences.contains("push_notifications_enabled") }
     var isLoading by remember { mutableStateOf(!hasCachedPref) }
     var isSaving by remember { mutableStateOf(false) }
     var pushEnabled by remember {
         mutableStateOf(GlobalData.preferences.getBoolean("push_notifications_enabled", true))
+    }
+    var pendingPushState by remember { mutableStateOf<Boolean?>(null) }
+
+    val applyPushNotificationChange: (Boolean) -> Unit = { nextVal ->
+        if (nextVal && !hasOsPermission) {
+            requestOrOpenPermission()
+        }
+        pushEnabled = nextVal
+        isSaving = true
+        GlobalData.preferences.edit()
+            .putBoolean("push_notifications_enabled", nextVal)
+            .apply()
+        scope.launch {
+            try {
+                val resp = bsApi.updateUserNotificationSettings(
+                    UserNotificationSettingsModel(
+                        global = UserNotificationGlobalSetting(enabled = nextVal)
+                    )
+                )
+                if (resp.isSuccessful) {
+                    if (nextVal) {
+                        if (hasOsPermission) {
+                            com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                                if (isEn) "Notifications enabled successfully!" else "Đã bật thông báo thành công!"
+                            )
+                        } else {
+                            com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
+                                if (isEn) "Notification permission is not granted on this device." else "Bạn chưa cấp quyền thông báo trên thiết bị."
+                            )
+                        }
+                    } else {
+                        com.tenli.oneview.ui.component.MobileTopPopupManager.info(
+                            if (isEn) "Notifications disabled." else "Đã tắt nhận thông báo."
+                        )
+                    }
+                } else {
+                    com.tenli.oneview.ui.component.MobileTopPopupManager.error(
+                        if (isEn) "Failed to save notification settings" else "Không thể lưu cấu hình thông báo"
+                    )
+                }
+            } catch (_: Exception) {
+                com.tenli.oneview.ui.component.MobileTopPopupManager.error(
+                    if (isEn) "Failed to save notification settings" else "Không thể lưu cấu hình thông báo"
+                )
+            } finally {
+                isSaving = false
+            }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -1297,13 +1342,13 @@ private fun MobileNotificationConfigScreen(
             ) {
                 Icon(
                     imageVector = LucideIcons.ChevronLeft,
-                    contentDescription = "Quay lại",
+                    contentDescription = if (isEn) "Back" else "Quay lại",
                     tint = titleColor,
                     modifier = Modifier.size(22.dp)
                 )
             }
             Text(
-                text = "Cấu hình thông báo",
+                text = if (isEn) "Notification Settings" else "Cấu hình thông báo",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = titleColor
@@ -1334,7 +1379,7 @@ private fun MobileNotificationConfigScreen(
             ) {
                 // 1. Device Permission Status Card matching MobileNotificationConfigModal.vue
                 Text(
-                    text = "Quyền thông báo trên thiết bị",
+                    text = if (isEn) "Device Notification Permission" else "Quyền thông báo trên thiết bị",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = subTextColor,
@@ -1370,14 +1415,14 @@ private fun MobileNotificationConfigScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Đã cấp quyền thông báo",
+                                    text = if (isEn) "Notification permission granted" else "Đã cấp quyền thông báo",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = titleColor
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Thiết bị này đã sẵn sàng nhận cảnh báo.",
+                                    text = if (isEn) "This device is ready to receive alerts." else "Thiết bị này đã sẵn sàng nhận cảnh báo.",
                                     fontSize = 12.5.sp,
                                     color = subTextColor,
                                     lineHeight = 17.sp
@@ -1387,17 +1432,15 @@ private fun MobileNotificationConfigScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(
-                                        Color(0xFF10B981).copy(alpha = if (isDark) 0.15f else 0.12f)
-                                    )
+                                    .background(Color(0xFF10B981))
                                     .padding(horizontal = 10.dp, vertical = 4.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Đang bật",
+                                    text = if (isEn) "Enabled" else "Đang bật",
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = if (isDark) Color(0xFF10B981) else Color(0xFF059669)
+                                    color = Color.White
                                 )
                             }
                         }
@@ -1425,14 +1468,14 @@ private fun MobileNotificationConfigScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Chưa cấp quyền trên thiết bị",
+                                    text = if (isEn) "Permission not granted on device" else "Chưa cấp quyền trên thiết bị",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = titleColor
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Cần cấp quyền thông báo để nhận cảnh báo khi có sự kiện mới.",
+                                    text = if (isEn) "Notification permission is required to receive alerts for new events." else "Cần cấp quyền thông báo để nhận cảnh báo khi có sự kiện mới.",
                                     fontSize = 12.5.sp,
                                     color = subTextColor,
                                     lineHeight = 17.sp
@@ -1449,7 +1492,7 @@ private fun MobileNotificationConfigScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
-                                    text = "Cấp quyền ngay",
+                                    text = if (isEn) "Grant now" else "Cấp quyền ngay",
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color.White
@@ -1463,7 +1506,7 @@ private fun MobileNotificationConfigScreen(
 
                 // 2. System General Setting matching MobileNotificationConfigModal.vue
                 Text(
-                    text = "Cài đặt chung",
+                    text = if (isEn) "General Settings" else "Cài đặt chung",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = subTextColor,
@@ -1498,7 +1541,7 @@ private fun MobileNotificationConfigScreen(
                         Spacer(modifier = Modifier.width(14.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Cho phép nhận thông báo",
+                                text = if (isEn) "Allow push notifications" else "Cho phép nhận thông báo",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = titleColor
@@ -1506,7 +1549,7 @@ private fun MobileNotificationConfigScreen(
                             if (!hasOsPermission && pushEnabled) {
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "⚠️ Thiết bị này chưa cấp quyền nên chưa thể nhận thông báo",
+                                    text = if (isEn) "⚠️ Device permission is not granted so notifications cannot be received" else "⚠️ Thiết bị này chưa cấp quyền nên chưa thể nhận thông báo",
                                     fontSize = 12.sp,
                                     color = Color(0xFFF59E0B),
                                     lineHeight = 16.sp
@@ -1518,55 +1561,124 @@ private fun MobileNotificationConfigScreen(
                             checked = pushEnabled,
                             enabled = !isSaving,
                             onCheckedChange = { nextVal ->
-                                if (nextVal && !hasOsPermission) {
-                                    requestOrOpenPermission()
-                                }
-                                pushEnabled = nextVal
-                                isSaving = true
-                                GlobalData.preferences.edit()
-                                    .putBoolean("push_notifications_enabled", nextVal)
-                                    .apply()
-                                scope.launch {
-                                    try {
-                                        val resp = bsApi.updateUserNotificationSettings(
-                                            UserNotificationSettingsModel(
-                                                global = UserNotificationGlobalSetting(enabled = nextVal)
-                                            )
-                                        )
-                                        if (resp.isSuccessful) {
-                                            if (nextVal) {
-                                                if (hasOsPermission) {
-                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.success(
-                                                        "Đã bật thông báo thành công!"
-                                                    )
-                                                } else {
-                                                    com.tenli.oneview.ui.component.MobileTopPopupManager.warning(
-                                                        "Bạn chưa cấp quyền thông báo trên thiết bị."
-                                                    )
-                                                }
-                                            } else {
-                                                com.tenli.oneview.ui.component.MobileTopPopupManager.info(
-                                                    "Đã tắt nhận thông báo."
-                                                )
-                                            }
-                                        } else {
-                                            com.tenli.oneview.ui.component.MobileTopPopupManager.error(
-                                                "Không thể lưu cấu hình thông báo"
-                                            )
-                                        }
-                                    } catch (_: Exception) {
-                                        com.tenli.oneview.ui.component.MobileTopPopupManager.error(
-                                            "Không thể lưu cấu hình thông báo"
-                                        )
-                                    } finally {
-                                        isSaving = false
-                                    }
-                                }
+                                pendingPushState = nextVal
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
                                 checkedTrackColor = BrandAccent
                             )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Bottom Sheet xác nhận khi bật/tắt Cho phép nhận thông báo
+        val targetPushState = pendingPushState
+        if (targetPushState != null) {
+            val accentColor = if (targetPushState) BrandAccent else Color(0xFFEF4444)
+            val cancelBtnBg = if (isDark) Color(0xFF263449) else Color.White
+
+            MobileNativeBottomSheet(
+                title = if (targetPushState) {
+                    if (isEn) "Enable notifications" else "Bật thông báo"
+                } else {
+                    if (isEn) "Disable notifications" else "Tắt thông báo"
+                },
+                isDark = isDark,
+                onDismiss = { pendingPushState = null }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(accentColor.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.Bell,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = if (targetPushState) {
+                            if (isEn) "Allow push notifications?" else "Bật nhận thông báo?"
+                        } else {
+                            if (isEn) "Turn off push notifications?" else "Tắt nhận thông báo?"
+                        },
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = titleColor
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (targetPushState) {
+                            if (isEn) {
+                                "Your device will receive instant alerts whenever new AI events are detected."
+                            } else {
+                                "Thiết bị sẽ nhận cảnh báo tức thì ngay khi hệ thống phát hiện sự kiện mới."
+                            }
+                        } else {
+                            if (isEn) {
+                                "You will no longer receive push alerts for new events until you turn notifications back on."
+                            } else {
+                                "Bạn sẽ không nhận được thông báo đẩy khi có sự kiện mới cho đến khi bật lại."
+                            }
+                        },
+                        fontSize = 14.sp,
+                        color = subTextColor,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(cancelBtnBg)
+                            .clickable { pendingPushState = null },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.dialog_btn_cancel),
+                            color = titleColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(accentColor)
+                            .clickable {
+                                pendingPushState = null
+                                applyPushNotificationChange(targetPushState)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isEn) "Confirm" else "Xác nhận",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
@@ -1582,6 +1694,7 @@ private fun MobilePasswordChangeSheet(
     onSuccess: () -> Unit
 ) {
     val context = LocalContext.current
+    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
     val scope = rememberCoroutineScope()
     val vmsApi = remember { LoginAuthClient.create(VmsApi::class.java) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -1649,7 +1762,7 @@ private fun MobilePasswordChangeSheet(
             PasswordFieldRow(
                 badgeColor = BrandAccent,
                 badgeIcon = LucideIcons.Lock,
-                placeholder = "Mật khẩu hiện tại",
+                placeholder = if (isEn) "Current password" else "Mật khẩu hiện tại",
                 value = oldPassword,
                 onValueChange = {
                     oldPassword = it
@@ -1676,7 +1789,7 @@ private fun MobilePasswordChangeSheet(
             PasswordFieldRow(
                 badgeColor = Color(0xFFF59E0B),
                 badgeIcon = LucideIcons.ShieldAlert,
-                placeholder = "Mật khẩu mới",
+                placeholder = if (isEn) "New password" else "Mật khẩu mới",
                 value = newPassword,
                 onValueChange = {
                     newPassword = it
@@ -1703,7 +1816,7 @@ private fun MobilePasswordChangeSheet(
             PasswordFieldRow(
                 badgeColor = Color(0xFF10B981),
                 badgeIcon = LucideIcons.CheckCircle,
-                placeholder = "Xác nhận mật khẩu mới",
+                placeholder = if (isEn) "Confirm new password" else "Xác nhận mật khẩu mới",
                 value = confirmPassword,
                 onValueChange = {
                     confirmPassword = it
@@ -1751,20 +1864,20 @@ private fun MobilePasswordChangeSheet(
                     .background(BrandAccent)
                     .clickable(enabled = !isSubmitting) {
                         if (oldPassword.isBlank() || newPassword.isBlank() || confirmPassword.isBlank()) {
-                            errorMsg = "Vui lòng nhập đầy đủ thông tin"
+                            errorMsg = if (isEn) "Please fill in all fields" else "Vui lòng nhập đầy đủ thông tin"
                             return@clickable
                         }
                         if (newPassword.length < 6) {
-                            errorMsg = "Mật khẩu mới phải có ít nhất 6 ký tự"
+                            errorMsg = if (isEn) "New password must be at least 6 characters" else "Mật khẩu mới phải có ít nhất 6 ký tự"
                             return@clickable
                         }
                         if (newPassword != confirmPassword) {
-                            errorMsg = "Mật khẩu xác nhận không khớp"
+                            errorMsg = if (isEn) "Passwords do not match" else "Mật khẩu xác nhận không khớp"
                             return@clickable
                         }
                         val userId = UserSession.userData?.id
                         if (userId == null) {
-                            errorMsg = "Không tìm thấy thông tin người dùng"
+                            errorMsg = if (isEn) "User information not found" else "Không tìm thấy thông tin người dùng"
                             return@clickable
                         }
                         isSubmitting = true
@@ -1779,14 +1892,14 @@ private fun MobilePasswordChangeSheet(
                                 )
                                 if (resp.isSuccessful) {
                                     com.tenli.oneview.ui.component.MobileTopPopupManager.success(
-                                        "Đổi mật khẩu thành công!"
+                                        if (isEn) "Password changed successfully!" else "Đổi mật khẩu thành công!"
                                     )
                                     onSuccess()
                                 } else {
-                                    errorMsg = "Mật khẩu hiện tại không đúng (${resp.code()})"
+                                    errorMsg = if (isEn) "Current password is incorrect (${resp.code()})" else "Mật khẩu hiện tại không đúng (${resp.code()})"
                                 }
                             } catch (e: Exception) {
-                                errorMsg = e.message ?: "Có lỗi xảy ra khi đổi mật khẩu"
+                                errorMsg = e.message ?: if (isEn) "An error occurred while changing password" else "Có lỗi xảy ra khi đổi mật khẩu"
                             } finally {
                                 isSubmitting = false
                             }
@@ -1802,7 +1915,7 @@ private fun MobilePasswordChangeSheet(
                     )
                 } else {
                     Text(
-                        text = "Xác nhận",
+                        text = if (isEn) "Confirm" else "Xác nhận",
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold

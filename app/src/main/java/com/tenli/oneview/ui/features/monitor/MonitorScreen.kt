@@ -101,6 +101,7 @@ import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
@@ -204,36 +205,22 @@ fun MonitorScreen(
         uiState.treeData.any { MonitorViewModel.countNodeCameras(it) > 0 }
     }
 
-    val vmsFilterChips = remember(
-        uiState.treeData,
-        uiState.activeVmsKey,
-        uiState.selectedFilterNodeKey
-    ) {
-        MonitorViewModel.computeVmsFilterChips(uiState)
+    val totalAllCamerasCount = remember(uiState.treeData) {
+        uiState.treeData.sumOf { MonitorViewModel.countNodeCameras(it) }
     }
 
     val groupTreeRows = remember(
         uiState.treeData,
-        uiState.sheetVmsKey,
-        uiState.activeVmsKey,
         uiState.expandedNodes
     ) {
         MonitorViewModel.computeGroupTreeRows(uiState)
     }
 
-    val sheetVmsTitle = remember(uiState.treeData, uiState.sheetVmsKey, uiState.activeVmsKey, isEn) {
-        val defaultTitle = if (isEn) "Select camera group" else "Chọn nhóm camera"
-        val targetKey = uiState.sheetVmsKey.ifEmpty { uiState.activeVmsKey }
-        val vmsNode = uiState.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-            .firstOrNull { it.key == targetKey }
-            ?: uiState.treeData.filterIsInstance<CameraTreeNode.VMSNode>().firstOrNull()
-        vmsNode?.vms?.name?.ifBlank { defaultTitle } ?: defaultTitle
-    }
+    val sheetTitle = if (isEn) "Filter camera groups" else "Lọc nhóm camera"
 
     val displayedCameraItems = remember(
         uiState.treeData,
         uiState.selectedFilterNodeKey,
-        uiState.activeVmsKey,
         uiState.searchQuery
     ) {
         MonitorViewModel.computeDisplayedCameraItems(uiState)
@@ -269,7 +256,6 @@ fun MonitorScreen(
     LaunchedEffect(
         uiState.currentCameraPage,
         uiState.selectedFilterNodeKey,
-        uiState.activeVmsKey,
         uiState.searchQuery
     ) {
         cameraGridState.scrollToItem(0)
@@ -302,7 +288,15 @@ fun MonitorScreen(
         ) {
             if (!isAnyFullscreen) {
                 MobileTopBar(
-                    title = stringResource(id = R.string.tab_monitor)
+                    title = stringResource(id = R.string.tab_monitor),
+                    rightAction = {
+                        MobileTopActionButton(
+                            icon = LucideIcons.ListFilter,
+                            contentDescription = if (isEn) "Filter" else "Bộ lọc",
+                            hasActiveDot = uiState.selectedFilterNodeKey != "all",
+                            onClick = { viewModel.openGroupFilterSheet() }
+                        )
+                    }
                 )
             }
 
@@ -588,83 +582,48 @@ fun MonitorScreen(
                                 }
                             }
 
-                            // Row 2: Toggle Arrow Button + Collapsible VMS chips + Pagination controls
+                            // Row 2: Toggle Arrow Button + Pagination controls
                             val arrowRotation by animateFloatAsState(
                                 targetValue = if (isControlsExpanded) 180f else 0f,
                                 animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
                                 label = "controlsToggleArrow"
                             )
-                            val hasActiveCustomControl = uiState.searchQuery.isNotEmpty() ||
-                                uiState.selectedFilterNodeKey != "all"
+                            val hasActiveCustomControl = uiState.searchQuery.isNotEmpty()
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Row(
-                                    modifier = Modifier.weight(1f),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    // Nút mũi tên đóng/mở thanh công cụ lọc, chọn lưới và VMS
-                                    Box(
-                                        modifier = Modifier
-                                            .height(28.dp)
-                                            .widthIn(min = 28.dp)
-                                            .clip(RoundedCornerShape(7.dp))
-                                            .background(
-                                                if (isControlsExpanded || hasActiveCustomControl) {
-                                                    BrandAccent.copy(alpha = if (isDark) 0.20f else 0.12f)
-                                                } else {
-                                                    controlBg
-                                                }
-                                            )
-                                            .clickable { isControlsExpanded = !isControlsExpanded }
-                                            .padding(horizontal = 7.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = LucideIcons.ChevronDown,
-                                            contentDescription = if (isEn) {
-                                                if (isControlsExpanded) "Collapse filters" else "Expand filters"
+                                // Nút mũi tên đóng/mở thanh công cụ tìm kiếm và chọn lưới 1x1/2x2
+                                Box(
+                                    modifier = Modifier
+                                        .height(28.dp)
+                                        .widthIn(min = 28.dp)
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(
+                                            if (isControlsExpanded || hasActiveCustomControl) {
+                                                BrandAccent.copy(alpha = if (isDark) 0.20f else 0.12f)
                                             } else {
-                                                if (isControlsExpanded) "Thu gọn bộ lọc" else "Mở rộng bộ lọc"
-                                            },
-                                            tint = if (isControlsExpanded || hasActiveCustomControl) BrandAccent else mutedText,
-                                            modifier = Modifier
-                                                .size(15.dp)
-                                                .rotate(arrowRotation)
-                                        )
-                                    }
-
-                                    // .vms-chips-scroll (chỉ hiển thị khi đã bấm mũi tên mở rộng)
-                                    AnimatedVisibility(
-                                        visible = isControlsExpanded && vmsFilterChips.isNotEmpty(),
-                                        enter = expandHorizontally(
-                                            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                                        ) + fadeIn(animationSpec = tween(durationMillis = 180)),
-                                        exit = shrinkHorizontally(
-                                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
-                                        ) + fadeOut(animationSpec = tween(durationMillis = 140))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.horizontalScroll(rememberScrollState()),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                        ) {
-                                            vmsFilterChips.forEach { chip ->
-                                                VmsFilterChipButton(
-                                                    chip = chip,
-                                                    isDark = isDark,
-                                                    panelBg = panelBg,
-                                                    controlBg = controlBg,
-                                                    mutedText = mutedText,
-                                                    onClick = { viewModel.handleVmsChipClick(chip.key) }
-                                                )
+                                                controlBg
                                             }
-                                        }
-                                    }
+                                        )
+                                        .clickable { isControlsExpanded = !isControlsExpanded }
+                                        .padding(horizontal = 7.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.ChevronDown,
+                                        contentDescription = if (isEn) {
+                                            if (isControlsExpanded) "Collapse controls" else "Expand controls"
+                                        } else {
+                                            if (isControlsExpanded) "Thu gọn công cụ" else "Mở rộng công cụ"
+                                        },
+                                        tint = if (isControlsExpanded || hasActiveCustomControl) BrandAccent else mutedText,
+                                        modifier = Modifier
+                                            .size(15.dp)
+                                            .rotate(arrowRotation)
+                                    )
                                 }
 
                                 // .pagination-controls (luôn hiển thị)
@@ -802,8 +761,9 @@ fun MonitorScreen(
         // Group Filter Bottom Sheet (.mobile-group-sheet-overlay)
         if (uiState.showGroupFilterSheet && !isAnyFullscreen) {
             MobileGroupFilterBottomSheet(
-                title = sheetVmsTitle,
+                title = sheetTitle,
                 rows = groupTreeRows,
+                totalAllCamerasCount = totalAllCamerasCount,
                 selectedFilterNodeKey = uiState.selectedFilterNodeKey,
                 isDark = isDark,
                 onDismiss = { viewModel.closeGroupFilterSheet() },
@@ -1240,18 +1200,21 @@ private fun PlayingEqualizerBars() {
 private fun MobileGroupFilterBottomSheet(
     title: String,
     rows: List<GroupSheetRow>,
+    totalAllCamerasCount: Int,
     selectedFilterNodeKey: String,
     isDark: Boolean,
     onDismiss: () -> Unit,
     onToggleExpand: (String) -> Unit,
     onRowClick: (String) -> Unit
 ) {
+    val isEn = rememberIsEnglish()
     val sheetBg = if (isDark) Color(0xFF172033) else Color.White
     val sheetBorder = if (isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.06f)
     val titleColor = if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A)
     val closeBtnBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9)
     val mutedColor = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
     val rowTextColor = if (isDark) Color(0xFFF1F5F9) else Color(0xFF0F172A)
+    val countBadgeBg = if (isDark) Color.White.copy(alpha = 0.08f) else Color(0xFFF1F5F9)
 
     com.tenli.oneview.ui.component.MobileFullScreenOverlay(
         onDismissRequest = onDismiss
@@ -1323,7 +1286,7 @@ private fun MobileGroupFilterBottomSheet(
                     ) {
                         Icon(
                             imageVector = LucideIcons.X,
-                            contentDescription = "Đóng",
+                            contentDescription = if (isEn) "Close" else "Đóng",
                             tint = mutedColor,
                             modifier = Modifier.size(18.dp)
                         )
@@ -1331,21 +1294,89 @@ private fun MobileGroupFilterBottomSheet(
                 }
 
                 // Sheet Body
-                if (rows.isEmpty()) {
-                    val isEn = rememberIsEnglish()
+                if (rows.isEmpty() && totalAllCamerasCount == 0) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(160.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CommonEmptyState(text = if (isEn) "No camera subgroups" else "Không có nhóm camera con")
+                        CommonEmptyState(text = if (isEn) "No camera groups" else "Không có nhóm camera")
                     }
                 } else {
                     LazyColumn(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
+                        // Top option: "Tất cả camera" / "All cameras"
+                        item(key = "all") {
+                            val isAllSelected = selectedFilterNodeKey == "all"
+                            val allIconTint = if (isAllSelected) BrandAccent else mutedColor
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isAllSelected) BrandAccent.copy(alpha = 0.12f) else Color.Transparent
+                                    )
+                                    .clickable { onRowClick("all") }
+                                    .padding(
+                                        start = 10.dp,
+                                        end = 10.dp,
+                                        top = 6.dp,
+                                        bottom = 6.dp
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Spacer(modifier = Modifier.size(22.dp))
+
+                                Icon(
+                                    imageVector = LucideIcons.Video,
+                                    contentDescription = null,
+                                    tint = allIconTint,
+                                    modifier = Modifier.size(16.dp)
+                                )
+
+                                Text(
+                                    text = if (isEn) "All cameras" else "Tất cả camera",
+                                    color = if (isAllSelected) BrandAccent else rowTextColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isAllSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isAllSelected) BrandAccent.copy(alpha = 0.18f) else countBadgeBg
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = totalAllCamerasCount.toString(),
+                                        color = if (isAllSelected) BrandAccent else mutedColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+
+                                if (isAllSelected) {
+                                    Icon(
+                                        imageVector = LucideIcons.Check,
+                                        contentDescription = null,
+                                        tint = BrandAccent,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         items(items = rows, key = { it.key }) { row ->
                             val isSelected = selectedFilterNodeKey == row.key
                             val indentDp = (minOf(row.depth, 5) * 16 + 10).dp
@@ -1379,7 +1410,7 @@ private fun MobileGroupFilterBottomSheet(
                                     ) {
                                         Icon(
                                             imageVector = LucideIcons.ChevronDown,
-                                            contentDescription = "Mở rộng nhóm",
+                                            contentDescription = if (isEn) "Expand group" else "Mở rộng nhóm",
                                             tint = iconTint,
                                             modifier = Modifier
                                                 .size(15.dp)
@@ -1405,11 +1436,28 @@ private fun MobileGroupFilterBottomSheet(
                                     text = row.title,
                                     color = if (isSelected) BrandAccent else rowTextColor,
                                     fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    fontWeight = if (isSelected || row.isVmsNode) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) BrandAccent.copy(alpha = 0.18f) else countBadgeBg
+                                        )
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = row.count.toString(),
+                                        color = if (isSelected) BrandAccent else mutedColor,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
 
                                 if (isSelected) {
                                     Icon(

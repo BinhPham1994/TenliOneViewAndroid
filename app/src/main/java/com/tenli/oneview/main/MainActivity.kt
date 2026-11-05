@@ -14,12 +14,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
@@ -175,27 +180,46 @@ class MainActivity : ComponentActivity() {
                     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                 }
 
+                val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
+
                 if (showNotificationWarningDialog) {
                     val notificationDescription = buildAnnotatedString {
-                        append("Quyền thông báo đang bị tắt. Điều này sẽ khiến bạn ")
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("không thể nhận được cuộc gọi và tin nhắn cảnh báo khẩn cấp")
-                        }
-                        append(" từ hệ thống AI.\n\n")
+                        if (isEn) {
+                            append("Notification permission is disabled. You ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("will not receive emergency alert calls and notifications")
+                            }
+                            append(" from the AI system.\n\n")
+                            append("Please tap ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Set up now")
+                            }
+                            append(" and enable ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Allow notifications")
+                            }
+                            append(" to stay protected.")
+                        } else {
+                            append("Quyền thông báo đang bị tắt. Điều này sẽ khiến bạn ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("không thể nhận được cuộc gọi và tin nhắn cảnh báo khẩn cấp")
+                            }
+                            append(" từ hệ thống AI.\n\n")
 
-                        append("Vui lòng nhấn ")
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("Thiết lập ngay")
+                            append("Vui lòng nhấn ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Thiết lập ngay")
+                            }
+                            append(" và bật mục ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Cho phép thông báo")
+                            }
+                            append(" để bảo vệ an toàn cho ngôi nhà.")
                         }
-                        append(" và bật mục ")
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("Cho phép thông báo")
-                        }
-                        append(" để bảo vệ an toàn cho ngôi nhà.")
                     }
 
                     PermissionExplanationDialog(
-                        title = "Bật thông báo cảnh báo",
+                        title = if (isEn) "Enable Alert Notifications" else "Bật thông báo cảnh báo",
                         description = notificationDescription,
                         onConfirm = {
                             showNotificationWarningDialog = false
@@ -209,37 +233,69 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (showOverlayDialog) {
-                    val overlayTitle = if (isChinesePhone) "Quyền chạy nền đặc biệt" else "Quyền hiển thị cuộc gọi"
+                    val overlayTitle = if (isEn) {
+                        if (isChinesePhone) "Special Background Permissions" else "Display Over Other Apps"
+                    } else {
+                        if (isChinesePhone) "Quyền chạy nền đặc biệt" else "Quyền hiển thị cuộc gọi"
+                    }
 
                     val overlayDescription = buildAnnotatedString {
-                        if (isChinesePhone) {
-                            append("Để nhận cuộc gọi cảnh báo ổn định trên máy ")
-                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append(manufacturer.uppercase())
-                            }
-                            append(", vui lòng bật các mục sau:\n\n")
-
-                            append("• ")
-                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append("Hiển thị trên màn hình khóa")
-                            }
-                            append("\n\n")
-
-                            append("• ")
-                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append("Tự khởi chạy")
-                            }
-                            append("\n\n")
-
-                            append("• ")
-                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append("Hiển thị cửa sổ pop-up")
+                        if (isEn) {
+                            if (isChinesePhone) {
+                                append("To receive reliable alert calls on ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append(manufacturer.uppercase())
+                                }
+                                append(" devices, please enable:\n\n")
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Show on Lock screen")
+                                }
+                                append("\n\n• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Autostart")
+                                }
+                                append("\n\n• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Display pop-up windows")
+                                }
+                            } else {
+                                append("To display alert screens immediately during emergencies, please allow:\n\n")
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Display over other apps")
+                                }
                             }
                         } else {
-                            append("Để màn hình cảnh báo hiển thị ngay lập tức khi có sự kiện khẩn cấp, vui lòng cho phép mục:\n\n")
-                            append("• ")
-                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append("Hiển thị trên các ứng dụng khác")
+                            if (isChinesePhone) {
+                                append("Để nhận cuộc gọi cảnh báo ổn định trên máy ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append(manufacturer.uppercase())
+                                }
+                                append(", vui lòng bật các mục sau:\n\n")
+
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Hiển thị trên màn hình khóa")
+                                }
+                                append("\n\n")
+
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Tự khởi chạy")
+                                }
+                                append("\n\n")
+
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Hiển thị cửa sổ pop-up")
+                                }
+                            } else {
+                                append("Để màn hình cảnh báo hiển thị ngay lập tức khi có sự kiện khẩn cấp, vui lòng cho phép mục:\n\n")
+                                append("• ")
+                                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append("Hiển thị trên các ứng dụng khác")
+                                }
                             }
                         }
                     }
@@ -262,23 +318,37 @@ class MainActivity : ComponentActivity() {
 
                 if (showBatteryDialog) {
                     val batteryDescription = buildAnnotatedString {
-                        append("Để không bỏ lỡ cảnh báo khi điện thoại đang ở chế độ ngủ, vui lòng thực hiện:\n\n")
+                        if (isEn) {
+                            append("To avoid missing alerts while your phone is asleep, please:\n\n")
+                            append("• Select ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("App battery usage")
+                            }
+                            append(" (or Battery).\n\n")
+                            append("• Choose ")
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Unrestricted")
+                            }
+                            append(" so the app runs reliably.")
+                        } else {
+                            append("Để không bỏ lỡ cảnh báo khi điện thoại đang ở chế độ ngủ, vui lòng thực hiện:\n\n")
 
-                        append("• Chọn mục ") // Dùng dấu chấm thay cho 1️⃣
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("Mức sử dụng Pin của ứng dụng")
-                        }
-                        append(" (hoặc Pin).\n\n")
+                            append("• Chọn mục ") // Dùng dấu chấm thay cho 1️⃣
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Mức sử dụng Pin của ứng dụng")
+                            }
+                            append(" (hoặc Pin).\n\n")
 
-                        append("• Tích chọn chế độ ") // Dùng dấu chấm thay cho 2️⃣
-                        withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                            append("Không hạn chế (Unrestricted)")
+                            append("• Tích chọn chế độ ") // Dùng dấu chấm thay cho 2️⃣
+                            withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("Không hạn chế (Unrestricted)")
+                            }
+                            append(" để App luôn chạy ổn định.")
                         }
-                        append(" để App luôn chạy ổn định.")
                     }
 
                     PermissionExplanationDialog(
-                        title = "Duy trì kết nối",
+                        title = if (isEn) "Keep Connection Active" else "Duy trì kết nối",
                         description = batteryDescription,
                         onConfirm = {
                             showBatteryDialog = false
@@ -370,79 +440,162 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PermissionExplanationDialog(
     title: String,
-    description: AnnotatedString, // Đổi từ String sang AnnotatedString
+    description: AnnotatedString,
     icon: ImageVector = Icons.Default.Notifications,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(16.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        icon = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp)
-            )
-        },
-        title = {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        text = {
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                // Đổi sang TextAlign.Start để các bước 1, 2, 3 thẳng hàng, dễ đọc hơn
-                textAlign = TextAlign.Start,
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        confirmButton = {
-            Button(
-                onClick = onConfirm,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
+    val isEn = com.tenli.oneview.ui.component.rememberIsEnglish()
+    val isDark = com.tenli.oneview.ui.component.rememberIsDarkTheme()
+    val sheetBg = if (isDark) androidx.compose.ui.graphics.Color(0xFF172033) else androidx.compose.ui.graphics.Color(0xFFF2F2F7)
+    val closeBtnBg = if (isDark) androidx.compose.ui.graphics.Color(0xFF263449) else androidx.compose.ui.graphics.Color(0xFFE2E8F0)
+    val titleColor = if (isDark) androidx.compose.ui.graphics.Color(0xFFF8FAFC) else androidx.compose.ui.graphics.Color(0xFF1E293B)
+    val subTextColor = if (isDark) androidx.compose.ui.graphics.Color(0xFF94A3B8) else androidx.compose.ui.graphics.Color(0xFF64748B)
+    val cancelBtnBg = if (isDark) androidx.compose.ui.graphics.Color(0xFF263449) else androidx.compose.ui.graphics.Color.White
+    val primaryColor = com.tenli.oneview.ui.theme.BrandAccent
+
+    com.tenli.oneview.ui.component.MobileFullScreenOverlay(
+        onDismissRequest = onDismiss
+    ) {
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
                 ),
+            contentAlignment = androidx.compose.ui.Alignment.BottomCenter
+        ) {
+            Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 8.dp)
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                color = sheetBg
             ) {
-                Text(
-                    text = "Thiết lập ngay",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        },
-        dismissButton = {
-            Button(
-                onClick = onDismiss,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.outlineVariant,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 8.dp)
-            ) {
-                Text(
-                    text = "Để sau",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
-                )
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 10.dp, bottom = 20.dp)
+                ) {
+                    androidx.compose.foundation.layout.Box(
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.CenterHorizontally)
+                            .width(36.dp)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(
+                                if (isDark) androidx.compose.ui.graphics.Color.White.copy(alpha = 0.2f)
+                                else androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.15f)
+                            )
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(14.dp))
+
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 14.dp),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = titleColor
+                        )
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(closeBtnBg)
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = com.tenli.oneview.ui.theme.LucideIcons.X,
+                                contentDescription = if (isEn) "Close" else "Đóng",
+                                tint = subTextColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    androidx.compose.foundation.layout.Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(primaryColor.copy(alpha = 0.14f)),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = primaryColor,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(14.dp))
+                        Text(
+                            text = description,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = subTextColor,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(16.dp))
+
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)
+                    ) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(cancelBtnBg)
+                                .clickable(onClick = onDismiss),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isEn) "Later" else "Để sau",
+                                color = titleColor,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                            )
+                        }
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(primaryColor)
+                                .clickable(onClick = onConfirm),
+                            contentAlignment = androidx.compose.ui.Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isEn) "Set up now" else "Thiết lập ngay",
+                                color = androidx.compose.ui.graphics.Color.White,
+                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+                }
             }
         }
-    )
+    }
 }

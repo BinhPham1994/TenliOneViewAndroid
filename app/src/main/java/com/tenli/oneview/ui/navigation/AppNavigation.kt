@@ -145,21 +145,39 @@ fun AppNavigation(
                 ) {
                     val displayEventId = activeEventDetailId ?: lastEventDetailId
                     if (displayEventId != null) {
-                        CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@AnimatedVisibility) {
-                            EventDetailScreen(
-                                eventId = displayEventId,
-                                onBack = {
-                                    skipExitAnimation = false
-                                    activeEventDetailId = null
-                                },
-                                onSwipeDismissed = {
-                                    skipExitAnimation = true
-                                    activeEventDetailId = null
+                        val eventDetailOverlayHostState = remember(displayEventId) {
+                            com.tenli.oneview.ui.component.MobileOverlayHostState()
+                        }
+                        CompositionLocalProvider(
+                            LocalAnimatedVisibilityScope provides this@AnimatedVisibility,
+                            com.tenli.oneview.ui.component.LocalMobileOverlayHost provides eventDetailOverlayHostState
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                EventDetailScreen(
+                                    eventId = displayEventId,
+                                    onBack = {
+                                        skipExitAnimation = false
+                                        activeEventDetailId = null
+                                    },
+                                    onSwipeDismissed = {
+                                        skipExitAnimation = true
+                                        activeEventDetailId = null
+                                    }
+                                )
+                                if (eventDetailOverlayHostState.hasOverlays) {
+                                    Box(modifier = Modifier.fillMaxSize()) {
+                                        eventDetailOverlayHostState.Content()
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                 }
+
+                // Global Top Popup Notification Host above both MainScreen and EventDetailScreen
+                com.tenli.oneview.ui.component.MobileTopPopupHost(
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
+                )
             }
         }
     }

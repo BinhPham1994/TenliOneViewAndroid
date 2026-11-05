@@ -131,6 +131,12 @@ fun VideoPlayer(
             .graphicsLayer { alpha = if (isVideoReady && !isError) 1f else 0f })
 
         if (isError) {
+            val isEn = rememberIsEnglish()
+            val resolvedErrorText = if (isEn && errorText == "Không có video sự kiện") {
+                "No event video"
+            } else {
+                errorText
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -138,7 +144,7 @@ fun VideoPlayer(
                 contentAlignment = Alignment.Center
             ) {
                 CommonEmptyState(
-                    text = errorText,
+                    text = resolvedErrorText,
                     modifier = Modifier.fillMaxSize()
                 )
             }

@@ -61,7 +61,9 @@ fun ChangePasswordScreen(
         viewModel.event.collect { event ->
             when (event) {
                 is ChangePasswordEvent.Success -> {
-                    Toast.makeText(context, context.getString(R.string.msg_change_password_success), Toast.LENGTH_SHORT).show()
+                    com.tenli.oneview.ui.component.MobileTopPopupManager.success(
+                        context.getString(R.string.msg_change_password_success)
+                    )
                     onPasswordChangedSuccess()
                 }
             }

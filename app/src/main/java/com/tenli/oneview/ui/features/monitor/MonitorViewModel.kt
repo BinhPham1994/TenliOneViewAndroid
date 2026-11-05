@@ -54,7 +54,8 @@ data class GroupSheetRow(
     val depth: Int,
     val hasSubGroups: Boolean,
     val isExpanded: Boolean,
-    val count: Int
+    val count: Int,
+    val isVmsNode: Boolean = false
 )
 
 data class CameraCardItem(
@@ -255,14 +256,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         }
 
         fun computeGroupTreeRows(state: MonitorUiState): List<GroupSheetRow> {
-            val targetKey = state.sheetVmsKey.ifEmpty { state.activeVmsKey }
-            val vmsNode = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
-                .firstOrNull { it.key == targetKey }
-                ?: state.treeData.filterIsInstance<CameraTreeNode.VMSNode>().firstOrNull()
-                ?: return emptyList()
+            val vmsNodes = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
+                .filter { countNodeCameras(it) > 0 }
+            if (vmsNodes.isEmpty()) return emptyList()
 
             val rows = mutableListOf<GroupSheetRow>()
-            fun walk(nodes: List<CameraTreeNode>, depth: Int) {
+
+            fun walkGroups(nodes: List<CameraTreeNode>, depth: Int) {
                 for (node in nodes) {
                     if (node is CameraTreeNode.GroupNode) {
                         val count = countNodeCameras(node)
@@ -279,24 +279,46 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                                 depth = depth,
                                 hasSubGroups = hasSubGroups,
                                 isExpanded = isExpanded,
-                                count = count
+                                count = count,
+                                isVmsNode = false
                             )
                         )
                         if (hasSubGroups && isExpanded) {
-                            walk(subGroups, depth + 1)
+                            walkGroups(subGroups, depth + 1)
                         }
                     }
                 }
             }
-            walk(vmsNode.children, 0)
+
+            for (vmsNode in vmsNodes) {
+                val vmsCount = countNodeCameras(vmsNode)
+                if (vmsCount <= 0) continue
+                val subGroups = vmsNode.children.filter {
+                    it is CameraTreeNode.GroupNode && countNodeCameras(it) > 0
+                }
+                val hasSubGroups = subGroups.isNotEmpty()
+                val isExpanded = state.expandedNodes.contains(vmsNode.key)
+                rows.add(
+                    GroupSheetRow(
+                        key = vmsNode.key,
+                        title = vmsNode.vms.name.ifBlank { "VMS" },
+                        depth = 0,
+                        hasSubGroups = hasSubGroups,
+                        isExpanded = isExpanded,
+                        count = vmsCount,
+                        isVmsNode = true
+                    )
+                )
+                if (hasSubGroups && isExpanded) {
+                    walkGroups(subGroups, 1)
+                }
+            }
             return rows
         }
 
         fun computeDisplayedCameraItems(state: MonitorUiState): List<CameraCardItem> {
             val targetNode: CameraTreeNode? = if (state.selectedFilterNodeKey != "all") {
                 findTreeNodeByKey(state.treeData, state.selectedFilterNodeKey)
-            } else if (state.activeVmsKey.isNotEmpty()) {
-                findTreeNodeByKey(state.treeData, state.activeVmsKey)
             } else {
                 null
             }
@@ -498,19 +520,24 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         loadVisibleCameraSnapshots()
     }
 
+    fun openGroupFilterSheet() {
+        _uiState.update { it.copy(showGroupFilterSheet = true) }
+    }
+
     fun closeGroupFilterSheet() {
         _uiState.update { it.copy(showGroupFilterSheet = false) }
     }
 
     fun handleGroupRowClick(groupKey: String) {
         _uiState.update { state ->
-            val fallbackVmsKey = state.sheetVmsKey.ifEmpty { state.activeVmsKey }
-            val nextFilterKey = if (state.selectedFilterNodeKey == groupKey) {
-                fallbackVmsKey.ifEmpty { "all" }
+            val nextFilterKey = if (groupKey == "all" || state.selectedFilterNodeKey == groupKey) {
+                "all"
             } else {
                 groupKey
             }
-            val nextActiveVms = if (fallbackVmsKey.isNotEmpty()) fallbackVmsKey else state.activeVmsKey
+            val matchedVms = state.treeData.filterIsInstance<CameraTreeNode.VMSNode>()
+                .firstOrNull { isDescendantOrSelfKey(it, nextFilterKey) }
+            val nextActiveVms = matchedVms?.key ?: state.activeVmsKey
             clampAndNormalizeState(
                 state.copy(
                     selectedFilterNodeKey = nextFilterKey,
@@ -569,8 +596,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (sheetVms.isEmpty() || vmsNodes.none { it.key == sheetVms }) {
                 sheetVms = activeVms.ifEmpty { firstKey }
             }
-            if (selectedFilter == "all" || findTreeNodeByKey(state.treeData, selectedFilter) == null) {
-                selectedFilter = activeVms.ifEmpty { firstKey }
+            if (selectedFilter != "all" && findTreeNodeByKey(state.treeData, selectedFilter) == null) {
+                selectedFilter = "all"
             }
         }
 

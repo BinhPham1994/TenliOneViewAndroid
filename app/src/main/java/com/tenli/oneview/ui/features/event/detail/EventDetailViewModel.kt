@@ -164,7 +164,14 @@ class EventDetailViewModel(
                     }
 
                     if (foundEvent == null) {
-                        _uiState.update { it.copy(isLoading = false, isJourneyLoading = false, error = "Không tìm thấy sự kiện") }
+                        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(getApplication()).startsWith("en")
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                isJourneyLoading = false,
+                                error = if (isEn) "Event not found" else "Không tìm thấy sự kiện"
+                            )
+                        }
                         return@launch
                     }
 
@@ -591,6 +598,7 @@ class EventDetailViewModel(
 
     fun loadOriginalVideo() {
         val event = _uiState.value.event ?: return
+        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(getApplication()).startsWith("en")
         val camera = _uiState.value.camera
             ?: resolveCameraForEvent(event, _uiState.value.cameraList)
 
@@ -598,7 +606,7 @@ class EventDetailViewModel(
             _uiState.update {
                 it.copy(
                     originalVideoLoading = false,
-                    originalVideoError = "Video không khả dụng"
+                    originalVideoError = if (isEn) "Original video unavailable" else "Video không khả dụng"
                 )
             }
             return
@@ -646,7 +654,7 @@ class EventDetailViewModel(
                         _uiState.update {
                             it.copy(
                                 originalVideoLoading = false,
-                                originalVideoError = "Video không khả dụng"
+                                originalVideoError = if (isEn) "Original video unavailable" else "Video không khả dụng"
                             )
                         }
                     }
@@ -654,7 +662,7 @@ class EventDetailViewModel(
                     _uiState.update {
                         it.copy(
                             originalVideoLoading = false,
-                            originalVideoError = "Lỗi khi lấy video gốc"
+                            originalVideoError = if (isEn) "Error fetching original video" else "Lỗi khi lấy video gốc"
                         )
                     }
                 }
@@ -663,7 +671,7 @@ class EventDetailViewModel(
                 _uiState.update {
                     it.copy(
                         originalVideoLoading = false,
-                        originalVideoError = "Lỗi khi tải video"
+                        originalVideoError = if (isEn) "Error loading video" else "Lỗi khi tải video"
                     )
                 }
             }
@@ -671,6 +679,7 @@ class EventDetailViewModel(
     }
 
     fun reportEventAsFalse(eventId: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
+        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(getApplication()).startsWith("en")
         viewModelScope.launch {
             try {
                 val response = eventApi.verifyEvent(eventId, Confirm(false))
@@ -678,11 +687,11 @@ class EventDetailViewModel(
                     com.tenli.oneview.util.EventBus.emitEventReportedFalse(eventId)
                     onSuccess()
                 } else {
-                    onError("Lỗi khi báo cáo: ${response.code()}")
+                    onError(if (isEn) "Error reporting event: ${response.code()}" else "Lỗi khi báo cáo: ${response.code()}")
                 }
             } catch (e: Exception) {
                 Log.e("EventDetailVM", "Error reporting event", e)
-                onError("Lỗi kết nối khi báo cáo")
+                onError(if (isEn) "Connection error while reporting" else "Lỗi kết nối khi báo cáo")
             }
         }
     }
