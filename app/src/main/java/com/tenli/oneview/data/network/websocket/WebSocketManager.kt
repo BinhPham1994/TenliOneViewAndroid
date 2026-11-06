@@ -36,10 +36,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - Khi app quay lại foreground: tự kết nối lại những gì đang cần + phát 1 sự kiện làm mới để UI cập nhật dữ liệu bị lỡ.
  */
 class WebSocketManager(
-    private val client: OkHttpClient,
-    private val gson: Gson,
-    private val vmsApi: VmsApi
+    clientProvider: () -> OkHttpClient,
+    gsonProvider: () -> Gson,
+    vmsApiProvider: () -> VmsApi
 ) {
+    private val client: OkHttpClient by lazy(clientProvider)
+    private val gson: Gson by lazy(gsonProvider)
+    private val vmsApi: VmsApi by lazy(vmsApiProvider)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // WebSockets
@@ -118,17 +121,19 @@ class WebSocketManager(
         desiredNotifyBaseUrl = baseUrl
         if (!isAppInForeground) return
 
-        synchronized(notifyLock) {
-            if (notifyClient?.isConnected() == true) return
+        scope.launch {
+            synchronized(notifyLock) {
+                if (notifyClient?.isConnected() == true) return@launch
 
-            val clientInstance = notifyClient ?: WebSocketNotifyClient(client, gson, scope) { data ->
-                if (data.topic != TOPIC_PONG) {
-                    _notifyEvent.tryEmit(data)
-                }
-            }.also { notifyClient = it }
+                val clientInstance = notifyClient ?: WebSocketNotifyClient(client, gson, scope) { data ->
+                    if (data.topic != TOPIC_PONG) {
+                        _notifyEvent.tryEmit(data)
+                    }
+                }.also { notifyClient = it }
 
-            val wsUrl = ReconnectingWebSocket.toWsScheme(ReconnectingWebSocket.stripApiSuffix(baseUrl)) + "/Data/ws/Notify"
-            clientInstance.connect(wsUrl)
+                val wsUrl = ReconnectingWebSocket.toWsScheme(ReconnectingWebSocket.stripApiSuffix(baseUrl)) + "/Data/ws/Notify"
+                clientInstance.connect(wsUrl)
+            }
         }
     }
 

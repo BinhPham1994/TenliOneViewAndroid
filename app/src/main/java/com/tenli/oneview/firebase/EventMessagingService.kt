@@ -1,9 +1,13 @@
 package com.tenli.oneview.firebase
 
+import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
+import android.os.Build
+import android.os.Bundle
 import android.util.Log
+import android.window.SplashScreen
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import coil.Coil
@@ -108,9 +112,33 @@ class EventMessagingService : FirebaseMessagingService() {
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         return PendingIntent.getActivity(
-            this, requestCode, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            splashIconOptionsBundle()
         )
+    }
+
+    /**
+     * Trên Android 12+ (API 31+), khi mở Activity từ PendingIntent (thông báo), hệ thống mặc định dùng
+     * SPLASH_SCREEN_STYLE_SOLID_COLOR (chỉ hiện nền trắng trống không có logo). Truyền SPLASH_SCREEN_STYLE_ICON
+     * để luôn hiển thị đầy đủ màn hình Splash có icon giống như khi mở từ màn hình chính.
+     */
+    private fun splashIconOptionsBundle(): Bundle? {
+        return when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                ActivityOptions.makeBasic()
+                    .setSplashScreenStyle(SplashScreen.SPLASH_SCREEN_STYLE_ICON)
+                    .toBundle()
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                ActivityOptions.makeBasic().toBundle().apply {
+                    putInt("android.activity.splashScreenStyle", 1)
+                }
+            }
+            else -> null
+        }
     }
 
     private fun showMissedCallNotification(title: String, body: String, url: String?, eId: String) {

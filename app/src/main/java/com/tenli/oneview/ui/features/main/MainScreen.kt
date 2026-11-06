@@ -211,18 +211,31 @@ fun MainScreen(
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
-    // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation
+    // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation.
+    // Ở Frame 1 khi vừa mở app, chỉ khởi tạo & render tab đang hiển thị (Trang chủ) để tắt Splash tức thì;
+    // các tab còn lại được nạp ngầm lệch pha sau khi Frame 1 đã lên hình (hoặc ngay khi người dùng chạm chọn tab).
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
-    val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
-    val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+    var mountedTabs by remember { mutableStateOf(setOf(uiState.currentTab)) }
 
     var activeTab by remember { mutableStateOf(uiState.currentTab) }
     var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
     var slideDirection by remember { mutableIntStateOf(1) }
     val transitionProgress = remember { Animatable(1f) }
 
+    LaunchedEffect(Unit) {
+        delay(500L)
+        mountedTabs = mountedTabs + MainTab.Setting
+        delay(300L)
+        mountedTabs = mountedTabs + MainTab.Event
+        delay(350L)
+        mountedTabs = mountedTabs + MainTab.Monitor
+    }
+
     LaunchedEffect(uiState.currentTab) {
         val targetTab = uiState.currentTab
+        if (targetTab !in mountedTabs) {
+            mountedTabs = mountedTabs + targetTab
+        }
         if (targetTab != MainTab.Monitor) {
             showBottomBar = true
         }
@@ -231,8 +244,6 @@ fun MainScreen(
         }
         if (targetTab == MainTab.Home) {
             homeViewModel.syncViewModeFromPrefs()
-        } else if (targetTab == MainTab.Event) {
-            eventViewModel.syncViewModeFromPrefs()
         }
 
         if (targetTab == activeTab) {
@@ -271,9 +282,6 @@ fun MainScreen(
 
     LaunchedEffect(isHomeActive) {
         homeViewModel.setHomeTabActive(isHomeActive)
-    }
-    LaunchedEffect(isEventActive) {
-        eventViewModel.setEventTabActive(isEventActive)
     }
 
     // Callback ổn định (không tạo lambda mới mỗi lần recompose -> các tab con được skip)
@@ -489,66 +497,89 @@ fun MainScreen(
                         .padding(top = innerPadding.calculateTopPadding())
                         .zIndex(1f)
                 ) {
+                    val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab, activeTab, outgoingTab) {
+                        buildSet {
+                            addAll(mountedTabs)
+                            add(uiState.currentTab)
+                            add(activeTab)
+                            outgoingTab?.let { add(it) }
+                        }
+                    }
+
                     OrderedMainTabs.forEach { tab ->
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .zIndex(
-                                    when (tab) {
-                                        activeTab -> 2f
-                                        outgoingTab -> 1f
-                                        else -> 0f
-                                    }
-                                )
-                                .layout { measurable, constraints ->
-                                    val placeable = measurable.measure(constraints)
-                                    layout(placeable.width, placeable.height) {
-                                        // Đọc animation value ở pha placement (không gây recompose mỗi frame)
-                                        val currentOutgoing = outgoingTab
-                                        if (tab == activeTab || tab == currentOutgoing) {
-                                            val progress = transitionProgress.value
-                                            val offsetX = when (tab) {
-                                                activeTab -> if (currentOutgoing != null) {
-                                                    (slideDirection * (1f - progress) * placeable.width).toInt()
-                                                } else {
-                                                    0
+                        if (tab in effectiveMountedTabs) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .zIndex(
+                                        when (tab) {
+                                            activeTab -> 2f
+                                            outgoingTab -> 1f
+                                            else -> 0f
+                                        }
+                                    )
+                                    .layout { measurable, constraints ->
+                                        val placeable = measurable.measure(constraints)
+                                        layout(placeable.width, placeable.height) {
+                                            // Đọc animation value ở pha placement (không gây recompose mỗi frame)
+                                            val currentOutgoing = outgoingTab
+                                            if (tab == activeTab || tab == currentOutgoing) {
+                                                val progress = transitionProgress.value
+                                                val offsetX = when (tab) {
+                                                    activeTab -> if (currentOutgoing != null) {
+                                                        (slideDirection * (1f - progress) * placeable.width).toInt()
+                                                    } else {
+                                                        0
+                                                    }
+                                                    else -> (-slideDirection * progress * placeable.width).toInt()
                                                 }
-                                                else -> (-slideDirection * progress * placeable.width).toInt()
+                                                placeable.placeRelativeWithLayer(offsetX, 0)
                                             }
-                                            placeable.placeRelativeWithLayer(offsetX, 0)
                                         }
                                     }
-                                }
-                        ) {
-                            saveableStateHolder.SaveableStateProvider(key = tab.route) {
-                                when (tab) {
-                                    MainTab.Home -> HomeScreen(
-                                        viewModel = homeViewModel,
-                                        listState = homeListState,
-                                        onEventClick = onHomeEventClick
-                                    )
+                            ) {
+                                saveableStateHolder.SaveableStateProvider(key = tab.route) {
+                                    when (tab) {
+                                        MainTab.Home -> HomeScreen(
+                                            viewModel = homeViewModel,
+                                            listState = homeListState,
+                                            onEventClick = onHomeEventClick
+                                        )
 
-                                    MainTab.Event -> EventScreen(
-                                        viewModel = eventViewModel,
-                                        listState = eventListState,
-                                        onEventClick = onEventIdClick
-                                    )
+                                        MainTab.Event -> {
+                                            val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
+                                            LaunchedEffect(isEventActive) {
+                                                eventViewModel.setEventTabActive(isEventActive)
+                                                if (isEventActive) {
+                                                    eventViewModel.syncViewModeFromPrefs()
+                                                }
+                                            }
+                                            EventScreen(
+                                                viewModel = eventViewModel,
+                                                listState = eventListState,
+                                                onEventClick = onEventIdClick
+                                            )
+                                        }
 
-                                    MainTab.Monitor -> MonitorScreen(
-                                        viewModel = monitorViewModel,
-                                        listState = monitorState,
-                                        isTabActive = isMonitorActive,
-                                        onEventClick = onEventIdClick,
-                                        onPlaybackClick = onPlaybackClick,
-                                        onFullscreenChange = onMonitorFullscreenChange
-                                    )
+                                        MainTab.Monitor -> {
+                                            val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+                                            MonitorScreen(
+                                                viewModel = monitorViewModel,
+                                                listState = monitorState,
+                                                isTabActive = isMonitorActive,
+                                                onEventClick = onEventIdClick,
+                                                onPlaybackClick = onPlaybackClick,
+                                                onFullscreenChange = onMonitorFullscreenChange
+                                            )
+                                        }
 
-                                    MainTab.Setting -> SettingScreen(
-                                        viewModel = viewModel,
-                                        listState = settingListState,
-                                        onLogoutClick = onLogoutClick,
-                                        onOpenNotificationConfig = onOpenNotificationConfig
-                                    )
+                                        MainTab.Setting -> SettingScreen(
+                                            viewModel = viewModel,
+                                            listState = settingListState,
+                                            onLogoutClick = onLogoutClick,
+                                            onOpenNotificationConfig = onOpenNotificationConfig
+                                        )
+                                    }
                                 }
                             }
                         }

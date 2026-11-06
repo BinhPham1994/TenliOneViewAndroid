@@ -238,7 +238,7 @@ class EventViewModel(
 
     private fun fetchRecentEvents() {
         recentFetchJob?.cancel()
-        recentFetchJob = viewModelScope.launch {
+        recentFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val state = _uiState.value
                 val (from, to) = getTimeRange(state.selectedFilter)
@@ -323,7 +323,7 @@ class EventViewModel(
         initialFetchJob?.cancel()
         paginateJob?.cancel()
         recentFetchJob?.cancel()
-        initialFetchJob = viewModelScope.launch {
+        initialFetchJob = viewModelScope.launch(Dispatchers.IO) {
             lastFetchedRawId = null
             _uiState.update { it.copy(isPaginating = false) }
             val startState = _uiState.value

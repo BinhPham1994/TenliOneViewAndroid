@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="windowActionBar">false</item>
@@ -14,8 +14,8 @@
 
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/white</item>
-        <item name="android:windowBackground">@color/white</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_wrapper</item>
+        <item name="android:windowSplashScreenBehavior" tools:targetApi="33">icon_preferred</item>
         <item name="postSplashScreenTheme">@style/Theme.App</item>
     </style>
 

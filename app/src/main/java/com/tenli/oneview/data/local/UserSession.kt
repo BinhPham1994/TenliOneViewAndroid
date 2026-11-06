@@ -19,7 +19,9 @@ object UserSession {
     @Volatile var savedUsername: String = ""
     @Volatile var savedPassword: String = ""
 
-    private val gson by lazy { Gson() }
+    private val fallbackGson by lazy { Gson() }
+    private val gson: Gson
+        get() = runCatching { GlobalData.gson }.getOrElse { fallbackGson }
 
     private const val DOMAIN_KEY = "DOMAIN_KEY"
 

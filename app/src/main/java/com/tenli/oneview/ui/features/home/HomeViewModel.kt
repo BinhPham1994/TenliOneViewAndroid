@@ -376,7 +376,7 @@ class HomeViewModel(
 
     private fun fetchRecentEvents() {
         recentEventsJob?.cancel()
-        recentEventsJob = viewModelScope.launch {
+        recentEventsJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val filter = _uiState.value.selectedFilter
                 val serviceId = _uiState.value.selectedServiceId
@@ -472,7 +472,7 @@ class HomeViewModel(
 
     fun fetchDashboardData(isUserRefresh: Boolean = false) {
         dashboardJob?.cancel()
-        dashboardJob = viewModelScope.launch {
+        dashboardJob = viewModelScope.launch(Dispatchers.IO) {
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
 

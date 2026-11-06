@@ -1,5 +1,6 @@
 package com.tenli.oneview.firebase
 
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -11,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.WindowManager
+import android.window.SplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.LinearEasing
@@ -349,11 +351,26 @@ private fun showMissedCallNotification(context: Context, title: String, eId: Str
         flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
     }
 
+    val splashOptions = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+            ActivityOptions.makeBasic()
+                .setSplashScreenStyle(SplashScreen.SPLASH_SCREEN_STYLE_ICON)
+                .toBundle()
+        }
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            ActivityOptions.makeBasic().toBundle().apply {
+                putInt("android.activity.splashScreenStyle", 1)
+            }
+        }
+        else -> null
+    }
+
     val pendingIntent = PendingIntent.getActivity(
         context,
         eId.hashCode() + 1, // ID khác với cuộc gọi đang reo
         intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        splashOptions
     )
 
     val missedCallBuilder = NotificationCompat.Builder(context, MISSED_CALL_CHANNEL_ID) // Dùng kênh cảnh báo thường

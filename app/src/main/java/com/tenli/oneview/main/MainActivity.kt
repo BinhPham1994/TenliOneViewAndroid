@@ -127,10 +127,11 @@ class MainActivity : ComponentActivity() {
 
         // Chỉ kiểm tra cập nhật ở lần tạo đầu (không lặp lại khi recreate do đổi ngôn ngữ)
         if (savedInstanceState == null) {
-            checkUpdate()
             intent.extractEventId()?.let { rawId ->
                 pendingEventNav = PendingEventNav(eventId = rawId, isColdStart = true)
             }
+            // Hoãn kiểm tra cập nhật Play Store sang sau khi Frame 1 đã hiển thị để không chặn mở app
+            window.decorView.post { checkUpdate() }
         }
 
         setContent {

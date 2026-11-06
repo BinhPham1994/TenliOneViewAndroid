@@ -57,6 +57,8 @@ class TenliApp : Application(), ImageLoaderFactory {
                     .maxSizeBytes(IMAGE_DISK_CACHE_BYTES) // disk cache cho ảnh sự kiện & snapshot camera
                     .build()
             }
+            // Luôn ưu tiên đọc ảnh ngay từ DiskCache khi mở app (0ms network wait), không phụ thuộc Cache-Control của server
+            .respectCacheHeaders(false)
             // Tắt crossfade mặc định & cho phép RGB_565 với ảnh không có kênh alpha để cuộn danh sách mượt 60/120fps, giảm 50% RAM bitmap
             .allowRgb565(true)
             .crossfade(false)
@@ -67,28 +69,33 @@ class TenliApp : Application(), ImageLoaderFactory {
         super.onCreate()
         container = DefaultAppContainer(this)
         ThemeManager.init(this)
-        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(LocaleManager.getLocale(this)))
+
+        val desiredLang = LocaleManager.getLocale(this)
+        val currentTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+        if (!currentTags.equals(desiredLang, ignoreCase = true)) {
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(desiredLang))
+        }
 
         GlobalData.apply {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
             gson = GsonBuilder().serializeNulls().create()
         }
+        // Khôi phục ngay phiên đăng nhập vào RAM (< 0.2ms) để SplashViewModel mở thẳng vào Main ở Frame 1
+        runCatching { UserSession.ensureRestored(GlobalData.preferences) }
+
+        // Pre-warm song song các cache từ ổ đĩa lên RAM ngay lập tức để Home / Event / Monitor có dữ liệu ở Frame 1
+        appScope.launch { runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) } }
+        appScope.launch { runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) } }
+        appScope.launch { runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) } }
+
         FcmTokenManager.init(this)
 
-        // Tạo channel đồng bộ (rất nhẹ) để FCM/Service luôn có channel ngay khi cần
-        NotificationChannels.createAll(this)
-
-        // Pre-warm phiên đăng nhập + dữ liệu cache từ ổ đĩa lên RAM ngay khi khởi tạo tiến trình ứng dụng
-        // để FCM chạy ngầm luôn có domain/token tải ảnh và cả 3 màn hình chính có dữ liệu 0ms ở frame đầu tiên
         appScope.launch {
-            runCatching { UserSession.ensureRestored(GlobalData.preferences) }
-            runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) }
-            runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) }
-            runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) }
+            runCatching { NotificationChannels.createAll(this@TenliApp) }
+            setupBackgroundWorkers()
         }
 
         registerActivityLifecycleCallbacks(ForegroundTracker())
-        setupBackgroundWorkers()
     }
 
     /**
@@ -99,13 +106,15 @@ class TenliApp : Application(), ImageLoaderFactory {
         private var startedCount = 0
 
         override fun onActivityStarted(activity: Activity) {
-            if (startedCount++ == 0) container.webSocketManager.onAppForegroundChanged(true)
+            if (startedCount++ == 0) {
+                appScope.launch { container.webSocketManager.onAppForegroundChanged(true) }
+            }
         }
 
         override fun onActivityStopped(activity: Activity) {
             startedCount = (startedCount - 1).coerceAtLeast(0)
             if (startedCount == 0 && !activity.isChangingConfigurations) {
-                container.webSocketManager.onAppForegroundChanged(false)
+                appScope.launch { container.webSocketManager.onAppForegroundChanged(false) }
             }
         }
 

@@ -27,7 +27,11 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
     override val networkMonitor: NetworkMonitor by lazy { NetworkMonitor(context, dispatcherProvider) }
 
     override val webSocketManager: WebSocketManager by lazy {
-        // OkHttpClient WebSocket dùng chung connection pool với REST API (xem LoginAuthClient.webSocketClient)
-        WebSocketManager(LoginAuthClient.webSocketClient, LoginAuthClient.gson, ApiProvider.vmsApi)
+        // Khởi tạo lazy các client/API bên trong IO thread khi kết nối thực sự để không chặn Main thread ở Frame 1
+        WebSocketManager(
+            clientProvider = { LoginAuthClient.webSocketClient },
+            gsonProvider = { LoginAuthClient.gson },
+            vmsApiProvider = { ApiProvider.vmsApi }
+        )
     }
 }

@@ -20,31 +20,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class SplashViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(SplashUiState())
+    private val _uiState = MutableStateFlow(SplashUiState(destination = resolveInitialDestination()))
     val uiState = _uiState.asStateFlow()
 
-    init {
-        restoreSessionAndNavigate()
-    }
-
     /**
-     * Đọc phiên đăng nhập đã lưu (SharedPreferences + parse JSON UserData) trên IO thread.
-     * Splash screen hệ thống được giữ trong lúc destination còn là [SplashDestination.Loading].
+     * Xác định đích điều hướng ngay tức thì từ phiên đăng nhập đã được khôi phục trong [UserSession]
+     * để tắt Splash screen ngay ở Frame 1 thay vì phải chờ nhảy qua IO thread rồi recompose lại.
      */
-    private fun restoreSessionAndNavigate() {
-        viewModelScope.launch {
-            val hasSession = withContext(Dispatchers.IO) {
-                UserSession.ensureRestored(GlobalData.preferences)
-                UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
-            }
-            _uiState.update {
-                it.copy(destination = if (hasSession) SplashDestination.Main else SplashDestination.Login)
-            }
-        }
+    private fun resolveInitialDestination(): SplashDestination {
+        UserSession.ensureRestored(GlobalData.preferences)
+        val hasSession = UserSession.refreshToken.isNotEmpty() && UserSession.userData != null
+        return if (hasSession) SplashDestination.Main else SplashDestination.Login
     }
 
     fun navigateToMain() {
