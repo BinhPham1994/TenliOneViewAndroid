@@ -90,6 +90,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -97,6 +99,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -1387,13 +1390,20 @@ private fun SettingSubPageHeader(
     }
 }
 
-/** Màn hình Giới thiệu: hiển thị icon ứng dụng và phiên bản lấy từ [BuildConfig.VERSION_NAME] */
+/** Màn hình Giới thiệu: hiển thị icon ứng dụng, tên "Tenli OneView" và phiên bản lấy từ [BuildConfig.VERSION_NAME] */
 @Composable
 private fun MobileAboutScreen(
     onBackClick: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
     val backgroundColor = MaterialTheme.colorScheme.background
+    val brandTitle = remember(colors.textTitle, colors.accent) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = colors.textTitle)) { append("Tenli ") }
+            withStyle(SpanStyle(color = colors.accent)) { append("OneView") }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1424,10 +1434,16 @@ private fun MobileAboutScreen(
             )
             Spacer(modifier = Modifier.height(spacing.space2))
             Text(
+                text = brandTitle,
+                style = MaterialTheme.typography.headlineLarge,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(spacing.space6))
+            Text(
                 text = stringResource(id = R.string.intro_version_label, BuildConfig.VERSION_NAME),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground,
+                color = colors.textSubtle,
                 textAlign = TextAlign.Center
             )
         }
