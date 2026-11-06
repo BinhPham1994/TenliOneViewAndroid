@@ -7,6 +7,8 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -20,6 +22,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -56,6 +59,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -84,11 +88,17 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -476,6 +486,7 @@ private fun MobileTopPopupFilledIcon(
 
 private class MobileOverlayEntry(
     val key: Any,
+    var onDismissRequest: () -> Unit,
     var content: @Composable () -> Unit
 ) {
     var isScrimVisible by mutableStateOf(false)
@@ -486,15 +497,20 @@ private class MobileOverlayEntry(
 class MobileOverlayHostState {
     private val entries = mutableStateListOf<MobileOverlayEntry>()
 
-    fun show(key: Any, content: @Composable () -> Unit) {
+    fun show(
+        key: Any,
+        onDismissRequest: () -> Unit = {},
+        content: @Composable () -> Unit
+    ) {
         val idx = entries.indexOfFirst { it.key == key }
         if (idx >= 0) {
+            entries[idx].onDismissRequest = onDismissRequest
             entries[idx].content = content
             entries[idx].isClosing = false
             entries[idx].isScrimVisible = true
             entries[idx].isSheetVisible = true
         } else {
-            entries.add(MobileOverlayEntry(key, content))
+            entries.add(MobileOverlayEntry(key, onDismissRequest, content))
         }
     }
 
@@ -534,6 +550,7 @@ class MobileOverlayHostState {
                 OverlayLayers(
                     isScrimVisible = entry.isScrimVisible,
                     isSheetVisible = entry.isSheetVisible,
+                    onDismissRequest = entry.onDismissRequest,
                     content = entry.content
                 )
             }
@@ -541,22 +558,99 @@ class MobileOverlayHostState {
     }
 }
 
-/** Lớp nền mờ (fade) + nội dung sheet (trượt từ dưới lên) – dùng chung cho host và chế độ fallback. */
+/**
+ * Lớp nền mờ (fade) + nội dung sheet (trượt từ dưới lên + hỗ trợ vuốt từ trên xuống để đóng) –
+ * dùng chung cho host và chế độ fallback.
+ */
 @Composable
 private fun OverlayLayers(
     isScrimVisible: Boolean,
     isSheetVisible: Boolean,
+    onDismissRequest: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val scrimColor = MaterialTheme.appColors.scrim
+    val density = LocalDensity.current
+    val dismissThresholdPx = remember(density) { with(density) { 68.dp.toPx() } }
+    val dismissVelocityPx = remember(density) { with(density) { 420.dp.toPx() } }
+    val scope = rememberCoroutineScope()
+    val currentOnDismiss by rememberUpdatedState(onDismissRequest)
+
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var isDismissedBySwipe by remember { mutableStateOf(false) }
+
+    val finishDrag: (Float) -> Unit = remember(scope, dismissThresholdPx, dismissVelocityPx) {
+        { velocityY ->
+            isDragging = false
+            val shouldDismiss =
+                dragOffsetY >= dismissThresholdPx ||
+                    (dragOffsetY > 12f && velocityY >= dismissVelocityPx)
+            if (shouldDismiss && !isDismissedBySwipe) {
+                isDismissedBySwipe = true
+                currentOnDismiss()
+            } else if (dragOffsetY > 0f && !isDismissedBySwipe) {
+                val startOffset = dragOffsetY
+                scope.launch {
+                    animate(
+                        initialValue = startOffset,
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                    ) { value, _ ->
+                        if (!isDragging && !isDismissedBySwipe) {
+                            dragOffsetY = value
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val nestedScrollConnection = remember(finishDrag) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.UserInput && dragOffsetY > 0f && available.y < 0f) {
+                    val consumedY = maxOf(available.y, -dragOffsetY)
+                    dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && available.y > 0f && !isDismissedBySwipe) {
+                    isDragging = true
+                    dragOffsetY = (dragOffsetY + available.y).coerceAtLeast(0f)
+                    return Offset(0f, available.y)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (dragOffsetY > 0f) {
+                    finishDrag(available.y)
+                    return available
+                }
+                return Velocity.Zero
+            }
+        }
+    }
+
     AnimatedVisibility(
         visible = isScrimVisible,
         enter = ScrimEnterTransition,
         exit = ScrimExitTransition
     ) {
+        val dragScrimAlpha =
+            (1f - (dragOffsetY / (dismissThresholdPx * 3.5f))).coerceIn(0.25f, 1f)
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .graphicsLayer { alpha = dragScrimAlpha }
                 .background(scrimColor)
         )
     }
@@ -565,7 +659,40 @@ private fun OverlayLayers(
         enter = SheetEnterTransition,
         exit = SheetExitTransition
     ) {
-        content()
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .nestedScroll(nestedScrollConnection)
+                .pointerInput(Unit) {
+                    val velocityTracker = VelocityTracker()
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            velocityTracker.resetTracking()
+                            isDragging = true
+                        },
+                        onVerticalDrag = { change, dragAmount ->
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+                            if ((dragAmount > 0f || dragOffsetY > 0f) && !isDismissedBySwipe) {
+                                change.consume()
+                                isDragging = true
+                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                            }
+                        },
+                        onDragEnd = {
+                            val velocityY = velocityTracker.calculateVelocity().y
+                            finishDrag(velocityY)
+                        },
+                        onDragCancel = {
+                            finishDrag(0f)
+                        }
+                    )
+                }
+                .graphicsLayer {
+                    translationY = dragOffsetY
+                }
+        ) {
+            content()
+        }
     }
 }
 
@@ -587,9 +714,13 @@ fun MobileFullScreenOverlay(
 
     if (host != null) {
         DisposableEffect(host, key) {
-            host.show(key) {
-                currentContentState.value.invoke()
-            }
+            host.show(
+                key = key,
+                onDismissRequest = { currentOnDismiss() },
+                content = {
+                    currentContentState.value.invoke()
+                }
+            )
             onDispose {
                 host.hide(key)
             }
@@ -606,6 +737,7 @@ fun MobileFullScreenOverlay(
             OverlayLayers(
                 isScrimVisible = isScrimVisible,
                 isSheetVisible = isSheetVisible,
+                onDismissRequest = { currentOnDismiss() },
                 content = content
             )
         }

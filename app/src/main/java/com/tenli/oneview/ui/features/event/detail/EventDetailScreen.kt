@@ -22,6 +22,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -787,7 +788,7 @@ private fun DetailHeader(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // Chừa chỗ cho nút đóng 32dp bên phải để tiêu đề luôn căn giữa
+                // Chừa đều 2 bên theo kích thước nút đóng 32dp bên phải để tiêu đề luôn căn chính giữa màn hình
                 .padding(horizontal = spacing.space32 + spacing.space6)
                 .align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -800,7 +801,12 @@ private fun DetailHeader(
                 color = colors.textStrong,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                modifier = Modifier.basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 1200,
+                    repeatDelayMillis = 1600,
+                    velocity = 28.dp
+                )
             )
 
             if (showBackToOriginal) {
