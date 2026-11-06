@@ -8,6 +8,7 @@ import androidx.core.content.edit
 import com.google.android.gms.tasks.Task
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
+import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
@@ -71,6 +72,22 @@ object FcmTokenManager {
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val registerMutex = Mutex()
 
+    private inline fun logInfo(msg: () -> String) {
+        if (BuildConfig.DEBUG) Log.i(LOG_TAG, msg())
+    }
+
+    private inline fun logWarn(throwable: Throwable? = null, msg: () -> String) {
+        if (BuildConfig.DEBUG) {
+            if (throwable != null) Log.w(LOG_TAG, msg(), throwable) else Log.w(LOG_TAG, msg())
+        }
+    }
+
+    private inline fun logError(throwable: Throwable? = null, msg: () -> String) {
+        if (BuildConfig.DEBUG) {
+            if (throwable != null) Log.e(LOG_TAG, msg(), throwable) else Log.e(LOG_TAG, msg())
+        }
+    }
+
     /**
      * Khởi tạo trong [com.tenli.oneview.TenliApp.onCreate].
      */
@@ -95,17 +112,16 @@ object FcmTokenManager {
      */
     fun onNewToken(newToken: String) {
         val trimmed = newToken.trim()
-        Log.i(LOG_TAG, "[onNewToken] Firebase cấp FCM token mặc định mới: $trimmed")
+        logInfo { "[onNewToken] Firebase cấp FCM token mặc định mới: $trimmed" }
         if (trimmed.isEmpty()) return
         ioScope.launch {
             UserSession.ensureRestored()
             if (UserSession.accessToken.isNotEmpty() && isPushEnabledInPrefs()) {
                 registerDevicePushToken(force = true, overrideToken = trimmed)
             } else {
-                Log.w(
-                    LOG_TAG,
+                logWarn {
                     "[onNewToken] Chưa đăng ký lên server vì hasAccessToken=${UserSession.accessToken.isNotEmpty()}, pushEnabled=${isPushEnabledInPrefs()}"
-                )
+                }
             }
         }
     }
@@ -124,17 +140,16 @@ object FcmTokenManager {
                 val currentUserKey = currentUserIdentifier()
                 val currentDomain = UserSession.domain.trim()
 
-                Log.i(
-                    LOG_TAG,
+                logInfo {
                     "=== [BẮT ĐẦU ĐĂNG KÝ FCM TOKEN] force=$force | domain=$currentDomain | user=$currentUserKey | hasAccessToken=${UserSession.accessToken.isNotEmpty()} ==="
-                )
+                }
 
                 if (UserSession.accessToken.isEmpty() || currentDomain.isEmpty()) {
-                    Log.w(LOG_TAG, "[BỎ QUA] Chưa đăng nhập (accessToken hoặc domain rỗng), không thể gọi API đăng ký FCM token")
+                    logWarn { "[BỎ QUA] Chưa đăng nhập (accessToken hoặc domain rỗng), không thể gọi API đăng ký FCM token" }
                     return@withLock null
                 }
                 if (!isPushEnabledInPrefs()) {
-                    Log.w(LOG_TAG, "[BỎ QUA] Người dùng đang tắt nhận thông báo trong cài đặt")
+                    logWarn { "[BỎ QUA] Người dùng đang tắt nhận thông báo trong cài đặt" }
                     return@withLock null
                 }
 
@@ -149,10 +164,9 @@ object FcmTokenManager {
                 if (prefs != null && defaultAppId.isNotEmpty()) {
                     val lastAppId = prefs.getString(PREF_LAST_GOOGLE_APP_ID, null)
                     if (lastAppId != defaultAppId) {
-                        Log.i(
-                            LOG_TAG,
+                        logInfo {
                             "🔄 [GOOGLE APP ID THAY ĐỔI] $lastAppId -> $defaultAppId, xoá FCM token cũ và cấp mới theo project '$defaultProjectId'..."
-                        )
+                        }
                         awaitDeleteDefaultFcmToken()
                         prefs.edit {
                             putString(PREF_LAST_GOOGLE_APP_ID, defaultAppId)
@@ -177,11 +191,10 @@ object FcmTokenManager {
                         lastDomain == currentDomain &&
                         earlyNow - lastTime < REGISTER_DEDUP_WINDOW_MS
                     ) {
-                        val remainMin = (REGISTER_DEDUP_WINDOW_MS - (earlyNow - lastTime)) / 60_000L
-                        Log.i(
-                            LOG_TAG,
+                        logInfo {
+                            val remainMin = (REGISTER_DEDUP_WINDOW_MS - (earlyNow - lastTime)) / 60_000L
                             "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Bỏ qua gọi mạng vì token đã đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (còn hiệu lực cache ${remainMin} phút)"
-                        )
+                        }
                         return@withLock lastToken
                     }
                 }
@@ -198,10 +211,9 @@ object FcmTokenManager {
                         val srvFb = pubResp.body()?.firebase
                         serverProjectId = srvFb?.projectId?.trim()?.takeIf { it.isNotEmpty() }
                         serverSenderId = srvFb?.messagingSenderId?.trim()?.takeIf { it.isNotEmpty() }
-                        Log.i(
-                            LOG_TAG,
+                        logInfo {
                             "[Firebase Config] App google-services.json: projectId=$defaultProjectId (senderId=$defaultSenderId) | Server PublicConfig: projectId=$serverProjectId (senderId=$serverSenderId)"
-                        )
+                        }
                         if (prefs != null) {
                             prefs.edit {
                                 putString(PREF_CACHED_SERVER_DOMAIN, currentDomain)
@@ -215,10 +227,10 @@ object FcmTokenManager {
                             }
                         }
                     } else {
-                        Log.w(LOG_TAG, "[Server PublicConfig] GET /ts/api/v1/config/public trả về HTTP ${pubResp.code()}")
+                        logWarn { "[Server PublicConfig] GET /ts/api/v1/config/public trả về HTTP ${pubResp.code()}" }
                     }
                 }.onFailure { e ->
-                    Log.w(LOG_TAG, "[Server PublicConfig] Lỗi khi kiểm tra /ts/api/v1/config/public: ${e.message}")
+                    logWarn { "[Server PublicConfig] Lỗi khi kiểm tra /ts/api/v1/config/public: ${e.message}" }
                 }
 
                 // Nếu gọi /ts/api/v1/config/public thất bại (vd. mất mạng thoáng qua khi chạy ngầm KeepAliveWorker),
@@ -231,23 +243,20 @@ object FcmTokenManager {
                         cachedDomain == currentDomain -> {
                             serverSenderId = prefs.getString(PREF_CACHED_SERVER_SENDER_ID, null)?.takeIf { it.isNotBlank() }
                             serverProjectId = prefs.getString(PREF_CACHED_SERVER_PROJECT_ID, null)?.takeIf { it.isNotBlank() }
-                            Log.i(
-                                LOG_TAG,
+                            logInfo {
                                 "[Firebase Config Cache] Dùng lại cấu hình đã lưu cho domain=$currentDomain: projectId=$serverProjectId, senderId=$serverSenderId"
-                            )
+                            }
                         }
                         regDomain == currentDomain -> {
                             serverSenderId = prefs.getString(PREF_REGISTERED_SENDER, null)?.takeIf { it.isNotBlank() }
-                            Log.i(
-                                LOG_TAG,
+                            logInfo {
                                 "[Firebase Config Cache] Dùng lại senderId đã đăng ký cho domain=$currentDomain: senderId=$serverSenderId"
-                            )
+                            }
                         }
                         !force -> {
-                            Log.w(
-                                LOG_TAG,
+                            logWarn {
                                 "[BỎ QUA] Chưa xác định được Firebase Config của server '$currentDomain' khi chạy ngầm, đợi lần kiểm tra sau"
-                            )
+                            }
                             return@withLock null
                         }
                     }
@@ -264,10 +273,9 @@ object FcmTokenManager {
                 val token = if (useCustomSender) {
                     val ctx = appContext
                     if (ctx != null) {
-                        Log.i(
-                            LOG_TAG,
+                        logInfo {
                             "🔄 [ĐỒNG BỘ SENDER ID THEO SERVER] Xin FCM token cho project='$targetProjectId' (senderId=$targetSenderId) qua Google Play Services..."
-                        )
+                        }
                         awaitTokenViaGmsRpc(ctx, targetSenderId)
                     } else null
                 } else {
@@ -277,17 +285,15 @@ object FcmTokenManager {
                 }
 
                 if (token.isNullOrBlank()) {
-                    Log.e(
-                        LOG_TAG,
+                    logError {
                         "❌ [LỖI] Không lấy được FCM token cho project '$targetProjectId' (senderId=$targetSenderId)!"
-                    )
+                    }
                     return@withLock null
                 }
 
-                Log.i(
-                    LOG_TAG,
+                logInfo {
                     "[FCM Token thiết bị] projectId=$targetProjectId | senderId=$targetSenderId | token=$token"
-                )
+                }
 
                 prefs?.edit { putString(PREF_LATEST_DEVICE_TOKEN, token) }
 
@@ -305,11 +311,10 @@ object FcmTokenManager {
                         lastSender == targetSenderId &&
                         now - lastTime < REGISTER_DEDUP_WINDOW_MS
                     ) {
-                        val remainMin = (REGISTER_DEDUP_WINDOW_MS - (now - lastTime)) / 60_000L
-                        Log.i(
-                            LOG_TAG,
+                        logInfo {
+                            val remainMin = (REGISTER_DEDUP_WINDOW_MS - (now - lastTime)) / 60_000L
                             "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Token đã được đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (senderId=$targetSenderId, còn hiệu lực cache ${remainMin} phút)"
-                        )
+                        }
                         return@withLock token
                     }
                 }
@@ -320,10 +325,9 @@ object FcmTokenManager {
                     status = 1,
                     clientId = "oneview-web"
                 )
-                Log.i(
-                    LOG_TAG,
+                logInfo {
                     "[GỬI API] POST $currentDomain/ts/api/v1/notification-tokens | payload={type=${payload.type}, status=${payload.status}, client_id=${payload.clientId}, senderId=$targetSenderId, token=${token.take(24)}...}"
-                )
+                }
 
                 val response = ApiProvider.bsApi.registerNotificationToken(payload)
 
@@ -335,21 +339,19 @@ object FcmTokenManager {
                         putString(PREF_REGISTERED_SENDER, targetSenderId)
                         putLong(PREF_REGISTERED_TIME, now)
                     }
-                    Log.i(
-                        LOG_TAG,
+                    logInfo {
                         "✅ [ĐĂNG KÝ THÀNH CÔNG] POST /ts/api/v1/notification-tokens -> HTTP ${response.code()} | projectId=$targetProjectId (senderId=$targetSenderId) | response=${response.body()}"
-                    )
+                    }
                     token
                 } else {
-                    val errBody = runCatching { response.errorBody()?.string() }.getOrNull()
-                    Log.e(
-                        LOG_TAG,
+                    logError {
+                        val errBody = runCatching { response.errorBody()?.string() }.getOrNull()
                         "❌ [ĐĂNG KÝ THẤT BẠI] POST /ts/api/v1/notification-tokens -> HTTP ${response.code()} | errorBody=$errBody"
-                    )
+                    }
                     null
                 }
             } catch (t: Throwable) {
-                Log.e(LOG_TAG, "❌ [EXCEPTION KHI ĐĂNG KÝ FCM TOKEN] ${t.message}", t)
+                logError(t) { "❌ [EXCEPTION KHI ĐĂNG KÝ FCM TOKEN] ${t.message}" }
                 null
             }
         }
@@ -383,38 +385,35 @@ object FcmTokenManager {
                 }
 
                 if (!targetToken.isNullOrBlank() && UserSession.accessToken.isNotEmpty()) {
-                    Log.i(
-                        LOG_TAG,
+                    logInfo {
                         "[HUỶ ĐĂNG KÝ FCM] DELETE /ts/api/v1/notification-tokens/${targetToken.take(24)}... | user=${currentUserIdentifier()}"
-                    )
+                    }
                     withTimeoutOrNull(UNREGISTER_TIMEOUT_MS) {
                         runCatching {
                             ApiProvider.bsApi.unregisterNotificationToken(targetToken)
                         }.onSuccess { resp ->
-                            val errBody = if (!resp.isSuccessful) {
-                                runCatching { resp.errorBody()?.string() }.getOrNull()
-                            } else null
-                            Log.i(
-                                LOG_TAG,
+                            logInfo {
+                                val errBody = if (!resp.isSuccessful) {
+                                    runCatching { resp.errorBody()?.string() }.getOrNull()
+                                } else null
                                 "[HUỶ ĐĂNG KÝ FCM] Kết quả HTTP ${resp.code()}${if (errBody != null) " | errorBody=$errBody" else ""}"
-                            )
+                            }
                         }.onFailure { err ->
-                            Log.w(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Lỗi: ${err.message}")
+                            logWarn { "[HUỶ ĐĂNG KÝ FCM] Lỗi: ${err.message}" }
                         }
                     }
                 } else {
-                    Log.w(
-                        LOG_TAG,
+                    logWarn {
                         "[HUỶ ĐĂNG KÝ FCM] Bỏ qua gọi DELETE vì hasToken=${!targetToken.isNullOrBlank()}, hasAccessToken=${UserSession.accessToken.isNotEmpty()}"
-                    )
+                    }
                 }
 
                 if (deleteLocalToken) {
-                    Log.i(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Xoá FCM token cục bộ (FirebaseMessaging.deleteToken) để cấp mới cho phiên sau...")
+                    logInfo { "[HUỶ ĐĂNG KÝ FCM] Xoá FCM token cục bộ (FirebaseMessaging.deleteToken) để cấp mới cho phiên sau..." }
                     awaitDeleteDefaultFcmToken()
                 }
             } catch (t: Throwable) {
-                Log.w(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Exception: ${t.message}", t)
+                logWarn(t) { "[HUỶ ĐĂNG KÝ FCM] Exception: ${t.message}" }
             }
         }
     }
@@ -445,7 +444,7 @@ object FcmTokenManager {
             cachedGmsRpcSendMethod = method
             instance to method
         }.onFailure { e ->
-            Log.e(LOG_TAG, "❌ Không thể khởi tạo com.google.android.gms.cloudmessaging.Rpc: ${e.message}", e)
+            logError(e) { "❌ Không thể khởi tạo com.google.android.gms.cloudmessaging.Rpc: ${e.message}" }
         }.getOrNull()
     }
 
@@ -497,24 +496,21 @@ object FcmTokenManager {
                             if (!cleanToken.isNullOrBlank()) {
                                 cont.resume(cleanToken)
                             } else {
-                                val err = resBundle?.getString("error")
-                                Log.e(
-                                    LOG_TAG,
+                                logError {
+                                    val err = resBundle?.getString("error")
                                     "❌ GmsRpc không trả về token cho senderId=$senderId: error=$err, bundle=$resBundle"
-                                )
+                                }
                                 cont.resume(null)
                             }
                         } else {
-                            Log.e(
-                                LOG_TAG,
-                                "❌ GmsRpc thất bại cho senderId=$senderId: ${resultTask.exception?.message}",
-                                resultTask.exception
-                            )
+                            logError(resultTask.exception) {
+                                "❌ GmsRpc thất bại cho senderId=$senderId: ${resultTask.exception?.message}"
+                            }
                             cont.resume(null)
                         }
                     }
                 } catch (t: Throwable) {
-                    Log.e(LOG_TAG, "❌ Lỗi khi gọi GmsRpc cho senderId=$senderId: ${t.message}", t)
+                    logError(t) { "❌ Lỗi khi gọi GmsRpc cho senderId=$senderId: ${t.message}" }
                     if (cont.isActive) cont.resume(null)
                 }
             }
@@ -546,12 +542,12 @@ object FcmTokenManager {
                     if (task.isSuccessful) {
                         cont.resume(task.result?.trim()?.takeIf { it.isNotEmpty() })
                     } else {
-                        Log.e(LOG_TAG, "❌ FirebaseMessaging.getInstance().token thất bại: ${task.exception?.message}", task.exception)
+                        logError(task.exception) { "❌ FirebaseMessaging.getInstance().token thất bại: ${task.exception?.message}" }
                         cont.resume(null)
                     }
                 }
             } catch (t: Throwable) {
-                Log.e(LOG_TAG, "❌ Exception khi gọi FirebaseMessaging.getInstance().token: ${t.message}", t)
+                logError(t) { "❌ Exception khi gọi FirebaseMessaging.getInstance().token: ${t.message}" }
                 if (cont.isActive) cont.resume(null)
             }
         }

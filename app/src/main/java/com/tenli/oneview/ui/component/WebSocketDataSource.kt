@@ -6,6 +6,7 @@ import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSpec
+import com.tenli.oneview.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -38,7 +39,7 @@ class WebSocketDataSource(
         if (urlStr.startsWith("http://")) urlStr = urlStr.replaceFirst("http://", "ws://")
         if (urlStr.startsWith("https://")) urlStr = urlStr.replaceFirst("https://", "wss://")
         
-        Log.d("WebSocketDataSource", "Connecting to WebSocket: $urlStr")
+        if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "Connecting to WebSocket: $urlStr")
         val uri = runCatching { java.net.URI(urlStr) }.getOrNull()
         val scheme = if (uri?.scheme == "wss") "https" else "http"
         val host = uri?.host ?: ""
@@ -63,7 +64,7 @@ class WebSocketDataSource(
 
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("WebSocketDataSource", "WebSocket Opened")
+                if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Opened")
             }
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
                 if (isOpen) {
@@ -75,12 +76,12 @@ class WebSocketDataSource(
                 }
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
+                if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
                 isOpen = false
                 dataQueue.offer(ByteArray(0)) // Unblock read
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("WebSocketDataSource", "WebSocket Failure", t)
+                if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
                 isOpen = false
                 error = IOException("WebSocket failure", t)
                 dataQueue.offer(ByteArray(0)) // Unblock read
@@ -128,7 +129,7 @@ class WebSocketDataSource(
     override fun getUri(): Uri? = dataSpec?.uri
 
     override fun close() {
-        Log.d("WebSocketDataSource", "Closing WebSocket")
+        if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "Closing WebSocket")
         val wasOpen = isOpen
         isOpen = false
         try {

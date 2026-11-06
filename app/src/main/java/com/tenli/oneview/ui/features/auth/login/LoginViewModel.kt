@@ -67,6 +67,13 @@ class LoginViewModel(
 
     fun onRememberMeChanged(rememberMe: Boolean) {
         _uiState.update { it.copy(rememberMe = rememberMe) }
+        if (!rememberMe) {
+            GlobalData.preferences.edit {
+                putBoolean(AppKeys.REMEMBER_ME_KEY, false)
+                remove(AppKeys.USERNAME_KEY)
+                remove(AppKeys.PASSWORD_KEY)
+            }
+        }
     }
 
     fun onDomainChanged(domain: String) {
@@ -182,8 +189,13 @@ class LoginViewModel(
                 putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
                 putString(DOMAIN_KEY, formattedDomain)
                 putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
-                putString(AppKeys.USERNAME_KEY, username)
-                putString(AppKeys.PASSWORD_KEY, password)
+                if (rememberMe) {
+                    putString(AppKeys.USERNAME_KEY, username)
+                    putString(AppKeys.PASSWORD_KEY, password)
+                } else {
+                    remove(AppKeys.USERNAME_KEY)
+                    remove(AppKeys.PASSWORD_KEY)
+                }
                 remove("push_notifications_enabled")
             }
         }

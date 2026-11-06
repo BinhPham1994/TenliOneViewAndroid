@@ -26,7 +26,9 @@ class EventMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.i(FcmTokenManager.LOG_TAG, "=== [EventMessagingService.onNewToken] token=$token ===")
+        if (BuildConfig.DEBUG) {
+            Log.i(FcmTokenManager.LOG_TAG, "=== [EventMessagingService.onNewToken] token=$token ===")
+        }
         FcmTokenManager.onNewToken(token)
     }
 
@@ -36,10 +38,12 @@ class EventMessagingService : FirebaseMessagingService() {
 
         val data = remoteMessage.data
         val notif = remoteMessage.notification
-        Log.i(
-            FcmTokenManager.LOG_TAG,
-            "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
-        )
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                FcmTokenManager.LOG_TAG,
+                "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
+            )
+        }
         val isCall = data["makeCall"].equals("true", ignoreCase = true) ||
             data["alarmMode"].equals("call", ignoreCase = true)
 
@@ -60,10 +64,12 @@ class EventMessagingService : FirebaseMessagingService() {
         val imageUrl = resolveNotificationImageUrl(rawImageUrl)
         val eventId = (data["eId"] ?: data["eventId"] ?: data["event_id"] ?: data["id"]).orEmpty()
 
-        Log.i(
-            FcmTokenManager.LOG_TAG,
-            "[XỬ LÝ NOTIFY] isCall=$isCall | eventId=$eventId | title='$title' | body='$body' | imageUrl=$imageUrl"
-        )
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                FcmTokenManager.LOG_TAG,
+                "[XỬ LÝ NOTIFY] isCall=$isCall | eventId=$eventId | title='$title' | body='$body' | imageUrl=$imageUrl"
+            )
+        }
 
         if (isCall) {
             // Firebase tự động cung cấp sentTime (miliseconds)
@@ -191,12 +197,16 @@ class EventMessagingService : FirebaseMessagingService() {
         try {
             val areEnabled = manager.areNotificationsEnabled()
             manager.notify(id, builder.build())
-            Log.i(
-                FcmTokenManager.LOG_TAG,
-                "✅ [HIỂN THỊ NOTIFY LÊN TRAY] notificationId=$id | areNotificationsEnabled=$areEnabled"
-            )
+            if (BuildConfig.DEBUG) {
+                Log.i(
+                    FcmTokenManager.LOG_TAG,
+                    "✅ [HIỂN THỊ NOTIFY LÊN TRAY] notificationId=$id | areNotificationsEnabled=$areEnabled"
+                )
+            }
         } catch (e: SecurityException) {
-            Log.e(FcmTokenManager.LOG_TAG, "❌ [THIẾU QUYỀN POST_NOTIFICATIONS] ${e.message}", e)
+            if (BuildConfig.DEBUG) {
+                Log.e(FcmTokenManager.LOG_TAG, "❌ [THIẾU QUYỀN POST_NOTIFICATIONS] ${e.message}", e)
+            }
         }
     }
 

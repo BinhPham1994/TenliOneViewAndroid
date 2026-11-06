@@ -23,9 +23,9 @@
               <option name="connection">
                 <ConnectionSetting>
                   <option name="appId" value="com.tenli.oneview" />
-                  <option name="mobileSdkAppId" value="1:139855279628:android:d30de9b73308c848dce029" />
-                  <option name="projectId" value="kakoi-5b330" />
-                  <option name="projectNumber" value="139855279628" />
+                  <option name="mobileSdkAppId" value="1:106599562247:android:4c59633885959055323ea2" />
+                  <option name="projectId" value="kk-dev-6fde6" />
+                  <option name="projectNumber" value="106599562247" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />
