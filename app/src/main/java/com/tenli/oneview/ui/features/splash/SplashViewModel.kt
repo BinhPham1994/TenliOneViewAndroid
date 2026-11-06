@@ -41,9 +41,12 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
+        val needsCleanup = UserSession.accessToken.isNotEmpty() || UserSession.refreshToken.isNotEmpty()
         _uiState.update { it.copy(destination = SplashDestination.Login) }
 
-        // Huỷ đăng ký FCM token + xoá session/cache ngoài Main thread để chuyển màn không bị giật
+        if (!needsCleanup) return
+
+        // Dự phòng trường hợp gọi trực tiếp SplashViewModel.logout() mà chưa chạy MainViewModel.logout()
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
             FcmTokenManager.unregisterDevicePushToken()

@@ -116,6 +116,7 @@ import com.tenli.oneview.ui.features.event.EventScreen
 import com.tenli.oneview.ui.features.event.EventViewModel
 import com.tenli.oneview.ui.features.home.HomeScreen
 import com.tenli.oneview.ui.features.home.HomeViewModel
+import com.tenli.oneview.ui.features.monitor.MonitorLiveCameraOverlay
 import com.tenli.oneview.ui.features.monitor.MonitorScreen
 import com.tenli.oneview.ui.features.monitor.MonitorViewModel
 import com.tenli.oneview.ui.theme.LucideIcons
@@ -204,6 +205,7 @@ fun MainScreen(
     val saveableStateHolder = rememberSaveableStateHolder()
     var showBottomBar by remember { mutableStateOf(true) }
     var showNotificationConfigPage by remember { mutableStateOf(false) }
+    var isLiveCameraPageOpen by remember { mutableStateOf(false) }
     val overlayHostState = remember { MobileOverlayHostState() }
 
     val homeListState = rememberLazyListState()
@@ -274,6 +276,7 @@ fun MainScreen(
     val currentTabState by rememberUpdatedState(uiState.currentTab)
     val showBottomBarState by rememberUpdatedState(showBottomBar)
     val showNotificationConfigPageState by rememberUpdatedState(showNotificationConfigPage)
+    val isLiveCameraPageOpenState by rememberUpdatedState(isLiveCameraPageOpen)
 
     val isScreenUncovered = !showNotificationConfigPage && !isOverlayCovered
     val isHomeActive = uiState.currentTab == MainTab.Home && isScreenUncovered
@@ -297,6 +300,7 @@ fun MainScreen(
         }
     }
     val onMonitorFullscreenChange: (Boolean) -> Unit = remember { { isFullscreen: Boolean -> showBottomBar = !isFullscreen } }
+    val onLiveCameraPageOpenChange: (Boolean) -> Unit = remember { { isOpen: Boolean -> isLiveCameraPageOpen = isOpen } }
     val onLogoutClick: () -> Unit = remember(viewModel) { { viewModel.logout() } }
     val onOpenNotificationConfig: () -> Unit = remember(viewModel) {
         {
@@ -348,7 +352,12 @@ fun MainScreen(
     val onBottomTabClick: (MainTab) -> Unit = remember(switchToTab) { { tab: MainTab -> switchToTab(tab, false) } }
 
     // Khi đang ở tab khác Trang chủ (Sự kiện, Trực tiếp, Cài đặt), ấn Back sẽ quay về tab Trang chủ trước
-    BackHandler(enabled = uiState.currentTab != MainTab.Home && showBottomBar && !showNotificationConfigPage) {
+    BackHandler(
+        enabled = uiState.currentTab != MainTab.Home &&
+            showBottomBar &&
+            !showNotificationConfigPage &&
+            !isLiveCameraPageOpen
+    ) {
         switchToTab(MainTab.Home, false)
     }
 
@@ -406,6 +415,7 @@ fun MainScreen(
                             // or in the bottom navigation bar zone, or when video is in fullscreen
                             if (!showBottomBarState ||
                                 showNotificationConfigPageState ||
+                                isLiveCameraPageOpenState ||
                                 overlayHostState.hasOverlays ||
                                 startX < edgeBufferPx ||
                                 startX > widthPx - edgeBufferPx ||
@@ -488,6 +498,15 @@ fun MainScreen(
                         }
                     }
             ) {
+                val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab, activeTab, outgoingTab) {
+                    buildSet {
+                        addAll(mountedTabs)
+                        add(uiState.currentTab)
+                        add(activeTab)
+                        outgoingTab?.let { add(it) }
+                    }
+                }
+
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
                 // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
                 // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
@@ -497,15 +516,6 @@ fun MainScreen(
                         .padding(top = innerPadding.calculateTopPadding())
                         .zIndex(1f)
                 ) {
-                    val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab, activeTab, outgoingTab) {
-                        buildSet {
-                            addAll(mountedTabs)
-                            add(uiState.currentTab)
-                            add(activeTab)
-                            outgoingTab?.let { add(it) }
-                        }
-                    }
-
                     OrderedMainTabs.forEach { tab ->
                         if (tab in effectiveMountedTabs) {
                             Box(
@@ -598,6 +608,22 @@ fun MainScreen(
                             onScrollToTop = scrollTabToTop
                         )
                     }
+                }
+
+                // Full-screen Live Camera Page sliding in from right & sliding out to right at zIndex(30f)
+                // (above MainBottomNavigation at zIndex(10f), identical to MobileNotificationConfigScreen)
+                if (MainTab.Monitor in effectiveMountedTabs) {
+                    val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+                    MonitorLiveCameraOverlay(
+                        viewModel = monitorViewModel,
+                        isTabActive = isMonitorActive,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(top = innerPadding.calculateTopPadding())
+                            .zIndex(30f),
+                        onFullscreenChange = onMonitorFullscreenChange,
+                        onLiveScreenOpenChange = onLiveCameraPageOpenChange
+                    )
                 }
 
                 // Full-screen Notification Configuration Page sliding in from right & sliding out to right (matching MobileNotificationConfigModal.vue)

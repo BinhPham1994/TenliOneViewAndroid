@@ -1,5 +1,7 @@
 package com.tenli.oneview.model.network
 
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 
 // ==================== Plate & Plate Group ====================
@@ -127,38 +129,24 @@ data class VmsEventCountByTypeModel(
 // ==================== Event Config & Notification Settings ====================
 
 data class UserNotificationGlobalSetting(
-    var enabled: Boolean = true,
-    @SerializedName("pause_until")
-    var pauseUntil: Any? = null
-)
-
-data class UserNotificationAlarmMode(
-    var default: String? = "push"
-)
-
-data class UserNotificationDetailSetting(
     var enabled: Boolean? = true,
-    @SerializedName("alarm_mode", alternate = ["alarmMode"])
-    var alarmMode: UserNotificationAlarmMode? = null
-)
-
-data class UserNotificationItemSetting(
-    var notification: UserNotificationDetailSetting? = null
-)
-
-data class UserNotificationOverrides(
-    @SerializedName("event_type_groups")
-    var eventTypeGroups: MutableMap<String, UserNotificationItemSetting>? = mutableMapOf(),
-    @SerializedName("event_types")
-    var eventTypes: MutableMap<String, UserNotificationItemSetting>? = mutableMapOf()
+    @SerializedName("pause_until")
+    var pauseUntil: JsonElement? = null
 )
 
 data class UserNotificationSettingsModel(
-    var global: UserNotificationGlobalSetting = UserNotificationGlobalSetting(),
-    var overrides: UserNotificationOverrides = UserNotificationOverrides(),
+    var global: UserNotificationGlobalSetting? = UserNotificationGlobalSetting(),
+    var overrides: JsonElement? = defaultNotificationOverridesJson(),
     @SerializedName("global_scripts")
-    var globalScripts: List<Any>? = null
-)
+    var globalScripts: JsonElement? = null
+) {
+    companion object {
+        fun defaultNotificationOverridesJson(): JsonObject = JsonObject().apply {
+            add("event_type_groups", JsonObject())
+            add("event_types", JsonObject())
+        }
+    }
+}
 
 data class NotificationTokenRegisterModel(
     val token: String,

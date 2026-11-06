@@ -333,10 +333,12 @@ object FcmTokenManager {
     }
 
     /**
-     * Huỷ đăng ký FCM token trên backend `DELETE /ts/api/v1/notification-tokens/{token}`.
+     * Huỷ đăng ký FCM token trên backend `DELETE /ts/api/v1/notification-tokens/{token}`
+     * và xoá token cục bộ (`FirebaseMessaging.deleteToken()`) giống `unregisterDevicePushToken` trong `firebaseMessaging.ts`
+     * để khi đăng nhập tài khoản mới trên cùng thiết bị sẽ được cấp FCM token mới hoàn toàn.
      * Lưu ý: Phải gọi **trước khi** xoá `UserSession.accessToken` khi đăng xuất để request có `Bearer` token hợp lệ.
      */
-    suspend fun unregisterDevicePushToken(deleteLocalToken: Boolean = false) = withContext(Dispatchers.IO) {
+    suspend fun unregisterDevicePushToken(deleteLocalToken: Boolean = true) = withContext(Dispatchers.IO) {
         registerMutex.withLock {
             try {
                 UserSession.ensureRestored()
@@ -352,15 +354,27 @@ object FcmTokenManager {
                     remove(PREF_REGISTERED_DOMAIN)
                     remove(PREF_REGISTERED_SENDER)
                     remove(PREF_REGISTERED_TIME)
+                    if (deleteLocalToken) {
+                        remove(PREF_LATEST_DEVICE_TOKEN)
+                    }
                 }
 
                 if (!targetToken.isNullOrBlank() && UserSession.accessToken.isNotEmpty()) {
-                    Log.i(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] DELETE /ts/api/v1/notification-tokens/${targetToken.take(24)}...")
+                    Log.i(
+                        LOG_TAG,
+                        "[HUỶ ĐĂNG KÝ FCM] DELETE /ts/api/v1/notification-tokens/${targetToken.take(24)}... | user=${currentUserIdentifier()}"
+                    )
                     withTimeoutOrNull(UNREGISTER_TIMEOUT_MS) {
                         runCatching {
                             ApiProvider.bsApi.unregisterNotificationToken(targetToken)
                         }.onSuccess { resp ->
-                            Log.i(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Kết quả HTTP ${resp.code()}")
+                            val errBody = if (!resp.isSuccessful) {
+                                runCatching { resp.errorBody()?.string() }.getOrNull()
+                            } else null
+                            Log.i(
+                                LOG_TAG,
+                                "[HUỶ ĐĂNG KÝ FCM] Kết quả HTTP ${resp.code()}${if (errBody != null) " | errorBody=$errBody" else ""}"
+                            )
                         }.onFailure { err ->
                             Log.w(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Lỗi: ${err.message}")
                         }
@@ -373,6 +387,7 @@ object FcmTokenManager {
                 }
 
                 if (deleteLocalToken) {
+                    Log.i(LOG_TAG, "[HUỶ ĐĂNG KÝ FCM] Xoá FCM token cục bộ (FirebaseMessaging.deleteToken) để cấp mới cho phiên sau...")
                     awaitDeleteDefaultFcmToken()
                 }
             } catch (t: Throwable) {

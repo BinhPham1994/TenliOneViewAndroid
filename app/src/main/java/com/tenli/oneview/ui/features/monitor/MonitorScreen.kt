@@ -72,9 +72,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
@@ -135,8 +138,8 @@ private const val LIVE_STAGE_SNAPSHOT_WIDTH_PX = 1280
 private const val LIVE_STAGE_SNAPSHOT_HEIGHT_PX = 720
 private const val LIVE_PAGE_ENTER_DURATION_MS = 280
 private const val LIVE_PAGE_EXIT_DURATION_MS = 240
-private val LivePageEnterEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
-private val LivePageExitEasing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
+private val LivePageEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val LivePageExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
@@ -171,17 +174,8 @@ fun MonitorScreen(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
-    // fullscreenIndex != null: 1x1 single-camera landscape fullscreen
-    var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
-
     val activeLiveCamera = uiState.selectedCameras.getOrNull(0)
     val isLiveScreenOpen = activeLiveCamera != null
-
-    // Giữ lại thông tin camera cuối cùng trong lúc hiệu ứng trượt đóng màn hình Live đang chạy
-    var displayedLiveCamera by remember { mutableStateOf<SelectedCamera?>(null) }
-    if (activeLiveCamera != null) {
-        displayedLiveCamera = activeLiveCamera
-    }
 
     var wasDeactivated by remember { mutableStateOf(true) }
     LaunchedEffect(isTabActive) {
@@ -189,7 +183,6 @@ fun MonitorScreen(
         if (!isTabActive) {
             dismissKeyboard()
             wasDeactivated = true
-            fullscreenIndex = null
         } else if (wasDeactivated) {
             wasDeactivated = false
             viewModel.refreshActiveStreams()
@@ -197,17 +190,10 @@ fun MonitorScreen(
         }
     }
 
-    val isSingleFullscreen = fullscreenIndex == 0 && isLiveScreenOpen
-
-    LaunchedEffect(isLiveScreenOpen, isSingleFullscreen) {
+    LaunchedEffect(isLiveScreenOpen) {
         if (isLiveScreenOpen) {
             dismissKeyboard()
         }
-        if (!isLiveScreenOpen && fullscreenIndex != null) {
-            restoreSystemOrientationAndBars(activity)
-            fullscreenIndex = null
-        }
-        onFullscreenChange(isLiveScreenOpen || isSingleFullscreen)
     }
 
     LaunchedEffect(cameraGridState.isScrollInProgress) {
@@ -281,20 +267,6 @@ fun MonitorScreen(
 
     val panelBg = colors.surface
     val bottomClearance = spacing.bottomNavHeight + spacing.space20
-
-    if (isSingleFullscreen) {
-        LandscapeFullscreenHandler(
-            activity = activity,
-            onExit = {
-                restoreSystemOrientationAndBars(activity)
-                fullscreenIndex = null
-            }
-        )
-    } else if (isLiveScreenOpen && isTabActive) {
-        BackHandler {
-            viewModel.closeLiveCamera()
-        }
-    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         // =========================================================================================
@@ -492,7 +464,19 @@ fun MonitorScreen(
                                     hasSnapKey = hasSnapKey,
                                     snapshotUrl = snapUrl,
                                     onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
-                                    onClick = { viewModel.openLiveCamera(item.camera) }
+                                    onClick = {
+                                        val isImeOpen = ViewCompat.getRootWindowInsets(view)
+                                            ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                                        dismissKeyboard()
+                                        if (isImeOpen) {
+                                            uiScope.launch {
+                                                delay(240L)
+                                                viewModel.openLiveCamera(item.camera)
+                                            }
+                                        } else {
+                                            viewModel.openLiveCamera(item.camera)
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -653,54 +637,118 @@ fun MonitorScreen(
                 onRowClick = { viewModel.handleGroupRowClick(it) }
             )
         }
+    }
+}
 
-        // =========================================================================================
-        // 2. MÀN HÌNH XEM TRỰC TIẾP 1x1 RIÊNG (Trượt ngang từ phải sang khi chạm chọn 1 camera)
-        // =========================================================================================
-        AnimatedVisibility(
-            visible = isLiveScreenOpen,
-            modifier = Modifier.fillMaxSize(),
-            enter = slideInHorizontally(
-                initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(durationMillis = LIVE_PAGE_ENTER_DURATION_MS, easing = LivePageEnterEasing)
-            ),
-            exit = slideOutHorizontally(
-                targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(durationMillis = LIVE_PAGE_EXIT_DURATION_MS, easing = LivePageExitEasing)
-            )
-        ) {
-            val currentCam = activeLiveCamera ?: displayedLiveCamera
-            if (currentCam != null) {
-                val locationLabel = remember(currentCam.camera.id, uiState.groupTreeRows) {
-                    viewModel.getCameraLocationLabel(currentCam.camera)
-                }
-                MobileLiveCameraScreen(
-                    selectedCamera = currentCam,
-                    locationLabel = locationLabel,
-                    isTabActive = isTabActive && isLiveScreenOpen,
-                    isFullscreen = isSingleFullscreen,
-                    onBackClick = {
-                        if (isSingleFullscreen) {
-                            restoreSystemOrientationAndBars(activity)
-                            fullscreenIndex = null
-                        }
-                        viewModel.closeLiveCamera()
-                    },
-                    onToggleFullscreen = {
-                        if (isSingleFullscreen) {
-                            restoreSystemOrientationAndBars(activity)
-                            fullscreenIndex = null
-                        } else {
-                            fullscreenIndex = 0
-                        }
-                    },
-                    onRetryClick = { viewModel.retryCameraStream(0) },
-                    onSuccess = { viewModel.resetRetryCount(0) },
-                    onSnapshotError = { viewModel.onSnapshotLoadError(0) },
-                    onReloadClick = { viewModel.reloadLiveCamera() },
-                    onSwitchChannel = { channel -> viewModel.switchLiveChannel(channel) }
-                )
+/**
+ * Lớp phủ toàn màn hình cho trang Xem trực tiếp 1x1 (đặt ở zIndex(30f) trong MainScreen,
+ * phía trên thanh điều hướng dưới cùng giống hệt màn hình Cấu hình thông báo).
+ * Nhờ đó khi trượt vào hoặc bấm Back trượt ra, toàn bộ chiều cao từ đỉnh xuống đáy màn hình
+ * (bao gồm phần đè lên menu bottom) cùng di chuyển mượt mà.
+ */
+@Composable
+fun MonitorLiveCameraOverlay(
+    viewModel: MonitorViewModel,
+    isTabActive: Boolean,
+    modifier: Modifier = Modifier,
+    onFullscreenChange: (Boolean) -> Unit = {},
+    onLiveScreenOpenChange: (Boolean) -> Unit = {}
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val activity = LocalContext.current as? Activity
+
+    // fullscreenIndex != null: 1x1 single-camera landscape fullscreen
+    var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
+
+    val activeLiveCamera = uiState.selectedCameras.getOrNull(0)
+    val isLiveScreenOpen = activeLiveCamera != null
+
+    // Giữ lại thông tin camera cuối cùng trong lúc hiệu ứng trượt đóng màn hình Live đang chạy
+    var displayedLiveCamera by remember { mutableStateOf<SelectedCamera?>(null) }
+    if (activeLiveCamera != null) {
+        displayedLiveCamera = activeLiveCamera
+    }
+
+    val isSingleFullscreen = fullscreenIndex == 0 && isLiveScreenOpen
+
+    LaunchedEffect(isTabActive) {
+        if (!isTabActive && fullscreenIndex != null) {
+            restoreSystemOrientationAndBars(activity)
+            fullscreenIndex = null
+        }
+    }
+
+    LaunchedEffect(isLiveScreenOpen) {
+        onLiveScreenOpenChange(isLiveScreenOpen)
+    }
+
+    LaunchedEffect(isLiveScreenOpen, isSingleFullscreen) {
+        if (!isLiveScreenOpen && fullscreenIndex != null) {
+            restoreSystemOrientationAndBars(activity)
+            fullscreenIndex = null
+        }
+        onFullscreenChange(isSingleFullscreen)
+    }
+
+    if (isSingleFullscreen) {
+        LandscapeFullscreenHandler(
+            activity = activity,
+            onExit = {
+                restoreSystemOrientationAndBars(activity)
+                fullscreenIndex = null
             }
+        )
+    } else if (isLiveScreenOpen && isTabActive) {
+        BackHandler {
+            viewModel.closeLiveCamera()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = isLiveScreenOpen,
+        modifier = modifier.fillMaxSize(),
+        enter = slideInHorizontally(
+            initialOffsetX = { fullWidth -> fullWidth },
+            animationSpec = tween(durationMillis = LIVE_PAGE_ENTER_DURATION_MS, easing = LivePageEnterEasing)
+        ),
+        exit = slideOutHorizontally(
+            targetOffsetX = { fullWidth -> fullWidth },
+            animationSpec = tween(durationMillis = LIVE_PAGE_EXIT_DURATION_MS, easing = LivePageExitEasing)
+        )
+    ) {
+        val isSliding = transition.isRunning
+        val currentCam = activeLiveCamera ?: displayedLiveCamera
+        if (currentCam != null) {
+            val locationLabel = remember(currentCam.camera.id, uiState.groupTreeRows) {
+                viewModel.getCameraLocationLabel(currentCam.camera)
+            }
+            MobileLiveCameraScreen(
+                selectedCamera = currentCam,
+                locationLabel = locationLabel,
+                isTabActive = isTabActive && isLiveScreenOpen,
+                isFullscreen = isSingleFullscreen,
+                isSliding = isSliding,
+                onBackClick = {
+                    if (isSingleFullscreen) {
+                        restoreSystemOrientationAndBars(activity)
+                        fullscreenIndex = null
+                    }
+                    viewModel.closeLiveCamera()
+                },
+                onToggleFullscreen = {
+                    if (isSingleFullscreen) {
+                        restoreSystemOrientationAndBars(activity)
+                        fullscreenIndex = null
+                    } else {
+                        fullscreenIndex = 0
+                    }
+                },
+                onRetryClick = { viewModel.retryCameraStream(0) },
+                onSuccess = { viewModel.resetRetryCount(0) },
+                onSnapshotError = { viewModel.onSnapshotLoadError(0) },
+                onReloadClick = { viewModel.reloadLiveCamera() },
+                onSwitchChannel = { channel -> viewModel.switchLiveChannel(channel) }
+            )
         }
     }
 }
@@ -711,6 +759,7 @@ private fun MobileLiveCameraScreen(
     locationLabel: String,
     isTabActive: Boolean,
     isFullscreen: Boolean,
+    isSliding: Boolean = false,
     onBackClick: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onRetryClick: () -> Unit,
@@ -722,6 +771,7 @@ private fun MobileLiveCameraScreen(
     val isEn = rememberIsEnglish()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    val edgeBorderColor = colors.border
     val ipText = remember(selectedCamera.camera.id) {
         MonitorViewModel.getCameraIpText(selectedCamera.camera)
     }
@@ -733,6 +783,16 @@ private fun MobileLiveCameraScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
+            .drawWithContent {
+                drawContent()
+                if (isSliding && !isFullscreen) {
+                    drawRect(
+                        color = edgeBorderColor,
+                        topLeft = Offset.Zero,
+                        size = Size(spacing.borderThin.toPx(), size.height)
+                    )
+                }
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1655,12 +1715,12 @@ fun CameraGridItem(
     var snapshotFailed by remember(selectedCamera.camera.id, selectedCamera.fallbackImageUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
 
-    // Đồng bộ showInfoTemporarily (3000ms) trong LiveVideoView.vue
+    // Mặc định ẩn toàn bộ overlay (tên camera, nút đóng, nút phóng to).
+    // Chạm vào màn hình live: đang ẩn -> hiện lên và tự ẩn sau 3 giây; đang hiện -> chạm vùng trống sẽ ẩn ngay.
     var showInfo by remember(selectedCamera.camera.id) { mutableStateOf(false) }
-    var infoTrigger by remember { mutableIntStateOf(0) }
-    LaunchedEffect(infoTrigger) {
-        if (infoTrigger > 0) {
-            showInfo = true
+    var autoHideToken by remember(selectedCamera.camera.id) { mutableIntStateOf(0) }
+    LaunchedEffect(showInfo, autoHideToken) {
+        if (showInfo) {
             delay(3000L)
             showInfo = false
         }
@@ -1680,14 +1740,21 @@ fun CameraGridItem(
                 detectTapGestures(
                     onTap = {
                         onClick()
-                        infoTrigger++
+                        if (showInfo) {
+                            showInfo = false
+                        } else {
+                            showInfo = true
+                            autoHideToken++
+                        }
                     },
                     onDoubleTap = {
                         if (!isCompact && showFullscreenButton) {
+                            showInfo = false
                             onFullscreenClick()
                         } else {
                             onClick()
-                            infoTrigger++
+                            showInfo = !showInfo
+                            if (showInfo) autoHideToken++
                         }
                     }
                 )

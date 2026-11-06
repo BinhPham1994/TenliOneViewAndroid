@@ -8,9 +8,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
@@ -24,57 +22,96 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import com.tenli.oneview.ui.theme.spacing
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 private const val DOT_COUNT = 3
-private const val DEFAULT_DELAY_UNIT_MS = 200
-private const val ANIMATION_DURATION_MS = 500
-private const val CYCLE_DURATION_MS = ANIMATION_DURATION_MS * 2
+private const val DEFAULT_DELAY_UNIT_MS = 300
+private const val PULSE_HALF_CYCLE_MS = 450
+private const val PULSE_CYCLE_DURATION_MS = PULSE_HALF_CYCLE_MS * 2
+private const val ROTATION_DURATION_MS = 1050
+private const val CLUSTER_RADIUS_FACTOR = 0.85f
+private const val CLUSTER_CONTAINER_FACTOR = 2.8f
+private const val MIN_DOT_SCALE = 0.84f
+private const val MAX_DOT_SCALE = 1.06f
 
+/**
+ * Hiển thị 3 chấm tròn chụm lại thành cụm tam giác đều ở tâm và xoay mượt.
+ */
 @Composable
 fun WaveDotsLoading(
     modifier: Modifier = Modifier,
     dotSize: Dp = MaterialTheme.spacing.space8,
     dotColor: Color = MaterialTheme.colorScheme.primary,
     dotColors: List<Color> = remember(dotColor) {
-        listOf(dotColor, dotColor.copy(alpha = 0.7f), dotColor.copy(alpha = 0.4f))
+        listOf(dotColor, dotColor.copy(alpha = 0.72f), dotColor.copy(alpha = 0.45f))
     },
     delayUnit: Int = DEFAULT_DELAY_UNIT_MS,
+    @Suppress("UNUSED_PARAMETER")
     maxOffset: Dp = MaterialTheme.spacing.space10
 ) {
-    val spacing = MaterialTheme.spacing
     val density = LocalDensity.current
-    val maxOffsetPx = remember(density, maxOffset) { with(density) { maxOffset.toPx() } }
+    val orbitRadiusPx = remember(density, dotSize) {
+        with(density) { (dotSize * CLUSTER_RADIUS_FACTOR).toPx() }
+    }
+    val containerSize = remember(dotSize) { dotSize * CLUSTER_CONTAINER_FACTOR }
 
-    // Dùng DUY NHẤT 1 InfiniteTransition thay vì 3 coroutine Animatable riêng lẻ cho mỗi chấm
-    val transition = rememberInfiniteTransition(label = "waveDots")
-    val phaseMs by transition.animateFloat(
+    val transition = rememberInfiniteTransition(label = "clusterDots")
+    val rotationDeg by transition.animateFloat(
         initialValue = 0f,
-        targetValue = CYCLE_DURATION_MS.toFloat(),
+        targetValue = 360f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = CYCLE_DURATION_MS, easing = LinearEasing),
+            animation = tween(durationMillis = ROTATION_DURATION_MS, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "wavePhase"
+        label = "clusterRotation"
+    )
+    val phaseMs by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = PULSE_CYCLE_DURATION_MS.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = PULSE_CYCLE_DURATION_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "clusterPulse"
     )
 
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(spacing.space6),
-        verticalAlignment = Alignment.CenterVertically
+    Box(
+        modifier = modifier
+            .size(containerSize)
+            .graphicsLayer {
+                rotationZ = rotationDeg
+            },
+        contentAlignment = Alignment.Center
     ) {
         for (index in 0 until DOT_COUNT) {
+            val angleRad = remember(index) {
+                (-PI / 2.0) + index * (2.0 * PI / DOT_COUNT)
+            }
+            val offsetX = remember(orbitRadiusPx, angleRad) {
+                (orbitRadiusPx * cos(angleRad)).toFloat()
+            }
+            val offsetY = remember(orbitRadiusPx, angleRad) {
+                (orbitRadiusPx * sin(angleRad)).toFloat()
+            }
+
             Box(
                 modifier = Modifier
                     .size(dotSize)
                     .graphicsLayer {
-                        val shifted = (phaseMs - index * delayUnit + CYCLE_DURATION_MS * 4) % CYCLE_DURATION_MS
-                        val rawFraction = if (shifted <= ANIMATION_DURATION_MS) {
-                            shifted / ANIMATION_DURATION_MS.toFloat()
+                        val shifted = (phaseMs - index * delayUnit + PULSE_CYCLE_DURATION_MS * 4) % PULSE_CYCLE_DURATION_MS
+                        val rawFraction = if (shifted <= PULSE_HALF_CYCLE_MS) {
+                            shifted / PULSE_HALF_CYCLE_MS.toFloat()
                         } else {
-                            (CYCLE_DURATION_MS - shifted) / ANIMATION_DURATION_MS.toFloat()
+                            (PULSE_CYCLE_DURATION_MS - shifted) / PULSE_HALF_CYCLE_MS.toFloat()
                         }
                         val eased = FastOutSlowInEasing.transform(rawFraction.coerceIn(0f, 1f))
-                        translationY = -maxOffsetPx * eased
+                        val scale = MIN_DOT_SCALE + (MAX_DOT_SCALE - MIN_DOT_SCALE) * eased
+                        translationX = offsetX
+                        translationY = offsetY
+                        scaleX = scale
+                        scaleY = scale
                         shape = CircleShape
                         clip = true
                     }

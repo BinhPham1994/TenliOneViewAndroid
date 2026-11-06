@@ -11,7 +11,6 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
-import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.model.network.LoginResponseData
 import com.tenli.oneview.ui.component.MobileTopPopupManager
@@ -172,7 +171,9 @@ class LoginViewModel(
             savedUsername = username
             savedPassword = password
         }
-        // Serialize JSON + ghi SharedPreferences ngoài Main thread
+        // Serialize JSON + ghi SharedPreferences ngoài Main thread.
+        // Việc đồng bộ notification_settings & đăng ký FCM token được thực hiện tập trung tại MainViewModel.init
+        // ngay khi chuyển sang MainScreen để đảm bảo lấy đúng trạng thái bật/tắt thông báo của tài khoản mới trước khi đăng ký token.
         withContext(dispatcherProvider.io) {
             val userDataJson = GlobalData.gson.toJson(loginData.target)
             GlobalData.preferences.edit {
@@ -186,8 +187,6 @@ class LoginViewModel(
                 remove("push_notifications_enabled")
             }
         }
-        // Đăng ký ngay FCM token cho tài khoản vừa đăng nhập (chạy ngầm, không chặn điều hướng vào màn chính)
-        FcmTokenManager.registerDevicePushTokenAsync(force = true)
     }
 
     companion object {
