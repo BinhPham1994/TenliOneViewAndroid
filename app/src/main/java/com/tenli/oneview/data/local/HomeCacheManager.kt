@@ -9,6 +9,8 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -32,6 +34,7 @@ object HomeCacheManager {
 
     // RAM Cache giúp hiển thị tức thì (0ms) ngay từ frame đầu tiên khi mở app hoặc chuyển bộ lọc
     private val inMemoryHomeCache = ConcurrentHashMap<String, CachedHomeData>()
+    private val diskReadMutex = Mutex()
 
     private fun cacheKey(filter: TimeFilter, serviceId: Int?): String {
         val servicePart = serviceId?.toString() ?: "all"
@@ -64,9 +67,12 @@ object HomeCacheManager {
         inMemoryHomeCache[key]?.let { return it }
 
         return withContext(Dispatchers.IO) {
-            JsonFileStore.read(gson, getCacheFile(context, filter, serviceId), CachedHomeData::class.java)?.also { parsed ->
-                inMemoryHomeCache[key] = parsed
-                EventCacheManager.cacheInMemory(parsed.recentEvents, parsed.cameraList, parsed.aiServices)
+            diskReadMutex.withLock {
+                inMemoryHomeCache[key]?.let { return@withContext it }
+                JsonFileStore.read(gson, getCacheFile(context, filter, serviceId), CachedHomeData::class.java)?.also { parsed ->
+                    inMemoryHomeCache[key] = parsed
+                    EventCacheManager.cacheInMemory(parsed.recentEvents, parsed.cameraList, parsed.aiServices)
+                }
             }
         }
     }

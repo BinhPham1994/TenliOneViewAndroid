@@ -5,7 +5,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -59,6 +62,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -78,6 +82,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -132,6 +137,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 // =====================================================================================
 // Hằng số dùng chung trong file
@@ -834,11 +840,54 @@ fun MobileEventCard(
         resolveCardImages(event, cameraName, domain)
     }
 
-    val cardBgColor = when {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    var isTapFlashing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentIsPressed by rememberUpdatedState(isPressed)
+
+    val handleCardClick: () -> Unit = remember(scope) {
+        {
+            if (currentIsPressed) {
+                isTapFlashing = true
+                currentOnClick()
+                scope.launch {
+                    delay(180L)
+                    isTapFlashing = false
+                }
+            } else {
+                // Khi chạm nhanh (<100ms) trong LazyColumn, isPressed bị trễ bởi TapIndicationDelay.
+                // Bật nền phản hồi ngay lập tức trong ~60ms trước khi chuyển màn hình để người dùng cảm nhận rõ thao tác bấm.
+                isTapFlashing = true
+                scope.launch {
+                    delay(60L)
+                    currentOnClick()
+                    delay(180L)
+                    isTapFlashing = false
+                }
+            }
+        }
+    }
+
+    val isActivePress = isPressed || isTapFlashing
+    val targetBgColor = when {
+        isActivePress && colors.isDark -> Color(0xFF28374E)
+        isActivePress -> colors.closeButtonBg
         !isSelected -> colors.surface
         colors.isDark -> SelectedCardBgDark
         else -> BrandContainer
     }
+    val cardBgColor by animateColorAsState(
+        targetValue = targetBgColor,
+        animationSpec = tween(durationMillis = if (isActivePress) 35 else 180),
+        label = "eventCardBg"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (isActivePress) 0.982f else 1f,
+        animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
+        label = "eventCardScale"
+    )
 
     if (isListView) {
         EventListCard(
@@ -847,8 +896,10 @@ fun MobileEventCard(
             images = images,
             isEn = isEn,
             cardBgColor = cardBgColor,
+            pressScale = pressScale,
+            interactionSource = interactionSource,
             enableSharedElement = enableSharedElement,
-            onClick = onClick
+            onClick = handleCardClick
         )
     } else {
         EventGridCard(
@@ -857,8 +908,11 @@ fun MobileEventCard(
             images = images,
             isEn = isEn,
             cardBgColor = cardBgColor,
+            pressScale = pressScale,
+            isActivePress = isActivePress,
+            interactionSource = interactionSource,
             enableSharedElement = enableSharedElement,
-            onClick = onClick
+            onClick = handleCardClick
         )
     }
 }
@@ -871,6 +925,8 @@ private fun EventListCard(
     images: EventCardImages,
     isEn: Boolean,
     cardBgColor: Color,
+    pressScale: Float,
+    interactionSource: MutableInteractionSource,
     enableSharedElement: Boolean,
     onClick: () -> Unit
 ) {
@@ -913,9 +969,17 @@ private fun EventListCard(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .clip(cardShape)
             .background(cardBgColor)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
             .padding(start = spacing.space8, top = spacing.space8, bottom = spacing.space8, end = spacing.space12),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -997,6 +1061,9 @@ private fun EventGridCard(
     images: EventCardImages,
     isEn: Boolean,
     cardBgColor: Color,
+    pressScale: Float,
+    isActivePress: Boolean,
+    interactionSource: MutableInteractionSource,
     enableSharedElement: Boolean,
     onClick: () -> Unit
 ) {
@@ -1021,9 +1088,17 @@ private fun EventGridCard(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(THUMBNAIL_ASPECT_RATIO)
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .clip(cardShape)
             .background(cardBgColor)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
             .eventImageSharedElement(enableSharedElement, event.id)
     ) {
         VideoFrameImage(
@@ -1035,6 +1110,14 @@ private fun EventGridCard(
             targetWidthPx = GRID_IMAGE_WIDTH_PX,
             targetHeightPx = GRID_IMAGE_HEIGHT_PX
         )
+
+        if (isActivePress) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.White.copy(alpha = 0.14f))
+            )
+        }
 
         // Face crop overlay on TopEnd (72x90dp)
         val faceCropUrl = images.faceCropUrl
@@ -1623,14 +1706,14 @@ private fun FilterCellRow(
     ) {
         IconBadge(
             icon = icon,
-            backgroundColor = badgeColor,
-            iconSize = spacing.iconXSmall
+            backgroundColor = badgeColor
         )
         Spacer(modifier = Modifier.width(spacing.space12))
         Text(
             text = label,
             color = textColor,
-            style = MaterialTheme.typography.bodySmall,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
@@ -1734,7 +1817,7 @@ private fun <K> AnchoredFilterDropdownMenu(
                     Text(
                         text = label,
                         color = if (isSelected) accent else itemTextColor,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

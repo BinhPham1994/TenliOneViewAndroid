@@ -707,7 +707,7 @@ fun SettingScreen(
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Spacer(modifier = Modifier.height(spacing.space10))
+                    Spacer(modifier = Modifier.height(spacing.space8))
                 }
             }
 
@@ -721,7 +721,7 @@ fun SettingScreen(
                         onClick = onOpenNotificationConfig
                     )
                 }
-                Spacer(modifier = Modifier.height(spacing.space10))
+                Spacer(modifier = Modifier.height(spacing.space8))
             }
 
             // Section: Giao diện
@@ -742,7 +742,7 @@ fun SettingScreen(
                         onClick = { showThemeSheet = true }
                     )
                 }
-                Spacer(modifier = Modifier.height(spacing.space10))
+                Spacer(modifier = Modifier.height(spacing.space8))
             }
 
             // Section: Tài khoản
@@ -933,7 +933,8 @@ private fun SettingsGroupCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(MaterialTheme.spacing.radiusMedium))
-            .background(background),
+            .background(background)
+            .padding(vertical = MaterialTheme.spacing.space2),
         content = content
     )
 }
@@ -945,7 +946,8 @@ private fun OptionsCard(content: @Composable ColumnScope.() -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(MaterialTheme.spacing.radiusRegular))
-            .background(MaterialTheme.appColors.surfaceRaised),
+            .background(MaterialTheme.appColors.surfaceRaised)
+            .padding(vertical = MaterialTheme.spacing.space4),
         content = content
     )
 }
@@ -961,7 +963,7 @@ private fun SettingsSection(
     Column(modifier = Modifier.widthIn(max = spacing.contentMaxWidth).fillMaxWidth()) {
         SettingsSectionHeader(
             text = title,
-            modifier = Modifier.padding(start = spacing.space14, end = spacing.space10, top = spacing.space2, bottom = spacing.space8)
+            modifier = Modifier.padding(start = spacing.space14, end = spacing.space10, top = spacing.space2, bottom = spacing.space6)
         )
         SettingsGroupCard(modifier = groupModifier, content = content)
     }
@@ -981,7 +983,7 @@ private fun SelectableOptionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = spacing.space16, vertical = spacing.space14),
+            .padding(horizontal = spacing.space14, vertical = spacing.space10),
         verticalAlignment = Alignment.CenterVertically
     ) {
         leading()
@@ -1579,7 +1581,7 @@ private fun PasswordFieldRow(
     val colors = MaterialTheme.appColors
     val textColor = colors.textTitle
     val placeholderColor = colors.textMuted
-    val baseTextStyle = MaterialTheme.typography.bodySmall
+    val baseTextStyle = MaterialTheme.typography.bodyMedium
     val textStyle = remember(baseTextStyle, textColor) {
         baseTextStyle.copy(color = textColor, fontWeight = FontWeight.Medium)
     }
@@ -1664,7 +1666,7 @@ private fun SettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = spacing.space16, vertical = spacing.space14),
+            .padding(horizontal = spacing.space16, vertical = spacing.space10),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Squircle colored icon badge matching MobileSettingsPage.vue

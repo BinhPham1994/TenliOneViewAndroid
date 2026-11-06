@@ -59,9 +59,10 @@ import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.buildCameraNameMap
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.theme.BrandAccent
-import com.tenli.oneview.ui.theme.InfoCyan
 import com.tenli.oneview.ui.theme.InfoSkyDeep
 import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.OrangeDeep
+import com.tenli.oneview.ui.theme.OrangeUserAccent
 import com.tenli.oneview.ui.theme.PurpleAccent
 import com.tenli.oneview.ui.theme.SuccessGreen
 import com.tenli.oneview.ui.theme.appColors
@@ -75,11 +76,11 @@ private val StatPurpleGradientEnd = Color(0xFF9333EA)
 private val StatTotalEventsGradient = listOf(StatBlueGradientStart, InfoSkyDeep)
 private val StatOnlineCamerasGradient = listOf(SuccessGreen, StatGreenGradientEnd)
 private val StatActiveAiTasksGradient = listOf(PurpleAccent, StatPurpleGradientEnd)
-private val StatRecordingCamerasGradient = listOf(InfoCyan, InfoSkyDeep)
+private val StatRecordingCamerasGradient = listOf(OrangeUserAccent, OrangeDeep)
 
 private val HomeBottomContentPadding = 130.dp
 private val HomeEmptyStateHeight = 220.dp
-private val StatLabelLetterSpacing = 0.2.sp
+private val StatLabelLetterSpacing = 0.sp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -183,7 +184,7 @@ fun HomeScreen(
                                 label = if (isEn) "RECORDING CAMERAS" else "CAMERA GHI HÌNH",
                                 mainValue = uiState.recordingCamerasCount.toString(),
                                 subValue = "/$totalCameras",
-                                accentColor = InfoCyan,
+                                accentColor = OrangeUserAccent,
                                 iconGradient = StatRecordingCamerasGradient,
                                 icon = LucideIcons.Disc,
                                 modifier = Modifier.weight(1f)

@@ -262,6 +262,7 @@ class HomeViewModel(
         } else {
             val cameras = EventCacheManager.getCamerasInMemory()
             HomeUiState(
+                isLoading = true,
                 isListView = isList,
                 cameraList = cameras,
                 aiServices = EventCacheManager.getAiServicesInMemory()
@@ -338,11 +339,12 @@ class HomeViewModel(
         fromSec: Long,
         toSec: Long,
         serviceId: Int?
-    ): List<EventData> {
+    ): Pair<List<EventData>, Boolean> {
         val permitted = mutableListOf<EventData>()
         val seenIds = HashSet<Int>()
         var lastId: Int? = null
         var attempts = 0
+        var anySuccessful = false
 
         while (permitted.size < MAX_RECENT_EVENTS && attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
@@ -357,6 +359,7 @@ class HomeViewModel(
             }.getOrNull()
 
             if (resp == null || !resp.isSuccessful) break
+            anySuccessful = true
             val data = resp.body() ?: emptyList()
             if (data.isEmpty()) break
 
@@ -371,7 +374,7 @@ class HomeViewModel(
             lastId = data.last().id
         }
 
-        return permitted.take(MAX_RECENT_EVENTS)
+        return permitted.take(MAX_RECENT_EVENTS) to anySuccessful
     }
 
     private fun fetchRecentEvents() {
@@ -410,7 +413,7 @@ class HomeViewModel(
                     }
                     val overviewResp = overviewDeferred.await()
                     val byTypeResp = byTypeDeferred.await()
-                    val newEvents = recentDeferred.await()
+                    val (newEvents, _) = recentDeferred.await()
 
                     if (newEvents.isNotEmpty()) {
                         EventCacheManager.cacheInMemory(events = newEvents)
@@ -432,6 +435,21 @@ class HomeViewModel(
                         ).withRecomputedMetrics()
                     }
                     _uiState.value = nextState
+                    HomeCacheManager.saveHomeData(
+                        getApplication(),
+                        filter,
+                        serviceId,
+                        CachedHomeData(
+                            overviewStats = nextState.overviewStats,
+                            eventsByType = nextState.eventsByType,
+                            cameraList = nextState.cameraList,
+                            aiServices = nextState.aiServices,
+                            recentEvents = nextState.recentEvents,
+                            runningAiTasks = nextState.runningAiTasks,
+                            totalAiTasks = nextState.totalAiTasks,
+                            updatedAt = System.currentTimeMillis()
+                        )
+                    )
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -553,7 +571,7 @@ class HomeViewModel(
 
                     val overviewResponse = overviewDeferred.await()
                     val byTypeResponse = byTypeDeferred.await()
-                    val recentEvents = recentEventsDeferred.await()
+                    val (recentEvents, recentEventsSucceeded) = recentEventsDeferred.await()
                     val cameraResponse = cameraDeferred.await()
                     val aiServiceResponse = aiServiceDeferred.await()
 
@@ -630,7 +648,7 @@ class HomeViewModel(
                         errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
                     }
 
-                    val finalRecentEvents = if (recentEvents.isNotEmpty() || cachedData == null) {
+                    val finalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
                         recentEvents
                     } else {
                         _uiState.value.recentEvents
@@ -639,7 +657,8 @@ class HomeViewModel(
                     EventCacheManager.cacheInMemory(
                         events = finalRecentEvents,
                         cameras = cameraList,
-                        aiServices = aiServices
+                        aiServices = aiServices,
+                        fromNetwork = cameraResponse?.isSuccessful == true
                     )
 
                     val nextState = withContext(Dispatchers.Default) {
@@ -658,7 +677,7 @@ class HomeViewModel(
                     }
                     _uiState.value = nextState
 
-                    if (overviewResponse?.isSuccessful == true) {
+                    if (overviewResponse?.isSuccessful == true || recentEventsSucceeded) {
                         val newCachedData = CachedHomeData(
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,

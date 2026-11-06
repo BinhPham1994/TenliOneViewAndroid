@@ -22,16 +22,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.tenli.oneview.ui.features.event.detail.EventDetailScreen
 import com.tenli.oneview.ui.features.main.MainScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
-/** Thời gian chờ ngắn sau khi giao diện chính hiện lên ở lần mở app mới (cold start) trước khi trượt màn Chi tiết sự kiện lên */
-private const val COLD_START_EVENT_DETAIL_DELAY_MS = 750L
+/**
+ * Thời gian chờ sau khi giao diện chính (MainScreen) đã resume và vẽ xong frame đầu tiên
+ * trước khi trượt màn Chi tiết sự kiện lên từ thông báo:
+ * - Cold start (mở mới từ trạng thái tắt app): chờ 1100ms để hiệu ứng đóng splash + mở cửa sổ hoàn tất và màn chính hiển thị ổn định.
+ * - Warm start (app đang chạy nền / kéo thanh thông báo bấm vào): chờ 650ms để thanh thông báo thu gọn & cửa sổ app ổn định trước khi mở chi tiết.
+ */
+private const val COLD_START_EVENT_DETAIL_DELAY_MS = 1100L
+private const val WARM_START_EVENT_DETAIL_DELAY_MS = 650L
 
 @Immutable
 data class PendingEventNav(
@@ -52,6 +62,7 @@ fun AppNavigation(
     onEventNavConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    val lifecycleOwner = LocalLifecycleOwner.current
     var activeEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var lastEventDetailId by rememberSaveable { mutableStateOf<Int?>(null) }
     var skipExitAnimation by remember { mutableStateOf(false) }
@@ -60,10 +71,17 @@ fun AppNavigation(
         val nav = pendingEventNav ?: return@LaunchedEffect
         val parsed = nav.eventId.toIntOrNull()
         if (parsed != null) {
-            if (nav.isColdStart) {
-                // App vừa mở mới: để giao diện chính (MainScreen) hiện ổn định trước rồi mới trượt nhẹ màn Chi tiết sự kiện lên
-                delay(COLD_START_EVENT_DETAIL_DELAY_MS)
-            }
+            // 1. Đảm bảo Activity đã ở trạng thái RESUMED và MainScreen đã vẽ xong frame đầu tiên
+            lifecycleOwner.lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+            withFrameNanos { }
+            // 2. Chờ cửa sổ app và màn hình chính hiển thị ổn định rồi mới trượt màn Chi tiết sự kiện lên
+            delay(
+                if (nav.isColdStart) {
+                    COLD_START_EVENT_DETAIL_DELAY_MS
+                } else {
+                    WARM_START_EVENT_DETAIL_DELAY_MS
+                }
+            )
             skipExitAnimation = false
             lastEventDetailId = parsed
             activeEventDetailId = parsed

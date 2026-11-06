@@ -10,6 +10,8 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.home.TimeFilter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -59,6 +61,11 @@ object EventCacheManager {
     @Volatile
     private var inMemoryProfileGroups: List<BsProfileGroupModel> = emptyList()
 
+    @Volatile
+    private var sessionMetadataUpdatedAtMs: Long = 0L
+
+    private val diskReadMutex = Mutex()
+
     private fun datasetCacheKey(
         filter: TimeFilter,
         serviceId: Int?,
@@ -74,7 +81,8 @@ object EventCacheManager {
     fun cacheInMemory(
         events: List<EventData> = emptyList(),
         cameras: List<CameraModel> = emptyList(),
-        aiServices: List<AIServiceModel> = emptyList()
+        aiServices: List<AIServiceModel> = emptyList(),
+        fromNetwork: Boolean = false
     ) {
         events.forEach { ev ->
             if (ev.id > 0) {
@@ -87,6 +95,15 @@ object EventCacheManager {
         if (aiServices.isNotEmpty()) {
             inMemoryAiServices = aiServices
         }
+        if (fromNetwork && cameras.isNotEmpty()) {
+            sessionMetadataUpdatedAtMs = System.currentTimeMillis()
+        }
+    }
+
+    fun hasFreshSessionMetadata(maxAgeMs: Long = 30_000L): Boolean {
+        val updatedAt = sessionMetadataUpdatedAtMs
+        if (updatedAt <= 0L || inMemoryCameras.isEmpty()) return false
+        return (System.currentTimeMillis() - updatedAt) < maxAgeMs
     }
 
     fun cacheClickedEvent(
@@ -218,19 +235,22 @@ object EventCacheManager {
         inMemoryDatasetCache.get(key)?.let { return it }
 
         return withContext(Dispatchers.IO) {
-            val file = getCacheFile(context, filter, serviceId, aiType, cameraUuid)
-            // Tương thích ngược với file cache cũ không có hậu tố cameraPart
-            val targetFile = if (!file.exists() && cameraUuid == null) {
-                val sPart = serviceId?.toString() ?: "all"
-                val aPart = aiType ?: "all"
-                File(context.cacheDir, "$EVENT_CACHE_PREFIX${filter.name}_${sPart}_${aPart}.json")
-            } else {
-                file
-            }
+            diskReadMutex.withLock {
+                inMemoryDatasetCache.get(key)?.let { return@withContext it }
+                val file = getCacheFile(context, filter, serviceId, aiType, cameraUuid)
+                // Tương thích ngược với file cache cũ không có hậu tố cameraPart
+                val targetFile = if (!file.exists() && cameraUuid == null) {
+                    val sPart = serviceId?.toString() ?: "all"
+                    val aPart = aiType ?: "all"
+                    File(context.cacheDir, "$EVENT_CACHE_PREFIX${filter.name}_${sPart}_${aPart}.json")
+                } else {
+                    file
+                }
 
-            JsonFileStore.read(gson, targetFile, CachedEventData::class.java)?.also { parsed ->
-                inMemoryDatasetCache.put(key, parsed)
-                cacheInMemory(parsed.events.orEmpty(), parsed.cameraList.orEmpty(), parsed.aiServices.orEmpty())
+                JsonFileStore.read(gson, targetFile, CachedEventData::class.java)?.also { parsed ->
+                    inMemoryDatasetCache.put(key, parsed)
+                    cacheInMemory(parsed.events.orEmpty(), parsed.cameraList.orEmpty(), parsed.aiServices.orEmpty())
+                }
             }
         }
     }
@@ -239,6 +259,11 @@ object EventCacheManager {
         inMemoryEvents.evictAll()
         inMemoryDatasetCache.evictAll()
         inMemoryRelatedEvents.evictAll()
+        inMemoryCameras = emptyList()
+        inMemoryAiServices = emptyList()
+        inMemoryProfiles = emptyList()
+        inMemoryProfileGroups = emptyList()
+        sessionMetadataUpdatedAtMs = 0L
         lastClickedEvent = null
         JsonFileStore.deleteMatching(context.cacheDir) { it.startsWith(EVENT_CACHE_PREFIX) || it == PROFILES_CACHE_FILE }
     }

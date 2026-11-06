@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -11,15 +13,16 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,7 +51,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -59,6 +65,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -66,6 +73,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
@@ -73,10 +82,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -88,6 +106,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
@@ -113,6 +133,10 @@ private const val SNAPSHOT_CARD_WIDTH_PX = 420
 private const val SNAPSHOT_CARD_HEIGHT_PX = 236
 private const val LIVE_STAGE_SNAPSHOT_WIDTH_PX = 1280
 private const val LIVE_STAGE_SNAPSHOT_HEIGHT_PX = 720
+private const val LIVE_PAGE_ENTER_DURATION_MS = 280
+private const val LIVE_PAGE_EXIT_DURATION_MS = 240
+private val LivePageEnterEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+private val LivePageExitEasing = CubicBezierEasing(0.4f, 0f, 0.6f, 1f)
 private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
@@ -132,24 +156,40 @@ fun MonitorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isEn = rememberIsEnglish()
     val activity = LocalContext.current as? Activity
+    val view = LocalView.current
+    val uiScope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val searchFocusRequester = remember { FocusRequester() }
+    val dismissKeyboard: () -> Unit = remember(focusManager, keyboardController) {
+        {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+        }
+    }
     val cameraGridState = rememberLazyGridState()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
-    // fullscreenIndex != null: 1x1 single-camera fullscreen
+    // fullscreenIndex != null: 1x1 single-camera landscape fullscreen
     var fullscreenIndex by remember { mutableStateOf<Int?>(null) }
-    // isGridFullscreen: 2x2 grid fullscreen matching MobileLivePage.vue
-    var isGridFullscreen by remember { mutableStateOf(false) }
-    // Thu gọn mặc định các ô lọc, chọn lưới 1x1/2x2 để giao diện gọn gàng
-    var isControlsExpanded by remember { mutableStateOf(false) }
+
+    val activeLiveCamera = uiState.selectedCameras.getOrNull(0)
+    val isLiveScreenOpen = activeLiveCamera != null
+
+    // Giữ lại thông tin camera cuối cùng trong lúc hiệu ứng trượt đóng màn hình Live đang chạy
+    var displayedLiveCamera by remember { mutableStateOf<SelectedCamera?>(null) }
+    if (activeLiveCamera != null) {
+        displayedLiveCamera = activeLiveCamera
+    }
 
     var wasDeactivated by remember { mutableStateOf(true) }
     LaunchedEffect(isTabActive) {
         viewModel.setMonitorTabActive(isTabActive)
         if (!isTabActive) {
+            dismissKeyboard()
             wasDeactivated = true
             fullscreenIndex = null
-            isGridFullscreen = false
         } else if (wasDeactivated) {
             wasDeactivated = false
             viewModel.refreshActiveStreams()
@@ -157,13 +197,22 @@ fun MonitorScreen(
         }
     }
 
-    LaunchedEffect(fullscreenIndex, isGridFullscreen) {
-        onFullscreenChange(fullscreenIndex != null || isGridFullscreen)
+    val isSingleFullscreen = fullscreenIndex == 0 && isLiveScreenOpen
+
+    LaunchedEffect(isLiveScreenOpen, isSingleFullscreen) {
+        if (isLiveScreenOpen) {
+            dismissKeyboard()
+        }
+        if (!isLiveScreenOpen && fullscreenIndex != null) {
+            restoreSystemOrientationAndBars(activity)
+            fullscreenIndex = null
+        }
+        onFullscreenChange(isLiveScreenOpen || isSingleFullscreen)
     }
 
-    LaunchedEffect(uiState.gridSize) {
-        if (uiState.gridSize != 4 && isGridFullscreen) {
-            isGridFullscreen = false
+    LaunchedEffect(cameraGridState.isScrollInProgress) {
+        if (cameraGridState.isScrollInProgress) {
+            dismissKeyboard()
         }
     }
 
@@ -201,28 +250,23 @@ fun MonitorScreen(
 
     // Derived data precomputed on background/ViewModel layer
     val hasAvailableCameras = uiState.hasAvailableCameras
-    val totalAllCamerasCount = uiState.totalAllCamerasCount
+    val totalFilteredCamerasCount = uiState.totalFilteredCamerasCount
     val groupTreeRows = uiState.groupTreeRows
     val pagedCameraItems = uiState.pagedCameraItems
     val totalCameraPages = uiState.totalCameraPages
 
     val sheetTitle = if (isEn) "Filter camera groups" else "Lọc nhóm camera"
 
-    val cameraPageNumbers = remember(uiState.currentCameraPage, totalCameraPages) {
+    // -1 biểu thị dấu "..." (ellipsis) trong thanh phân trang: 1, 2, 3 ... trang cuối
+    val cameraPaginationItems = remember(uiState.currentCameraPage, totalCameraPages) {
         val total = totalCameraPages
         val current = uiState.currentCameraPage
         when {
-            total <= 3 -> (1..total).toList()
-            current <= 2 -> listOf(1, 2, 3)
-            current >= total - 1 -> listOf(total - 2, total - 1, total)
-            else -> listOf(current - 1, current, current + 1)
+            total <= 4 -> (1..total).toList()
+            current <= 2 -> listOf(1, 2, 3, -1, total)
+            current >= total - 1 -> listOf(1, -1, total - 2, total - 1, total)
+            else -> listOf(1, -1, current, -1, total)
         }
-    }
-
-    val activeCameraIds = remember(uiState.selectedCameras, uiState.gridSize) {
-        (0 until uiState.gridSize).mapNotNull { idx ->
-            uiState.selectedCameras.getOrNull(idx)?.camera?.id
-        }.toSet()
     }
 
     // Scroll camera grid to top on page / filter / search change
@@ -236,44 +280,57 @@ fun MonitorScreen(
     }
 
     val panelBg = colors.surface
-    val gridDividerBg = colors.borderStrong
+    val bottomClearance = spacing.bottomNavHeight + spacing.space20
 
-    val isSingleFullscreen = fullscreenIndex == 0 && uiState.gridSize == 1
-    val is2x2Fullscreen = isGridFullscreen && uiState.gridSize == 4
-    val isAnyFullscreen = isSingleFullscreen || is2x2Fullscreen
-
-    if (isAnyFullscreen) {
+    if (isSingleFullscreen) {
         LandscapeFullscreenHandler(
             activity = activity,
             onExit = {
                 restoreSystemOrientationAndBars(activity)
                 fullscreenIndex = null
-                isGridFullscreen = false
             }
         )
+    } else if (isLiveScreenOpen && isTabActive) {
+        BackHandler {
+            viewModel.closeLiveCamera()
+        }
     }
 
-    val bottomClearance = spacing.bottomNavHeight + spacing.space20
-
     Box(modifier = Modifier.fillMaxSize()) {
+        // =========================================================================================
+        // 1. MÀN HÌNH DANH SÁCH LƯỚI CAMERA BAN ĐẦU (Không phát live tự động)
+        // =========================================================================================
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (isAnyFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
+                .background(MaterialTheme.colorScheme.background)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = { dismissKeyboard() })
+                }
         ) {
-            if (!isAnyFullscreen) {
-                MobileTopBar(
-                    title = stringResource(id = R.string.tab_monitor),
-                    rightAction = {
-                        MobileTopActionButton(
-                            icon = LucideIcons.ListFilter,
-                            contentDescription = if (isEn) "Filter" else "Bộ lọc",
-                            hasActiveDot = uiState.selectedFilterNodeKey != MonitorViewModel.FILTER_ALL,
-                            onClick = { viewModel.openGroupFilterSheet() }
-                        )
-                    }
-                )
-            }
+            MobileTopBar(
+                title = stringResource(id = R.string.tab_monitor),
+                rightAction = {
+                    MobileTopActionButton(
+                        icon = LucideIcons.ListFilter,
+                        contentDescription = if (isEn) "Filter" else "Bộ lọc",
+                        hasActiveDot = uiState.selectedFilterNodeKey != MonitorViewModel.FILTER_ALL,
+                        onClick = {
+                            val isImeOpen = ViewCompat.getRootWindowInsets(view)
+                                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                            dismissKeyboard()
+                            if (isImeOpen) {
+                                uiScope.launch {
+                                    delay(240L)
+                                    viewModel.openGroupFilterSheet()
+                                }
+                            } else {
+                                viewModel.openGroupFilterSheet()
+                            }
+                        }
+                    )
+                }
+            )
 
             if (uiState.isLoading && !hasAvailableCameras) {
                 Box(
@@ -298,344 +355,207 @@ fun MonitorScreen(
                     CommonEmptyState(text = if (isEn) "No cameras available" else "Không có camera nào")
                 }
             } else {
-                // 1. Live Video Stage Card (.mobile-live-stage-card)
-                // Giữ nguyên cùng 1 node trong cây Compose khi bật/tắt fullscreen để ExoPlayer & WebSocket không bị huỷ hoặc kết nối lại
-                Box(
-                    modifier = if (isAnyFullscreen) {
-                        Modifier
-                            .fillMaxSize()
-                            .background(colors.mediaBg)
-                    } else {
-                        Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
-                            .background(if (uiState.gridSize == 4) gridDividerBg else panelBg)
-                    }
+                Spacer(modifier = Modifier.height(spacing.space4))
+
+                // Camera Panel (.mobile-camera-panel) chiếm toàn bộ chiều cao màn hình
+                val controlBg = colors.controlBg
+                val mutedText = colors.textSubtle
+                val placeholderColor = colors.textPlaceholder
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .navigationBarsPadding()
+                        .padding(horizontal = spacing.space10)
+                        .padding(bottom = bottomClearance)
+                        .clip(RoundedCornerShape(spacing.radiusRegular))
+                        .background(panelBg)
                 ) {
-                    if (uiState.gridSize == 1) {
-                        val selectedCam = uiState.selectedCameras.getOrNull(0)
-                        val isBlinking = uiState.blinkStates.getOrNull(0) == true
+                    // .camera-filter-header: Thanh tìm kiếm chiếm trọn chiều ngang phía trên
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = spacing.space10,
+                                end = spacing.space10,
+                                top = spacing.space8,
+                                bottom = spacing.space4
+                            )
+                            .height(spacing.buttonHeightSmall)
+                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                            .background(controlBg)
+                            .padding(horizontal = spacing.space10),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.Search,
+                            contentDescription = if (isEn) "Search camera" else "Tìm camera",
+                            tint = if (colors.isDark) colors.accent else colors.textMuted,
+                            modifier = Modifier.size(spacing.iconSmall)
+                        )
+                        Spacer(modifier = Modifier.width(spacing.space6))
                         Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(if (isSingleFullscreen) colors.mediaBg else panelBg)
-                                .then(
-                                    if (isBlinking && !isSingleFullscreen) {
-                                        Modifier.border(spacing.borderFocus, colors.accent)
-                                    } else {
-                                        Modifier
-                                    }
-                                )
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
                         ) {
-                            if (selectedCam != null) {
-                                CameraGridItem(
-                                    selectedCamera = selectedCam,
-                                    isTabActive = isTabActive,
-                                    onClick = {},
-                                    onRetryClick = { viewModel.retryCameraStream(0) },
-                                    onSuccess = { viewModel.resetRetryCount(0) },
-                                    onSnapshotError = { viewModel.onSnapshotLoadError(0) },
-                                    onFullscreenClick = {
-                                        if (isSingleFullscreen) {
-                                            restoreSystemOrientationAndBars(activity)
-                                            fullscreenIndex = null
-                                        } else {
-                                            fullscreenIndex = 0
-                                        }
-                                    },
-                                    onBackToLiveClick = { viewModel.addCamera(selectedCam.camera, 0) },
-                                    onRemoveClick = {
-                                        if (isSingleFullscreen) {
-                                            restoreSystemOrientationAndBars(activity)
-                                            fullscreenIndex = null
-                                        }
-                                        viewModel.removeCamera(0)
-                                    },
-                                    isFullscreen = isSingleFullscreen,
-                                    isCompact = false,
-                                    showFullscreenButton = true
-                                )
-                            } else {
-                                if (isSingleFullscreen) {
-                                    LaunchedEffect(Unit) {
-                                        restoreSystemOrientationAndBars(activity)
-                                        fullscreenIndex = null
-                                    }
-                                }
-                                EmptyGridItem(
-                                    onClick = {},
-                                    isCompact = false,
-                                    isActiveSlot = false
+                            if (uiState.searchQuery.isEmpty()) {
+                                Text(
+                                    text = if (isEn) "Search camera..." else "Tìm camera...",
+                                    color = placeholderColor,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
+                            BasicTextField(
+                                value = uiState.searchQuery,
+                                onValueChange = { viewModel.setSearchQuery(it) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = { dismissKeyboard() },
+                                    onDone = { dismissKeyboard() }
+                                ),
+                                textStyle = MaterialTheme.typography.bodySmall.copy(
+                                    color = colors.textStrong
+                                ),
+                                cursorBrush = SolidColor(colors.accent),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(searchFocusRequester)
+                            )
                         }
-                    } else {
-                        // 2x2 Grid (.mobile-grid-2x2 with 2.dp gap) - giữ nguyên instance khi phóng to/thu nhỏ
-                        LiveGrid2x2Stage(
-                            uiState = uiState,
-                            isTabActive = isTabActive,
-                            panelBg = panelBg,
-                            gridDividerBg = gridDividerBg,
-                            onCellTap = { viewModel.handleCellTap(it) },
-                            onRetryClick = { viewModel.retryCameraStream(it) },
-                            onSuccess = { viewModel.resetRetryCount(it) },
-                            onSnapshotError = { viewModel.onSnapshotLoadError(it) },
-                            onReloadClick = { cam, idx -> viewModel.addCamera(cam, idx) },
-                            onRemoveClick = { viewModel.removeCamera(it) }
-                        )
-
-                        // Floating exit button (.grid-fullscreen-exit-btn) khi ở chế độ phóng to lưới 2x2
-                        if (is2x2Fullscreen) {
+                        if (uiState.searchQuery.isNotEmpty()) {
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(spacing.space12)
-                                    .size(spacing.iconButton)
-                                    .clip(RoundedCornerShape(spacing.radiusSmallMedium))
-                                    .background(colors.mediaOverlay)
-                                    .border(
-                                        spacing.borderMedium,
-                                        colors.onMedia.copy(alpha = 0.18f),
-                                        RoundedCornerShape(spacing.radiusSmallMedium)
-                                    )
+                                    .size(spacing.badgeMinSize)
+                                    .clip(CircleShape)
+                                    .background(colors.textMuted.copy(alpha = 0.2f))
                                     .clickable {
-                                        restoreSystemOrientationAndBars(activity)
-                                        isGridFullscreen = false
+                                        viewModel.setSearchQuery("")
+                                        searchFocusRequester.requestFocus()
+                                        keyboardController?.show()
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = LucideIcons.Minimize,
-                                    contentDescription = "Thu nhỏ lưới 2x2",
-                                    tint = colors.onMedia,
-                                    modifier = Modifier.size(spacing.iconSmall)
+                                    imageVector = LucideIcons.X,
+                                    contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm",
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(spacing.iconTiny)
                                 )
                             }
                         }
                     }
-                }
 
-                if (!isAnyFullscreen) {
-                    Spacer(modifier = Modifier.height(spacing.space10))
+                    // .mobile-camera-list-scroll -> Lưới camera 2 cột
+                    if (pagedCameraItems.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(spacing.space16),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CommonEmptyState(
+                                text = if (isEn) "No matching cameras found" else "Không tìm thấy camera phù hợp"
+                            )
+                        }
+                    } else {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            state = cameraGridState,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentPadding = PaddingValues(
+                                start = spacing.space8,
+                                end = spacing.space8,
+                                top = spacing.space6,
+                                bottom = spacing.space8
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space8),
+                            verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                        ) {
+                            items(
+                                items = pagedCameraItems,
+                                key = { it.key },
+                                contentType = { "camera_card" }
+                            ) { item ->
+                                val hasSnapKey = uiState.cameraSnapshots.containsKey(item.camera.id)
+                                val snapUrl = uiState.cameraSnapshots[item.camera.id]
 
-                    // 2. Camera Panel (.mobile-camera-panel)
-                    val controlBg = colors.controlBg
-                    val mutedText = colors.textSubtle
-                    val placeholderColor = colors.textPlaceholder
+                                MobileCameraSnapshotCard(
+                                    camera = item.camera,
+                                    isTabActive = isTabActive && !isLiveScreenOpen,
+                                    hasSnapKey = hasSnapKey,
+                                    snapshotUrl = snapUrl,
+                                    onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
+                                    onClick = { viewModel.openLiveCamera(item.camera) }
+                                )
+                            }
+                        }
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .navigationBarsPadding()
-                            .padding(horizontal = spacing.space10)
-                            .padding(bottom = bottomClearance)
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
-                            .background(panelBg)
-                    ) {
-                        // .camera-filter-header
-                        Column(
+                        // Hàng chân trang dưới cùng: Phân trang nằm giữa (< 1 2 3 ... trang cuối >), "Tổng x camera" nằm bên phải
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(
                                     start = spacing.space10,
                                     end = spacing.space10,
-                                    top = spacing.space8,
-                                    bottom = spacing.space4
+                                    top = spacing.space4,
+                                    bottom = spacing.space8
                                 )
+                                .heightIn(min = spacing.chipHeight)
                         ) {
-                            // Row 1 (Collapsible): .tree-search-bar (Search + 1x1/2x2 selector + 2x2 Fullscreen button)
-                            AnimatedVisibility(
-                                visible = isControlsExpanded,
-                                enter = expandVertically(
-                                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                                ) + fadeIn(animationSpec = tween(durationMillis = 180)),
-                                exit = shrinkVertically(
-                                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                                ) + fadeOut(animationSpec = tween(durationMillis = 150))
-                            ) {
+                            if (totalCameraPages > 1) {
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = spacing.space8),
+                                    modifier = Modifier.align(Alignment.Center),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.space3)
                                 ) {
-                                    // .search-input-box
-                                    Row(
+                                    val canPrev = uiState.currentCameraPage > 1
+                                    val canNext = uiState.currentCameraPage < totalCameraPages
+
+                                    Box(
                                         modifier = Modifier
-                                            .weight(1f)
-                                            .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                            .height(spacing.chipHeight)
+                                            .widthIn(min = spacing.space24)
+                                            .clip(RoundedCornerShape(spacing.radiusSmall))
                                             .background(controlBg)
-                                            .padding(horizontal = spacing.space10),
-                                        verticalAlignment = Alignment.CenterVertically
+                                            .alpha(if (canPrev) 1f else 0.4f)
+                                            .clickable(enabled = canPrev) {
+                                                dismissKeyboard()
+                                                viewModel.prevCameraPage()
+                                            }
+                                            .padding(horizontal = spacing.space5),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = LucideIcons.Search,
-                                            contentDescription = if (isEn) "Search camera" else "Tìm camera",
-                                            tint = if (colors.isDark) colors.accent else colors.textMuted,
-                                            modifier = Modifier.size(spacing.iconSmall)
+                                            imageVector = LucideIcons.ChevronLeft,
+                                            contentDescription = if (isEn) "Previous page" else "Trang trước",
+                                            tint = mutedText,
+                                            modifier = Modifier.size(spacing.iconXSmall)
                                         )
-                                        Spacer(modifier = Modifier.width(spacing.space6))
-                                        Box(
-                                            modifier = Modifier.weight(1f),
-                                            contentAlignment = Alignment.CenterStart
-                                        ) {
-                                            if (uiState.searchQuery.isEmpty()) {
-                                                Text(
-                                                    text = if (isEn) "Search camera..." else "Tìm camera...",
-                                                    color = placeholderColor,
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                            }
-                                            BasicTextField(
-                                                value = uiState.searchQuery,
-                                                onValueChange = { viewModel.setSearchQuery(it) },
-                                                singleLine = true,
-                                                textStyle = MaterialTheme.typography.bodySmall.copy(
-                                                    color = colors.textStrong
-                                                ),
-                                                cursorBrush = SolidColor(colors.accent),
-                                                modifier = Modifier.fillMaxWidth()
-                                            )
-                                        }
-                                        if (uiState.searchQuery.isNotEmpty()) {
+                                    }
+
+                                    cameraPaginationItems.forEach { page ->
+                                        if (page == -1) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(spacing.badgeMinSize)
-                                                    .clip(CircleShape)
-                                                    .background(colors.textMuted.copy(alpha = 0.2f))
-                                                    .clickable { viewModel.setSearchQuery("") },
+                                                    .height(spacing.chipHeight)
+                                                    .padding(horizontal = spacing.space2),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Icon(
-                                                    imageVector = LucideIcons.X,
-                                                    contentDescription = if (isEn) "Clear search" else "Xóa tìm kiếm",
-                                                    tint = colors.textMuted,
-                                                    modifier = Modifier.size(spacing.iconTiny)
+                                                Text(
+                                                    text = "...",
+                                                    color = mutedText,
+                                                    style = MaterialTheme.typography.caption,
+                                                    fontWeight = FontWeight.SemiBold
                                                 )
                                             }
-                                        }
-                                    }
-
-                                    // .mobile-grid-selector ("1x1" / "2x2")
-                                    Row(
-                                        modifier = Modifier
-                                            .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
-                                            .background(controlBg)
-                                            .padding(spacing.space3),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-                                    ) {
-                                        GridOptionButton(
-                                            label = "1x1",
-                                            isSelected = uiState.gridSize == 1,
-                                            onClick = { viewModel.setGridSize(1) }
-                                        )
-                                        GridOptionButton(
-                                            label = "2x2",
-                                            isSelected = uiState.gridSize == 4,
-                                            onClick = { viewModel.setGridSize(4) }
-                                        )
-                                    }
-
-                                    // .grid-fullscreen-btn (visible when gridSize == 4)
-                                    if (uiState.gridSize == 4) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(spacing.iconButton)
-                                                .clip(RoundedCornerShape(spacing.radiusSmallMedium))
-                                                .background(controlBg)
-                                                .clickable { isGridFullscreen = true },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = LucideIcons.Maximize,
-                                                contentDescription = "Phóng to lưới 2x2",
-                                                tint = mutedText,
-                                                modifier = Modifier.size(spacing.iconSmall)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Row 2: Toggle Arrow Button + Pagination controls
-                            val arrowRotation by animateFloatAsState(
-                                targetValue = if (isControlsExpanded) 180f else 0f,
-                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                                label = "controlsToggleArrow"
-                            )
-                            val hasActiveCustomControl = uiState.searchQuery.isNotEmpty()
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                // Nút mũi tên đóng/mở thanh công cụ tìm kiếm và chọn lưới 1x1/2x2
-                                Box(
-                                    modifier = Modifier
-                                        .height(spacing.chipHeight)
-                                        .widthIn(min = spacing.chipHeight)
-                                        .clip(RoundedCornerShape(spacing.radiusSmall))
-                                        .background(
-                                            if (isControlsExpanded || hasActiveCustomControl) {
-                                                colors.accent.copy(alpha = if (colors.isDark) 0.20f else 0.12f)
-                                            } else {
-                                                controlBg
-                                            }
-                                        )
-                                        .clickable { isControlsExpanded = !isControlsExpanded }
-                                        .padding(horizontal = spacing.space6),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = LucideIcons.ChevronDown,
-                                        contentDescription = if (isEn) {
-                                            if (isControlsExpanded) "Collapse controls" else "Expand controls"
                                         } else {
-                                            if (isControlsExpanded) "Thu gọn công cụ" else "Mở rộng công cụ"
-                                        },
-                                        tint = if (isControlsExpanded || hasActiveCustomControl) colors.accent else mutedText,
-                                        modifier = Modifier
-                                            .size(spacing.iconSmall)
-                                            .rotate(arrowRotation)
-                                    )
-                                }
-
-                                // .pagination-controls (luôn hiển thị)
-                                if (totalCameraPages > 1) {
-                                    Spacer(modifier = Modifier.width(spacing.space6))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(spacing.space3)
-                                    ) {
-                                        val canPrev = uiState.currentCameraPage > 1
-                                        val canNext = uiState.currentCameraPage < totalCameraPages
-
-                                        Box(
-                                            modifier = Modifier
-                                                .height(spacing.chipHeight)
-                                                .widthIn(min = spacing.space24)
-                                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                                .background(controlBg)
-                                                .alpha(if (canPrev) 1f else 0.4f)
-                                                .clickable(enabled = canPrev) { viewModel.prevCameraPage() }
-                                                .padding(horizontal = spacing.space5),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = LucideIcons.ChevronLeft,
-                                                contentDescription = "Trang trước",
-                                                tint = mutedText,
-                                                modifier = Modifier.size(spacing.iconXSmall)
-                                            )
-                                        }
-
-                                        cameraPageNumbers.forEach { page ->
                                             val isPageActive = page == uiState.currentCameraPage
                                             Box(
                                                 modifier = Modifier
@@ -643,7 +563,10 @@ fun MonitorScreen(
                                                     .widthIn(min = spacing.space24)
                                                     .clip(RoundedCornerShape(spacing.radiusSmall))
                                                     .background(if (isPageActive) colors.accent else controlBg)
-                                                    .clickable { viewModel.setCameraPage(page) }
+                                                    .clickable {
+                                                        dismissKeyboard()
+                                                        viewModel.setCameraPage(page)
+                                                    }
                                                     .padding(horizontal = spacing.space6),
                                                 contentAlignment = Alignment.Center
                                             ) {
@@ -655,84 +578,64 @@ fun MonitorScreen(
                                                 )
                                             }
                                         }
+                                    }
 
-                                        Box(
-                                            modifier = Modifier
-                                                .height(spacing.chipHeight)
-                                                .widthIn(min = spacing.space24)
-                                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                                .background(controlBg)
-                                                .alpha(if (canNext) 1f else 0.4f)
-                                                .clickable(enabled = canNext) { viewModel.nextCameraPage() }
-                                                .padding(horizontal = spacing.space5),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = LucideIcons.ChevronRight,
-                                                contentDescription = "Trang sau",
-                                                tint = mutedText,
-                                                modifier = Modifier.size(spacing.iconXSmall)
-                                            )
-                                        }
+                                    Box(
+                                        modifier = Modifier
+                                            .height(spacing.chipHeight)
+                                            .widthIn(min = spacing.space24)
+                                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                                            .background(controlBg)
+                                            .alpha(if (canNext) 1f else 0.4f)
+                                            .clickable(enabled = canNext) {
+                                                dismissKeyboard()
+                                                viewModel.nextCameraPage()
+                                            }
+                                            .padding(horizontal = spacing.space5),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = LucideIcons.ChevronRight,
+                                            contentDescription = if (isEn) "Next page" else "Trang sau",
+                                            tint = mutedText,
+                                            modifier = Modifier.size(spacing.iconXSmall)
+                                        )
                                     }
                                 }
                             }
-                        }
 
-                        // .mobile-camera-list-scroll -> 2-column camera cards grid
-                        val gridFullMsg = stringResource(id = R.string.camera_grid_full)
-                        if (pagedCameraItems.isEmpty()) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(spacing.space16),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CommonEmptyState(
-                                    text = if (isEn) "No matching cameras found" else "Không tìm thấy camera phù hợp"
-                                )
-                            }
-                        } else {
-                            LazyVerticalGrid(
-                                columns = GridCells.Fixed(2),
-                                state = cameraGridState,
-                                modifier = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(
-                                    start = spacing.space8,
-                                    end = spacing.space8,
-                                    top = spacing.space6,
-                                    bottom = spacing.space12
-                                ),
-                                horizontalArrangement = Arrangement.spacedBy(spacing.space8),
-                                verticalArrangement = Arrangement.spacedBy(spacing.space8)
-                            ) {
-                                items(
-                                    items = pagedCameraItems,
-                                    key = { it.key },
-                                    contentType = { "camera_card" }
-                                ) { item ->
-                                    val isPlaying = activeCameraIds.contains(item.camera.id)
-                                    val hasSnapKey = uiState.cameraSnapshots.containsKey(item.camera.id)
-                                    val snapUrl = uiState.cameraSnapshots[item.camera.id]
-
-                                    MobileCameraSnapshotCard(
-                                        camera = item.camera,
-                                        isPlaying = isPlaying,
-                                        isTabActive = isTabActive,
-                                        hasSnapKey = hasSnapKey,
-                                        snapshotUrl = snapUrl,
-                                        onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
-                                        onClick = {
-                                            viewModel.selectCameraFromTree(
-                                                camera = item.camera,
-                                                onGridFull = {
-                                                    MobileTopPopupManager.warning(gridFullMsg)
-                                                }
-                                            )
-                                        }
-                                    )
-                                }
-                            }
+                            Text(
+                                text = buildAnnotatedString {
+                                    withStyle(
+                                        SpanStyle(
+                                            color = colors.textMuted,
+                                            fontWeight = FontWeight.Normal
+                                        )
+                                    ) {
+                                        append(if (isEn) "Total " else "Tổng ")
+                                    }
+                                    withStyle(
+                                        SpanStyle(
+                                            color = colors.textTitle,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    ) {
+                                        append(totalFilteredCamerasCount.toString())
+                                    }
+                                    withStyle(
+                                        SpanStyle(
+                                            color = colors.textMuted,
+                                            fontWeight = FontWeight.Normal
+                                        )
+                                    ) {
+                                        append(if (isEn) " cameras" else " camera")
+                                    }
+                                },
+                                color = colors.textMuted,
+                                style = MaterialTheme.typography.caption,
+                                maxLines = 1,
+                                modifier = Modifier.align(Alignment.CenterEnd)
+                            )
                         }
                     }
                 }
@@ -740,15 +643,297 @@ fun MonitorScreen(
         }
 
         // Group Filter Bottom Sheet (.mobile-group-sheet-overlay)
-        if (uiState.showGroupFilterSheet && !isAnyFullscreen) {
+        if (uiState.showGroupFilterSheet && !isLiveScreenOpen) {
             MobileGroupFilterBottomSheet(
                 title = sheetTitle,
                 rows = groupTreeRows,
-                totalAllCamerasCount = totalAllCamerasCount,
                 selectedFilterNodeKey = uiState.selectedFilterNodeKey,
                 onDismiss = { viewModel.closeGroupFilterSheet() },
                 onToggleExpand = { viewModel.toggleNodeExpansion(it) },
                 onRowClick = { viewModel.handleGroupRowClick(it) }
+            )
+        }
+
+        // =========================================================================================
+        // 2. MÀN HÌNH XEM TRỰC TIẾP 1x1 RIÊNG (Trượt ngang từ phải sang khi chạm chọn 1 camera)
+        // =========================================================================================
+        AnimatedVisibility(
+            visible = isLiveScreenOpen,
+            modifier = Modifier.fillMaxSize(),
+            enter = slideInHorizontally(
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = LIVE_PAGE_ENTER_DURATION_MS, easing = LivePageEnterEasing)
+            ),
+            exit = slideOutHorizontally(
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(durationMillis = LIVE_PAGE_EXIT_DURATION_MS, easing = LivePageExitEasing)
+            )
+        ) {
+            val currentCam = activeLiveCamera ?: displayedLiveCamera
+            if (currentCam != null) {
+                val locationLabel = remember(currentCam.camera.id, uiState.groupTreeRows) {
+                    viewModel.getCameraLocationLabel(currentCam.camera)
+                }
+                MobileLiveCameraScreen(
+                    selectedCamera = currentCam,
+                    locationLabel = locationLabel,
+                    isTabActive = isTabActive && isLiveScreenOpen,
+                    isFullscreen = isSingleFullscreen,
+                    onBackClick = {
+                        if (isSingleFullscreen) {
+                            restoreSystemOrientationAndBars(activity)
+                            fullscreenIndex = null
+                        }
+                        viewModel.closeLiveCamera()
+                    },
+                    onToggleFullscreen = {
+                        if (isSingleFullscreen) {
+                            restoreSystemOrientationAndBars(activity)
+                            fullscreenIndex = null
+                        } else {
+                            fullscreenIndex = 0
+                        }
+                    },
+                    onRetryClick = { viewModel.retryCameraStream(0) },
+                    onSuccess = { viewModel.resetRetryCount(0) },
+                    onSnapshotError = { viewModel.onSnapshotLoadError(0) },
+                    onReloadClick = { viewModel.reloadLiveCamera() },
+                    onSwitchChannel = { channel -> viewModel.switchLiveChannel(channel) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MobileLiveCameraScreen(
+    selectedCamera: SelectedCamera,
+    locationLabel: String,
+    isTabActive: Boolean,
+    isFullscreen: Boolean,
+    onBackClick: () -> Unit,
+    onToggleFullscreen: () -> Unit,
+    onRetryClick: () -> Unit,
+    onSuccess: () -> Unit,
+    onSnapshotError: () -> Unit,
+    onReloadClick: () -> Unit,
+    onSwitchChannel: (Int) -> Unit
+) {
+    val isEn = rememberIsEnglish()
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val ipText = remember(selectedCamera.camera.id) {
+        MonitorViewModel.getCameraIpText(selectedCamera.camera)
+    }
+    val hasDualStreams = remember(selectedCamera.camera.id) {
+        selectedCamera.camera.sub.isNotBlank() && selectedCamera.camera.main.isNotBlank()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+    ) {
+        if (!isFullscreen) {
+            MobileTopBar(
+                title = selectedCamera.camera.name,
+                leftAction = {
+                    Box(
+                        modifier = Modifier
+                            .size(spacing.iconButton)
+                            .clip(CircleShape)
+                            .clickable(onClick = onBackClick),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.ChevronLeft,
+                            contentDescription = stringResource(id = R.string.common_back),
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(spacing.iconMedium)
+                        )
+                    }
+                },
+                rightAction = {
+                    MobileTopActionButton(
+                        icon = LucideIcons.RefreshCw,
+                        contentDescription = if (isEn) "Reload stream" else "Tải lại luồng",
+                        onClick = onReloadClick
+                    )
+                }
+            )
+        }
+
+        // Khung phát Live 1x1 (giữ nguyên cùng 1 node trong cây Compose khi xoay ngang/dọc để không ngắt kết nối WS/ExoPlayer)
+        Box(
+            modifier = if (isFullscreen) {
+                Modifier
+                    .fillMaxSize()
+                    .background(colors.mediaBg)
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+                    .background(colors.mediaBg)
+            }
+        ) {
+            CameraGridItem(
+                selectedCamera = selectedCamera,
+                isTabActive = isTabActive,
+                onClick = {},
+                onRetryClick = onRetryClick,
+                onSuccess = onSuccess,
+                onSnapshotError = onSnapshotError,
+                onFullscreenClick = onToggleFullscreen,
+                onBackToLiveClick = onReloadClick,
+                onRemoveClick = onBackClick,
+                isFullscreen = isFullscreen,
+                isCompact = false,
+                showFullscreenButton = true,
+                showCloseButton = false
+            )
+        }
+
+        if (!isFullscreen) {
+            Spacer(modifier = Modifier.height(spacing.space6))
+
+            Text(
+                text = if (isEn) "CAMERA INFORMATION" else "THÔNG TIN CAMERA",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.6.sp,
+                color = colors.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(
+                    start = spacing.space24,
+                    end = spacing.space14,
+                    top = spacing.space10,
+                    bottom = spacing.space6
+                )
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = spacing.space10)
+                    .clip(RoundedCornerShape(spacing.radiusMedium))
+                    .background(colors.surface)
+                    .padding(horizontal = spacing.space16, vertical = spacing.space12),
+                verticalArrangement = Arrangement.spacedBy(spacing.space2)
+            ) {
+                LiveCameraInfoRow(
+                    label = if (isEn) "Camera name" else "Tên camera",
+                    value = selectedCamera.camera.name
+                )
+
+                if (locationLabel.isNotEmpty()) {
+                    LiveCameraInfoRow(
+                        label = if (isEn) "Group / Area" else "Khu vực / Nhóm",
+                        value = locationLabel
+                    )
+                }
+
+                if (ipText.isNotEmpty()) {
+                    LiveCameraInfoRow(
+                        label = if (isEn) "IP address" else "Địa chỉ IP",
+                        value = ipText
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = spacing.space32)
+                        .padding(vertical = spacing.space5),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isEn) "Stream quality" else "Chất lượng luồng",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textMuted,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(spacing.space12))
+                    if (hasDualStreams) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                .background(colors.controlBg)
+                                .padding(spacing.space3),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                        ) {
+                            GridOptionButton(
+                                label = if (isEn) "Standard (SD)" else "Tiêu chuẩn (SD)",
+                                isSelected = selectedCamera.channel == 1,
+                                onClick = { onSwitchChannel(1) }
+                            )
+                            GridOptionButton(
+                                label = if (isEn) "High (HD)" else "Cao (HD)",
+                                isSelected = selectedCamera.channel == 0,
+                                onClick = { onSwitchChannel(0) }
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = if (selectedCamera.channel == 0) {
+                                if (isEn) "High (HD)" else "Chất lượng cao (HD)"
+                            } else {
+                                if (isEn) "Standard (SD)" else "Tiêu chuẩn (SD)"
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textStrong,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveCameraInfoRow(
+    label: String,
+    value: String
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = spacing.space32)
+            .padding(vertical = spacing.space5),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textMuted,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.width(spacing.space12))
+        Box(modifier = Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textStrong,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -896,7 +1081,9 @@ private fun GridOptionButton(
             text = label,
             color = contentColor,
             style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -904,7 +1091,6 @@ private fun GridOptionButton(
 @Composable
 private fun MobileCameraSnapshotCard(
     camera: CameraModel,
-    isPlaying: Boolean,
     isTabActive: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
@@ -912,22 +1098,84 @@ private fun MobileCameraSnapshotCard(
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
-    val cardBg = when {
-        isPlaying && colors.isDark -> colors.accent.copy(alpha = 0.14f)
-        isPlaying -> colors.accent.copy(alpha = 0.10f)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    var isTapFlashing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val currentOnClick by rememberUpdatedState(onClick)
+    val currentIsPressed by rememberUpdatedState(isPressed)
+
+    val handleCardClick: () -> Unit = remember(scope, view, focusManager, keyboardController) {
+        {
+            val keyboardWasOpen = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            focusManager.clearFocus()
+            keyboardController?.hide()
+
+            if (keyboardWasOpen) {
+                // Nếu bàn phím đang mở: ưu tiên đóng bàn phím xong hoàn toàn (~260ms) rồi mới trượt mở màn hình Live
+                isTapFlashing = true
+                scope.launch {
+                    delay(260L)
+                    currentOnClick()
+                    delay(160L)
+                    isTapFlashing = false
+                }
+            } else if (currentIsPressed) {
+                isTapFlashing = true
+                currentOnClick()
+                scope.launch {
+                    delay(180L)
+                    isTapFlashing = false
+                }
+            } else {
+                isTapFlashing = true
+                scope.launch {
+                    delay(55L)
+                    currentOnClick()
+                    delay(180L)
+                    isTapFlashing = false
+                }
+            }
+        }
+    }
+
+    val isActivePress = isPressed || isTapFlashing
+    val targetCardBg = when {
+        isActivePress && colors.isDark -> Color(0xFF28374E)
+        isActivePress -> colors.closeButtonBg
         else -> colors.inputBg
     }
+    val cardBg by animateColorAsState(
+        targetValue = targetCardBg,
+        animationSpec = tween(durationMillis = if (isActivePress) 35 else 180),
+        label = "cameraCardBg"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (isActivePress) 0.98f else 1f,
+        animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
+        label = "cameraCardScale"
+    )
     val thumbBg = colors.thumbnailBg
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
-    val nameColor = if (isPlaying) colors.accent else colors.textTitle
+    val nameColor = colors.textTitle
 
-    var isImageLoading by remember(snapshotUrl) { mutableStateOf(!snapshotUrl.isNullOrEmpty()) }
+    var lastLoadedCacheKey by remember(camera.id) { mutableStateOf<String?>(null) }
+    var isImageLoading by remember(snapshotUrl) {
+        mutableStateOf(!snapshotUrl.isNullOrEmpty() && lastLoadedCacheKey == null)
+    }
     var isImageError by remember(snapshotUrl) { mutableStateOf(false) }
 
-    val imageRequest = remember(snapshotUrl) {
+    val targetMemKey = remember(snapshotUrl) {
+        if (snapshotUrl.isNullOrEmpty()) null else "${snapshotUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+    }
+    val imageRequest = remember(snapshotUrl, lastLoadedCacheKey) {
         if (snapshotUrl.isNullOrEmpty()) {
             null
         } else {
@@ -938,8 +1186,9 @@ private fun MobileCameraSnapshotCard(
                 .allowHardware(true)
                 .allowRgb565(true)
                 .crossfade(false)
-                .memoryCacheKey("${snapshotUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}")
+                .memoryCacheKey(targetMemKey)
                 .diskCacheKey(snapshotUrl)
+                .placeholderMemoryCacheKey(lastLoadedCacheKey)
                 .build()
         }
     }
@@ -947,9 +1196,17 @@ private fun MobileCameraSnapshotCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = pressScale
+                scaleY = pressScale
+            }
             .clip(RoundedCornerShape(spacing.radiusSmallMedium))
             .background(cardBg)
-            .clickable(onClick = onClick)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = handleCardClick
+            )
     ) {
         // .cam-card-thumb (16:9) - Dùng AsyncImage trực tiếp thay vì SubcomposeAsyncImage để cuộn lưới mượt 60/120fps
         Box(
@@ -968,14 +1225,17 @@ private fun MobileCameraSnapshotCard(
                     onSuccess = {
                         isImageLoading = false
                         isImageError = false
+                        lastLoadedCacheKey = targetMemKey
                     },
                     onError = {
                         isImageLoading = false
-                        isImageError = true
+                        if (lastLoadedCacheKey == null) {
+                            isImageError = true
+                        }
                         onSnapshotError()
                     }
                 )
-                if (isImageLoading && isTabActive) {
+                if (isImageLoading && lastLoadedCacheKey == null && isTabActive) {
                     WaveDotsLoading(
                         dotSize = spacing.space6,
                         dotColor = colors.accent,
@@ -996,32 +1256,6 @@ private fun MobileCameraSnapshotCard(
                     modifier = Modifier.size(spacing.iconMedium)
                 )
             }
-
-            // .cam-card-overlay-badge -> .cam-playing-badge
-            if (isPlaying) {
-                val isEn = rememberIsEnglish()
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(spacing.space6)
-                        .clip(CircleShape)
-                        .background(colors.accent)
-                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space5)
-                    ) {
-                        PlayingEqualizerBars(isTabActive = isTabActive)
-                        Text(
-                            text = if (isEn) "Playing" else "Đang xem",
-                            color = colors.onAccent,
-                            style = MaterialTheme.typography.micro,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-            }
         }
 
         // .cam-card-footer
@@ -1036,7 +1270,7 @@ private fun MobileCameraSnapshotCard(
                 text = camera.name,
                 color = nameColor,
                 style = MaterialTheme.typography.labelMedium,
-                fontWeight = if (isPlaying) FontWeight.SemiBold else FontWeight.Medium,
+                fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -1146,7 +1380,6 @@ private fun PlayingEqualizerBars(isTabActive: Boolean = true) {
 private fun MobileGroupFilterBottomSheet(
     title: String,
     rows: List<GroupSheetRow>,
-    totalAllCamerasCount: Int,
     selectedFilterNodeKey: String,
     onDismiss: () -> Unit,
     onToggleExpand: (String) -> Unit,
@@ -1244,7 +1477,7 @@ private fun MobileGroupFilterBottomSheet(
                 )
 
                 // Sheet Body
-                if (rows.isEmpty() && totalAllCamerasCount == 0) {
+                if (rows.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1298,29 +1531,12 @@ private fun MobileGroupFilterBottomSheet(
                                 Text(
                                     text = if (isEn) "All cameras" else "Tất cả camera",
                                     color = if (isAllSelected) colors.accent else colors.textStrong,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = if (isAllSelected) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .background(
-                                            if (isAllSelected) colors.accent.copy(alpha = 0.18f) else colors.controlBg
-                                        )
-                                        .padding(horizontal = spacing.space6, vertical = spacing.space2),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = totalAllCamerasCount.toString(),
-                                        color = if (isAllSelected) colors.accent else colors.textMuted,
-                                        style = MaterialTheme.typography.caption,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
 
                                 if (isAllSelected) {
                                     Icon(
@@ -1391,29 +1607,12 @@ private fun MobileGroupFilterBottomSheet(
                                 Text(
                                     text = row.title,
                                     color = if (isSelected) colors.accent else colors.textStrong,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = if (isSelected || row.isVmsNode) FontWeight.SemiBold else FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .background(
-                                            if (isSelected) colors.accent.copy(alpha = 0.18f) else colors.controlBg
-                                        )
-                                        .padding(horizontal = spacing.space6, vertical = spacing.space2),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = row.count.toString(),
-                                        color = if (isSelected) colors.accent else colors.textMuted,
-                                        style = MaterialTheme.typography.caption,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
 
                                 if (isSelected) {
                                     Icon(
@@ -1445,7 +1644,8 @@ fun CameraGridItem(
     onRemoveClick: () -> Unit = {},
     isFullscreen: Boolean = false,
     isCompact: Boolean = false,
-    showFullscreenButton: Boolean = true
+    showFullscreenButton: Boolean = true,
+    showCloseButton: Boolean = true
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
@@ -1533,7 +1733,11 @@ fun CameraGridItem(
         val isLoadingStream = !isLiveViewPlaying && !hasError
         val context = LocalContext.current
         val fallbackUrl = selectedCamera.fallbackImageUrl
-        val fallbackImageRequest = remember(fallbackUrl) {
+        var lastFallbackCacheKey by remember(selectedCamera.camera.id) { mutableStateOf<String?>(null) }
+        val targetFallbackMemKey = remember(fallbackUrl) {
+            if (fallbackUrl.isEmpty()) null else "${fallbackUrl}_${LIVE_STAGE_SNAPSHOT_WIDTH_PX}x${LIVE_STAGE_SNAPSHOT_HEIGHT_PX}"
+        }
+        val fallbackImageRequest = remember(fallbackUrl, lastFallbackCacheKey) {
             if (fallbackUrl.isEmpty()) {
                 null
             } else {
@@ -1543,6 +1747,9 @@ fun CameraGridItem(
                     .precision(Precision.INEXACT)
                     .allowHardware(true)
                     .crossfade(false)
+                    .memoryCacheKey(targetFallbackMemKey)
+                    .diskCacheKey(fallbackUrl)
+                    .placeholderMemoryCacheKey(lastFallbackCacheKey)
                     .build()
             }
         }
@@ -1564,8 +1771,13 @@ fun CameraGridItem(
                         contentDescription = selectedCamera.camera.name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
+                        onSuccess = {
+                            lastFallbackCacheKey = targetFallbackMemKey
+                        },
                         onError = {
-                            snapshotFailed = true
+                            if (lastFallbackCacheKey == null) {
+                                snapshotFailed = true
+                            }
                             onSnapshotError()
                         }
                     )
@@ -1636,7 +1848,7 @@ fun CameraGridItem(
                 }
 
                 // .info-action (Close button x-circle)
-                if (!isFullscreen) {
+                if (!isFullscreen && showCloseButton) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)

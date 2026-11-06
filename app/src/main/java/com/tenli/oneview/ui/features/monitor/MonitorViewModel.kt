@@ -7,7 +7,12 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import coil.Coil
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import coil.size.Precision
 import com.tenli.oneview.data.local.CachedMonitorData
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
@@ -83,6 +88,7 @@ data class MonitorUiState(
     // ---- Dữ liệu suy ra từ cây camera – tính sẵn trong ViewModel, UI chỉ việc đọc ----
     val hasAvailableCameras: Boolean = false,
     val totalAllCamerasCount: Int = 0,
+    val totalFilteredCamerasCount: Int = 0,
     val groupTreeRows: List<GroupSheetRow> = emptyList(),
     val pagedCameraItems: List<CameraCardItem> = emptyList(),
     val totalCameraPages: Int = 1
@@ -98,6 +104,7 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     private val camerasByNodeKey = HashMap<String, List<CameraCardItem>>()
     private val normalizedNameById = HashMap<Int, String>()
     private val ipTextById = HashMap<Int, String>()
+    private val locationById = HashMap<Int, String>()
 
     /** Các VMS có ít nhất 1 camera */
     val vmsNodes: List<CameraTreeNode.VMSNode>
@@ -108,7 +115,7 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     private val cameraById: Map<Int, CameraModel>
 
     init {
-        tree.forEach { collect(it) }
+        tree.forEach { collect(it, vmsName = "", groupPath = "") }
         vmsNodes = tree.filterIsInstance<CameraTreeNode.VMSNode>().filter { count(it) > 0 }
         allCameras = mergeUnique(tree.map { camerasOf(it) })
         totalCameraCount = tree.sumOf { count(it) }
@@ -121,16 +128,40 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     }
 
     /** Duyệt hậu thứ tự: danh sách camera của node = hợp (giữ thứ tự, không trùng id) của các node con. */
-    private fun collect(node: CameraTreeNode): List<CameraCardItem> {
+    private fun collect(node: CameraTreeNode, vmsName: String, groupPath: String): List<CameraCardItem> {
         // Giữ ngữ nghĩa "node đầu tiên khớp key theo thứ tự duyệt" như hàm tìm kiếm cũ
         nodeByKey.putIfAbsent(node.key, node)
         val items = when (node) {
             is CameraTreeNode.CameraLeaf -> {
                 val cam = node.camera
-                if (cam.id != 0) listOf(CameraCardItem(key = "cam-${cam.id}", camera = cam)) else emptyList()
+                if (cam.id != 0) {
+                    val loc = when {
+                        groupPath.isNotEmpty() && vmsName.isNotEmpty() -> "$groupPath • $vmsName"
+                        groupPath.isNotEmpty() -> groupPath
+                        vmsName.isNotEmpty() -> vmsName
+                        else -> ""
+                    }
+                    if (loc.isNotEmpty()) {
+                        locationById.putIfAbsent(cam.id, loc)
+                    }
+                    listOf(CameraCardItem(key = "cam-${cam.id}", camera = cam))
+                } else {
+                    emptyList()
+                }
             }
-            is CameraTreeNode.GroupNode -> mergeUnique(node.children.map { collect(it) })
-            is CameraTreeNode.VMSNode -> mergeUnique(node.children.map { collect(it) })
+            is CameraTreeNode.GroupNode -> {
+                val gName = node.group.name.trim()
+                val nextGroupPath = when {
+                    gName.isEmpty() -> groupPath
+                    groupPath.isEmpty() -> gName
+                    else -> "$groupPath / $gName"
+                }
+                mergeUnique(node.children.map { collect(it, vmsName = vmsName, groupPath = nextGroupPath) })
+            }
+            is CameraTreeNode.VMSNode -> {
+                val vName = node.vms.name.trim().ifBlank { "VMS" }
+                mergeUnique(node.children.map { collect(it, vmsName = vName, groupPath = "") })
+            }
         }
         camerasByNodeKey.putIfAbsent(node.key, items)
         return items
@@ -150,6 +181,8 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     fun hasNode(key: String): Boolean = nodeByKey.containsKey(key)
 
     fun findCamera(id: Int): CameraModel? = cameraById[id]
+
+    fun locationLabel(id: Int): String = locationById[id].orEmpty()
 
     fun camerasForFilter(filterKey: String): List<CameraCardItem> {
         if (filterKey == MonitorViewModel.FILTER_ALL) return allCameras
@@ -252,6 +285,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         private const val BLINK_DURATION_MS = 1000L
         private const val RETRY_MAX_DELAY_MS = 8000L
         private const val NO_IMAGE = "NO_IMAGE"
+        private const val SNAPSHOT_CARD_WIDTH_PX = 420
+        private const val SNAPSHOT_CARD_HEIGHT_PX = 236
 
         private val RTSP_HOST_REGEX = Regex("(?i)^rtsp://(?:[^@/\\s]+@)?([^:/?\\s]+)")
         private val DIACRITICS_REGEX = Regex("\\p{InCombiningDiacriticalMarks}+")
@@ -405,8 +440,42 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     init {
         val prefs = GlobalData.preferences
         val savedNodes = prefs.getStringSet(PREF_EXPANDED_NODES, emptySet()) ?: emptySet()
-        val savedGridSize = if (prefs.getInt(PREF_GRID_SIZE, 1) == 4) 4 else 1
-        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = savedGridSize) }
+        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = 1) }
+
+        // Nếu dữ liệu cây camera đã được preload sẵn trong RAM, áp dụng ngay tức thì (0ms)
+        val memCached = MonitorCacheManager.getMonitorDataInMemory()
+        if (memCached != null && (memCached.vmsList.isNotEmpty() || memCached.cameraList.isNotEmpty())) {
+            if (memCached.aiServices.isNotEmpty()) aiServices = memCached.aiServices
+            applyTree(
+                CameraTreeIndex(
+                    buildTree(memCached.vmsList, memCached.groupList, memCached.cameraList, memCached.cameraInGroups)
+                )
+            )
+        }
+
+        // Lắng nghe cập nhật snapshot (vd. frame vừa chụp từ luồng live) để đồng bộ ngay lên thẻ camera & ô live
+        viewModelScope.launch {
+            MonitorCacheManager.snapshotUpdates.collect { (camId, rawLink) ->
+                val resolved = resolveFullMediaUrl(rawLink)
+                if (resolved.isNotEmpty()) {
+                    _uiState.update { cur ->
+                        val updatedMap = if (cur.cameraSnapshots[camId] == resolved) {
+                            cur.cameraSnapshots
+                        } else {
+                            cur.cameraSnapshots + (camId to resolved)
+                        }
+                        val updatedSelected = cur.selectedCameras.map { sel ->
+                            if (sel != null && (sel.camera.id == camId || sel.camera.cameraId == camId) && sel.fallbackImageUrl != resolved) {
+                                sel.copy(fallbackImageUrl = resolved)
+                            } else {
+                                sel
+                            }
+                        }
+                        cur.copy(cameraSnapshots = updatedMap, selectedCameras = updatedSelected)
+                    }
+                }
+            }
+        }
 
         loadData()
     }
@@ -498,6 +567,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             currentCameraPage = page,
             hasAvailableCameras = index.vmsNodes.isNotEmpty(),
             totalAllCamerasCount = index.totalCameraCount,
+            totalFilteredCamerasCount = displayed.size,
             groupTreeRows = if (rows == groupTreeRows) groupTreeRows else rows,
             pagedCameraItems = if (paged == pagedCameraItems) pagedCameraItems else paged,
             totalCameraPages = totalPages
@@ -707,45 +777,82 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val state = _uiState.value
         val visibleCameras = state.pagedCameraItems.map { it.camera }.filter { it.id != 0 }
         if (visibleCameras.isEmpty()) return
-        val knownSnapshots = state.cameraSnapshots
 
-        // Chỉ xử lý trang đang hiển thị: huỷ lượt tra cứu của trang/bộ lọc trước
+        // 1. Nạp đồng bộ tức thì (0ms) từ RAM cache cho các camera chưa có trong state để hiển thị ngay không chờ coroutine
+        val syncUpdates = HashMap<Int, String?>()
+        for (cam in visibleCameras) {
+            val camId = cam.id
+            if (state.cameraSnapshots[camId].isNullOrEmpty()) {
+                val memRaw = MonitorCacheManager.getCachedCameraImageLinkInMemory(camId, cam.cameraId)
+                if (!memRaw.isNullOrBlank()) {
+                    val resolved = resolveFullMediaUrl(memRaw)
+                    if (resolved.isNotEmpty()) {
+                        syncUpdates[camId] = resolved
+                    }
+                }
+            }
+        }
+        if (syncUpdates.isNotEmpty()) {
+            _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + syncUpdates) }
+        }
+
+        // 2. Tra ổ đĩa (nếu chưa nạp xong RAM) và kiểm tra danh sách cần cập nhật lại từ server (Stale-While-Revalidate)
         snapshotLookupJob?.cancel()
         snapshotLookupJob = viewModelScope.launch {
-            val immediateUpdates = HashMap<Int, String?>()
+            val diskUpdates = HashMap<Int, String?>()
             val toFetch = ArrayList<CameraModel>()
+            val currentSnapshots = _uiState.value.cameraSnapshots
 
-            // Tra cache (đọc đĩa) trên IO thay vì Main thread
             withContext(Dispatchers.IO) {
                 for (cam in visibleCameras) {
                     val camId = cam.id
-                    val isFresh = MonitorCacheManager.isSnapshotCacheFresh(app, camId)
-
-                    // Nếu đã có kết quả trong state (kể cả null khi camera thực sự không có ảnh snapshot)
-                    // thì không gọi lại API trên mỗi lần đổi trang/bộ lọc
-                    if (knownSnapshots.containsKey(camId)) {
-                        if (!knownSnapshots[camId].isNullOrEmpty() || !isFresh) continue
+                    if (currentSnapshots[camId].isNullOrEmpty()) {
+                        val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId, cam.cameraId)
+                        if (!cachedRaw.isNullOrBlank()) {
+                            val resolved = resolveFullMediaUrl(cachedRaw)
+                            if (resolved.isNotEmpty()) {
+                                diskUpdates[camId] = resolved
+                            }
+                        }
                     }
 
-                    val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId, cam.cameraId)
-                    if (!cachedRaw.isNullOrBlank()) {
-                        val resolved = resolveFullMediaUrl(cachedRaw)
-                        if (resolved.isNotEmpty()) immediateUpdates[camId] = resolved
-                        if (isFresh) continue
+                    // Nếu trong phiên hiện tại camera này chưa được cập nhật lại từ server (hoặc đã quá 60s),
+                    // đưa vào hàng đợi làm mới ngầm sau khi đã hiển thị ảnh cache
+                    val isFreshInSession = MonitorCacheManager.isSnapshotCacheFresh(app, camId)
+                    if (!isFreshInSession && !pendingSnapshotIds.contains(camId)) {
+                        toFetch.add(cam)
                     }
-
-                    if (!pendingSnapshotIds.contains(camId)) toFetch.add(cam)
                 }
             }
 
-            if (immediateUpdates.isNotEmpty()) {
-                _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + immediateUpdates) }
+            if (diskUpdates.isNotEmpty()) {
+                _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + diskUpdates) }
             }
-            // Chỉ gọi mạng tải link snapshot cho danh sách thẻ khi người dùng đang thực sự mở tab Trực tiếp
+            // Chỉ gọi mạng tải link snapshot mới khi người dùng đang thực sự mở tab Trực tiếp
             if (isMonitorTabActive) {
                 toFetch.forEach { fetchCardSnapshot(it, force = false) }
             }
         }
+    }
+
+    /**
+     * Tải trước và giải mã ảnh snapshot mới vào MemoryCache/DiskCache của Coil ở nền trước khi đổi URL trên UI,
+     * giúp chuyển từ ảnh cache cũ sang ảnh mới mượt tuyệt đối (không nháy trắng, không hiện vòng xoay loading).
+     */
+    private suspend fun preloadCardSnapshotIntoCoil(url: String): Boolean {
+        if (url.isEmpty()) return false
+        return runCatching {
+            val request = ImageRequest.Builder(app)
+                .data(url)
+                .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
+                .precision(Precision.INEXACT)
+                .allowHardware(true)
+                .allowRgb565(true)
+                .memoryCacheKey("${url}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}")
+                .diskCacheKey(url)
+                .build()
+            Coil.imageLoader(app).execute(request) is SuccessResult
+        }.getOrDefault(false)
     }
 
     private fun fetchCardSnapshot(cam: CameraModel, force: Boolean) {
@@ -760,13 +867,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 try {
                     if (!isMonitorTabActive) return@launch
                     var resolvedLink = ""
+                    var rawFetchedLink = ""
                     val res = runCatching { vmsApi.getCameraImageLink(camId) }.getOrNull()
                     if (res?.isSuccessful == true) {
                         val rawLink = res.body()?.link?.trim().orEmpty()
                         if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
-                            withContext(Dispatchers.IO) {
-                                MonitorCacheManager.setCachedCameraImageLink(app, camId, rawLink, cam.cameraId)
-                            }
+                            rawFetchedLink = rawLink
                             resolvedLink = resolveFullMediaUrl(rawLink)
                         }
                     }
@@ -780,20 +886,39 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                             val firstVideo = videoRes.body()?.firstOrNull()
                             val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
                             if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
-                                withContext(Dispatchers.IO) {
-                                    MonitorCacheManager.setCachedCameraImageLink(app, camId, rawThumb, cam.cameraId)
-                                }
+                                rawFetchedLink = rawThumb
                                 resolvedLink = resolveFullMediaUrl(rawThumb)
                             }
                         }
                     }
 
-                    _uiState.update { cur ->
-                        val currentVal = cur.cameraSnapshots[camId]
-                        when {
-                            resolvedLink.isNotEmpty() -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to resolvedLink))
-                            currentVal.isNullOrEmpty() || force -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
-                            else -> cur
+                    val existingDisplayedUrl = _uiState.value.cameraSnapshots[camId]
+                    if (resolvedLink.isNotEmpty()) {
+                        // Nếu thẻ đang hiển thị sẵn ảnh cache cũ và server trả về link ảnh mới khác link cũ,
+                        // nạp sẵn ảnh mới vào RAM của Coil trước khi cập nhật state để đổi ảnh 0ms không nháy
+                        if (!existingDisplayedUrl.isNullOrEmpty() && existingDisplayedUrl != resolvedLink) {
+                            val loadedOk = withContext(Dispatchers.IO) { preloadCardSnapshotIntoCoil(resolvedLink) }
+                            if (!loadedOk && !force) {
+                                MonitorCacheManager.markSnapshotCheckedInSession(camId)
+                                return@launch
+                            }
+                        }
+                        withContext(Dispatchers.IO) {
+                            MonitorCacheManager.setCachedCameraImageLink(app, camId, rawFetchedLink, cam.cameraId)
+                        }
+                        _uiState.update { cur ->
+                            if (cur.cameraSnapshots[camId] == resolvedLink) cur
+                            else cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to resolvedLink))
+                        }
+                    } else {
+                        MonitorCacheManager.markSnapshotCheckedInSession(camId)
+                        _uiState.update { cur ->
+                            val currentVal = cur.cameraSnapshots[camId]
+                            if (currentVal.isNullOrEmpty() || force) {
+                                cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
+                            } else {
+                                cur
+                            }
                         }
                     }
                 } finally {
@@ -854,20 +979,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
             state.copy(isLoading = false, error = null, expandedNodes = expanded).withDerivedData()
         }
-        restoreOrSelectInitialCameras()
+        // Không tự động chọn camera phát live khi mới vào màn hình: chỉ hiển thị lưới snapshot camera,
+        // người dùng chạm vào camera nào mới mở màn hình xem trực tiếp của camera đó.
         loadVisibleCameraSnapshots()
     }
 
     private fun loadData() {
         viewModelScope.launch {
-            val cachedData = MonitorCacheManager.getMonitorData(app)
-            if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
-                if (cachedData.aiServices.isNotEmpty()) aiServices = cachedData.aiServices
-                applyTree(
-                    buildIndex(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
-                )
-            } else {
-                _uiState.update { it.copy(isLoading = true, error = null) }
+            if (treeIndex.tree.isEmpty()) {
+                val cachedData = MonitorCacheManager.getMonitorData(app)
+                if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
+                    if (cachedData.aiServices.isNotEmpty()) aiServices = cachedData.aiServices
+                    applyTree(
+                        buildIndex(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
+                    )
+                } else {
+                    _uiState.update { it.copy(isLoading = true, error = null) }
+                }
             }
 
             try {
@@ -942,54 +1070,69 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      *   + Nếu cả 4 ô đều đã có camera đang phát -> báo lưới đã đầy, không ghi đè.
      *   + Nếu còn ô trống -> ưu tiên đặt vào `activeSlotIndex` nếu trống, hoặc ô trống đầu tiên, sau đó chuyển `activeSlotIndex` sang ô trống tiếp theo.
      */
+    /**
+     * Mở màn hình xem trực tiếp 1x1 cho [camera] được chọn từ danh sách lưới.
+     */
+    fun openLiveCamera(camera: CameraModel) {
+        _uiState.update { it.copy(gridSize = 1, activeSlotIndex = 0) }
+        addCamera(camera, 0, startPolling = true)
+    }
+
+    /**
+     * Tải lại luồng trực tiếp của camera đang mở trên màn hình Live 1x1.
+     */
+    fun reloadLiveCamera() {
+        val current = _uiState.value.selectedCameras.getOrNull(0) ?: return
+        updateSlot(0, current.camera.id) {
+            it.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
+        }
+        ensureCameraSnapshotUrl(current.camera, 0, force = false)
+        startLiveStreamPolling(
+            camera = current.camera,
+            slotIndex = 0,
+            channel = current.channel,
+            isFallback = false
+        )
+    }
+
+    /**
+     * Đóng màn hình xem trực tiếp 1x1, dừng luồng live và quay lại danh sách lưới camera.
+     */
+    fun closeLiveCamera() {
+        removeCamera(0)
+    }
+
+    /**
+     * Đổi luồng phát trực tiếp giữa kênh phụ (SD - `channel = 1`) và kênh chính (HD - `channel = 0`).
+     */
+    fun switchLiveChannel(channel: Int) {
+        val current = _uiState.value.selectedCameras.getOrNull(0) ?: return
+        val normalizedChannel = if (channel == 0) 0 else 1
+        if (current.channel == normalizedChannel && !current.streamUrl.startsWith("error://")) return
+        updateSlot(0, current.camera.id) {
+            it.copy(
+                streamUrl = "",
+                channel = normalizedChannel,
+                hasFallbackTried = true,
+                retryCount = 0
+            )
+        }
+        startLiveStreamPolling(
+            camera = current.camera,
+            slotIndex = 0,
+            channel = normalizedChannel,
+            isFallback = true
+        )
+    }
+
+    fun getCameraLocationLabel(camera: CameraModel): String =
+        treeIndex.locationLabel(camera.id)
+
     fun selectCameraFromTree(
         camera: CameraModel,
         onGridFull: (() -> Unit)? = null
     ) {
-        val currentState = _uiState.value
-        if (currentState.gridSize == 1) {
-            _uiState.update { it.copy(activeSlotIndex = 0) }
-            if (currentState.selectedCameras.getOrNull(0)?.camera?.id == camera.id) {
-                triggerBlink(0)
-                return
-            }
-            addCamera(camera, 0)
-            return
-        }
-
-        // Chế độ 2x2 (gridSize == 4)
-        val existingIndex = (0 until SLOT_COUNT).indexOfFirst { idx ->
-            currentState.selectedCameras.getOrNull(idx)?.camera?.id == camera.id
-        }
-        if (existingIndex != -1) {
-            _uiState.update { it.copy(activeSlotIndex = existingIndex) }
-            triggerBlink(existingIndex)
-            return
-        }
-
-        val preferredSlot = currentState.activeSlotIndex.coerceIn(0, SLOT_COUNT - 1)
-        val targetSlot = if (currentState.selectedCameras.getOrNull(preferredSlot) == null) {
-            preferredSlot
-        } else {
-            (0 until SLOT_COUNT).firstOrNull { idx -> currentState.selectedCameras.getOrNull(idx) == null }
-        }
-
-        if (targetSlot == null) {
-            if (onGridFull != null) {
-                onGridFull()
-            } else {
-                MobileTopPopupManager.warning("Lưới đang phát đã đầy, không thể phát thêm!")
-            }
-            return
-        }
-
-        addCamera(camera, targetSlot)
-
-        val updatedCameras = _uiState.value.selectedCameras
-        val nextEmpty = (0 until SLOT_COUNT).firstOrNull { idx ->
-            idx != targetSlot && updatedCameras.getOrNull(idx) == null
-        }
-        _uiState.update { it.copy(activeSlotIndex = nextEmpty ?: targetSlot) }
+        openLiveCamera(camera)
     }
 
     fun addCamera(camera: CameraModel, slotIndex: Int, startPolling: Boolean = true) {
@@ -999,21 +1142,34 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (existing?.camera?.id == camera.id && existing.streamUrl.startsWith("ws")) return
 
         val initialChannel = preferredChannel(camera)
+        // Lấy ngay ảnh snapshot đang hiển thị trên thẻ hoặc đã cache trong RAM (0ms) để khung phát live có ảnh nền ngay từ frame đầu tiên
+        val initialFallback = _uiState.value.cameraSnapshots[camera.id]
+            ?.takeIf { it.isNotEmpty() }
+            ?: MonitorCacheManager.getCachedCameraImageLinkInMemory(camera.id, camera.cameraId)
+                ?.let(::resolveFullMediaUrl)
+                .orEmpty()
         var updatedCameras: List<SelectedCamera?> = emptyList()
         _uiState.update { state ->
             val cameras = state.selectedCameras.toPaddedMutableList()
-            cameras[slotIndex] = SelectedCamera(camera = camera, streamUrl = "", channel = initialChannel)
+            cameras[slotIndex] = SelectedCamera(
+                camera = camera,
+                streamUrl = "",
+                fallbackImageUrl = initialFallback,
+                channel = initialChannel
+            )
             updatedCameras = cameras
             state.copy(selectedCameras = cameras)
         }
         saveSelectedCamerasToPrefs(updatedCameras)
 
-        // Gắn ngay ảnh snapshot đã cache (đọc đĩa trên IO) giống cachedSnapshotUrl trên PWA
-        viewModelScope.launch {
-            val cachedSnap = readCachedSnapshot(camera).orEmpty()
-            if (cachedSnap.isNotEmpty()) {
-                updateSlot(slotIndex, camera.id) {
-                    if (it.fallbackImageUrl.isEmpty()) it.copy(fallbackImageUrl = cachedSnap) else it
+        if (initialFallback.isEmpty()) {
+            // Fallback đọc đĩa trên IO nếu RAM cache chưa nạp xong
+            viewModelScope.launch {
+                val cachedSnap = readCachedSnapshot(camera).orEmpty()
+                if (cachedSnap.isNotEmpty()) {
+                    updateSlot(slotIndex, camera.id) {
+                        if (it.fallbackImageUrl.isEmpty()) it.copy(fallbackImageUrl = cachedSnap) else it
+                    }
                 }
             }
         }

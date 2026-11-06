@@ -2,18 +2,23 @@ package com.tenli.oneview.data.local
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.model.network.CameraGroupModel
 import com.tenli.oneview.model.network.CameraInGroupModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -35,8 +40,9 @@ data class SnapshotCacheItem(
 
 object MonitorCacheManager {
 
-    private val gson = Gson()
+    private val gson get() = LoginAuthClient.gson
     private val ioScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val diskReadMutex = Mutex()
     private val snapshotMapType = object : TypeToken<Map<String, SnapshotCacheItem>>() {}.type
 
     /** Gom nhiều lần cập nhật snapshot liên tiếp thành 1 lần ghi đĩa (tránh ghi file liên tục khi xem nhiều camera) */
@@ -50,15 +56,21 @@ object MonitorCacheManager {
     @Volatile
     private var snapshotDir: File? = null
 
-    private const val SNAPSHOT_TTL_MS = 60 * 60 * 1000L // 1 giờ (đồng bộ vmsData.ts)
+    /** Thời gian giữ kết quả đã làm mới trong phiên hiện tại (60 giây) để mở app luôn làm mới lại từ server nhưng không gọi lặp khi chuyển trang */
+    private const val SNAPSHOT_SESSION_FRESH_TTL_MS = 60 * 1000L
     private const val SNAPSHOT_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L // 7 ngày
 
     @Volatile
     private var inMemoryMonitorData: CachedMonitorData? = null
 
     private val snapshotMap = ConcurrentHashMap<Int, SnapshotCacheItem>()
+    /** Đánh dấu thời điểm camera đã được cập nhật snapshot thực tế trong phiên mở app hiện tại */
+    private val sessionRefreshedAtMap = ConcurrentHashMap<Int, Long>()
     @Volatile
     private var snapshotsLoaded = false
+
+    private val _snapshotUpdates = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 32)
+    val snapshotUpdates: SharedFlow<Pair<Int, String>> = _snapshotUpdates.asSharedFlow()
 
     fun getMonitorDataInMemory(): CachedMonitorData? = inMemoryMonitorData
 
@@ -95,15 +107,43 @@ object MonitorCacheManager {
     private fun loadSnapshotsLocked(context: Context) {
         if (snapshotsLoaded) return
         snapshotsLoaded = true
+        val now = System.currentTimeMillis()
         try {
             val parsed: Map<String, SnapshotCacheItem>? = JsonFileStore.read(gson, getSnapshotCacheFile(context), snapshotMapType)
             if (parsed != null) {
-                val now = System.currentTimeMillis()
                 parsed.forEach { (keyStr, item) ->
                     val id = keyStr.toIntOrNull()
                     if (id != null && item.link.isNotBlank() && item.link != "NO_IMAGE") {
                         if (now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
-                            snapshotMap[id] = item
+                            if (item.link.startsWith("file://")) {
+                                val rawPath = item.link.removePrefix("file://").substringBefore("?")
+                                if (File(rawPath).exists()) {
+                                    snapshotMap[id] = item
+                                }
+                            } else {
+                                snapshotMap[id] = item
+                            }
+                        }
+                    }
+                }
+            }
+            // Nạp sẵn các ảnh chụp từ luồng live lưu trên đĩa (cam_{id}.jpg) vào RAM để tra cứu 0ms không cần gọi File.exists() lặp lại
+            val dir = getSnapshotImageDir(context)
+            val files = dir.listFiles()
+            if (files != null) {
+                for (file in files) {
+                    val name = file.name
+                    if (name.startsWith("cam_") && name.endsWith(".jpg") && file.length() > MIN_VALID_IMAGE_BYTES) {
+                        val camId = name.removePrefix("cam_").removeSuffix(".jpg").toIntOrNull() ?: continue
+                        val lastMod = file.lastModified()
+                        if (now - lastMod <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
+                            val existing = snapshotMap[camId]
+                            if (existing == null || lastMod > existing.updatedAt) {
+                                snapshotMap[camId] = SnapshotCacheItem(
+                                    link = "file://${file.absolutePath}?t=$lastMod",
+                                    updatedAt = lastMod
+                                )
+                            }
                         }
                     }
                 }
@@ -129,48 +169,60 @@ object MonitorCacheManager {
         }
     }
 
-    fun getCachedCameraImageLink(context: Context, cameraId: Int, altCameraId: Int = 0): String? {
-        ensureSnapshotsLoaded(context)
-        val idsToCheck = buildList {
-            if (cameraId > 0) add(cameraId)
-            if (altCameraId > 0 && altCameraId != cameraId) add(altCameraId)
-        }
+    /**
+     * Tra cứu tức thì từ RAM (0ms, không chạm đĩa) khi snapshotMap đã được preload.
+     */
+    fun getCachedCameraImageLinkInMemory(cameraId: Int, altCameraId: Int = 0): String? {
         val now = System.currentTimeMillis()
-        for (id in idsToCheck) {
-            val item = snapshotMap[id]
-            if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE") {
-                if (now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
-                    if (item.link.startsWith("file://")) {
-                        val rawPath = item.link.removePrefix("file://").substringBefore("?")
-                        if (File(rawPath).exists()) {
-                            return item.link
-                        }
-                    } else {
-                        return item.link
-                    }
-                }
+        if (cameraId > 0) {
+            val item = snapshotMap[cameraId]
+            if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE" && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
+                return item.link
             }
-            val localFile = File(getSnapshotImageDir(context), "cam_${id}.jpg")
-            if (localFile.exists() && localFile.length() > MIN_VALID_IMAGE_BYTES) {
-                return "file://${localFile.absolutePath}?t=${localFile.lastModified()}"
+        }
+        if (altCameraId > 0 && altCameraId != cameraId) {
+            val item = snapshotMap[altCameraId]
+            if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE" && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
+                return item.link
             }
         }
         return null
     }
 
+    fun getCachedCameraImageLink(context: Context, cameraId: Int, altCameraId: Int = 0): String? {
+        ensureSnapshotsLoaded(context)
+        return getCachedCameraImageLinkInMemory(cameraId, altCameraId)
+    }
+
+    /**
+     * Chỉ trả về `true` nếu snapshot của camera này ĐÃ được làm mới từ server (hoặc chụp từ luồng live)
+     * trong phiên mở app hiện tại và chưa quá [SNAPSHOT_SESSION_FRESH_TTL_MS] (60s).
+     * Nhờ đó khi mở app lần đầu, ảnh cache cũ được hiển thị ngay lập tức (0ms) nhưng luôn được cập nhật lại từ server.
+     */
     fun isSnapshotCacheFresh(context: Context, cameraId: Int): Boolean {
         ensureSnapshotsLoaded(context)
         val item = snapshotMap[cameraId] ?: return false
         if (item.link.isBlank() || item.link == "NO_IMAGE") return false
-        return (System.currentTimeMillis() - item.updatedAt) < SNAPSHOT_TTL_MS
+        val refreshedAt = sessionRefreshedAtMap[cameraId] ?: return false
+        return (System.currentTimeMillis() - refreshedAt) < SNAPSHOT_SESSION_FRESH_TTL_MS
+    }
+
+    fun markSnapshotCheckedInSession(cameraId: Int) {
+        if (cameraId > 0) {
+            sessionRefreshedAtMap[cameraId] = System.currentTimeMillis()
+        }
     }
 
     fun setCachedCameraImageLink(context: Context, cameraId: Int, link: String, altCameraId: Int = 0) {
         if (cameraId <= 0 || link.isBlank() || link == "NO_IMAGE") return
         ensureSnapshotsLoaded(context)
+        val now = System.currentTimeMillis()
+        sessionRefreshedAtMap[cameraId] = now
+        if (altCameraId > 0 && altCameraId != cameraId) {
+            sessionRefreshedAtMap[altCameraId] = now
+        }
         // Không ghi đè ảnh frame vừa chụp từ luồng live bằng link ảnh cũ hơn nếu frame đó còn rất mới (< 30s)
         val existing = snapshotMap[cameraId]
-        val now = System.currentTimeMillis()
         if (existing != null &&
             existing.link.startsWith("file://") &&
             !link.startsWith("file://") &&
@@ -183,14 +235,17 @@ object MonitorCacheManager {
         if (altCameraId > 0 && altCameraId != cameraId) {
             snapshotMap[altCameraId] = newItem
         }
+        _snapshotUpdates.tryEmit(cameraId to link)
         persistSnapshotsAsync(context)
     }
 
     fun removeCachedCameraImageLink(context: Context, cameraId: Int, altCameraId: Int = 0) {
         ensureSnapshotsLoaded(context)
         snapshotMap.remove(cameraId)
+        sessionRefreshedAtMap.remove(cameraId)
         if (altCameraId > 0) {
             snapshotMap.remove(altCameraId)
+            sessionRefreshedAtMap.remove(altCameraId)
         }
         persistSnapshotsAsync(context)
     }
@@ -241,9 +296,12 @@ object MonitorCacheManager {
     suspend fun getMonitorData(context: Context): CachedMonitorData? {
         inMemoryMonitorData?.let { return it }
         return withContext(Dispatchers.IO) {
-            JsonFileStore.read(gson, getCacheFile(context), CachedMonitorData::class.java)?.also { parsed ->
-                inMemoryMonitorData = parsed
-                EventCacheManager.cacheInMemory(cameras = parsed.cameraList.orEmpty(), aiServices = parsed.aiServices.orEmpty())
+            diskReadMutex.withLock {
+                inMemoryMonitorData?.let { return@withContext it }
+                JsonFileStore.read(gson, getCacheFile(context), CachedMonitorData::class.java)?.also { parsed ->
+                    inMemoryMonitorData = parsed
+                    EventCacheManager.cacheInMemory(cameras = parsed.cameraList.orEmpty(), aiServices = parsed.aiServices.orEmpty())
+                }
             }
         }
     }
@@ -260,7 +318,9 @@ object MonitorCacheManager {
             if (snapFile.exists()) {
                 snapFile.delete()
             }
+            getSnapshotImageDir(context).listFiles()?.forEach { it.delete() }
             snapshotMap.clear()
+            sessionRefreshedAtMap.clear()
         } catch (e: Exception) {
             e.printStackTrace()
         }
