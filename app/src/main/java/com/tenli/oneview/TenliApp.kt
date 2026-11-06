@@ -57,7 +57,9 @@ class TenliApp : Application(), ImageLoaderFactory {
                     .maxSizeBytes(IMAGE_DISK_CACHE_BYTES) // disk cache cho ảnh sự kiện & snapshot camera
                     .build()
             }
-            .crossfade(true)
+            // Tắt crossfade mặc định & cho phép RGB_565 với ảnh không có kênh alpha để cuộn danh sách mượt 60/120fps, giảm 50% RAM bitmap
+            .allowRgb565(true)
+            .crossfade(false)
             .build()
     }
 

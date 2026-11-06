@@ -183,6 +183,7 @@ class LoginViewModel(
                 putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
                 putString(AppKeys.USERNAME_KEY, username)
                 putString(AppKeys.PASSWORD_KEY, password)
+                remove("push_notifications_enabled")
             }
         }
         // Đăng ký ngay FCM token cho tài khoản vừa đăng nhập (chạy ngầm, không chặn điều hướng vào màn chính)

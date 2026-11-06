@@ -234,6 +234,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private var isMonitorTabActive: Boolean = false
     private val pendingSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
     private val retriedCardSnapshotIds = java.util.Collections.synchronizedSet(mutableSetOf<Int>())
+    private val snapshotFetchSemaphore = kotlinx.coroutines.sync.Semaphore(4)
 
     companion object {
         const val CAMERA_PAGE_SIZE = 10
@@ -740,54 +741,63 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (immediateUpdates.isNotEmpty()) {
                 _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + immediateUpdates) }
             }
-            toFetch.forEach { fetchCardSnapshot(it, force = false) }
+            // Chỉ gọi mạng tải link snapshot cho danh sách thẻ khi người dùng đang thực sự mở tab Trực tiếp
+            if (isMonitorTabActive) {
+                toFetch.forEach { fetchCardSnapshot(it, force = false) }
+            }
         }
     }
 
     private fun fetchCardSnapshot(cam: CameraModel, force: Boolean) {
         val camId = cam.id
-        if (camId == 0) return
+        if (camId == 0 || !isMonitorTabActive) return
         if (!force && !pendingSnapshotIds.add(camId)) return
         if (force) pendingSnapshotIds.add(camId)
 
         viewModelScope.launch {
             try {
-                var resolvedLink = ""
-                val res = runCatching { vmsApi.getCameraImageLink(camId) }.getOrNull()
-                if (res?.isSuccessful == true) {
-                    val rawLink = res.body()?.link?.trim().orEmpty()
-                    if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
-                        withContext(Dispatchers.IO) {
-                            MonitorCacheManager.setCachedCameraImageLink(app, camId, rawLink, cam.cameraId)
-                        }
-                        resolvedLink = resolveFullMediaUrl(rawLink)
-                    }
-                }
-
-                // Fallback giống MobileLivePage.vue: lấy thumbnail từ bản ghi VideoList gần nhất nếu CameraImageLink không có
-                if (resolvedLink.isEmpty()) {
-                    val videoRes = runCatching {
-                        vmsApi.getVideoList(camera = camId, count = 1, from = null, to = null)
-                    }.getOrNull()
-                    if (videoRes?.isSuccessful == true) {
-                        val firstVideo = videoRes.body()?.firstOrNull()
-                        val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
-                        if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
+                snapshotFetchSemaphore.acquire()
+                try {
+                    if (!isMonitorTabActive) return@launch
+                    var resolvedLink = ""
+                    val res = runCatching { vmsApi.getCameraImageLink(camId) }.getOrNull()
+                    if (res?.isSuccessful == true) {
+                        val rawLink = res.body()?.link?.trim().orEmpty()
+                        if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
                             withContext(Dispatchers.IO) {
-                                MonitorCacheManager.setCachedCameraImageLink(app, camId, rawThumb, cam.cameraId)
+                                MonitorCacheManager.setCachedCameraImageLink(app, camId, rawLink, cam.cameraId)
                             }
-                            resolvedLink = resolveFullMediaUrl(rawThumb)
+                            resolvedLink = resolveFullMediaUrl(rawLink)
                         }
                     }
-                }
 
-                _uiState.update { cur ->
-                    val currentVal = cur.cameraSnapshots[camId]
-                    when {
-                        resolvedLink.isNotEmpty() -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to resolvedLink))
-                        currentVal.isNullOrEmpty() || force -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
-                        else -> cur
+                    // Fallback giống MobileLivePage.vue: lấy thumbnail từ bản ghi VideoList gần nhất nếu CameraImageLink không có
+                    if (resolvedLink.isEmpty() && isMonitorTabActive) {
+                        val videoRes = runCatching {
+                            vmsApi.getVideoList(camera = camId, count = 1, from = null, to = null)
+                        }.getOrNull()
+                        if (videoRes?.isSuccessful == true) {
+                            val firstVideo = videoRes.body()?.firstOrNull()
+                            val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
+                            if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
+                                withContext(Dispatchers.IO) {
+                                    MonitorCacheManager.setCachedCameraImageLink(app, camId, rawThumb, cam.cameraId)
+                                }
+                                resolvedLink = resolveFullMediaUrl(rawThumb)
+                            }
+                        }
                     }
+
+                    _uiState.update { cur ->
+                        val currentVal = cur.cameraSnapshots[camId]
+                        when {
+                            resolvedLink.isNotEmpty() -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to resolvedLink))
+                            currentVal.isNullOrEmpty() || force -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null))
+                            else -> cur
+                        }
+                    }
+                } finally {
+                    snapshotFetchSemaphore.release()
                 }
             } catch (e: CancellationException) {
                 throw e

@@ -16,8 +16,6 @@ import com.tenli.oneview.ui.features.home.findAllBoxes
 import com.tenli.oneview.ui.features.home.getEventCropUrls
 import com.tenli.oneview.ui.features.home.getEventImageUrl
 import com.tenli.oneview.ui.features.home.getEventVideoUrl
-import com.tenli.oneview.ui.theme.BrandAccent
-import com.tenli.oneview.ui.theme.ErrorRedDeep
 import com.tenli.oneview.ui.utils.AiTypeHelper
 
 /*
@@ -375,21 +373,18 @@ private fun resolveFaceProfileDisplayName(
     return baseName
 }
 
-/** Màu nhóm mặc định khi profile / nhóm không cấu hình màu */
-private val DefaultGroupColor = BrandAccent
-
 private fun resolveFaceGroupNameAndColor(
     event: EventData,
     profiles: List<BsProfileModel>,
     groups: List<BsProfileGroupModel>,
     isEn: Boolean
 ): Pair<String, Color> {
+    val badgeColor = AiTypeHelper.getAiColor(event)
     if (AiTypeHelper.isStranger(event)) {
-        return Pair(if (isEn) "Stranger" else "Người lạ", ErrorRedDeep)
+        return Pair(if (isEn) "Stranger" else "Người lạ", badgeColor)
     }
     val d = event.data
     val directGroupName = (d?.face?.groupName ?: d?.groupName)?.trim().orEmpty()
-    val directGroupColor = d?.face?.groupColor ?: d?.face?.groupColorSnake ?: d?.groupColor ?: d?.groupColorSnake ?: event.groupColor
     val matchedProfile = findMatchedProfile(event, profiles, isEn)
 
     val profileGroup = matchedProfile?.groups?.firstOrNull()
@@ -406,12 +401,5 @@ private fun resolveFaceGroupNameAndColor(
         else -> "---"
     }
 
-    val colorHex = directGroupColor
-        ?: matchedProfile?.groupColor
-        ?: matchedProfile?.groupColorSnake
-        ?: profileGroup?.config?.ui?.color
-        ?: profileGroup?.config?.ui?.background
-
-    val resolvedColor = AiTypeHelper.parseHexColor(colorHex) ?: DefaultGroupColor
-    return Pair(resolvedGroupName, resolvedColor)
+    return Pair(resolvedGroupName, badgeColor)
 }

@@ -207,11 +207,37 @@ class HomeViewModel(
 
     private var dashboardJob: Job? = null
     private var recentEventsJob: Job? = null
+    @Volatile private var isHomeTabActive: Boolean = true
+    @Volatile private var pendingNotifyRefresh: Boolean = false
+    @Volatile private var pendingCameraStatusRecompute: Boolean = false
 
     init {
         fetchDashboardData()
         listenToWebSocket()
         webSocketManager.connectAllReports()
+    }
+
+    fun setHomeTabActive(active: Boolean) {
+        if (isHomeTabActive == active) return
+        isHomeTabActive = active
+        if (!active) {
+            recentEventsJob?.cancel()
+            return
+        }
+        if (pendingCameraStatusRecompute) {
+            pendingCameraStatusRecompute = false
+            viewModelScope.launch(Dispatchers.Default) {
+                val camMap = webSocketManager.cameraStatusMap.value
+                val recMap = webSocketManager.recordStatusMap.value
+                _uiState.update {
+                    it.copy(cameraStatusMap = camMap, recordStatusMap = recMap).withRecomputedCameraMetrics()
+                }
+            }
+        }
+        if (pendingNotifyRefresh && _uiState.value.selectedFilter == TimeFilter.TODAY) {
+            pendingNotifyRefresh = false
+            fetchRecentEvents()
+        }
     }
 
     private fun buildInitialState(): HomeUiState {
@@ -264,7 +290,11 @@ class HomeViewModel(
                 .debounce(NOTIFY_DEBOUNCE_MS)
                 .collect { _ ->
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
-                        fetchRecentEvents()
+                        if (isHomeTabActive) {
+                            fetchRecentEvents()
+                        } else {
+                            pendingNotifyRefresh = true
+                        }
                     }
                 }
         }
@@ -272,14 +302,22 @@ class HomeViewModel(
             webSocketManager.cameraStatusMap
                 .debounce(STATUS_DEBOUNCE_MS)
                 .collect { statusMap ->
-                    _uiState.update { it.copy(cameraStatusMap = statusMap).withRecomputedCameraMetrics() }
+                    if (isHomeTabActive) {
+                        _uiState.update { it.copy(cameraStatusMap = statusMap).withRecomputedCameraMetrics() }
+                    } else {
+                        pendingCameraStatusRecompute = true
+                    }
                 }
         }
         viewModelScope.launch(Dispatchers.Default) {
             webSocketManager.recordStatusMap
                 .debounce(STATUS_DEBOUNCE_MS)
                 .collect { recMap ->
-                    _uiState.update { it.copy(recordStatusMap = recMap).withRecomputedCameraMetrics() }
+                    if (isHomeTabActive) {
+                        _uiState.update { it.copy(recordStatusMap = recMap).withRecomputedCameraMetrics() }
+                    } else {
+                        pendingCameraStatusRecompute = true
+                    }
                 }
         }
         viewModelScope.launch {

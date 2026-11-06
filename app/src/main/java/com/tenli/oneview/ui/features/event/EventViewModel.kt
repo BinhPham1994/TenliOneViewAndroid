@@ -101,10 +101,25 @@ class EventViewModel(
     private var initialFetchJob: Job? = null
     private var recentFetchJob: Job? = null
     private var paginateJob: Job? = null
+    @Volatile private var isEventTabActive: Boolean = false
+    @Volatile private var pendingNotifyRefresh: Boolean = false
 
     init {
         fetchInitialData(reloadMetadata = true)
         listenToWebSocket()
+    }
+
+    fun setEventTabActive(active: Boolean) {
+        if (isEventTabActive == active) return
+        isEventTabActive = active
+        if (!active) {
+            recentFetchJob?.cancel()
+            return
+        }
+        if (pendingNotifyRefresh && _uiState.value.selectedFilter == TimeFilter.TODAY) {
+            pendingNotifyRefresh = false
+            fetchRecentEvents()
+        }
     }
 
     private fun readIsListViewPref(): Boolean =
@@ -131,7 +146,11 @@ class EventViewModel(
                 .debounce(600L)
                 .collect {
                     if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
-                        fetchRecentEvents()
+                        if (isEventTabActive) {
+                            fetchRecentEvents()
+                        } else {
+                            pendingNotifyRefresh = true
+                        }
                     }
                 }
         }
@@ -439,6 +458,7 @@ class EventViewModel(
     }
 
     fun loadMoreEvents() {
+        if (initialFetchJob?.isActive == true) return
         val currentState = _uiState.value
         if (currentState.isLoading || currentState.isPaginating || !currentState.hasMore || currentState.events.isEmpty()) return
 

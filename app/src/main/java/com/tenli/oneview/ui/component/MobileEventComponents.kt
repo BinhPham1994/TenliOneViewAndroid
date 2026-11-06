@@ -780,7 +780,9 @@ private class EventCardImages(
 )
 
 private fun resolveCardImages(event: EventData, cameraName: String, domain: String): EventCardImages {
-    val resolvedCameraName = cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
+    val resolvedCameraName = cameraName.takeIf {
+        it.isNotBlank() && !isUuidString(it) && !it.equals("Camera", ignoreCase = true)
+    }
         ?: event.data?.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
         ?: event.cameraName?.takeIf { it.isNotBlank() && !isUuidString(it) }
         ?: ""

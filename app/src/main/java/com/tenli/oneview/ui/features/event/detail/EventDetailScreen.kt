@@ -106,7 +106,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
@@ -1014,10 +1014,24 @@ private fun MediaViewport(
 
 @Composable
 private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isEn: Boolean) {
+    val context = LocalContext.current
     var imageLoadError by remember(imageUrl) { mutableStateOf(false) }
-    if (imageUrl != null && !imageLoadError) {
+    val request = remember(imageUrl) {
+        if (imageUrl.isNullOrEmpty()) {
+            null
+        } else {
+            ImageRequest.Builder(context)
+                .data(imageUrl)
+                .size(1280, 720)
+                .precision(Precision.INEXACT)
+                .allowHardware(true)
+                .crossfade(false)
+                .build()
+        }
+    }
+    if (request != null && !imageLoadError) {
         AsyncImage(
-            model = imageUrl,
+            model = request,
             contentDescription = "Event Image",
             onError = { imageLoadError = true },
             modifier = Modifier
@@ -1060,6 +1074,7 @@ private fun OriginalVideoPane(
     isEn: Boolean,
     onLoad: () -> Unit
 ) {
+    val context = LocalContext.current
     LaunchedEffect(eventId) { onLoad() }
 
     val mainBox = display.mainBox
@@ -1083,9 +1098,19 @@ private fun OriginalVideoPane(
                 .background(MaterialTheme.appColors.surface),
             contentAlignment = Alignment.Center
         ) {
-            if (display.imageUrl != null) {
+            val previewUrl = display.imageUrl
+            if (!previewUrl.isNullOrEmpty()) {
+                val previewRequest = remember(previewUrl) {
+                    ImageRequest.Builder(context)
+                        .data(previewUrl)
+                        .size(1280, 720)
+                        .precision(Precision.INEXACT)
+                        .allowHardware(true)
+                        .crossfade(false)
+                        .build()
+                }
                 AsyncImage(
-                    model = display.imageUrl,
+                    model = previewRequest,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop
@@ -1410,107 +1435,104 @@ private fun EvidenceCropThumbnail(
             .data(url)
             .size(decodeSizePx)
             .precision(Precision.INEXACT)
+            .allowHardware(true)
+            .crossfade(false)
             .build()
     }
 
-    SubcomposeAsyncImage(
-        model = request,
-        contentDescription = "Evidence Crop"
-    ) {
-        val currentPainter = painter
-        if (currentPainter.state is AsyncImagePainter.State.Success) {
-            var keepPopupMounted by remember(url) { mutableStateOf(false) }
-            var animateIn by remember(url) { mutableStateOf(false) }
+    val currentPainter = rememberAsyncImagePainter(model = request)
+    if (currentPainter.state is AsyncImagePainter.State.Success) {
+        var keepPopupMounted by remember(url) { mutableStateOf(false) }
+        var animateIn by remember(url) { mutableStateOf(false) }
 
-            LaunchedEffect(isExpanded) {
-                if (isExpanded) {
-                    keepPopupMounted = true
-                    animateIn = true
-                } else if (keepPopupMounted) {
-                    animateIn = false
-                    delay(180)
-                    keepPopupMounted = false
-                }
+        LaunchedEffect(isExpanded) {
+            if (isExpanded) {
+                keepPopupMounted = true
+                animateIn = true
+            } else if (keepPopupMounted) {
+                animateIn = false
+                delay(180)
+                keepPopupMounted = false
             }
+        }
 
-            Box {
-                Image(
-                    painter = currentPainter,
-                    contentDescription = "Evidence Crop",
-                    modifier = Modifier
-                        .size(thumbSize)
-                        .clip(thumbShape)
-                        .background(colors.thumbnailBg)
-                        .border(width = spacing.borderThick, color = colors.border, shape = thumbShape)
-                        .clickable(onClick = onClick),
-                    contentScale = ContentScale.Crop
-                )
-
-                if (keepPopupMounted) {
-                    val popupScale by animateFloatAsState(
-                        targetValue = if (animateIn) 1f else 0.65f,
-                        animationSpec = tween(
-                            durationMillis = if (animateIn) 240 else 170,
-                            easing = if (animateIn) PopupInEasing else StandardEasing
-                        ),
-                        label = "cropZoomScale"
-                    )
-                    val popupAlpha by animateFloatAsState(
-                        targetValue = if (animateIn) 1f else 0f,
-                        animationSpec = tween(durationMillis = if (animateIn) 200 else 160),
-                        label = "cropZoomAlpha"
-                    )
-                    val shadowPadPx = with(density) { spacing.space10.roundToPx() }
-                    val popupShape = RoundedCornerShape(spacing.radiusCompact)
-
-                    Popup(
-                        alignment = Alignment.CenterEnd,
-                        offset = IntOffset(x = shadowPadPx, y = 0),
-                        onDismissRequest = onDismiss
-                    ) {
-                        val intrinsicSize = currentPainter.intrinsicSize
-                        val isSizeValid = intrinsicSize != Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
-                        val imgModifier = if (isSizeValid) {
-                            Modifier
-                                .widthIn(max = CropPopupMaxWidth)
-                                .heightIn(max = CropPopupMaxHeight)
-                                .aspectRatio(intrinsicSize.width / intrinsicSize.height, matchHeightConstraintsFirst = false)
-                        } else {
-                            Modifier.size(CropPopupFallbackSize)
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .padding(spacing.space10)
-                                .graphicsLayer {
-                                    scaleX = popupScale
-                                    scaleY = popupScale
-                                    alpha = popupAlpha
-                                    transformOrigin = TransformOrigin(1f, 0.5f)
-                                }
-                        ) {
-                            Image(
-                                painter = currentPainter,
-                                contentDescription = "Zoomed Crop",
-                                modifier = imgModifier
-                                    .shadow(spacing.space16, popupShape)
-                                    .clip(popupShape)
-                                    .background(Slate900)
-                                    .clickable(onClick = onDismiss),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
-                    }
-                }
-            }
-        } else {
-            Box(
+        Box {
+            Image(
+                painter = currentPainter,
+                contentDescription = "Evidence Crop",
                 modifier = Modifier
                     .size(thumbSize)
                     .clip(thumbShape)
                     .background(colors.thumbnailBg)
+                    .border(width = spacing.borderThick, color = colors.border, shape = thumbShape)
+                    .clickable(onClick = onClick),
+                contentScale = ContentScale.Crop
             )
+
+            if (keepPopupMounted) {
+                val popupScale by animateFloatAsState(
+                    targetValue = if (animateIn) 1f else 0.65f,
+                    animationSpec = tween(
+                        durationMillis = if (animateIn) 240 else 170,
+                        easing = if (animateIn) PopupInEasing else StandardEasing
+                    ),
+                    label = "cropZoomScale"
+                )
+                val popupAlpha by animateFloatAsState(
+                    targetValue = if (animateIn) 1f else 0f,
+                    animationSpec = tween(durationMillis = if (animateIn) 200 else 160),
+                    label = "cropZoomAlpha"
+                )
+                val shadowPadPx = with(density) { spacing.space10.roundToPx() }
+                val popupShape = RoundedCornerShape(spacing.radiusCompact)
+
+                Popup(
+                    alignment = Alignment.CenterEnd,
+                    offset = IntOffset(x = shadowPadPx, y = 0),
+                    onDismissRequest = onDismiss
+                ) {
+                    val intrinsicSize = currentPainter.intrinsicSize
+                    val isSizeValid = intrinsicSize != Size.Unspecified && intrinsicSize.width > 0f && intrinsicSize.height > 0f
+                    val imgModifier = if (isSizeValid) {
+                        Modifier
+                            .widthIn(max = CropPopupMaxWidth)
+                            .heightIn(max = CropPopupMaxHeight)
+                            .aspectRatio(intrinsicSize.width / intrinsicSize.height, matchHeightConstraintsFirst = false)
+                    } else {
+                        Modifier.size(CropPopupFallbackSize)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .padding(spacing.space10)
+                            .graphicsLayer {
+                                scaleX = popupScale
+                                scaleY = popupScale
+                                alpha = popupAlpha
+                                transformOrigin = TransformOrigin(1f, 0.5f)
+                            }
+                    ) {
+                        Image(
+                            painter = currentPainter,
+                            contentDescription = "Zoomed Crop",
+                            modifier = imgModifier
+                                .shadow(spacing.space16, popupShape)
+                                .clip(popupShape)
+                                .background(Slate900)
+                                .clickable(onClick = onDismiss),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                }
+            }
         }
+    } else {
+        Box(
+            modifier = Modifier
+                .size(thumbSize)
+                .clip(thumbShape)
+                .background(colors.thumbnailBg)
+        )
     }
 }
 
@@ -1931,7 +1953,7 @@ private fun InfoValueText(
     Text(
         text = text,
         color = color,
-        style = MaterialTheme.typography.bodySmall,
+        style = MaterialTheme.typography.bodyMedium,
         fontWeight = fontWeight,
         textAlign = textAlign,
         maxLines = maxLines,
@@ -1948,13 +1970,13 @@ private fun ColoredLabelBadge(text: String, color: Color) {
         modifier = Modifier
             .clip(RoundedCornerShape(spacing.radiusXSmall))
             .background(color)
-            .padding(horizontal = spacing.space8, vertical = spacing.space2)
+            .padding(horizontal = spacing.space8, vertical = spacing.space3)
     ) {
         Text(
             text = text,
             color = MaterialTheme.appColors.onAccent,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -2002,7 +2024,7 @@ private fun PlateBadgePill(
         Text(
             text = plate,
             color = colors.onAccent,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
             letterSpacing = PlateLetterSpacing,
             maxLines = 1

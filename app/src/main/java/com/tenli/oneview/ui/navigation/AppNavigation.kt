@@ -84,6 +84,7 @@ fun AppNavigation(
                         CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
                             MainScreen(
                                 onLogoutRequest = onLogoutRequest,
+                                isOverlayCovered = activeEventDetailId != null,
                                 onNavigateToEventDetail = { eventId ->
                                     skipExitAnimation = false
                                     lastEventDetailId = eventId

@@ -193,6 +193,7 @@ private fun themeModeLabel(mode: Int, isEn: Boolean): String = when (mode) {
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
     onLogoutRequest: () -> Unit,
+    isOverlayCovered: Boolean = false,
     onNavigateToEventDetail: (Int) -> Unit = {},
     onNavigateToPlaybackDetail: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
 ) {
@@ -262,6 +263,18 @@ fun MainScreen(
     val currentTabState by rememberUpdatedState(uiState.currentTab)
     val showBottomBarState by rememberUpdatedState(showBottomBar)
     val showNotificationConfigPageState by rememberUpdatedState(showNotificationConfigPage)
+
+    val isScreenUncovered = !showNotificationConfigPage && !isOverlayCovered
+    val isHomeActive = uiState.currentTab == MainTab.Home && isScreenUncovered
+    val isEventActive = uiState.currentTab == MainTab.Event && isScreenUncovered
+    val isMonitorActive = uiState.currentTab == MainTab.Monitor && isScreenUncovered
+
+    LaunchedEffect(isHomeActive) {
+        homeViewModel.setHomeTabActive(isHomeActive)
+    }
+    LaunchedEffect(isEventActive) {
+        eventViewModel.setEventTabActive(isEventActive)
+    }
 
     // Callback ổn định (không tạo lambda mới mỗi lần recompose -> các tab con được skip)
     val currentOnNavigateToEventDetail by rememberUpdatedState(onNavigateToEventDetail)
@@ -524,7 +537,7 @@ fun MainScreen(
                                     MainTab.Monitor -> MonitorScreen(
                                         viewModel = monitorViewModel,
                                         listState = monitorState,
-                                        isTabActive = uiState.currentTab == MainTab.Monitor,
+                                        isTabActive = isMonitorActive,
                                         onEventClick = onEventIdClick,
                                         onPlaybackClick = onPlaybackClick,
                                         onFullscreenChange = onMonitorFullscreenChange

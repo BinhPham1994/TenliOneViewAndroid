@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.component
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.util.LruCache
 import androidx.compose.foundation.Image
@@ -27,16 +28,20 @@ import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import android.graphics.Color as AndroidColor
 
 object VideoFrameCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = maxMemory / 8 // Use 1/8th of available memory for cache
+    private val cacheSize = (maxMemory / 10).coerceAtLeast(4096)
     val cache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
             return bitmap.byteCount / 1024
@@ -46,8 +51,24 @@ object VideoFrameCache {
     // Reuse shared OkHttpClient connection pool & dispatcher instead of allocating a new one
     val rangeHttpClient: OkHttpClient get() = LoginAuthClient.baseClient
 
-    // Track URLs that are confirmed to be videos (failed as images)
-    val knownVideoUrls = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+    // Track URLs that are confirmed to be videos
+    val knownVideoUrls: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    // Track URLs that permanently failed (404 / non-video error) so scrolling never re-requests them
+    val failedUrls: MutableSet<String> = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
+    // Giới hạn tối đa 2 MediaMetadataRetriever chạy đồng thời để chống nóng máy & nghẽn I/O khi cuộn nhanh
+    val extractionSemaphore = Semaphore(2)
+
+    fun looksLikeVideoUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) return false
+        val clean = url.substringBefore('?').lowercase()
+        return clean.endsWith(".mp4") ||
+            clean.endsWith(".mov") ||
+            clean.endsWith(".mkv") ||
+            clean.endsWith(".webm") ||
+            clean.endsWith(".avi")
+    }
 }
 
 @Composable
@@ -62,10 +83,11 @@ fun VideoFrameImage(
 ) {
     val context = LocalContext.current
     val effectiveKey = cacheKey ?: url ?: ""
-    
-    // Automatically fallback if we already know this URL is a video
-    var isVideoFallback by remember(effectiveKey) { 
-        mutableStateOf(url != null && (VideoFrameCache.knownVideoUrls.contains(effectiveKey) || url.lowercase().endsWith(".mp4"))) 
+
+    var isVideoFallback by remember(effectiveKey) {
+        mutableStateOf(
+            url != null && (VideoFrameCache.knownVideoUrls.contains(effectiveKey) || VideoFrameCache.looksLikeVideoUrl(url))
+        )
     }
 
     if (!isVideoFallback) {
@@ -78,6 +100,7 @@ fun VideoFrameImage(
                     .size(targetWidthPx, targetHeightPx)
                     .precision(coil.size.Precision.INEXACT)
                     .allowHardware(true)
+                    .allowRgb565(true)
                     .crossfade(false)
                     .memoryCacheKey("${url}_${targetWidthPx}x${targetHeightPx}")
                     .diskCacheKey(url)
@@ -86,7 +109,7 @@ fun VideoFrameImage(
         }
 
         Box(
-            modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
+            modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             if (imageRequest != null) {
                 coil.compose.AsyncImage(
@@ -95,36 +118,37 @@ fun VideoFrameImage(
                     contentScale = contentScale,
                     modifier = Modifier.fillMaxSize(),
                     onError = {
-                        if (effectiveKey.isNotEmpty()) {
+                        // Chỉ fallback sang trích xuất frame video khi URL thực sự là video hoặc chưa từng thất bại
+                        if (url != null && !VideoFrameCache.failedUrls.contains(effectiveKey) && VideoFrameCache.looksLikeVideoUrl(url)) {
                             VideoFrameCache.knownVideoUrls.add(effectiveKey)
+                            isVideoFallback = true
+                        } else if (effectiveKey.isNotEmpty()) {
+                            VideoFrameCache.failedUrls.add(effectiveKey)
                         }
-                        isVideoFallback = true
                     }
                 )
             }
         }
     } else {
-        // Here we handle the video frame extraction
-        var bitmap by remember(effectiveKey) { mutableStateOf<Bitmap?>(if (effectiveKey.isNotEmpty()) VideoFrameCache.cache.get(effectiveKey) else null) }
-        var hasError by remember(effectiveKey) { mutableStateOf(false) }
+        var bitmap by remember(effectiveKey) {
+            mutableStateOf<Bitmap?>(if (effectiveKey.isNotEmpty()) VideoFrameCache.cache.get(effectiveKey) else null)
+        }
+        var hasError by remember(effectiveKey) {
+            mutableStateOf(effectiveKey.isEmpty() || VideoFrameCache.failedUrls.contains(effectiveKey))
+        }
 
         LaunchedEffect(effectiveKey, url) {
-            if (url == null || effectiveKey.isEmpty()) {
-                hasError = true
+            if (url == null || effectiveKey.isEmpty() || hasError || bitmap != null) {
                 return@LaunchedEffect
             }
-            if (bitmap != null) return@LaunchedEffect
-            
-            try {
-                val extracted = extractVideoFrameWithRange(context, url)
-                if (extracted == null) {
-                    hasError = true
-                } else {
-                    bitmap = extracted
-                    VideoFrameCache.cache.put(effectiveKey, extracted)
-                }
-            } catch (_: Exception) {
+
+            val extracted = extractVideoFrameWithRange(context, url, effectiveKey)
+            if (extracted == null) {
+                VideoFrameCache.failedUrls.add(effectiveKey)
                 hasError = true
+            } else {
+                VideoFrameCache.cache.put(effectiveKey, extracted)
+                bitmap = extracted
             }
         }
 
@@ -173,78 +197,99 @@ private fun ErrorPlaceholder(modifier: Modifier = Modifier) {
     }
 }
 
-private suspend fun extractVideoFrameWithRange(context: Context, url: String): Bitmap? = withContext(Dispatchers.IO) {
-    var tempFile: File? = null
-    val retriever = MediaMetadataRetriever()
-    try {
-        val token = com.tenli.oneview.data.local.UserSession.accessToken
-        val client = VideoFrameCache.rangeHttpClient
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .header("Range", "bytes=0-2097152") // First 2MB
-        if (token.isNotEmpty()) {
-            requestBuilder.header("Authorization", "Bearer $token")
+private suspend fun extractVideoFrameWithRange(
+    context: Context,
+    url: String,
+    cacheKey: String
+): Bitmap? = withContext(Dispatchers.IO) {
+    // 1. Kiểm tra disk cache trước để không phải tải lại 2MB và chạy MediaMetadataRetriever
+    val thumbDir = File(context.cacheDir, "video_thumbs").apply { if (!exists()) mkdirs() }
+    val diskCacheFile = File(thumbDir, "vf_${cacheKey.hashCode().toUInt()}.jpg")
+    if (diskCacheFile.exists() && diskCacheFile.length() > 0L) {
+        runCatching { BitmapFactory.decodeFile(diskCacheFile.absolutePath) }.getOrNull()?.let {
+            return@withContext it
         }
-        val request = requestBuilder.build()
-            
-        val response = client.newCall(request).execute()
-        if (!response.isSuccessful && response.code != 206) {
-            return@withContext null
-        }
-        
-        val body = response.body ?: return@withContext null
-        tempFile = File.createTempFile("video_frame", ".mp4", context.cacheDir)
-        
-        FileOutputStream(tempFile).use { fos ->
-            fos.write(body.bytes())
-        }
-        
-        retriever.setDataSource(tempFile.absolutePath)
-        
-        // Try to get frame at 0.1s, 0.001s, 0.5s like web
-        val tryPoints = listOf(100000L, 1000L, 500000L) // in microseconds
-        var bestFrame: Bitmap? = null
-        
-        for (timeUs in tryPoints) {
-            val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-            if (frame != null) {
-                if (getBrightness(frame) > 20f) {
-                    bestFrame = frame
-                    break
-                }
-            }
-        }
-        
-        // Fallback to default frame
-        if (bestFrame == null) {
-            bestFrame = retriever.getFrameAtTime()
-        }
-        
-        if (bestFrame != null) {
-            val maxWidth = 600
-            if (bestFrame.width > maxWidth) {
-                val ratio = maxWidth.toFloat() / bestFrame.width
-                val newHeight = (bestFrame.height * ratio).toInt()
-                val scaledFrame = Bitmap.createScaledBitmap(bestFrame, maxWidth, newHeight, true)
-                if (scaledFrame != bestFrame) {
-                    // bestFrame.recycle() // Avoid recycling as it might be used internally or cause issues, but generally it's safe to recycle the original if we created a scaled copy
-                    bestFrame.recycle()
-                    bestFrame = scaledFrame
-                }
-            }
-        }
-        
-        return@withContext bestFrame
-    } catch (e: Exception) {
-        e.printStackTrace()
-        return@withContext null
-    } finally {
+    }
+
+    // 2. Giới hạn tối đa 2 luồng giải mã video frame cùng lúc
+    VideoFrameCache.extractionSemaphore.withPermit {
+        VideoFrameCache.cache.get(cacheKey)?.let { return@withPermit it }
+
+        var tempFile: File? = null
+        val retriever = MediaMetadataRetriever()
         try {
-            retriever.release()
-        } catch (e: Exception) {
-            // ignore
+            val token = com.tenli.oneview.data.local.UserSession.accessToken
+            val client = VideoFrameCache.rangeHttpClient
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .header("Range", "bytes=0-2097152") // First 2MB
+            if (token.isNotEmpty()) {
+                requestBuilder.header("Authorization", "Bearer $token")
+            }
+            val request = requestBuilder.build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful && response.code != 206) {
+                    return@withPermit null
+                }
+                val contentType = response.header("Content-Type")?.lowercase().orEmpty()
+                if (contentType.isNotEmpty() && !contentType.startsWith("video/") && !contentType.contains("octet-stream") && !VideoFrameCache.looksLikeVideoUrl(url)) {
+                    return@withPermit null
+                }
+
+                val body = response.body ?: return@withPermit null
+                tempFile = File.createTempFile("video_frame_", ".mp4", context.cacheDir)
+                FileOutputStream(tempFile).use { fos ->
+                    body.byteStream().copyTo(fos)
+                }
+            }
+
+            val videoFile = tempFile ?: return@withPermit null
+            retriever.setDataSource(videoFile.absolutePath)
+
+            val tryPoints = longArrayOf(100_000L, 1_000L, 500_000L)
+            var bestFrame: Bitmap? = null
+
+            for (timeUs in tryPoints) {
+                val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (frame != null) {
+                    if (getBrightness(frame) > 20f) {
+                        bestFrame = frame
+                        break
+                    }
+                }
+            }
+
+            if (bestFrame == null) {
+                bestFrame = retriever.getFrameAtTime()
+            }
+
+            if (bestFrame != null) {
+                val maxWidth = 480
+                if (bestFrame.width > maxWidth) {
+                    val ratio = maxWidth.toFloat() / bestFrame.width
+                    val newHeight = (bestFrame.height * ratio).toInt().coerceAtLeast(1)
+                    val scaledFrame = Bitmap.createScaledBitmap(bestFrame, maxWidth, newHeight, true)
+                    if (scaledFrame != bestFrame) {
+                        bestFrame.recycle()
+                        bestFrame = scaledFrame
+                    }
+                }
+                // Lưu xuống disk cache dưới dạng JPEG nhẹ để lần sau mở lên trong 0ms
+                runCatching {
+                    FileOutputStream(diskCacheFile).use { out ->
+                        bestFrame.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                    }
+                }
+            }
+
+            bestFrame
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+            runCatching { tempFile?.delete() }
         }
-        tempFile?.delete()
     }
 }
 
@@ -264,7 +309,7 @@ private fun getBrightness(bitmap: Bitmap): Float {
         }
         scaled.recycle()
         (r + g + b).toFloat() / 300f
-    } catch (e: Exception) {
-        100f // Fallback to safe brightness
+    } catch (_: Exception) {
+        100f
     }
 }

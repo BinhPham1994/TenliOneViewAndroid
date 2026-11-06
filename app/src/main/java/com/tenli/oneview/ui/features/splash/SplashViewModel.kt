@@ -13,6 +13,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,27 +52,29 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun logout() {
-        UserSession.clear()
-
-        val prefs = GlobalData.preferences
-        val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-        prefs.edit {
-            remove(AppKeys.ACCESS_TOKEN_KEY)
-            remove(AppKeys.REFRESH_TOKEN_KEY)
-            remove(AppKeys.USER_DATA_KEY)
-            remove(AppKeys.GROUP_ID)
-            remove(AppKeys.GROUP_ID_CAMERA)
-            if (!rememberMe) {
-                remove(AppKeys.USERNAME_KEY)
-                remove(AppKeys.PASSWORD_KEY)
-            }
-        }
-
         _uiState.update { it.copy(destination = SplashDestination.Login) }
 
-        // Xoá cache (RAM + file) ngoài Main thread để chuyển màn không bị giật
+        // Huỷ đăng ký FCM token + xoá session/cache ngoài Main thread để chuyển màn không bị giật
         val app = getApplication<Application>()
         viewModelScope.launch(Dispatchers.IO) {
+            FcmTokenManager.unregisterDevicePushToken()
+            UserSession.clear()
+
+            val prefs = GlobalData.preferences
+            val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
+            prefs.edit {
+                remove(AppKeys.ACCESS_TOKEN_KEY)
+                remove(AppKeys.REFRESH_TOKEN_KEY)
+                remove(AppKeys.USER_DATA_KEY)
+                remove(AppKeys.GROUP_ID)
+                remove(AppKeys.GROUP_ID_CAMERA)
+                remove("push_notifications_enabled")
+                if (!rememberMe) {
+                    remove(AppKeys.USERNAME_KEY)
+                    remove(AppKeys.PASSWORD_KEY)
+                }
+            }
+
             HomeCacheManager.clearCache(app)
             EventCacheManager.clearCache(app)
             MonitorCacheManager.clearCache(app)

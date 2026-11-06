@@ -56,6 +56,8 @@ import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.features.event.buildCameraNameMap
+import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.theme.BrandAccent
 import com.tenli.oneview.ui.theme.InfoCyan
 import com.tenli.oneview.ui.theme.InfoSkyDeep
@@ -99,7 +101,7 @@ fun HomeScreen(
     val hasActiveFilter = uiState.selectedServiceId != null || uiState.selectedFilter != TimeFilter.TODAY
 
     val cameraMap = remember(uiState.cameraList) {
-        uiState.cameraList.associateBy({ it.extra?.uuid }, { it.name })
+        buildCameraNameMap(uiState.cameraList)
     }
 
     val recentFiveEvents = uiState.recentEvents
@@ -260,7 +262,7 @@ fun HomeScreen(
                         key = { _, event -> "home_ev_${event.serviceId}_${event.id}_${event.time}" },
                         contentType = { _, _ -> "event_card" }
                     ) { index, event ->
-                        val cameraName = cameraMap[event.data?.cameraUUID] ?: "Camera"
+                        val cameraName = event.cameraUuidOrNull?.let { cameraMap[it] }.orEmpty()
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = spacing.space10)

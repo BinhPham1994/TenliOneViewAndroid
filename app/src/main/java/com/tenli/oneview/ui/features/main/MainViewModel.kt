@@ -57,6 +57,9 @@ class MainViewModel(
     private var notificationLoadJob: Job? = null
     private var passwordChangeJob: Job? = null
 
+    @Volatile
+    private var cachedNotificationSettings: UserNotificationSettingsModel? = null
+
     /** Ngôn ngữ hiện tại (cùng nguồn với rememberIsEnglish()) – dùng cho thông báo popup phát từ ViewModel */
     private val isEnglish: Boolean
         get() = LocaleManager.languageFlow.value.startsWith("en")
@@ -68,16 +71,34 @@ class MainViewModel(
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
 
-                // Reconnect WebSockets & đồng bộ FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
+                // Reconnect WebSockets & đồng bộ cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
                 if (isOnline && UserSession.accessToken.isNotEmpty()) {
                     val baseUrl = UserSession.domain.trim()
                     if (baseUrl.isNotEmpty()) {
                         webSocketManager.connectNotify(baseUrl)
                         webSocketManager.connectAllReports()
                     }
-                    FcmTokenManager.registerDevicePushTokenAsync(force = true)
+                    syncNotificationSettingsAndRegisterToken()
                 }
             }
+        }
+    }
+
+    private fun syncNotificationSettingsAndRegisterToken() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val resp = ApiProvider.bsApi.getUserNotificationSettings()
+                if (resp.isSuccessful) {
+                    val body = resp.body()
+                    if (body != null) {
+                        cachedNotificationSettings = body
+                        val serverEnabled = body.global.enabled
+                        savePushEnabledPref(serverEnabled)
+                        _notificationConfigState.update { it.copy(pushEnabled = serverEnabled) }
+                    }
+                }
+            }
+            FcmTokenManager.registerDevicePushToken(force = true)
         }
     }
 
@@ -91,6 +112,7 @@ class MainViewModel(
             // Huỷ đăng ký FCM token trên server trước khi xoá UserSession.accessToken (giống tenli-oneview auth.ts)
             FcmTokenManager.unregisterDevicePushToken()
             UserSession.clear()
+            cachedNotificationSettings = null
 
             // Xóa token/prefs + cache cục bộ (đọc/ghi file) trên IO để không chặn Main thread
             withContext(Dispatchers.IO) {
@@ -102,6 +124,7 @@ class MainViewModel(
                     remove(AppKeys.USER_DATA_KEY)
                     remove(AppKeys.GROUP_ID)
                     remove(AppKeys.GROUP_ID_CAMERA)
+                    remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
                     if (!rememberMe) {
                         remove(AppKeys.USERNAME_KEY)
                         remove(AppKeys.PASSWORD_KEY)
@@ -139,8 +162,10 @@ class MainViewModel(
             try {
                 val resp = ApiProvider.bsApi.getUserNotificationSettings()
                 if (resp.isSuccessful) {
-                    val enabled = resp.body()?.global?.enabled
-                    if (enabled != null) {
+                    val body = resp.body()
+                    if (body != null) {
+                        cachedNotificationSettings = body
+                        val enabled = body.global.enabled
                         _notificationConfigState.update { it.copy(pushEnabled = enabled) }
                         savePushEnabledPref(enabled)
                     }
@@ -154,6 +179,8 @@ class MainViewModel(
 
     /**
      * Bật/tắt "Cho phép nhận thông báo".
+     * Giữ nguyên `overrides` (`event_type_groups`, `event_types`), `pause_until` và `global_scripts`
+     * đã cấu hình trên server để không làm mất cấu hình nhận thông báo của từng loại sự kiện.
      * @param hasOsPermission Thiết bị đã cấp quyền POST_NOTIFICATIONS hay chưa (để chọn nội dung popup).
      */
     fun setPushNotificationsEnabled(enabled: Boolean, hasOsPermission: Boolean) {
@@ -162,12 +189,24 @@ class MainViewModel(
         viewModelScope.launch {
             val saveFailedMsg = localized("Failed to save notification settings", "Không thể lưu cấu hình thông báo")
             try {
-                val resp = ApiProvider.bsApi.updateUserNotificationSettings(
+                val baseSettings = cachedNotificationSettings ?: runCatching {
+                    val getResp = ApiProvider.bsApi.getUserNotificationSettings()
+                    if (getResp.isSuccessful) getResp.body() else null
+                }.getOrNull()
+
+                val updatedModel = if (baseSettings != null) {
+                    baseSettings.copy(
+                        global = baseSettings.global.copy(enabled = enabled)
+                    )
+                } else {
                     UserNotificationSettingsModel(
                         global = UserNotificationGlobalSetting(enabled = enabled)
                     )
-                )
+                }
+
+                val resp = ApiProvider.bsApi.updateUserNotificationSettings(updatedModel)
                 if (resp.isSuccessful) {
+                    cachedNotificationSettings = resp.body() ?: updatedModel
                     if (enabled) {
                         FcmTokenManager.registerDevicePushToken(force = true)
                     } else {

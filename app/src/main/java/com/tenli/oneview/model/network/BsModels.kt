@@ -138,6 +138,7 @@ data class UserNotificationAlarmMode(
 
 data class UserNotificationDetailSetting(
     var enabled: Boolean? = true,
+    @SerializedName("alarm_mode", alternate = ["alarmMode"])
     var alarmMode: UserNotificationAlarmMode? = null
 )
 
@@ -168,13 +169,21 @@ data class NotificationTokenRegisterModel(
 )
 
 data class FirebaseConfigModel(
+    @SerializedName("apiKey", alternate = ["api_key"])
     val apiKey: String? = null,
+    @SerializedName("projectId", alternate = ["project_id"])
     val projectId: String? = null,
+    @SerializedName("authDomain", alternate = ["auth_domain"])
     val authDomain: String? = null,
+    @SerializedName("messagingSenderId", alternate = ["messaging_sender_id", "senderId", "sender_id"])
     val messagingSenderId: String? = null,
+    @SerializedName("appId", alternate = ["app_id"])
     val appId: String? = null,
+    @SerializedName("storageBucket", alternate = ["storage_bucket"])
     val storageBucket: String? = null,
+    @SerializedName("measurementId", alternate = ["measurement_id"])
     val measurementId: String? = null,
+    @SerializedName("vapidKey", alternate = ["vapid_key"])
     val vapidKey: String? = null
 )
 

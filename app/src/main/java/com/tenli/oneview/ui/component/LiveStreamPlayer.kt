@@ -129,10 +129,14 @@ fun LiveStreamPlayer(
         if (cameraId <= 0) return
         try {
             val textureView = playerViewRef?.videoSurfaceView as? TextureView ?: return
-            if (textureView.isAvailable && textureView.width > 0 && textureView.height > 0) {
-                val bmp = textureView.bitmap
+            val w = textureView.width
+            val h = textureView.height
+            if (textureView.isAvailable && w > 0 && h > 0) {
+                val targetW = minOf(w, 640)
+                val targetH = (h * (targetW.toFloat() / w)).toInt().coerceAtLeast(1)
+                val bmp = textureView.getBitmap(targetW, targetH)
                 if (bmp != null) {
-                    MonitorCacheManager.saveCapturedCameraFrame(context, cameraId, bmp, altCameraId)
+                    MonitorCacheManager.saveCapturedCameraFrame(context.applicationContext, cameraId, bmp, altCameraId)
                 }
             }
         } catch (_: Exception) {
@@ -182,13 +186,18 @@ fun LiveStreamPlayer(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs = */ 1500,
-                /* maxBufferMs = */ 15000,
+                /* maxBufferMs = */ 12000,
                 /* bufferForPlaybackMs = */ 100,
                 /* bufferForPlaybackAfterRebufferMs = */ 300
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(0, false)
             .build()
 
-        ExoPlayer.Builder(context)
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
+
+        ExoPlayer.Builder(context, renderersFactory)
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .build()

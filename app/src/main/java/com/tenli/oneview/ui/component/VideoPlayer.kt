@@ -51,31 +51,52 @@ fun VideoPlayer(
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
 
     val exoPlayer = remember(videoUrl) {
-        ExoPlayer.Builder(context).build().apply {
-            val dataSourceFactory = DefaultHttpDataSource.Factory().setDefaultRequestProperties(mapOf("Authorization" to "Bearer $deviceKey"))
-            setMediaSource(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(MediaItem.fromUri(videoUrl))
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 2000,
+                /* maxBufferMs = */ 12000,
+                /* bufferForPlaybackMs = */ 250,
+                /* bufferForPlaybackAfterRebufferMs = */ 500
             )
-            if (initialSeekPositionMs != null) {
-                seekTo(initialSeekPositionMs)
-            }
-            prepare()
-            playWhenReady = true
-            addListener(object : Player.Listener {
-                override fun onRenderedFirstFrame() {
-                    isVideoReady = true; isError = false
-                    currentOnPlayingChange(true)
-                    currentOnErrorChange(false)
-                }
+            .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(0, false)
+            .build()
+        val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
+            .setEnableDecoderFallback(true)
 
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
-                    isError = true; isVideoReady = false
-                    currentOnPlayingChange(false)
-                    currentOnErrorChange(true)
+        ExoPlayer.Builder(context, renderersFactory)
+            .setLoadControl(loadControl)
+            .build()
+            .apply {
+                val dataSourceFactory = DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(10_000)
+                    .setReadTimeoutMs(15_000)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $deviceKey"))
+                setMediaSource(
+                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+                        .createMediaSource(MediaItem.fromUri(videoUrl))
+                )
+                if (initialSeekPositionMs != null) {
+                    seekTo(initialSeekPositionMs)
                 }
-            })
-        }
+                prepare()
+                playWhenReady = true
+                addListener(object : Player.Listener {
+                    override fun onRenderedFirstFrame() {
+                        isVideoReady = true; isError = false
+                        currentOnPlayingChange(true)
+                        currentOnErrorChange(false)
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
+                        isError = true; isVideoReady = false
+                        currentOnPlayingChange(false)
+                        currentOnErrorChange(true)
+                    }
+                })
+            }
     }
 
     DisposableEffect(exoPlayer) {
@@ -100,11 +121,12 @@ fun VideoPlayer(
         }
     }
 
+    val currentOnTimeUpdate by rememberUpdatedState(onTimeUpdate)
     if (onTimeUpdate != null) {
-        androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady, onTimeUpdate) {
+        androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady) {
             while (isActive && isVideoReady) {
                 if (exoPlayer.isPlaying) {
-                    onTimeUpdate(exoPlayer.currentPosition)
+                    currentOnTimeUpdate?.invoke(exoPlayer.currentPosition)
                 }
                 delay(250L)
             }

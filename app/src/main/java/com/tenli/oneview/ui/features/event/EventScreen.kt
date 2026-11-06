@@ -155,7 +155,7 @@ fun EventScreen(
                         Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
                             MobileEventCard(
                                 event = event,
-                                cameraName = uiState.cameraNameMap[event.data?.cameraUUID] ?: "Camera",
+                                cameraName = event.cameraUuidOrNull?.let { uiState.cameraNameMap[it] }.orEmpty(),
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
                                 onClick = {

@@ -40,16 +40,19 @@ fun SafeAsyncImage(
     var isImageLoading by remember(url) { mutableStateOf(true) }
     val context = LocalContext.current
 
-    // Xây dựng ImageRequest với Header Authorization
+    // Xây dựng ImageRequest với Header Authorization và giới hạn kích thước giải mã
     val imageRequest = remember(context, url, deviceKey) {
         ImageRequest.Builder(context)
             .data(url)
+            .size(1280, 720)
+            .precision(coil.size.Precision.INEXACT)
+            .allowHardware(true)
             .apply {
                 if (deviceKey.isNotEmpty()) {
                     addHeader("Authorization", "Bearer $deviceKey")
                 }
             }
-            .crossfade(true)
+            .crossfade(false)
             .diskCachePolicy(CachePolicy.ENABLED)
             .build()
     }

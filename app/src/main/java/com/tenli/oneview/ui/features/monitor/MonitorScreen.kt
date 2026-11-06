@@ -86,7 +86,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
-import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
@@ -112,6 +111,8 @@ import kotlinx.coroutines.delay
 private const val LIVE_STAGE_ASPECT_RATIO = 16f / 9f
 private const val SNAPSHOT_CARD_WIDTH_PX = 420
 private const val SNAPSHOT_CARD_HEIGHT_PX = 236
+private const val LIVE_STAGE_SNAPSHOT_WIDTH_PX = 1280
+private const val LIVE_STAGE_SNAPSHOT_HEIGHT_PX = 720
 private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
@@ -282,7 +283,9 @@ fun MonitorScreen(
                         .padding(bottom = bottomClearance),
                     contentAlignment = Alignment.Center
                 ) {
-                    WaveDotsLoading()
+                    if (isTabActive) {
+                        WaveDotsLoading()
+                    }
                 }
             } else if (!hasAvailableCameras) {
                 Box(
@@ -705,7 +708,8 @@ fun MonitorScreen(
                             ) {
                                 items(
                                     items = pagedCameraItems,
-                                    key = { it.key }
+                                    key = { it.key },
+                                    contentType = { "camera_card" }
                                 ) { item ->
                                     val isPlaying = activeCameraIds.contains(item.camera.id)
                                     val hasSnapKey = uiState.cameraSnapshots.containsKey(item.camera.id)
@@ -714,6 +718,7 @@ fun MonitorScreen(
                                     MobileCameraSnapshotCard(
                                         camera = item.camera,
                                         isPlaying = isPlaying,
+                                        isTabActive = isTabActive,
                                         hasSnapKey = hasSnapKey,
                                         snapshotUrl = snapUrl,
                                         onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
@@ -900,6 +905,7 @@ private fun GridOptionButton(
 private fun MobileCameraSnapshotCard(
     camera: CameraModel,
     isPlaying: Boolean,
+    isTabActive: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
     onSnapshotError: () -> Unit,
@@ -918,6 +924,9 @@ private fun MobileCameraSnapshotCard(
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
     val nameColor = if (isPlaying) colors.accent else colors.textTitle
 
+    var isImageLoading by remember(snapshotUrl) { mutableStateOf(!snapshotUrl.isNullOrEmpty()) }
+    var isImageError by remember(snapshotUrl) { mutableStateOf(false) }
+
     val imageRequest = remember(snapshotUrl) {
         if (snapshotUrl.isNullOrEmpty()) {
             null
@@ -927,7 +936,10 @@ private fun MobileCameraSnapshotCard(
                 .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
                 .precision(Precision.INEXACT)
                 .allowHardware(true)
+                .allowRgb565(true)
                 .crossfade(false)
+                .memoryCacheKey("${snapshotUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}")
+                .diskCacheKey(snapshotUrl)
                 .build()
         }
     }
@@ -939,7 +951,7 @@ private fun MobileCameraSnapshotCard(
             .background(cardBg)
             .clickable(onClick = onClick)
     ) {
-        // .cam-card-thumb (16:9)
+        // .cam-card-thumb (16:9) - Dùng AsyncImage trực tiếp thay vì SubcomposeAsyncImage để cuộn lưới mượt 60/120fps
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -947,42 +959,30 @@ private fun MobileCameraSnapshotCard(
                 .background(thumbBg),
             contentAlignment = Alignment.Center
         ) {
-            if (imageRequest != null) {
-                SubcomposeAsyncImage(
+            if (imageRequest != null && !isImageError) {
+                AsyncImage(
                     model = imageRequest,
                     contentDescription = camera.name,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            WaveDotsLoading(
-                                dotSize = spacing.space6,
-                                dotColor = colors.accent,
-                                maxOffset = spacing.space6
-                            )
-                        }
+                    onSuccess = {
+                        isImageLoading = false
+                        isImageError = false
                     },
-                    error = {
-                        LaunchedEffect(snapshotUrl) {
-                            onSnapshotError()
-                        }
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.ImageOff,
-                                contentDescription = null,
-                                tint = noImageTint,
-                                modifier = Modifier.size(spacing.iconMedium)
-                            )
-                        }
+                    onError = {
+                        isImageLoading = false
+                        isImageError = true
+                        onSnapshotError()
                     }
                 )
-            } else if (!hasSnapKey) {
+                if (isImageLoading && isTabActive) {
+                    WaveDotsLoading(
+                        dotSize = spacing.space6,
+                        dotColor = colors.accent,
+                        maxOffset = spacing.space6
+                    )
+                }
+            } else if (!hasSnapKey && isTabActive) {
                 WaveDotsLoading(
                     dotSize = spacing.space6,
                     dotColor = colors.accent,
@@ -1012,7 +1012,7 @@ private fun MobileCameraSnapshotCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(spacing.space5)
                     ) {
-                        PlayingEqualizerBars()
+                        PlayingEqualizerBars(isTabActive = isTabActive)
                         Text(
                             text = if (isEn) "Playing" else "Đang xem",
                             color = colors.onAccent,
@@ -1045,9 +1045,36 @@ private fun MobileCameraSnapshotCard(
 }
 
 @Composable
-private fun PlayingEqualizerBars() {
+private fun PlayingEqualizerBars(isTabActive: Boolean = true) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    if (!isTabActive) {
+        Row(
+            modifier = Modifier.height(spacing.space10),
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(spacing.space2)
+                    .height(spacing.space4)
+                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
+            )
+            Box(
+                modifier = Modifier
+                    .width(spacing.space2)
+                    .height(spacing.space8)
+                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
+            )
+            Box(
+                modifier = Modifier
+                    .width(spacing.space2)
+                    .height(spacing.space6)
+                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
+            )
+        }
+        return
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "playingEqualizer")
     val scale1 by infiniteTransition.animateFloat(
         initialValue = 0.45f,
@@ -1504,6 +1531,21 @@ fun CameraGridItem(
 
         // Cached Snapshot Preview + Loading Overlay (.cached-snapshot-preview & fade-snapshot 0.35s)
         val isLoadingStream = !isLiveViewPlaying && !hasError
+        val context = LocalContext.current
+        val fallbackUrl = selectedCamera.fallbackImageUrl
+        val fallbackImageRequest = remember(fallbackUrl) {
+            if (fallbackUrl.isEmpty()) {
+                null
+            } else {
+                ImageRequest.Builder(context)
+                    .data(fallbackUrl)
+                    .size(LIVE_STAGE_SNAPSHOT_WIDTH_PX, LIVE_STAGE_SNAPSHOT_HEIGHT_PX)
+                    .precision(Precision.INEXACT)
+                    .allowHardware(true)
+                    .crossfade(false)
+                    .build()
+            }
+        }
         AnimatedVisibility(
             visible = isLoadingStream,
             enter = fadeIn(animationSpec = tween(150)),
@@ -1516,9 +1558,9 @@ fun CameraGridItem(
                     .background(surfaceBg),
                 contentAlignment = Alignment.Center
             ) {
-                if (selectedCamera.fallbackImageUrl.isNotEmpty() && !snapshotFailed) {
+                if (fallbackImageRequest != null && !snapshotFailed) {
                     AsyncImage(
-                        model = selectedCamera.fallbackImageUrl,
+                        model = fallbackImageRequest,
                         contentDescription = selectedCamera.camera.name,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
@@ -1528,7 +1570,9 @@ fun CameraGridItem(
                         }
                     )
                 }
-                WaveDotsLoading(dotColor = colors.accent)
+                if (isTabActive) {
+                    WaveDotsLoading(dotColor = colors.accent)
+                }
             }
         }
 
