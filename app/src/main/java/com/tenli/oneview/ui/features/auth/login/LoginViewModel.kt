@@ -17,6 +17,8 @@ import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.DispatcherProvider
+import com.tenli.oneview.util.NetworkMonitor
+import com.tenli.oneview.util.noNetworkMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -113,6 +115,11 @@ class LoginViewModel(
             return
         }
 
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            MobileTopPopupManager.error(noNetworkMessage(isEn))
+            return
+        }
+
         loginJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
@@ -145,6 +152,9 @@ class LoginViewModel(
      * @param isUnexpected true khi lỗi phát sinh ngoài [AuthRepository] (không phải lỗi xác thực).
      */
     private fun loginErrorMessage(error: Throwable?, isEn: Boolean, isUnexpected: Boolean): String {
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            return noNetworkMessage(isEn)
+        }
         val errorMsg = error?.message.orEmpty()
         return when {
             !isUnexpected && (errorMsg.contains("failed with code 401") ||
@@ -152,7 +162,7 @@ class LoginViewModel(
                 errorMsg.contains("Failed to authenticate")) ->
                 if (isEn) "Invalid login credentials" else "Thông tin đăng nhập không chính xác"
             error is UnknownHostException || errorMsg.contains("Unable to resolve host") ->
-                if (isEn) "Cannot connect to server. Please check your connection." else "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
+                if (isEn) "Connection error to server, please try again later" else "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
             error is SocketTimeoutException || errorMsg.contains("timeout") ->
                 if (isEn) "Connection error to server, please try again later" else "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
             isUnexpected ->

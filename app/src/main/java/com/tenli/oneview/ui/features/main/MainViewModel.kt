@@ -27,7 +27,9 @@ import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.BackendHttpException
+import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.NetworkMonitor
+import com.tenli.oneview.util.noNetworkMessage
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -73,17 +75,27 @@ class MainViewModel(
 
     init {
         viewModelScope.launch {
+            var wasOffline = false
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
 
-                // Reconnect WebSockets & đồng bộ cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
-                if (isOnline && UserSession.accessToken.isNotEmpty()) {
-                    val baseUrl = UserSession.domain.trim()
-                    if (baseUrl.isNotEmpty()) {
-                        webSocketManager.connectNotify(baseUrl)
-                        webSocketManager.connectAllReports()
+                if (!isOnline) {
+                    wasOffline = true
+                    MobileTopPopupManager.error(noNetworkMessage(isEnglish))
+                } else {
+                    if (wasOffline) {
+                        wasOffline = false
+                        EventBus.emitNetworkRestored()
                     }
-                    syncNotificationSettingsAndRegisterToken()
+                    // Reconnect WebSockets & đồng bộ cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
+                    if (UserSession.accessToken.isNotEmpty()) {
+                        val baseUrl = UserSession.domain.trim()
+                        if (baseUrl.isNotEmpty()) {
+                            webSocketManager.connectNotify(baseUrl)
+                            webSocketManager.connectAllReports()
+                        }
+                        syncNotificationSettingsAndRegisterToken()
+                    }
                 }
             }
         }

@@ -24,6 +24,7 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.NetworkMonitor
 import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
@@ -330,6 +331,11 @@ class HomeViewModel(
                 }
             }
         }
+        viewModelScope.launch {
+            EventBus.networkRestored.collect {
+                fetchDashboardData()
+            }
+        }
     }
 
     private data class RecentEventsFetchResult(
@@ -616,57 +622,71 @@ class HomeViewModel(
                     } else _uiState.value.aiServices
 
                     // Compute running AI tasks & total AI tasks matching MobileHomePage.vue (song song trên các AI Service)
+                    // Chỉ gọi Wave 2 khi có kết nối mạng và ít nhất 1 API Wave 1 thành công để tránh treo chờ timeout khi mất mạng/sập backend
                     var runningTasks = 0
                     var totalTasks = 0
-                    try {
-                        val targetServices = if (serviceId != null) {
-                            aiServices.filter { it.id == serviceId }
-                        } else {
-                            aiServices
-                        }
-                        if (targetServices.isEmpty()) {
-                            val monResp = aiApi.getMonitorList()
-                            if (monResp.isSuccessful) {
-                                val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                                totalTasks = monitors.size
-                                runningTasks = monitors.count { it.enabled }
+                    val wave1Alive = NetworkMonitor.isNetworkAvailable() &&
+                        (overviewResponse?.isSuccessful == true || aiServiceResponse?.isSuccessful == true)
+                    if (wave1Alive) {
+                        try {
+                            val targetServices = if (serviceId != null) {
+                                aiServices.filter { it.id == serviceId }
+                            } else {
+                                aiServices
                             }
-                        } else {
-                            val monitorResults = targetServices.map { srv ->
-                                async {
-                                    val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
-                                    safeApiCall {
-                                        if (host.isNotBlank() && srv.id != 0) {
-                                            aiApi.getMonitorListExt(
-                                                url = "$host/api/Monitor",
-                                                authHeader = "Bearer ${srv.apiKey}"
-                                            )
-                                        } else {
-                                            aiApi.getMonitorList()
-                                        }
-                                    }.getOrNull()
-                                }
-                            }.map { it.await() }
-
-                            for (monResp in monitorResults) {
-                                if (monResp != null && monResp.isSuccessful) {
+                            if (targetServices.isEmpty()) {
+                                val monResp = aiApi.getMonitorList()
+                                if (monResp.isSuccessful) {
                                     val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                                    totalTasks += monitors.size
-                                    runningTasks += monitors.count { it.enabled }
+                                    totalTasks = monitors.size
+                                    runningTasks = monitors.count { it.enabled }
+                                }
+                            } else {
+                                val monitorResults = targetServices.map { srv ->
+                                    async {
+                                        val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
+                                        safeApiCall {
+                                            if (host.isNotBlank() && srv.id != 0) {
+                                                aiApi.getMonitorListExt(
+                                                    url = "$host/api/Monitor",
+                                                    authHeader = "Bearer ${srv.apiKey}"
+                                                )
+                                            } else {
+                                                aiApi.getMonitorList()
+                                            }
+                                        }.getOrNull()
+                                    }
+                                }.map { it.await() }
+
+                                for (monResp in monitorResults) {
+                                    if (monResp != null && monResp.isSuccessful) {
+                                        val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                                        totalTasks += monitors.size
+                                        runningTasks += monitors.count { it.enabled }
+                                    }
                                 }
                             }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                         }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                     }
                     if (totalTasks == 0) {
                         val overviewMonitorCount = overviewStats
                             .find { it.label == "monitor-count" && it.tag == "all" }
                             ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                        totalTasks = overviewMonitorCount
-                        runningTasks = overviewMonitorCount
+                        if (overviewMonitorCount > 0) {
+                            totalTasks = overviewMonitorCount
+                            runningTasks = if (_uiState.value.runningAiTasks > 0) {
+                                _uiState.value.runningAiTasks
+                            } else {
+                                overviewMonitorCount
+                            }
+                        } else {
+                            totalTasks = _uiState.value.totalAiTasks
+                            runningTasks = _uiState.value.runningAiTasks
+                        }
                     }
 
                     // Báo lỗi backend kể cả khi đã có dữ liệu cache hiển thị trên màn hình

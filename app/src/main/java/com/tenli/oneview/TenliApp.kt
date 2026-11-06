@@ -29,6 +29,7 @@ import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
+import com.tenli.oneview.util.NetworkMonitor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -67,6 +68,7 @@ class TenliApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        NetworkMonitor.init(this)
         container = DefaultAppContainer(this)
         ThemeManager.init(this)
 

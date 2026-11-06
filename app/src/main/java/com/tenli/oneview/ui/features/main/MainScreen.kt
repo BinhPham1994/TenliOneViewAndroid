@@ -382,28 +382,7 @@ fun MainScreen(
     val spacing = MaterialTheme.spacing
 
     CompositionLocalProvider(LocalMobileOverlayHost provides overlayHostState) {
-        val isEn = rememberIsEnglish()
-        Scaffold(
-            topBar = {
-                AnimatedVisibility(visible = uiState.isOffline) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(colors.error)
-                            .padding(vertical = spacing.space8, horizontal = spacing.space10),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isEn) "No network connection. Please check again." else "Không có kết nối mạng. Vui lòng kiểm tra lại.",
-                            color = colors.onAccent,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-        ) { innerPadding ->
+        Scaffold { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()

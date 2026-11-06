@@ -164,6 +164,12 @@ class EventViewModel(
                 }
             }
         }
+
+        viewModelScope.launch {
+            EventBus.networkRestored.collect {
+                fetchInitialData(reloadMetadata = true)
+            }
+        }
     }
 
     private data class EventBatchResult(

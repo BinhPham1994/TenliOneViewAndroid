@@ -130,6 +130,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
@@ -177,6 +178,8 @@ private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
 
+private class CacheKeyHolder(var key: String? = null)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MonitorScreen(
@@ -211,6 +214,16 @@ fun MonitorScreen(
 
     val activeLiveCamera = uiState.selectedCameras.getOrNull(0)
     val isLiveScreenOpen = activeLiveCamera != null
+
+    val onCardSnapshotError: (CameraModel) -> Unit = remember(viewModel) {
+        { cam -> viewModel.onCardSnapshotError(cam) }
+    }
+    val onCardClick: (CameraModel) -> Unit = remember(viewModel, dismissKeyboard) {
+        { cam ->
+            dismissKeyboard()
+            viewModel.openLiveCamera(cam)
+        }
+    }
 
     LaunchedEffect(uiState.searchQuery) {
         if (uiState.searchQuery.isNotEmpty()) {
@@ -334,7 +347,31 @@ fun MonitorScreen(
     val panelBg = colors.surface
     val bottomClearance = spacing.bottomNavHeight + spacing.space20
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Khi màn hình Live đã trượt vào che kín 100% màn hình (sau 280ms), tạm ngưng place lưới camera bên dưới
+    // để GPU không phải vẽ đè (overdraw) danh sách thẻ camera ở mỗi frame phát video 30/60fps.
+    // Ngay ở Frame 1 khi bấm Back (isLiveScreenOpen = false), lưới camera được place lại tức thì (0ms, không cần measure lại).
+    var isCoveredByLiveOverlay by remember { mutableStateOf(false) }
+    LaunchedEffect(isLiveScreenOpen) {
+        if (isLiveScreenOpen) {
+            delay(LIVE_PAGE_ENTER_DURATION_MS.toLong() + 16L)
+            isCoveredByLiveOverlay = true
+        } else {
+            isCoveredByLiveOverlay = false
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, placeable.height) {
+                    if (!isCoveredByLiveOverlay || !isLiveScreenOpen) {
+                        placeable.placeRelative(0, 0)
+                    }
+                }
+            }
+    ) {
         // =========================================================================================
         // 1. MÀN HÌNH DANH SÁCH LƯỚI CAMERA BAN ĐẦU (Không phát live tự động)
         // =========================================================================================
@@ -622,20 +659,8 @@ fun MonitorScreen(
                                     isTabActive = isTabActive && !isLiveScreenOpen,
                                     hasSnapKey = hasSnapKey,
                                     snapshotUrl = snapUrl,
-                                    onSnapshotError = { viewModel.onCardSnapshotError(item.camera) },
-                                    onClick = {
-                                        val isImeOpen = ViewCompat.getRootWindowInsets(view)
-                                            ?.isVisible(WindowInsetsCompat.Type.ime()) == true
-                                        dismissKeyboard()
-                                        if (isImeOpen) {
-                                            uiScope.launch {
-                                                delay(240L)
-                                                viewModel.openLiveCamera(item.camera)
-                                            }
-                                        } else {
-                                            viewModel.openLiveCamera(item.camera)
-                                        }
-                                    }
+                                    onSnapshotError = onCardSnapshotError,
+                                    onClick = onCardClick
                                 )
                             }
                         }
@@ -750,6 +775,7 @@ fun MonitorLiveCameraOverlay(
         )
     ) {
         val isSliding = transition.isRunning
+        val isClosing = !isLiveScreenOpen
         val currentCam = activeLiveCamera ?: displayedLiveCamera
         if (currentCam != null) {
             MobileLiveCameraScreen(
@@ -758,6 +784,7 @@ fun MonitorLiveCameraOverlay(
                 isTabActive = isTabActive && isLiveScreenOpen,
                 isFullscreen = isSingleFullscreen,
                 isSliding = isSliding,
+                isClosing = isClosing,
                 onBackClick = handleCameraDetailBack,
                 onToggleFullscreen = {
                     if (isSingleFullscreen) {
@@ -822,6 +849,7 @@ private fun MobileLiveCameraScreen(
     isTabActive: Boolean,
     isFullscreen: Boolean,
     isSliding: Boolean = false,
+    isClosing: Boolean = false,
     onBackClick: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onRetryClick: () -> Unit,
@@ -1108,6 +1136,9 @@ private fun MobileLiveCameraScreen(
                         ) {
                             when (tab) {
                                 CameraDetailTab.LIVE -> {
+                                    val isEnteringLivePage = isSliding && !isClosing
+                                    val isClosingOrLeavingLive = isClosing ||
+                                        (outgoingDetailTab == CameraDetailTab.LIVE && activeDetailTab != CameraDetailTab.LIVE)
                                     Column(modifier = Modifier.fillMaxSize()) {
                                         Box(
                                             modifier = if (isFullscreen) {
@@ -1124,6 +1155,8 @@ private fun MobileLiveCameraScreen(
                                             CameraGridItem(
                                                 selectedCamera = selectedCamera,
                                                 isTabActive = isTabActive && uiState.cameraDetailTab == CameraDetailTab.LIVE,
+                                                isEntering = isEnteringLivePage,
+                                                isClosing = isClosingOrLeavingLive,
                                                 onClick = {},
                                                 onRetryClick = onRetryClick,
                                                 onSuccess = onSuccess,
@@ -1145,9 +1178,12 @@ private fun MobileLiveCameraScreen(
                                 }
 
                                 CameraDetailTab.PLAYBACK -> {
+                                    val isPlaybackTabVisible = isTabActive &&
+                                        (activeDetailTab == CameraDetailTab.PLAYBACK || outgoingDetailTab == CameraDetailTab.PLAYBACK)
                                     CameraPlaybackTabContent(
                                         uiState = uiState,
                                         selectedCamera = selectedCamera,
+                                        isTabVisible = isPlaybackTabVisible,
                                         listState = playbackListState,
                                         bottomClearance = bottomClearance,
                                         onSelectVideo = onSelectPlaybackVideo,
@@ -1158,9 +1194,12 @@ private fun MobileLiveCameraScreen(
                                 }
 
                                 CameraDetailTab.EVENTS -> {
+                                    val isEventsTabVisible = isTabActive &&
+                                        (activeDetailTab == CameraDetailTab.EVENTS || outgoingDetailTab == CameraDetailTab.EVENTS)
                                     CameraEventsTabContent(
                                         uiState = uiState,
                                         cameraName = selectedCamera.camera.name,
+                                        isTabVisible = isEventsTabVisible,
                                         listState = eventListState,
                                         bottomClearance = bottomClearance,
                                         onRefresh = onRefreshEvents,
@@ -1237,6 +1276,7 @@ private fun MobileLiveCameraScreen(
 private fun CameraPlaybackTabContent(
     uiState: MonitorUiState,
     selectedCamera: SelectedCamera,
+    isTabVisible: Boolean,
     listState: LazyListState,
     bottomClearance: androidx.compose.ui.unit.Dp,
     onSelectVideo: (VideoModel?) -> Unit,
@@ -1336,7 +1376,9 @@ private fun CameraPlaybackTabContent(
                     .padding(bottom = bottomClearance),
                 contentAlignment = Alignment.Center
             ) {
-                WaveDotsLoading()
+                if (isTabVisible) {
+                    WaveDotsLoading()
+                }
             }
         } else if (uiState.playbackDayGroups.isEmpty()) {
             Column(
@@ -1504,10 +1546,10 @@ private fun PlaybackVideoGridCard(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val shape = RoundedCornerShape(spacing.radiusSmall)
+    // Ưu tiên ảnh thumbnail/image của bản ghi, nếu không có thì dùng ảnh snapshot đã cache của camera
+    // (không dùng videoLink .mp4 làm ảnh đại diện để tránh tải & giải mã hàng chục file video bằng MediaMetadataRetriever gây nóng máy)
     val thumbCandidate = video.thumbnailLink.ifEmpty {
-        video.imageLink.ifEmpty {
-            video.videoLink.ifEmpty { fallbackSnapshotUrl }
-        }
+        video.imageLink.ifEmpty { fallbackSnapshotUrl }
     }
     val timeOnlyText = remember(video.time) { formatPlaybackTimeOnly(video.time) }
 
@@ -1700,6 +1742,7 @@ private fun LoadMoreDaysButton(
 private fun CameraEventsTabContent(
     uiState: MonitorUiState,
     cameraName: String,
+    isTabVisible: Boolean,
     listState: LazyListState,
     bottomClearance: androidx.compose.ui.unit.Dp,
     onRefresh: () -> Unit,
@@ -1745,7 +1788,9 @@ private fun CameraEventsTabContent(
                         modifier = Modifier.fillParentMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        WaveDotsLoading()
+                        if (isTabVisible) {
+                            WaveDotsLoading()
+                        }
                     }
                 }
             } else if (uiState.cameraEvents.isEmpty()) {
@@ -1794,9 +1839,22 @@ private fun CameraEventsTabContent(
     }
 }
 
+private val dateKeyParserThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+}
+private val dayDisplayFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+}
+private val timeOnlyFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+}
+private val dateTimeFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+}
+
 private fun formatPlaybackDayLabel(dateKey: String, isEn: Boolean): String {
     val parsed = runCatching {
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateKey)
+        dateKeyParserThreadLocal.get()?.parse(dateKey)
     }.getOrNull() ?: return dateKey
 
     val targetCal = Calendar.getInstance().apply { time = parsed }
@@ -1814,17 +1872,17 @@ private fun formatPlaybackDayLabel(dateKey: String, isEn: Boolean): String {
         return if (isEn) "Yesterday" else "Hôm qua"
     }
 
-    return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(parsed)
+    return dayDisplayFormatterThreadLocal.get()?.format(parsed) ?: dateKey
 }
 
 private fun formatPlaybackTimeOnly(timeStr: String): String {
     val millis = parseVideoQueryTime(timeStr) ?: return timeStr
-    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(millis))
+    return timeOnlyFormatterThreadLocal.get()?.format(Date(millis)) ?: timeStr
 }
 
 private fun formatPlaybackDateTime(timeStr: String): String {
     val millis = parseVideoQueryTime(timeStr) ?: return timeStr
-    return SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault()).format(Date(millis))
+    return dateTimeFormatterThreadLocal.get()?.format(Date(millis)) ?: timeStr
 }
 
 @Composable
@@ -1874,8 +1932,8 @@ private fun MobileCameraSnapshotCard(
     isTabActive: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
-    onSnapshotError: () -> Unit,
-    onClick: () -> Unit
+    onSnapshotError: (CameraModel) -> Unit,
+    onClick: (CameraModel) -> Unit
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -1888,8 +1946,9 @@ private fun MobileCameraSnapshotCard(
     val isPressed by interactionSource.collectIsPressedAsState()
     var isTapFlashing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val currentCamera by rememberUpdatedState(camera)
     val currentOnClick by rememberUpdatedState(onClick)
-    val currentIsPressed by rememberUpdatedState(isPressed)
+    val currentOnSnapshotError by rememberUpdatedState(onSnapshotError)
 
     val handleCardClick: () -> Unit = remember(scope, view, focusManager, keyboardController) {
         {
@@ -1899,27 +1958,19 @@ private fun MobileCameraSnapshotCard(
             keyboardController?.hide()
 
             if (keyboardWasOpen) {
-                // Nếu bàn phím đang mở: ưu tiên đóng bàn phím xong hoàn toàn (~260ms) rồi mới trượt mở màn hình Live
+                // Nếu bàn phím đang mở: ưu tiên đóng bàn phím xong hoàn toàn (~240ms) rồi mới trượt mở màn hình Live
                 isTapFlashing = true
                 scope.launch {
-                    delay(260L)
-                    currentOnClick()
+                    delay(240L)
+                    currentOnClick(currentCamera)
                     delay(160L)
-                    isTapFlashing = false
-                }
-            } else if (currentIsPressed) {
-                isTapFlashing = true
-                currentOnClick()
-                scope.launch {
-                    delay(180L)
                     isTapFlashing = false
                 }
             } else {
                 isTapFlashing = true
+                currentOnClick(currentCamera)
                 scope.launch {
-                    delay(55L)
-                    currentOnClick()
-                    delay(180L)
+                    delay(160L)
                     isTapFlashing = false
                 }
             }
@@ -1946,29 +1997,31 @@ private fun MobileCameraSnapshotCard(
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
     val nameColor = colors.textTitle
 
-    var lastLoadedCacheKey by remember(camera.id) { mutableStateOf<String?>(null) }
-    var isImageLoading by remember(snapshotUrl) {
-        mutableStateOf(!snapshotUrl.isNullOrEmpty() && lastLoadedCacheKey == null)
+    // Giữ cache key của ảnh đã tải thành công trước đó trong holder không gây recompose để tránh tạo lại ImageRequest 2 lần
+    val lastLoadedCacheKeyHolder = remember(camera.id) { CacheKeyHolder() }
+    var hasLoadedAnyImage by remember(camera.id) { mutableStateOf(false) }
+    var isImageLoading by remember(camera.id, snapshotUrl) {
+        mutableStateOf(!snapshotUrl.isNullOrEmpty() && !hasLoadedAnyImage)
     }
-    var isImageError by remember(snapshotUrl) { mutableStateOf(false) }
+    var isImageError by remember(camera.id, snapshotUrl) { mutableStateOf(false) }
 
-    val targetMemKey = remember(snapshotUrl) {
-        if (snapshotUrl.isNullOrEmpty()) null else "${snapshotUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+    val targetMemKey = remember(camera.id, snapshotUrl) {
+        if (snapshotUrl.isNullOrEmpty()) null else MonitorCacheManager.cardMemCacheKey(camera.id, snapshotUrl)
     }
-    val imageRequest = remember(snapshotUrl, lastLoadedCacheKey) {
+    val imageRequest = remember(camera.id, snapshotUrl) {
         if (snapshotUrl.isNullOrEmpty()) {
             null
         } else {
             ImageRequest.Builder(context)
-                .data(snapshotUrl)
+                .data(MonitorCacheManager.coilDataModel(snapshotUrl))
                 .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
                 .precision(Precision.INEXACT)
                 .allowHardware(true)
                 .allowRgb565(true)
                 .crossfade(false)
                 .memoryCacheKey(targetMemKey)
-                .diskCacheKey(snapshotUrl)
-                .placeholderMemoryCacheKey(lastLoadedCacheKey)
+                .diskCacheKey(MonitorCacheManager.diskCacheKey(camera.id, snapshotUrl))
+                .placeholderMemoryCacheKey(lastLoadedCacheKeyHolder.key)
                 .build()
         }
     }
@@ -2005,17 +2058,18 @@ private fun MobileCameraSnapshotCard(
                     onSuccess = {
                         isImageLoading = false
                         isImageError = false
-                        lastLoadedCacheKey = targetMemKey
+                        hasLoadedAnyImage = true
+                        lastLoadedCacheKeyHolder.key = targetMemKey
                     },
                     onError = {
                         isImageLoading = false
-                        if (lastLoadedCacheKey == null) {
+                        if (!hasLoadedAnyImage) {
                             isImageError = true
                         }
-                        onSnapshotError()
+                        currentOnSnapshotError(currentCamera)
                     }
                 )
-                if (isImageLoading && lastLoadedCacheKey == null && isTabActive) {
+                if (isImageLoading && !hasLoadedAnyImage && isTabActive) {
                     WaveDotsLoading(
                         dotSize = spacing.space6,
                         dotColor = colors.accent,
@@ -2317,6 +2371,8 @@ private fun MobileGroupFilterBottomSheet(
 fun CameraGridItem(
     selectedCamera: SelectedCamera,
     isTabActive: Boolean = true,
+    isEntering: Boolean = false,
+    isClosing: Boolean = false,
     onClick: () -> Unit,
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
@@ -2335,8 +2391,10 @@ fun CameraGridItem(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val deviceKey = UserSession.accessToken
-    var isLiveViewPlaying by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
-    var isLiveViewError by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
+    // Không reset isLiveViewPlaying về false ngay ở Frame 1 khi bấm Back (isClosing = true)
+    // để giữ nguyên khung hình video cuối cùng trong suốt 240ms trượt đóng mà không bật lại vòng xoay loading
+    var isLiveViewPlaying by remember(selectedCamera.camera.id, selectedCamera.streamUrl) { mutableStateOf(false) }
+    var isLiveViewError by remember(selectedCamera.camera.id, selectedCamera.streamUrl) { mutableStateOf(false) }
     var snapshotFailed by remember(selectedCamera.camera.id, selectedCamera.fallbackImageUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
     val hasSub = remember(selectedCamera.camera.id, selectedCamera.camera.sub, selectedCamera.camera.main) {
@@ -2379,7 +2437,11 @@ fun CameraGridItem(
 
     val surfaceBg = if (isFullscreen || isOriginalRatio || !showCloseButton) colors.mediaBg else colors.surface
 
-    val canPlayStream = isTabActive &&
+    // Chờ hoàn tất hiệu ứng trượt mở (isEntering = false, ~280ms) mới mount ExoPlayer/TextureView để trượt vào mượt 120fps;
+    // Khi trượt đóng (isClosing = true), giữ PlayerView với trạng thái isPaused = true (ngắt ngay WS & giải mã) cho đến khi trượt xong mới tháo View.
+    val isStreamPaused = isClosing || !isTabActive
+    val canPlayStream = (isTabActive || (isClosing && isLiveViewPlaying)) &&
+        !isEntering &&
         selectedCamera.streamUrl.isNotEmpty() &&
         !selectedCamera.streamUrl.startsWith("error://")
 
@@ -2419,6 +2481,7 @@ fun CameraGridItem(
                     wsUrl = selectedCamera.streamUrl,
                     cameraId = selectedCamera.camera.id,
                     isOriginalRatio = isOriginalRatio,
+                    isPaused = isStreamPaused,
                     showInternalOverlay = false,
                     onPlayingChange = {
                         isLiveViewPlaying = it
@@ -2427,9 +2490,11 @@ fun CameraGridItem(
                         }
                     },
                     onErrorChange = { isError ->
-                        isLiveViewError = isError
-                        if (isError) {
-                            onRetryClick()
+                        if (!isStreamPaused) {
+                            isLiveViewError = isError
+                            if (isError) {
+                                onRetryClick()
+                            }
                         }
                     }
                 )
@@ -2452,27 +2517,29 @@ fun CameraGridItem(
 
         // Cached Snapshot Preview + Loading Overlay (.cached-snapshot-preview & fade-snapshot 0.35s)
         val isLoadingStream = !isLiveViewPlaying && !hasError
+        val camId = selectedCamera.camera.id
         val fallbackUrl = selectedCamera.fallbackImageUrl
-        var lastFallbackCacheKey by remember(selectedCamera.camera.id) { mutableStateOf<String?>(null) }
-        val targetFallbackMemKey = remember(fallbackUrl) {
-            if (fallbackUrl.isEmpty()) null else "${fallbackUrl}_${LIVE_STAGE_SNAPSHOT_WIDTH_PX}x${LIVE_STAGE_SNAPSHOT_HEIGHT_PX}"
+        val lastFallbackKeyHolder = remember(camId) { CacheKeyHolder() }
+        val targetFallbackMemKey = remember(camId, fallbackUrl) {
+            if (fallbackUrl.isEmpty()) null else MonitorCacheManager.liveStageMemCacheKey(camId, fallbackUrl)
         }
-        val cardFallbackMemKey = remember(fallbackUrl) {
-            if (fallbackUrl.isEmpty()) null else "${fallbackUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+        val cardFallbackMemKey = remember(camId, fallbackUrl) {
+            if (fallbackUrl.isEmpty()) null else MonitorCacheManager.cardMemCacheKey(camId, fallbackUrl)
         }
-        val fallbackImageRequest = remember(fallbackUrl, lastFallbackCacheKey) {
+        val fallbackImageRequest = remember(camId, fallbackUrl) {
             if (fallbackUrl.isEmpty()) {
                 null
             } else {
                 ImageRequest.Builder(context)
-                    .data(fallbackUrl)
+                    .data(MonitorCacheManager.coilDataModel(fallbackUrl))
                     .size(LIVE_STAGE_SNAPSHOT_WIDTH_PX, LIVE_STAGE_SNAPSHOT_HEIGHT_PX)
                     .precision(Precision.INEXACT)
                     .allowHardware(true)
+                    .allowRgb565(true)
                     .crossfade(false)
                     .memoryCacheKey(targetFallbackMemKey)
-                    .diskCacheKey(fallbackUrl)
-                    .placeholderMemoryCacheKey(lastFallbackCacheKey ?: cardFallbackMemKey)
+                    .diskCacheKey(MonitorCacheManager.diskCacheKey(camId, fallbackUrl))
+                    .placeholderMemoryCacheKey(lastFallbackKeyHolder.key ?: cardFallbackMemKey)
                     .build()
             }
         }
@@ -2495,17 +2562,17 @@ fun CameraGridItem(
                         contentScale = if (isOriginalRatio) ContentScale.Fit else ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         onSuccess = {
-                            lastFallbackCacheKey = targetFallbackMemKey
+                            lastFallbackKeyHolder.key = targetFallbackMemKey
                         },
                         onError = {
-                            if (lastFallbackCacheKey == null) {
+                            if (lastFallbackKeyHolder.key == null) {
                                 snapshotFailed = true
                             }
                             onSnapshotError()
                         }
                     )
                 }
-                if (isTabActive) {
+                if (isTabActive && !isClosing) {
                     WaveDotsLoading(dotColor = colors.accent)
                 }
             }

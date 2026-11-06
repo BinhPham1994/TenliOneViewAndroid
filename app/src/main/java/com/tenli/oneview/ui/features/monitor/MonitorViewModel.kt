@@ -34,6 +34,8 @@ import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.features.main.CameraDetailTab
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.NetworkMonitor
 import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import androidx.compose.runtime.Immutable
@@ -63,6 +65,7 @@ sealed class CameraTreeNode {
     data class CameraLeaf(val camera: CameraModel, override val key: String) : CameraTreeNode()
 }
 
+@Immutable
 data class GroupSheetRow(
     val key: String,
     val title: String,
@@ -73,11 +76,13 @@ data class GroupSheetRow(
     val isVmsNode: Boolean = false
 )
 
+@Immutable
 data class CameraCardItem(
     val key: String,
     val camera: CameraModel
 )
 
+@Immutable
 data class SelectedCamera(
     val camera: CameraModel,
     val streamUrl: String,
@@ -96,6 +101,7 @@ data class PlaybackDayGroup(
     val isLoadingMore: Boolean = false
 )
 
+@Immutable
 data class MonitorUiState(
     val isLoading: Boolean = false,
     val gridSize: Int = 1, // 1 (1x1) or 4 (2x2)
@@ -598,15 +604,30 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                             cur.cameraSnapshots + (camId to resolved)
                         }
                         val updatedSelected = cur.selectedCameras.map { sel ->
-                            if (sel != null && sel.camera.id == camId && sel.fallbackImageUrl != resolved) {
+                            // Chỉ cập nhật ảnh nền ô live nếu ô đó chưa có ảnh nền, hoặc khi nhận được frame mới chụp trực tiếp từ luồng Live (file://)
+                            if (sel != null &&
+                                sel.camera.id == camId &&
+                                sel.fallbackImageUrl != resolved &&
+                                (sel.fallbackImageUrl.isEmpty() || resolved.startsWith("file://"))
+                            ) {
                                 sel.copy(fallbackImageUrl = resolved)
                             } else {
                                 sel
                             }
                         }
-                        cur.copy(cameraSnapshots = updatedMap, selectedCameras = updatedSelected)
+                        if (updatedMap === cur.cameraSnapshots && updatedSelected == cur.selectedCameras) {
+                            cur
+                        } else {
+                            cur.copy(cameraSnapshots = updatedMap, selectedCameras = updatedSelected)
+                        }
                     }
                 }
+            }
+        }
+
+        viewModelScope.launch {
+            EventBus.networkRestored.collect {
+                loadData()
             }
         }
 
@@ -761,10 +782,27 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (isMonitorTabActive == active) return
         isMonitorTabActive = active
         if (!active) {
-            // Dừng mọi vòng poll LiveStream / retry, huỷ tải snapshot và tác vụ phụ khi màn hình không hiển thị hoặc app vào nền
+            // Dừng mọi vòng poll LiveStream / retry, huỷ tải snapshot và tác vụ phụ khi màn hình không hiển thị hoặc app vào nền.
+            // Đồng thời xóa ngay streamUrl cũ (token WS chỉ dùng 1 lần) để khi quay lại không khởi tạo nhầm ExoPlayer với link cũ ở Frame 1.
             for (i in 0 until SLOT_COUNT) cancelStreamJob(i)
             cancelAllCardSnapshotFetches()
             cancelCameraDetailSubJobs()
+            _uiState.update { cur ->
+                val hasActiveStreamUrl = cur.selectedCameras.any { it != null && it.streamUrl.isNotEmpty() }
+                if (!hasActiveStreamUrl) {
+                    cur
+                } else {
+                    cur.copy(
+                        selectedCameras = cur.selectedCameras.map { sel ->
+                            if (sel != null && sel.streamUrl.isNotEmpty()) {
+                                sel.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
+                            } else {
+                                sel
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -969,38 +1007,55 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + syncUpdates) }
         }
 
-        // 2. Tra ổ đĩa cho toàn bộ danh sách (0 tốn mạng, giúp cuộn tới đâu có sẵn ảnh cache tới đó),
-        // nhưng CHỈ xếp lịch gọi mạng làm mới cho các camera đang thực sự hiển thị trên màn hình
+        // 2. Chỉ đọc đĩa lần đầu nếu RAM cache của MonitorCacheManager chưa được nạp;
+        // các lần cuộn tiếp theo bỏ qua hoàn toàn vòng lặp IO để cuộn mượt 120fps.
         snapshotLookupJob?.cancel()
         snapshotLookupJob = viewModelScope.launch {
-            val diskUpdates = HashMap<Int, String?>()
-            val currentSnapshots = _uiState.value.cameraSnapshots
+            if (!MonitorCacheManager.isSnapshotsLoadedInMemory()) {
+                val diskUpdates = HashMap<Int, String?>()
+                val currentSnapshots = _uiState.value.cameraSnapshots
 
-            withContext(Dispatchers.IO) {
-                for (cam in allDisplayedCameras) {
-                    val camId = cam.id
-                    if (currentSnapshots[camId].isNullOrEmpty()) {
-                        val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId)
-                        if (!cachedRaw.isNullOrBlank()) {
-                            val resolved = resolveFullMediaUrl(cachedRaw)
-                            if (resolved.isNotEmpty()) {
-                                diskUpdates[camId] = resolved
+                withContext(Dispatchers.IO) {
+                    for (cam in allDisplayedCameras) {
+                        val camId = cam.id
+                        if (currentSnapshots[camId].isNullOrEmpty()) {
+                            val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId)
+                            if (!cachedRaw.isNullOrBlank()) {
+                                val resolved = resolveFullMediaUrl(cachedRaw)
+                                if (resolved.isNotEmpty()) {
+                                    diskUpdates[camId] = resolved
+                                }
                             }
                         }
                     }
                 }
+
+                if (diskUpdates.isNotEmpty()) {
+                    _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + diskUpdates) }
+                }
             }
 
-            if (diskUpdates.isNotEmpty()) {
-                _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + diskUpdates) }
-            }
-
-            // Nhịp chờ ngắn (45ms) để khi người dùng vuốt nhanh qua hàng loạt camera, các camera chỉ lướt ngang
+            // Nhịp chờ ngắn (60ms) để khi người dùng vuốt nhanh qua hàng loạt camera, các camera chỉ lướt ngang
             // không phát sinh gọi mạng thừa
-            delay(45L)
+            delay(60L)
             if (!isMonitorTabActive || _uiState.value.selectedCameras.getOrNull(0) != null) return@launch
 
             val activeVisible = currentVisibleCameras.ifEmpty { visibleCameras }
+            if (!NetworkMonitor.isNetworkAvailable()) {
+                // Khi mất mạng: các camera chưa có ảnh cache trong RAM/đĩa thì đánh dấu null ngay để tắt vòng xoay loading
+                val offlineNullUpdates = HashMap<Int, String?>()
+                val curSnaps = _uiState.value.cameraSnapshots
+                for (cam in activeVisible) {
+                    if (cam.id != 0 && !curSnaps.containsKey(cam.id)) {
+                        offlineNullUpdates[cam.id] = null
+                    }
+                }
+                if (offlineNullUpdates.isNotEmpty()) {
+                    _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + offlineNullUpdates) }
+                }
+                return@launch
+            }
+
             val toFetch = withContext(Dispatchers.IO) {
                 activeVisible.filter { cam ->
                     val camId = cam.id
@@ -1025,17 +1080,17 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * giúp chuyển từ ảnh cache cũ sang ảnh mới mượt tuyệt đối (không nháy trắng, không hiện vòng xoay loading).
      * Nếu coroutine bị hủy (do camera cuộn khuất), [CancellationException] được ném ra ngay để Coil dừng tải.
      */
-    private suspend fun preloadCardSnapshotIntoCoil(url: String): Boolean {
+    private suspend fun preloadCardSnapshotIntoCoil(camId: Int, url: String): Boolean {
         if (url.isEmpty()) return false
         return try {
             val request = ImageRequest.Builder(app)
-                .data(url)
+                .data(MonitorCacheManager.coilDataModel(url))
                 .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
                 .precision(Precision.INEXACT)
                 .allowHardware(true)
                 .allowRgb565(true)
-                .memoryCacheKey("${url}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}")
-                .diskCacheKey(url)
+                .memoryCacheKey(MonitorCacheManager.cardMemCacheKey(camId, url))
+                .diskCacheKey(MonitorCacheManager.diskCacheKey(camId, url))
                 .build()
             Coil.imageLoader(app).execute(request) is SuccessResult
         } catch (e: CancellationException) {
@@ -1110,7 +1165,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         // Nếu thẻ đang hiển thị sẵn ảnh cache cũ và server trả về link ảnh mới khác link cũ,
                         // nạp sẵn ảnh mới vào RAM của Coil trước khi cập nhật state để đổi ảnh 0ms không nháy
                         if (!existingDisplayedUrl.isNullOrEmpty() && existingDisplayedUrl != resolvedLink) {
-                            val loadedOk = withContext(Dispatchers.IO) { preloadCardSnapshotIntoCoil(resolvedLink) }
+                            val loadedOk = withContext(Dispatchers.IO) { preloadCardSnapshotIntoCoil(camId, resolvedLink) }
                             if (!loadedOk && !force) {
                                 MonitorCacheManager.markSnapshotCheckedInSession(camId)
                                 return@launch
@@ -1166,6 +1221,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun onCardSnapshotError(cam: CameraModel) {
         val camId = cam.id
         if (camId == 0) return
+        // Khi thiết bị đang mất kết nối mạng, giữ nguyên link snapshot đã cache trên đĩa tránh xóa nhầm
+        if (!NetworkMonitor.isNetworkAvailable()) return
         viewModelScope.launch(Dispatchers.IO) {
             MonitorCacheManager.removeCachedCameraImageLink(app, camId)
         }
@@ -1417,7 +1474,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         updateSlot(0, current.camera.id) {
             it.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
         }
-        ensureCameraSnapshotUrl(current.camera, 0, force = false)
+        if (current.fallbackImageUrl.isEmpty()) {
+            ensureCameraSnapshotUrl(current.camera, 0, force = false)
+        }
         startLiveStreamPolling(
             camera = current.camera,
             slotIndex = 0,
@@ -1434,7 +1493,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         playbackLoadedForCameraId = null
         eventsLoadedForCameraId = null
         removeCamera(0)
-        loadVisibleCameraSnapshots()
     }
 
     /**
@@ -1595,6 +1653,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * Khi ảnh snapshot cache bị lỗi hoặc hết hạn, xoá khỏi cache và gọi lại `CameraImageLink/{id}` với `force = true` 1 lần.
      */
     fun onSnapshotLoadError(slotIndex: Int) {
+        if (!NetworkMonitor.isNetworkAvailable()) return
         val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
         val camera = current.camera
         viewModelScope.launch(Dispatchers.IO) {

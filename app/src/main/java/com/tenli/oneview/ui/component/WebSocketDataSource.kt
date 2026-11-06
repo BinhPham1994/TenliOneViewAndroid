@@ -24,8 +24,8 @@ class WebSocketDataSource(
 
     private var webSocket: WebSocket? = null
     private var dataSpec: DataSpec? = null
-    // Giới hạn kích thước queue để không làm tràn bộ nhớ RAM hoặc treo luồng đọc của OkHttp khi giải mã chậm
-    private val dataQueue = LinkedBlockingQueue<ByteArray>(120)
+    // Giới hạn kích thước queue đủ chứa burst keyframe fMP4 mà không làm tràn bộ nhớ RAM
+    private val dataQueue = LinkedBlockingQueue<ByteArray>(256)
     private var currentBuffer: ByteArray? = null
     private var currentBufferPosition = 0
     @Volatile
@@ -73,17 +73,22 @@ class WebSocketDataSource(
                         dataQueue.poll()
                         dataQueue.offer(chunk)
                     }
+                } else {
+                    // Nếu player đã đóng mà server vẫn đẩy dữ liệu video xuống, ngắt ngay socket để tránh tốn băng thông & nóng máy
+                    runCatching { webSocket.cancel() }
                 }
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
                 isOpen = false
+                dataQueue.clear()
                 dataQueue.offer(ByteArray(0)) // Unblock read
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
                 isOpen = false
                 error = IOException("WebSocket failure", t)
+                dataQueue.clear()
                 dataQueue.offer(ByteArray(0)) // Unblock read
             }
         })
@@ -132,15 +137,22 @@ class WebSocketDataSource(
         if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "Closing WebSocket")
         val wasOpen = isOpen
         isOpen = false
-        try {
-            webSocket?.close(1000, "Player closed")
-        } catch (e: Exception) {
-            try { webSocket?.cancel() } catch (_: Exception) {}
-        }
+        val ws = webSocket
         webSocket = null
+        currentBuffer = null
+        currentBufferPosition = 0
         dataQueue.clear()
         // Unblock any thread stuck in read() waiting on dataQueue.poll()
         dataQueue.offer(ByteArray(0))
+        if (ws != null) {
+            try {
+                if (!ws.close(1000, "Player closed")) {
+                    ws.cancel()
+                }
+            } catch (_: Exception) {
+                runCatching { ws.cancel() }
+            }
+        }
         if (wasOpen) {
             transferEnded()
         }

@@ -93,6 +93,7 @@ fun LiveStreamPlayer(
     videoCodecTag: String = "",
     cameraId: Int = 0,
     isOriginalRatio: Boolean = false,
+    isPaused: Boolean = false,
     showInternalOverlay: Boolean = false,
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {}
@@ -100,35 +101,16 @@ fun LiveStreamPlayer(
     val context = LocalContext.current
     var isPlaying by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var isError by remember(cameraId, wsUrl) { mutableStateOf(false) }
+    var hasCapturedFrame by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var playerViewRef by remember(cameraId, wsUrl) { mutableStateOf<PlayerView?>(null) }
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
+    val currentIsPaused by rememberUpdatedState(isPaused)
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-    var isLifecycleActive by remember { mutableStateOf(true) }
-
-    DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_START || event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                isLifecycleActive = true
-            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                isLifecycleActive = false
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    if (!isLifecycleActive) {
-        return // Component will be destroyed, saving battery and network
-    }
-
-    fun captureCurrentFrameToCache(targetCameraId: Int, targetPlayerView: PlayerView?) {
-        if (targetCameraId <= 0) return
+    fun captureCurrentFrameToCache(targetCameraId: Int, targetPlayerView: PlayerView?): Boolean {
+        if (targetCameraId <= 0) return false
         try {
-            val textureView = targetPlayerView?.videoSurfaceView as? TextureView ?: return
+            val textureView = targetPlayerView?.videoSurfaceView as? TextureView ?: return false
             val w = textureView.width
             val h = textureView.height
             if (textureView.isAvailable && w > 0 && h > 0) {
@@ -137,18 +119,29 @@ fun LiveStreamPlayer(
                 val bmp = textureView.getBitmap(targetW, targetH)
                 if (bmp != null) {
                     MonitorCacheManager.saveCapturedCameraFrame(context.applicationContext, targetCameraId, bmp)
+                    return true
                 }
             }
         } catch (_: Exception) {
         }
+        return false
     }
 
-    // Đồng bộ LivePlayer.vue: chụp 1 frame sau 1200ms khi luồng live bắt đầu phát
-    LaunchedEffect(isPlaying, cameraId, wsUrl) {
+    // Đồng bộ LivePlayer.vue: chụp 1 frame sau 900ms khi luồng live bắt đầu phát (và cập nhật mỗi 20s nếu xem lâu)
+    // Nhờ đã chụp sẵn ở nền, khi bấm Back sẽ KHÔNG cần gọi lại textureView.getBitmap() trên Main thread gây khựng hiệu ứng trượt
+    LaunchedEffect(isPlaying, isPaused, cameraId, wsUrl) {
         val boundCameraId = cameraId
-        if (isPlaying && boundCameraId > 0) {
-            delay(1200)
-            captureCurrentFrameToCache(boundCameraId, playerViewRef)
+        if (isPlaying && !isPaused && boundCameraId > 0) {
+            delay(900L)
+            if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
+                hasCapturedFrame = true
+            }
+            while (true) {
+                delay(20_000L)
+                if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
+                    hasCapturedFrame = true
+                }
+            }
         }
     }
 
@@ -216,6 +209,7 @@ fun LiveStreamPlayer(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        if (currentIsPaused) return
                         Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
                         isError = true
                         isPlaying = false
@@ -226,10 +220,24 @@ fun LiveStreamPlayer(
             }
     }
 
+    // Khi bắt đầu trượt đóng màn hình Live (isPaused = true): ngắt ngay WebSocket & giải mã video
+    // nhưng giữ nguyên frame hình cuối cùng trên TextureView cho đến khi hiệu ứng trượt 240ms kết thúc.
+    LaunchedEffect(isPaused, exoPlayer) {
+        if (isPaused) {
+            if (isPlaying && !hasCapturedFrame && cameraId > 0) {
+                if (captureCurrentFrameToCache(cameraId, playerViewRef)) {
+                    hasCapturedFrame = true
+                }
+            }
+            exoPlayer.playWhenReady = false
+            exoPlayer.stop()
+        }
+    }
+
     DisposableEffect(exoPlayer, cameraId) {
         val boundCameraId = cameraId
         onDispose {
-            if (isPlaying) {
+            if (isPlaying && !hasCapturedFrame) {
                 captureCurrentFrameToCache(boundCameraId, playerViewRef)
             }
             exoPlayer.stop()

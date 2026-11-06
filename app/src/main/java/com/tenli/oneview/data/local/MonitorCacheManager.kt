@@ -2,6 +2,8 @@ package com.tenli.oneview.data.local
 
 import android.content.Context
 import android.graphics.Bitmap
+import coil.Coil
+import coil.memory.MemoryCache
 import com.google.gson.reflect.TypeToken
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.model.network.CameraGroupModel
@@ -47,17 +49,22 @@ object MonitorCacheManager {
 
     /** Gom nhiều lần cập nhật snapshot liên tiếp thành 1 lần ghi đĩa (tránh ghi file liên tục khi xem nhiều camera) */
     private const val SNAPSHOT_PERSIST_DEBOUNCE_MS = 2_000L
-    private const val LIVE_FRAME_PROTECT_MS = 30_000L
+    /** Giữ ưu tiên ảnh chụp trực tiếp từ luồng Live trong suốt phiên (10 phút) để ảnh cũ từ API không ghi đè */
+    private const val LIVE_FRAME_PROTECT_MS = 10 * 60 * 1000L
     private const val SNAPSHOT_MAX_DIMENSION_PX = 640
-    private const val SNAPSHOT_JPEG_QUALITY = 70
+    private const val SNAPSHOT_JPEG_QUALITY = 75
     private const val MIN_VALID_IMAGE_BYTES = 200L
+    const val SNAPSHOT_CARD_WIDTH_PX = 420
+    const val SNAPSHOT_CARD_HEIGHT_PX = 236
+    const val LIVE_STAGE_SNAPSHOT_WIDTH_PX = 1280
+    const val LIVE_STAGE_SNAPSHOT_HEIGHT_PX = 720
     @Volatile
     private var persistJob: Job? = null
     @Volatile
     private var snapshotDir: File? = null
 
-    /** Thời gian giữ kết quả đã làm mới trong phiên hiện tại (60 giây) để mở app luôn làm mới lại từ server nhưng không gọi lặp khi chuyển trang */
-    private const val SNAPSHOT_SESSION_FRESH_TTL_MS = 60 * 1000L
+    /** Thời gian giữ kết quả đã kiểm tra/làm mới trong phiên hiện tại (10 phút) để cuộn danh sách hoặc Back từ Live về không gọi API lặp lại */
+    private const val SNAPSHOT_SESSION_FRESH_TTL_MS = 10 * 60 * 1000L
     private const val SNAPSHOT_STORAGE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L // 7 ngày
 
     @Volatile
@@ -199,15 +206,32 @@ object MonitorCacheManager {
         return getCachedCameraImageLinkInMemory(cameraId)
     }
 
+    fun isSnapshotsLoadedInMemory(): Boolean = snapshotsLoaded
+
+    fun cardMemCacheKey(cameraId: Int, url: String): String =
+        "cam_${cameraId}_${url}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+
+    fun liveStageMemCacheKey(cameraId: Int, url: String): String =
+        "cam_${cameraId}_${url}_${LIVE_STAGE_SNAPSHOT_WIDTH_PX}x${LIVE_STAGE_SNAPSHOT_HEIGHT_PX}"
+
+    fun diskCacheKey(cameraId: Int, url: String): String =
+        "cam_${cameraId}_$url"
+
+    fun coilDataModel(url: String): Any =
+        if (url.startsWith("file://")) {
+            File(url.removePrefix("file://").substringBefore("?"))
+        } else {
+            url
+        }
+
     /**
-     * Chỉ trả về `true` nếu snapshot của camera này ĐÃ được làm mới từ server (hoặc chụp từ luồng live)
-     * trong phiên mở app hiện tại và chưa quá [SNAPSHOT_SESSION_FRESH_TTL_MS] (60s).
-     * Nhờ đó khi mở app lần đầu, ảnh cache cũ được hiển thị ngay lập tức (0ms) nhưng luôn được cập nhật lại từ server.
+     * Trả về `true` nếu camera này ĐÃ được kiểm tra/làm mới từ server (hoặc chụp từ luồng live)
+     * trong phiên mở app hiện tại và chưa quá [SNAPSHOT_SESSION_FRESH_TTL_MS] (10 phút).
+     * Kể cả khi server trả về không có ảnh (đã gọi [markSnapshotCheckedInSession]), hàm vẫn trả về `true`
+     * để không gọi lặp lại API mỗi khi người dùng cuộn danh sách hoặc bấm Back từ màn hình Live.
      */
     fun isSnapshotCacheFresh(context: Context, cameraId: Int): Boolean {
         ensureSnapshotsLoaded(context)
-        val item = snapshotMap[cameraId] ?: return false
-        if (item.link.isBlank() || item.link == "NO_IMAGE") return false
         val refreshedAt = sessionRefreshedAtMap[cameraId] ?: return false
         return (System.currentTimeMillis() - refreshedAt) < SNAPSHOT_SESSION_FRESH_TTL_MS
     }
@@ -223,7 +247,7 @@ object MonitorCacheManager {
         ensureSnapshotsLoaded(context)
         val now = System.currentTimeMillis()
         sessionRefreshedAtMap[cameraId] = now
-        // Không ghi đè ảnh frame vừa chụp từ luồng live bằng link ảnh cũ hơn nếu frame đó còn rất mới (< 30s)
+        // Không ghi đè ảnh frame vừa chụp từ luồng live bằng link ảnh cũ hơn từ server trong phiên hiện tại
         val existing = snapshotMap[cameraId]
         if (existing != null &&
             existing.link.startsWith("file://") &&
@@ -241,13 +265,19 @@ object MonitorCacheManager {
     fun removeCachedCameraImageLink(context: Context, cameraId: Int) {
         if (cameraId <= 0) return
         ensureSnapshotsLoaded(context)
-        snapshotMap.remove(cameraId)
+        val removed = snapshotMap.remove(cameraId)
         sessionRefreshedAtMap.remove(cameraId)
+        if (removed?.link?.startsWith("file://") == true) {
+            runCatching {
+                File(getSnapshotImageDir(context), "cam_${cameraId}.jpg").takeIf { it.exists() }?.delete()
+            }
+        }
         persistSnapshotsAsync(context)
     }
 
     /**
-     * Chụp frame từ luồng live (TextureView) và lưu vào cache đĩa giống `captureImmediateFrame()` trong `LivePlayer.vue`.
+     * Chụp frame từ luồng live (TextureView), nạp thẳng Bitmap vào MemoryCache của Coil (để thẻ camera cập nhật 0ms khi Back)
+     * và lưu xuống đĩa giống `captureImmediateFrame()` trong `LivePlayer.vue`.
      */
     fun saveCapturedCameraFrame(context: Context, cameraId: Int, bitmap: Bitmap) {
         if (cameraId <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return
@@ -267,12 +297,21 @@ object MonitorCacheManager {
                 FileOutputStream(outFile).use { fos ->
                     scaled.compress(Bitmap.CompressFormat.JPEG, SNAPSHOT_JPEG_QUALITY, fos)
                 }
-                if (scaled !== bitmap) {
-                    scaled.recycle()
-                }
                 if (outFile.exists() && outFile.length() > MIN_VALID_IMAGE_BYTES) {
                     val fileUrl = "file://${outFile.absolutePath}?t=${System.currentTimeMillis()}"
+                    // Đưa trực tiếp Bitmap vừa chụp vào MemoryCache của Coil cho cả thẻ lưới & màn hình Live
+                    // để khi Back lại danh sách, ảnh hiển thị ngay lập tức (0ms) mà không cần đọc đĩa/giải mã lại JPEG
+                    runCatching {
+                        val memoryCache = Coil.imageLoader(appContext).memoryCache
+                        if (memoryCache != null && !scaled.isRecycled) {
+                            val cacheValue = MemoryCache.Value(scaled)
+                            memoryCache[MemoryCache.Key(cardMemCacheKey(cameraId, fileUrl))] = cacheValue
+                            memoryCache[MemoryCache.Key(liveStageMemCacheKey(cameraId, fileUrl))] = cacheValue
+                        }
+                    }
                     setCachedCameraImageLink(appContext, cameraId, fileUrl)
+                } else if (scaled !== bitmap) {
+                    scaled.recycle()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

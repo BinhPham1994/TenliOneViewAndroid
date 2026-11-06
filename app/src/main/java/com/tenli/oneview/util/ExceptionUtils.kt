@@ -36,9 +36,20 @@ suspend inline fun <T> safeApiCall(crossinline block: suspend () -> Response<T>)
     }
 }
 
+fun noNetworkMessage(
+    isEn: Boolean = LocaleManager.languageFlow.value.startsWith("en")
+): String = if (isEn) {
+    "No network connection, please check again"
+} else {
+    "Không có kết nối mạng, vui lòng kiểm tra lại"
+}
+
 fun Throwable.toUserFriendlyMessage(
     isEn: Boolean = LocaleManager.languageFlow.value.startsWith("en")
 ): String {
+    if (!NetworkMonitor.isNetworkAvailable()) {
+        return noNetworkMessage(isEn)
+    }
     return when (this) {
         is BackendHttpException -> when (code) {
             401, 403 -> if (isEn) {
@@ -67,11 +78,6 @@ fun Throwable.toUserFriendlyMessage(
                 "Máy chủ phản hồi lỗi (HTTP $code)"
             }
         }
-        is UnknownHostException -> if (isEn) {
-            "Cannot connect to server, please check your network or domain"
-        } else {
-            "Không thể kết nối đến máy chủ, vui lòng kiểm tra mạng hoặc tên miền"
-        }
         is SSLException -> if (isEn) {
             "Secure connection error to server (SSL)"
         } else {
@@ -82,15 +88,15 @@ fun Throwable.toUserFriendlyMessage(
         } else {
             "Dữ liệu phản hồi từ máy chủ không hợp lệ"
         }
-        is ConnectException, is SocketTimeoutException, is IOException -> if (isEn) {
+        is UnknownHostException, is ConnectException, is SocketTimeoutException, is IOException -> if (isEn) {
             "Connection error to server, please try again later"
         } else {
             "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
         }
         else -> if (isEn) {
-            "Unable to sync data with server"
+            "Connection error to server, please try again later"
         } else {
-            "Không thể đồng bộ dữ liệu với máy chủ"
+            "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
         }
     }
 }

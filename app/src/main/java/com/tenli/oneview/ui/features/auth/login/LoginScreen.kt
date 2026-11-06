@@ -95,6 +95,8 @@ import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
+import com.tenli.oneview.util.NetworkMonitor
+import com.tenli.oneview.util.noNetworkMessage
 import kotlinx.coroutines.delay
 
 private const val STEP_DOMAIN = 1
@@ -186,6 +188,12 @@ private fun LoginContent(
     var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val isVietnamese = !rememberIsEnglish()
 
+    LaunchedEffect(Unit) {
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            MobileTopPopupManager.error(noNetworkMessage(!isVietnamese))
+        }
+    }
+
     BackHandler(enabled = currentStep == STEP_CREDENTIALS) {
         focusManager.clearFocus()
         keyboardController?.hide()
@@ -216,6 +224,8 @@ private fun LoginContent(
             MobileTopPopupManager.error(
                 if (isVietnamese) "Vui lòng nhập domain dự án" else "Please enter project domain"
             )
+        } else if (!NetworkMonitor.isNetworkAvailable()) {
+            MobileTopPopupManager.error(noNetworkMessage(!isVietnamese))
         } else {
             isDomainFromQr = false
             focusManager.clearFocus()

@@ -16,6 +16,10 @@ import java.util.concurrent.ConcurrentHashMap
 class NetworkMonitor(context: Context, private val dispatcherProvider: DispatcherProvider) {
     private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
+    init {
+        init(context)
+    }
+
     /**
      * true khi có ÍT NHẤT 1 mạng có Internet. Theo dõi tập hợp mạng để khi chuyển Wi-Fi ↔ 4G
      * (mạng cũ onLost trong khi mạng mới vẫn còn) không bị báo "mất mạng" nhầm.
@@ -62,4 +66,28 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
             connectivityManager.unregisterNetworkCallback(callback)
         }
     }.conflate().distinctUntilChanged().flowOn(dispatcherProvider.io)
+
+    companion object {
+        @Volatile
+        private var appConnectivityManager: ConnectivityManager? = null
+
+        fun init(context: Context) {
+            if (appConnectivityManager == null) {
+                appConnectivityManager = context.applicationContext
+                    .getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            }
+        }
+
+        /** Kiểm tra nhanh thiết bị hiện có kết nối mạng (Wi-Fi / Cellular / Ethernet / VPN) hay không. */
+        fun isNetworkAvailable(): Boolean {
+            val cm = appConnectivityManager ?: return true
+            return try {
+                val activeNetwork = cm.activeNetwork ?: return false
+                val capabilities = cm.getNetworkCapabilities(activeNetwork) ?: return false
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            } catch (_: Exception) {
+                true
+            }
+        }
+    }
 }
