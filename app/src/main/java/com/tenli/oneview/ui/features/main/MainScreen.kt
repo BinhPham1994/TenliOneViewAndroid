@@ -195,8 +195,7 @@ fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
     onLogoutRequest: () -> Unit,
     isOverlayCovered: Boolean = false,
-    onNavigateToEventDetail: (Int) -> Unit = {},
-    onNavigateToPlaybackDetail: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> }
+    onNavigateToEventDetail: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -214,8 +213,8 @@ fun MainScreen(
     val settingListState = rememberLazyListState()
 
     // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation.
-    // Ở Frame 1 khi vừa mở app, chỉ khởi tạo & render tab đang hiển thị (Trang chủ) để tắt Splash tức thì;
-    // các tab còn lại được nạp ngầm lệch pha sau khi Frame 1 đã lên hình (hoặc ngay khi người dùng chạm chọn tab).
+    // Chỉ khởi tạo tab khi người dùng thực sự chuyển tới tab đó lần đầu (dữ liệu cache đã được pre-warm vào RAM
+    // từ TenliApp.onCreate nên mở tab lần đầu vẫn đạt 0ms blank flash mà không tốn mạng/pin chạy ngầm).
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory)
     var mountedTabs by remember { mutableStateOf(setOf(uiState.currentTab)) }
 
@@ -223,15 +222,6 @@ fun MainScreen(
     var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
     var slideDirection by remember { mutableIntStateOf(1) }
     val transitionProgress = remember { Animatable(1f) }
-
-    LaunchedEffect(Unit) {
-        delay(500L)
-        mountedTabs = mountedTabs + MainTab.Setting
-        delay(300L)
-        mountedTabs = mountedTabs + MainTab.Event
-        delay(350L)
-        mountedTabs = mountedTabs + MainTab.Monitor
-    }
 
     LaunchedEffect(uiState.currentTab) {
         val targetTab = uiState.currentTab
@@ -289,15 +279,9 @@ fun MainScreen(
 
     // Callback ổn định (không tạo lambda mới mỗi lần recompose -> các tab con được skip)
     val currentOnNavigateToEventDetail by rememberUpdatedState(onNavigateToEventDetail)
-    val currentOnNavigateToPlaybackDetail by rememberUpdatedState(onNavigateToPlaybackDetail)
     val onEventIdClick: (Int) -> Unit = remember { { id: Int -> currentOnNavigateToEventDetail(id) } }
     val onHomeEventClick: (String) -> Unit = remember {
         { eventId: String -> eventId.toIntOrNull()?.let { currentOnNavigateToEventDetail(it) } }
-    }
-    val onPlaybackClick: (String, String, String, String) -> Unit = remember {
-        { videoLink: String, time: String, imageLink: String, cameraName: String ->
-            currentOnNavigateToPlaybackDetail(videoLink, time, imageLink, cameraName)
-        }
     }
     val onMonitorFullscreenChange: (Boolean) -> Unit = remember { { isFullscreen: Boolean -> showBottomBar = !isFullscreen } }
     val onLiveCameraPageOpenChange: (Boolean) -> Unit = remember { { isOpen: Boolean -> isLiveCameraPageOpen = isOpen } }
@@ -529,11 +513,14 @@ fun MainScreen(
                                         }
                                     )
                                     .layout { measurable, constraints ->
-                                        val placeable = measurable.measure(constraints)
-                                        layout(placeable.width, placeable.height) {
-                                            // Đọc animation value ở pha placement (không gây recompose mỗi frame)
-                                            val currentOutgoing = outgoingTab
-                                            if (tab == activeTab || tab == currentOutgoing) {
+                                        val currentOutgoing = outgoingTab
+                                        if (tab != activeTab && tab != currentOutgoing) {
+                                            // Tab đang ẩn hoàn toàn: bỏ qua cả pha measure lẫn place để tiết kiệm CPU/GPU
+                                            layout(0, 0) {}
+                                        } else {
+                                            val placeable = measurable.measure(constraints)
+                                            layout(placeable.width, placeable.height) {
+                                                // Đọc animation value ở pha placement (không gây recompose mỗi frame)
                                                 val progress = transitionProgress.value
                                                 val offsetX = when (tab) {
                                                     activeTab -> if (currentOutgoing != null) {
@@ -578,7 +565,6 @@ fun MainScreen(
                                                 listState = monitorState,
                                                 isTabActive = isMonitorActive,
                                                 onEventClick = onEventIdClick,
-                                                onPlaybackClick = onPlaybackClick,
                                                 onFullscreenChange = onMonitorFullscreenChange
                                             )
                                         }
@@ -622,7 +608,8 @@ fun MainScreen(
                             .padding(top = innerPadding.calculateTopPadding())
                             .zIndex(30f),
                         onFullscreenChange = onMonitorFullscreenChange,
-                        onLiveScreenOpenChange = onLiveCameraPageOpenChange
+                        onLiveScreenOpenChange = onLiveCameraPageOpenChange,
+                        onEventClick = onEventIdClick
                     )
                 }
 

@@ -129,14 +129,18 @@ class TenliApp : Application(), ImageLoaderFactory {
         runCatching {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED) // Chỉ chạy khi có mạng
+                .setRequiresBatteryNotLow(true) // Không đánh thức máy khi pin yếu
                 .build()
-            val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(KEEP_ALIVE_WORK_INTERVAL_MIN, TimeUnit.MINUTES)
+            val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(
+                KEEP_ALIVE_WORK_INTERVAL_HOURS,
+                TimeUnit.HOURS
+            )
                 .setConstraints(constraints)
                 .build()
 
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 KEEP_ALIVE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 workRequest
             )
         }
@@ -146,6 +150,6 @@ class TenliApp : Application(), ImageLoaderFactory {
         const val IMAGE_MEMORY_CACHE_PERCENT = 0.25
         const val IMAGE_DISK_CACHE_BYTES = 150L * 1024 * 1024
         const val KEEP_ALIVE_WORK_NAME = "ping_firebase"
-        const val KEEP_ALIVE_WORK_INTERVAL_MIN = 15L
+        const val KEEP_ALIVE_WORK_INTERVAL_HOURS = 6L
     }
 }

@@ -1378,7 +1378,7 @@ private fun formatGridEventTimeAndDate(timeSeconds: Double, isEn: Boolean): Pair
 // =====================================================================================
 
 /** Các ô chọn trong bộ lọc – mỗi ô có 1 dropdown neo ngay bên dưới/bên trên. */
-private enum class FilterPicker { SCOPE, TIME, CAMERA, EVENT }
+private enum class FilterPicker { SCOPE, TIME, STREAM_CHANNEL, CAMERA, EVENT }
 
 /**
  * Cloned from `MobileFilterBottomSheet.vue`
@@ -1391,6 +1391,10 @@ fun MobileFilterBottomSheet(
     selectedServiceId: Int? = null,
     showTime: Boolean = true,
     selectedTimeFilter: TimeFilter = TimeFilter.TODAY,
+    showPlaybackChannel: Boolean = false,
+    selectedPlaybackChannel: String = "main",
+    defaultPlaybackChannel: String = "main",
+    onApplyPlayback: ((timeFilter: TimeFilter, playbackChannel: String) -> Unit)? = null,
     showCamera: Boolean = false,
     cameras: List<CameraModel> = emptyList(),
     selectedCameraUuid: String? = null,
@@ -1398,7 +1402,7 @@ fun MobileFilterBottomSheet(
     activeModules: List<AiModuleOption> = AiTypeHelper.activeModules,
     selectedAiType: String? = null,
     onDismiss: () -> Unit,
-    onApply: (serviceId: Int?, timeFilter: TimeFilter, cameraUuid: String?, aiType: String?) -> Unit,
+    onApply: (serviceId: Int?, timeFilter: TimeFilter, cameraUuid: String?, aiType: String?) -> Unit = { _, _, _, _ -> },
     onReset: () -> Unit
 ) {
     val isEn = rememberIsEnglish()
@@ -1408,6 +1412,9 @@ fun MobileFilterBottomSheet(
 
     var draftServiceId by remember(selectedServiceId) { mutableStateOf(selectedServiceId) }
     var draftTimeFilter by remember(selectedTimeFilter) { mutableStateOf(selectedTimeFilter) }
+    var draftPlaybackChannel by remember(selectedPlaybackChannel) {
+        mutableStateOf(if (selectedPlaybackChannel == "sub") "sub" else "main")
+    }
     var draftCameraUuid by remember(selectedCameraUuid) { mutableStateOf(selectedCameraUuid) }
     var draftAiType by remember(selectedAiType) { mutableStateOf(selectedAiType) }
     var customPickerVersion by remember { mutableIntStateOf(0) }
@@ -1563,6 +1570,25 @@ fun MobileFilterBottomSheet(
                             )
                         }
 
+                        // 2b. Stream Channel (Luồng chính / Luồng phụ - dùng ở tab Xem lại)
+                        if (showPlaybackChannel) {
+                            val channelLabel = if (draftPlaybackChannel == "sub") {
+                                if (isEn) "Sub Stream" else "Luồng phụ"
+                            } else {
+                                if (isEn) "Main Stream" else "Luồng chính"
+                            }
+                            FilterCellRow(
+                                icon = LucideIcons.Video,
+                                badgeColor = BrandAccent,
+                                label = channelLabel,
+                                textColor = textColor,
+                                secondaryColor = secondaryColor,
+                                isExpanded = activePicker == FilterPicker.STREAM_CHANNEL,
+                                onClick = { togglePicker(FilterPicker.STREAM_CHANNEL) },
+                                modifier = anchorOf(FilterPicker.STREAM_CHANNEL)
+                            )
+                        }
+
                         // 3. Camera
                         if (showCamera) {
                             val cameraLabel = remember(cameras, draftCameraUuid) {
@@ -1608,6 +1634,7 @@ fun MobileFilterBottomSheet(
                             activePicker = null
                             draftServiceId = null
                             draftTimeFilter = TimeFilter.TODAY
+                            draftPlaybackChannel = if (defaultPlaybackChannel == "sub") "sub" else "main"
                             draftCameraUuid = null
                             draftAiType = null
                             onReset()
@@ -1615,7 +1642,11 @@ fun MobileFilterBottomSheet(
                         },
                         onApply = {
                             activePicker = null
-                            onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
+                            if (onApplyPlayback != null) {
+                                onApplyPlayback(draftTimeFilter, draftPlaybackChannel)
+                            } else {
+                                onApply(draftServiceId, draftTimeFilter, draftCameraUuid, draftAiType)
+                            }
                             onDismiss()
                         }
                     )
@@ -1670,6 +1701,24 @@ fun MobileFilterBottomSheet(
                                     TimeFilter.CUSTOM_RANGE -> showCustomRangeModal = true
                                     else -> draftTimeFilter = selected
                                 }
+                            }
+                        )
+                    }
+                    FilterPicker.STREAM_CHANNEL -> {
+                        val options = remember(isEn) {
+                            listOf(
+                                "main" to (if (isEn) "Main Stream" else "Luồng chính"),
+                                "sub" to (if (isEn) "Sub Stream" else "Luồng phụ")
+                            )
+                        }
+                        AnchoredFilterDropdownMenu(
+                            anchorRect = anchorRect,
+                            rootHeightPx = rootHeightPx,
+                            options = options,
+                            selectedKey = draftPlaybackChannel,
+                            onSelect = { selected ->
+                                draftPlaybackChannel = selected
+                                activePicker = null
                             }
                         )
                     }

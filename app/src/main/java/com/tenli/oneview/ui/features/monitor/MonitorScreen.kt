@@ -1,10 +1,12 @@
 package com.tenli.oneview.ui.features.monitor
 
 import android.app.Activity
+import android.content.Context
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
@@ -20,6 +22,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -54,14 +58,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -84,10 +91,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -99,6 +111,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.abs
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -117,21 +131,37 @@ import kotlinx.coroutines.launch
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
+import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LiveStreamPlayer
+import com.tenli.oneview.ui.component.MobileEventCard
+import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.features.event.parseVideoQueryTime
+import com.tenli.oneview.ui.features.event.uniqueKey
+import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.features.main.CameraDetailBottomNavigation
+import com.tenli.oneview.ui.features.main.CameraDetailTab
+import com.tenli.oneview.ui.theme.BrandActiveNavDark
+import com.tenli.oneview.ui.theme.BrandLight
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.micro
 import com.tenli.oneview.ui.theme.spacing
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
 private const val LIVE_STAGE_ASPECT_RATIO = 16f / 9f
 private const val SNAPSHOT_CARD_WIDTH_PX = 420
@@ -145,8 +175,6 @@ private val LivePageExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
 private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
-private val CameraInfoPillMaxWidthCompact = 140.dp
-private val CameraInfoPillMaxWidthRegular = 260.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -155,7 +183,6 @@ fun MonitorScreen(
     listState: LazyListState = rememberLazyListState(),
     isTabActive: Boolean = true,
     onEventClick: (Int) -> Unit = {},
-    onPlaybackClick: (videoLink: String, time: String, imageLink: String, cameraName: String) -> Unit = { _, _, _, _ -> },
     onFullscreenChange: (Boolean) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -643,7 +670,8 @@ fun MonitorLiveCameraOverlay(
     isTabActive: Boolean,
     modifier: Modifier = Modifier,
     onFullscreenChange: (Boolean) -> Unit = {},
-    onLiveScreenOpenChange: (Boolean) -> Unit = {}
+    onLiveScreenOpenChange: (Boolean) -> Unit = {},
+    onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val activity = LocalContext.current as? Activity
@@ -660,10 +688,11 @@ fun MonitorLiveCameraOverlay(
         displayedLiveCamera = activeLiveCamera
     }
 
-    val isSingleFullscreen = fullscreenIndex == 0 && isLiveScreenOpen
+    val isSingleFullscreen =
+        fullscreenIndex == 0 && isLiveScreenOpen && uiState.cameraDetailTab == CameraDetailTab.LIVE
 
-    LaunchedEffect(isTabActive) {
-        if (!isTabActive && fullscreenIndex != null) {
+    LaunchedEffect(isTabActive, uiState.cameraDetailTab) {
+        if ((!isTabActive || uiState.cameraDetailTab != CameraDetailTab.LIVE) && fullscreenIndex != null) {
             restoreSystemOrientationAndBars(activity)
             fullscreenIndex = null
         }
@@ -681,6 +710,21 @@ fun MonitorLiveCameraOverlay(
         onFullscreenChange(isSingleFullscreen)
     }
 
+    val handleCameraDetailBack: () -> Unit = {
+        when {
+            isSingleFullscreen -> {
+                restoreSystemOrientationAndBars(activity)
+                fullscreenIndex = null
+            }
+            uiState.cameraDetailTab != CameraDetailTab.LIVE -> {
+                viewModel.selectCameraDetailTab(CameraDetailTab.LIVE)
+            }
+            else -> {
+                viewModel.closeLiveCamera()
+            }
+        }
+    }
+
     if (isSingleFullscreen) {
         LandscapeFullscreenHandler(
             activity = activity,
@@ -690,9 +734,7 @@ fun MonitorLiveCameraOverlay(
             }
         )
     } else if (isLiveScreenOpen && isTabActive) {
-        BackHandler {
-            viewModel.closeLiveCamera()
-        }
+        BackHandler(onBack = handleCameraDetailBack)
     }
 
     AnimatedVisibility(
@@ -710,22 +752,13 @@ fun MonitorLiveCameraOverlay(
         val isSliding = transition.isRunning
         val currentCam = activeLiveCamera ?: displayedLiveCamera
         if (currentCam != null) {
-            val locationLabel = remember(currentCam.camera.id, uiState.groupTreeRows) {
-                viewModel.getCameraLocationLabel(currentCam.camera)
-            }
             MobileLiveCameraScreen(
+                uiState = uiState,
                 selectedCamera = currentCam,
-                locationLabel = locationLabel,
                 isTabActive = isTabActive && isLiveScreenOpen,
                 isFullscreen = isSingleFullscreen,
                 isSliding = isSliding,
-                onBackClick = {
-                    if (isSingleFullscreen) {
-                        restoreSystemOrientationAndBars(activity)
-                        fullscreenIndex = null
-                    }
-                    viewModel.closeLiveCamera()
-                },
+                onBackClick = handleCameraDetailBack,
                 onToggleFullscreen = {
                     if (isSingleFullscreen) {
                         restoreSystemOrientationAndBars(activity)
@@ -738,16 +771,54 @@ fun MonitorLiveCameraOverlay(
                 onSuccess = { viewModel.resetRetryCount(0) },
                 onSnapshotError = { viewModel.onSnapshotLoadError(0) },
                 onReloadClick = { viewModel.reloadLiveCamera() },
-                onSwitchChannel = { channel -> viewModel.switchLiveChannel(channel) }
+                onSwitchChannel = { channel -> viewModel.switchLiveChannel(channel) },
+                onSelectDetailTab = { tab -> viewModel.selectCameraDetailTab(tab) },
+                onApplyPlaybackFilters = { filter, channel -> viewModel.applyPlaybackFilters(filter, channel) },
+                onResetPlaybackFilters = { viewModel.resetPlaybackFilters() },
+                onSelectPlaybackVideo = { video -> viewModel.selectPlaybackVideo(video) },
+                onLoadMorePlaybackForDay = { dateKey -> viewModel.loadMorePlaybackForDay(dateKey) },
+                onLoadMorePlaybackDays = { viewModel.loadMorePlaybackDays() },
+                onApplyEventFilters = { filter, aiType -> viewModel.applyCameraEventFilters(filter, aiType) },
+                onResetEventFilters = { viewModel.resetCameraEventFilters() },
+                onRefreshEvents = { viewModel.refreshCameraEvents() },
+                onLoadMoreEvents = { viewModel.loadMoreCameraEvents() },
+                onEventItemClick = { event ->
+                    viewModel.cacheClickedCameraEvent(event)
+                    onEventClick(event.id)
+                }
             )
         }
     }
 }
 
+private const val CAMERA_EVENT_LOAD_MORE_THRESHOLD = 5
+private const val CAMERA_EVENT_AUTO_FILL_MAX = 12
+
+private val OrderedCameraDetailTabs = listOf(
+    CameraDetailTab.LIVE,
+    CameraDetailTab.PLAYBACK,
+    CameraDetailTab.EVENTS
+)
+
+private const val DETAIL_TAB_SWITCH_DURATION_MS = 250
+private val DetailTabSwitchEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+private val DetailTabSwitchAnimSpec = tween<Float>(durationMillis = DETAIL_TAB_SWITCH_DURATION_MS, easing = DetailTabSwitchEasing)
+
+private val DetailSwipeEdgeBuffer = 20.dp
+private val DetailSwipeBottomNavExclusion = 96.dp
+private val DetailSwipeDirectionLockThreshold = 10.dp
+private val DetailSwipeMinFlickDistance = 30.dp
+private val DetailSwipeMinDragDistance = 45.dp
+private val DetailSwipeLongDragDistance = 90.dp
+private const val DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.28f
+private const val DETAIL_SWIPE_MAX_DRAG_DURATION_MS = 700L
+private const val DETAIL_SWIPE_HORIZONTAL_DOMINANCE = 1.25f
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MobileLiveCameraScreen(
+    uiState: MonitorUiState,
     selectedCamera: SelectedCamera,
-    locationLabel: String,
     isTabActive: Boolean,
     isFullscreen: Boolean,
     isSliding: Boolean = false,
@@ -757,20 +828,78 @@ private fun MobileLiveCameraScreen(
     onSuccess: () -> Unit,
     onSnapshotError: () -> Unit,
     onReloadClick: () -> Unit,
-    onSwitchChannel: (Int) -> Unit
+    onSwitchChannel: (Int) -> Unit,
+    onSelectDetailTab: (CameraDetailTab) -> Unit,
+    onApplyPlaybackFilters: (TimeFilter, String) -> Unit,
+    onResetPlaybackFilters: () -> Unit,
+    onSelectPlaybackVideo: (VideoModel?) -> Unit,
+    onLoadMorePlaybackForDay: (String) -> Unit,
+    onLoadMorePlaybackDays: () -> Unit,
+    onApplyEventFilters: (TimeFilter, String?) -> Unit,
+    onResetEventFilters: () -> Unit,
+    onRefreshEvents: () -> Unit,
+    onLoadMoreEvents: () -> Unit,
+    onEventItemClick: (EventData) -> Unit
 ) {
-    val isEn = rememberIsEnglish()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val edgeBorderColor = colors.border
-    val ipText = remember(selectedCamera.camera.id) {
-        MonitorViewModel.getCameraIpText(selectedCamera.camera)
-    }
-    val hasDualStreams = remember(selectedCamera.camera.id) {
-        selectedCamera.camera.sub.isNotBlank() && selectedCamera.camera.main.isNotBlank()
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
+    val playbackListState = rememberLazyListState()
+    val eventListState = rememberLazyListState()
+
+    var showPlaybackFilterSheet by remember { mutableStateOf(false) }
+    var showEventFilterSheet by remember { mutableStateOf(false) }
+
+    val bottomClearance = spacing.bottomNavHeight + spacing.space28
+
+    // Keep-Alive + Simultaneous Edge-to-Edge Slide Transition cho 3 tab chi tiết camera (Trực tiếp / Xem lại / Sự kiện)
+    var mountedDetailTabs by remember(selectedCamera.camera.id) { mutableStateOf(setOf(uiState.cameraDetailTab)) }
+    var activeDetailTab by remember(selectedCamera.camera.id) { mutableStateOf(uiState.cameraDetailTab) }
+    var outgoingDetailTab by remember(selectedCamera.camera.id) { mutableStateOf<CameraDetailTab?>(null) }
+    var detailSlideDirection by remember(selectedCamera.camera.id) { mutableIntStateOf(1) }
+    val detailTransitionProgress = remember(selectedCamera.camera.id) { Animatable(1f) }
+
+    LaunchedEffect(uiState.cameraDetailTab) {
+        val targetTab = uiState.cameraDetailTab
+        if (targetTab !in mountedDetailTabs) {
+            mountedDetailTabs = mountedDetailTabs + targetTab
+        }
+        if (targetTab == activeDetailTab) {
+            detailTransitionProgress.animateTo(targetValue = 1f, animationSpec = DetailTabSwitchAnimSpec)
+            outgoingDetailTab = null
+            return@LaunchedEffect
+        }
+        val fromIdx = OrderedCameraDetailTabs.indexOf(activeDetailTab)
+        val toIdx = OrderedCameraDetailTabs.indexOf(targetTab)
+        detailSlideDirection = if (toIdx >= fromIdx) 1 else -1
+        outgoingDetailTab = activeDetailTab
+        activeDetailTab = targetTab
+        detailTransitionProgress.snapTo(0f)
+        detailTransitionProgress.animateTo(targetValue = 1f, animationSpec = DetailTabSwitchAnimSpec)
+        outgoingDetailTab = null
     }
 
-    Column(
+    val currentDetailTabState by rememberUpdatedState(uiState.cameraDetailTab)
+    val isFullscreenState by rememberUpdatedState(isFullscreen)
+    val isFilterSheetOpenState by rememberUpdatedState(showPlaybackFilterSheet || showEventFilterSheet)
+    val currentOnSelectDetailTab by rememberUpdatedState(onSelectDetailTab)
+
+    val switchDetailTabBySwipe: (CameraDetailTab) -> Unit = remember(haptic) {
+        { targetTab: CameraDetailTab ->
+            if (targetTab != currentDetailTabState) {
+                try {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                } catch (_: Exception) {
+                }
+                currentOnSelectDetailTab(targetTab)
+            }
+        }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
@@ -784,168 +913,578 @@ private fun MobileLiveCameraScreen(
                     )
                 }
             }
+            .pointerInput(Unit) {
+                val edgeBufferPx = DetailSwipeEdgeBuffer.toPx()
+                val bottomNavExclusionPx = DetailSwipeBottomNavExclusion.toPx()
+                val lockThresholdPx = DetailSwipeDirectionLockThreshold.toPx()
+                val minFlickDistPx = DetailSwipeMinFlickDistance.toPx()
+                val minDragDistPx = DetailSwipeMinDragDistance.toPx()
+                val longDragDistPx = DetailSwipeLongDragDistance.toPx()
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    val widthPx = size.width.toFloat()
+                    val heightPx = size.height.toFloat()
+                    val startX = down.position.x
+                    val startY = down.position.y
+
+                    if (isFullscreenState ||
+                        isFilterSheetOpenState ||
+                        startX < edgeBufferPx ||
+                        startX > widthPx - edgeBufferPx ||
+                        startY > heightPx - bottomNavExclusionPx
+                    ) {
+                        return@awaitEachGesture
+                    }
+
+                    val startTime = down.uptimeMillis
+                    var endTime = startTime
+                    var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
+                    var lastX = startX
+                    var lastY = startY
+
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        endTime = change.uptimeMillis
+
+                        if (change.changedToUpIgnoreConsumed()) {
+                            lastX = change.position.x
+                            lastY = change.position.y
+                            if (gestureDirection == 1) {
+                                change.consume()
+                            }
+                            break
+                        }
+
+                        if (!change.pressed) break
+
+                        lastX = change.position.x
+                        lastY = change.position.y
+                        val dx = lastX - startX
+                        val dy = lastY - startY
+
+                        if (gestureDirection == 0) {
+                            if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
+                                gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
+                            }
+                        }
+
+                        if (gestureDirection == 2) {
+                            break
+                        } else if (gestureDirection == 1) {
+                            change.consume()
+                        }
+                    }
+
+                    if (gestureDirection == 1) {
+                        val diffX = lastX - startX
+                        val diffY = lastY - startY
+                        val absX = abs(diffX)
+                        val absY = abs(diffY)
+                        val elapsed = (endTime - startTime).coerceAtLeast(1L)
+                        val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
+
+                        val isFlick = velocityDpPerMs > DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
+                        val isDrag = absX >= minDragDistPx && elapsed <= DETAIL_SWIPE_MAX_DRAG_DURATION_MS
+                        val isLongDrag = absX >= longDragDistPx
+
+                        if ((isFlick || isDrag || isLongDrag) && absX >= absY * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
+                            val currIdx = OrderedCameraDetailTabs.indexOf(currentDetailTabState)
+                            if (currIdx != -1) {
+                                if (diffX < 0f && currIdx < OrderedCameraDetailTabs.size - 1) {
+                                    switchDetailTabBySwipe(OrderedCameraDetailTabs[currIdx + 1])
+                                } else if (diffX > 0f && currIdx > 0) {
+                                    switchDetailTabBySwipe(OrderedCameraDetailTabs[currIdx - 1])
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {}
             )
     ) {
-        if (!isFullscreen) {
-            MobileTopBar(
-                title = selectedCamera.camera.name,
-                leftAction = {
-                    Box(
-                        modifier = Modifier
-                            .size(spacing.iconButton)
-                            .clip(CircleShape)
-                            .clickable(onClick = onBackClick),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.ChevronLeft,
-                            contentDescription = stringResource(id = R.string.common_back),
-                            tint = MaterialTheme.colorScheme.onBackground,
-                            modifier = Modifier.size(spacing.iconMedium)
-                        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            if (!isFullscreen) {
+                MobileTopBar(
+                    title = selectedCamera.camera.name,
+                    leftAction = {
+                        Box(
+                            modifier = Modifier
+                                .size(spacing.iconButton)
+                                .clip(CircleShape)
+                                .clickable(onClick = onBackClick),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = LucideIcons.ChevronLeft,
+                                contentDescription = stringResource(id = R.string.common_back),
+                                tint = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.size(spacing.iconMedium)
+                            )
+                        }
+                    },
+                    rightAction = when (uiState.cameraDetailTab) {
+                        CameraDetailTab.LIVE -> null
+                        CameraDetailTab.PLAYBACK -> {
+                            {
+                                MobileTopActionButton(
+                                    icon = LucideIcons.ListFilter,
+                                    contentDescription = stringResource(id = R.string.filter_title),
+                                    hasActiveDot = uiState.hasActivePlaybackFilter,
+                                    onClick = { showPlaybackFilterSheet = true }
+                                )
+                            }
+                        }
+                        CameraDetailTab.EVENTS -> {
+                            {
+                                MobileTopActionButton(
+                                    icon = LucideIcons.ListFilter,
+                                    contentDescription = stringResource(id = R.string.filter_title),
+                                    hasActiveDot = uiState.hasActiveCameraEventFilter,
+                                    onClick = { showEventFilterSheet = true }
+                                )
+                            }
+                        }
                     }
-                },
-                rightAction = {
-                    MobileTopActionButton(
-                        icon = LucideIcons.RefreshCw,
-                        contentDescription = if (isEn) "Reload stream" else "Tải lại luồng",
-                        onClick = onReloadClick
-                    )
-                }
-            )
-        }
-
-        // Khung phát Live 1x1 (giữ nguyên cùng 1 node trong cây Compose khi xoay ngang/dọc để không ngắt kết nối WS/ExoPlayer)
-        Box(
-            modifier = if (isFullscreen) {
-                Modifier
-                    .fillMaxSize()
-                    .background(colors.mediaBg)
-            } else {
-                Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
-                    .background(colors.mediaBg)
-            }
-        ) {
-            CameraGridItem(
-                selectedCamera = selectedCamera,
-                isTabActive = isTabActive,
-                onClick = {},
-                onRetryClick = onRetryClick,
-                onSuccess = onSuccess,
-                onSnapshotError = onSnapshotError,
-                onFullscreenClick = onToggleFullscreen,
-                onBackToLiveClick = onReloadClick,
-                onRemoveClick = onBackClick,
-                isFullscreen = isFullscreen,
-                isCompact = false,
-                showFullscreenButton = true,
-                showCloseButton = false
-            )
-        }
-
-        if (!isFullscreen) {
-            Spacer(modifier = Modifier.height(spacing.space6))
-
-            Text(
-                text = if (isEn) "CAMERA INFORMATION" else "THÔNG TIN CAMERA",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 0.6.sp,
-                color = colors.textMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(
-                    start = spacing.space24,
-                    end = spacing.space14,
-                    top = spacing.space10,
-                    bottom = spacing.space6
                 )
-            )
+            }
 
+            val effectiveMountedDetailTabs = remember(
+                mountedDetailTabs,
+                uiState.cameraDetailTab,
+                activeDetailTab,
+                outgoingDetailTab
+            ) {
+                buildSet {
+                    addAll(mountedDetailTabs)
+                    add(uiState.cameraDetailTab)
+                    add(activeDetailTab)
+                    outgoingDetailTab?.let { add(it) }
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                OrderedCameraDetailTabs.forEach { tab ->
+                    if (tab in effectiveMountedDetailTabs) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(
+                                    when (tab) {
+                                        activeDetailTab -> 2f
+                                        outgoingDetailTab -> 1f
+                                        else -> 0f
+                                    }
+                                )
+                                .layout { measurable, constraints ->
+                                    val currentOutgoing = outgoingDetailTab
+                                    if (tab != activeDetailTab && tab != currentOutgoing) {
+                                        layout(0, 0) {}
+                                    } else {
+                                        val placeable = measurable.measure(constraints)
+                                        layout(placeable.width, placeable.height) {
+                                            val progress = detailTransitionProgress.value
+                                            val offsetX = when (tab) {
+                                                activeDetailTab -> if (currentOutgoing != null) {
+                                                    (detailSlideDirection * (1f - progress) * placeable.width).toInt()
+                                                } else {
+                                                    0
+                                                }
+                                                else -> (-detailSlideDirection * progress * placeable.width).toInt()
+                                            }
+                                            placeable.placeRelativeWithLayer(offsetX, 0)
+                                        }
+                                    }
+                                }
+                        ) {
+                            when (tab) {
+                                CameraDetailTab.LIVE -> {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Box(
+                                            modifier = if (isFullscreen) {
+                                                Modifier
+                                                    .fillMaxSize()
+                                                    .background(colors.mediaBg)
+                                            } else {
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+                                                    .background(colors.mediaBg)
+                                            }
+                                        ) {
+                                            CameraGridItem(
+                                                selectedCamera = selectedCamera,
+                                                isTabActive = isTabActive && uiState.cameraDetailTab == CameraDetailTab.LIVE,
+                                                onClick = {},
+                                                onRetryClick = onRetryClick,
+                                                onSuccess = onSuccess,
+                                                onSnapshotError = onSnapshotError,
+                                                onFullscreenClick = onToggleFullscreen,
+                                                onBackToLiveClick = onReloadClick,
+                                                onSwitchChannel = onSwitchChannel,
+                                                onRemoveClick = onBackClick,
+                                                isFullscreen = isFullscreen,
+                                                isCompact = false,
+                                                showFullscreenButton = true,
+                                                showCloseButton = false
+                                            )
+                                        }
+                                        if (!isFullscreen) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+
+                                CameraDetailTab.PLAYBACK -> {
+                                    CameraPlaybackTabContent(
+                                        uiState = uiState,
+                                        selectedCamera = selectedCamera,
+                                        listState = playbackListState,
+                                        bottomClearance = bottomClearance,
+                                        onSelectVideo = onSelectPlaybackVideo,
+                                        onLoadMoreForDay = onLoadMorePlaybackForDay,
+                                        onLoadMoreDays = onLoadMorePlaybackDays,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+
+                                CameraDetailTab.EVENTS -> {
+                                    CameraEventsTabContent(
+                                        uiState = uiState,
+                                        cameraName = selectedCamera.camera.name,
+                                        listState = eventListState,
+                                        bottomClearance = bottomClearance,
+                                        onRefresh = onRefreshEvents,
+                                        onLoadMore = onLoadMoreEvents,
+                                        onEventClick = onEventItemClick,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Menu bottom 3 tính năng của Camera: Trực tiếp | Xem lại | Sự kiện
+        if (!isFullscreen) {
+            Box(
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                CameraDetailBottomNavigation(
+                    currentTab = uiState.cameraDetailTab,
+                    onTabClick = onSelectDetailTab,
+                    onScrollToTop = { tab ->
+                        scope.launch {
+                            when (tab) {
+                                CameraDetailTab.PLAYBACK -> playbackListState.animateScrollToItem(0)
+                                CameraDetailTab.EVENTS -> eventListState.animateScrollToItem(0)
+                                CameraDetailTab.LIVE -> Unit
+                            }
+                        }
+                    }
+                )
+            }
+        }
+
+        if (showPlaybackFilterSheet) {
+            MobileFilterBottomSheet(
+                showScope = false,
+                showTime = true,
+                selectedTimeFilter = uiState.playbackTimeFilter,
+                showPlaybackChannel = true,
+                selectedPlaybackChannel = uiState.playbackChannel,
+                defaultPlaybackChannel = uiState.defaultPlaybackChannel,
+                onApplyPlayback = { timeFilter, channel ->
+                    onApplyPlaybackFilters(timeFilter, channel)
+                },
+                showCamera = false,
+                showEventType = false,
+                onReset = onResetPlaybackFilters,
+                onDismiss = { showPlaybackFilterSheet = false }
+            )
+        }
+
+        if (showEventFilterSheet) {
+            MobileFilterBottomSheet(
+                showScope = false,
+                showTime = true,
+                showCamera = false,
+                showEventType = true,
+                selectedTimeFilter = uiState.cameraEventTimeFilter,
+                selectedAiType = uiState.cameraEventAiType,
+                onApply = { _, timeFilter, _, aiType ->
+                    onApplyEventFilters(timeFilter, aiType)
+                },
+                onReset = onResetEventFilters,
+                onDismiss = { showEventFilterSheet = false }
+            )
+        }
+    }
+}
+
+@Composable
+private fun CameraPlaybackTabContent(
+    uiState: MonitorUiState,
+    selectedCamera: SelectedCamera,
+    listState: LazyListState,
+    bottomClearance: androidx.compose.ui.unit.Dp,
+    onSelectVideo: (VideoModel?) -> Unit,
+    onLoadMoreForDay: (String) -> Unit,
+    onLoadMoreDays: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val isEn = rememberIsEnglish()
+
+    Column(modifier = modifier) {
+        // Trình phát video ghi hình VMS khi người dùng bấm vào 1 file ghi hình
+        val activeVideo = uiState.selectedPlaybackVideo
+        if (activeVideo != null) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = spacing.space10)
-                    .clip(RoundedCornerShape(spacing.radiusMedium))
+                    .padding(top = spacing.space4, bottom = spacing.space8)
+                    .clip(RoundedCornerShape(spacing.radiusCompact))
                     .background(colors.surface)
-                    .padding(horizontal = spacing.space16, vertical = spacing.space12),
-                verticalArrangement = Arrangement.spacedBy(spacing.space2)
+                    .border(
+                        width = spacing.borderThin,
+                        color = colors.border,
+                        shape = RoundedCornerShape(spacing.radiusCompact)
+                    )
             ) {
-                LiveCameraInfoRow(
-                    label = if (isEn) "Camera name" else "Tên camera",
-                    value = selectedCamera.camera.name
-                )
-
-                if (locationLabel.isNotEmpty()) {
-                    LiveCameraInfoRow(
-                        label = if (isEn) "Group / Area" else "Khu vực / Nhóm",
-                        value = locationLabel
-                    )
-                }
-
-                if (ipText.isNotEmpty()) {
-                    LiveCameraInfoRow(
-                        label = if (isEn) "IP address" else "Địa chỉ IP",
-                        value = ipText
-                    )
-                }
-
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = spacing.space32)
-                        .padding(vertical = spacing.space5),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(horizontal = spacing.space10, vertical = spacing.space6),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = if (isEn) "Stream quality" else "Chất lượng luồng",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textMuted,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.width(spacing.space12))
-                    if (hasDualStreams) {
-                        Row(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(spacing.radiusSmallMedium))
-                                .background(colors.controlBg)
-                                .padding(spacing.space3),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-                        ) {
-                            GridOptionButton(
-                                label = if (isEn) "Standard (SD)" else "Tiêu chuẩn (SD)",
-                                isSelected = selectedCamera.channel == 1,
-                                onClick = { onSwitchChannel(1) }
-                            )
-                            GridOptionButton(
-                                label = if (isEn) "High (HD)" else "Cao (HD)",
-                                isSelected = selectedCamera.channel == 0,
-                                onClick = { onSwitchChannel(0) }
-                            )
-                        }
-                    } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space6),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.Clock,
+                            contentDescription = null,
+                            tint = colors.accent,
+                            modifier = Modifier.size(spacing.iconSmall)
+                        )
                         Text(
-                            text = if (selectedCamera.channel == 0) {
-                                if (isEn) "High (HD)" else "Chất lượng cao (HD)"
-                            } else {
-                                if (isEn) "Standard (SD)" else "Tiêu chuẩn (SD)"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
+                            text = formatPlaybackDateTime(activeVideo.time),
                             color = colors.textStrong,
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(spacing.iconButtonSmall)
+                            .clip(CircleShape)
+                            .background(colors.controlBg)
+                            .clickable { onSelectVideo(null) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = LucideIcons.X,
+                            contentDescription = stringResource(id = R.string.dialog_btn_close),
+                            tint = colors.textMuted,
+                            modifier = Modifier.size(spacing.iconSmall)
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+                        .background(colors.mediaBg)
+                ) {
+                    val posterUrl = activeVideo.thumbnailLink.ifEmpty {
+                        activeVideo.imageLink.ifEmpty { selectedCamera.fallbackImageUrl }
+                    }
+                    VideoPlayer(
+                        videoUrl = activeVideo.videoLink,
+                        thumbnailUrl = posterUrl.ifEmpty { null },
+                        deviceKey = UserSession.accessToken
+                    )
+                }
+            }
+        }
+
+        // Danh sách file ghi hình từ VMS nhóm theo ngày (đồng bộ PlaybackPage.vue)
+        if (uiState.isLoadingPlaybacks && uiState.playbackDayGroups.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(bottom = bottomClearance),
+                contentAlignment = Alignment.Center
+            ) {
+                WaveDotsLoading()
+            }
+        } else if (uiState.playbackDayGroups.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = spacing.space16)
+                    .padding(bottom = bottomClearance),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                CommonEmptyState(
+                    text = if (isEn) {
+                        "No recordings in this time range"
+                    } else {
+                        "Không có dữ liệu ghi hình trong khoảng thời gian này"
+                    }
+                )
+                if (uiState.hasMorePlaybackDays) {
+                    Spacer(modifier = Modifier.height(spacing.space12))
+                    LoadMoreDaysButton(
+                        isLoading = uiState.isLoadingMorePlaybackDays,
+                        isEn = isEn,
+                        onClick = onLoadMoreDays
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(
+                    start = spacing.space10,
+                    end = spacing.space10,
+                    top = spacing.space4,
+                    bottom = bottomClearance
+                ),
+                verticalArrangement = Arrangement.spacedBy(spacing.space10)
+            ) {
+                uiState.playbackDayGroups.forEach { group ->
+                    item(key = "day_group_${group.dateKey}") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(spacing.radiusRegular))
+                                .background(colors.surface)
+                                .padding(spacing.space10),
+                            verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                        ) {
+                            // .day-header
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.Calendar,
+                                        contentDescription = null,
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(spacing.iconSmall)
+                                    )
+                                    Text(
+                                        text = formatPlaybackDayLabel(group.dateKey, isEn),
+                                        color = colors.textStrong,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .background(colors.controlBg)
+                                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
+                                ) {
+                                    Text(
+                                        text = "${group.videos.size} video",
+                                        color = colors.textMuted,
+                                        style = MaterialTheme.typography.caption,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            // .video-grid-view (2 cột trên mobile)
+                            val totalCells = group.videos.size + if (group.hasMore) 1 else 0
+                            val rowCount = (totalCells + 1) / 2
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                            ) {
+                                for (rowIdx in 0 until rowCount) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+                                    ) {
+                                        for (colIdx in 0..1) {
+                                            val cellIdx = rowIdx * 2 + colIdx
+                                            if (cellIdx < group.videos.size) {
+                                                val video = group.videos[cellIdx]
+                                                val isSelected = activeVideo != null &&
+                                                    activeVideo.videoLink == video.videoLink &&
+                                                    activeVideo.time == video.time
+                                                PlaybackVideoGridCard(
+                                                    video = video,
+                                                    cameraId = selectedCamera.camera.id,
+                                                    fallbackSnapshotUrl = selectedCamera.fallbackImageUrl,
+                                                    isSelected = isSelected,
+                                                    onClick = { onSelectVideo(video) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            } else if (cellIdx == group.videos.size && group.hasMore) {
+                                                LoadMoreDayVideosCard(
+                                                    isLoading = group.isLoadingMore,
+                                                    isEn = isEn,
+                                                    onClick = { onLoadMoreForDay(group.dateKey) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            } else {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (uiState.hasMorePlaybackDays) {
+                    item(key = "load_more_playback_days") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = spacing.space6),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            LoadMoreDaysButton(
+                                isLoading = uiState.isLoadingMorePlaybackDays,
+                                isEn = isEn,
+                                onClick = onLoadMoreDays
+                            )
+                        }
                     }
                 }
             }
@@ -954,40 +1493,338 @@ private fun MobileLiveCameraScreen(
 }
 
 @Composable
-private fun LiveCameraInfoRow(
-    label: String,
-    value: String
+private fun PlaybackVideoGridCard(
+    video: VideoModel,
+    cameraId: Int,
+    fallbackSnapshotUrl: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = spacing.space32)
-            .padding(vertical = spacing.space5),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+    val shape = RoundedCornerShape(spacing.radiusSmall)
+    val thumbCandidate = video.thumbnailLink.ifEmpty {
+        video.imageLink.ifEmpty {
+            video.videoLink.ifEmpty { fallbackSnapshotUrl }
+        }
+    }
+    val timeOnlyText = remember(video.time) { formatPlaybackTimeOnly(video.time) }
+
+    Box(
+        modifier = modifier
+            .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+            .clip(shape)
+            .background(colors.mediaBg)
+            .then(
+                if (isSelected) {
+                    Modifier.border(
+                        width = spacing.borderFocus,
+                        color = colors.accent,
+                        shape = shape
+                    )
+                } else {
+                    Modifier.border(
+                        width = spacing.borderThin,
+                        color = colors.border,
+                        shape = shape
+                    )
+                }
+            )
+            .clickable(onClick = onClick)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.textMuted,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(modifier = Modifier.width(spacing.space12))
-        Box(modifier = Modifier.weight(1f, fill = false), contentAlignment = Alignment.CenterEnd) {
+        if (thumbCandidate.isNotEmpty()) {
+            VideoFrameImage(
+                url = thumbCandidate,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                cacheKey = "vms_pb_${cameraId}_${video.time}"
+            )
+        }
+
+        // Play icon overlay (.play-overlay)
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(spacing.iconButtonSmall)
+                .clip(CircleShape)
+                .background(colors.mediaBg.copy(alpha = 0.52f))
+                .border(
+                    width = spacing.borderThin,
+                    color = colors.onMedia.copy(alpha = 0.28f),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = LucideIcons.Play,
+                contentDescription = null,
+                tint = colors.onMedia,
+                modifier = Modifier.size(spacing.iconXSmall)
+            )
+        }
+
+        // .video-time-overlay
+        if (timeOnlyText.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(spacing.space6)
+                    .clip(RoundedCornerShape(spacing.radiusXSmall))
+                    .background(colors.mediaBg.copy(alpha = 0.68f))
+                    .padding(horizontal = spacing.space6, vertical = spacing.space2)
+            ) {
+                Text(
+                    text = timeOnlyText,
+                    color = colors.onMedia,
+                    style = MaterialTheme.typography.micro,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LoadMoreDayVideosCard(
+    isLoading: Boolean,
+    isEn: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val shape = RoundedCornerShape(spacing.radiusSmall)
+
+    Box(
+        modifier = modifier
+            .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+            .clip(shape)
+            .background(colors.controlBg)
+            .border(
+                width = spacing.borderThin,
+                color = colors.border,
+                shape = shape
+            )
+            .clickable(enabled = !isLoading, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing.space4),
+            modifier = Modifier.padding(spacing.space8)
+        ) {
+            if (isLoading) {
+                CircularProgressIndicator(
+                    color = colors.accent,
+                    modifier = Modifier.size(spacing.iconRegular),
+                    strokeWidth = spacing.progressStroke
+                )
+            } else {
+                Icon(
+                    imageVector = LucideIcons.PlusCircle,
+                    contentDescription = null,
+                    tint = colors.accent,
+                    modifier = Modifier.size(spacing.iconRegular)
+                )
+            }
             Text(
-                text = value,
-                style = MaterialTheme.typography.bodyMedium,
+                text = if (isLoading) {
+                    if (isEn) "Loading..." else "Đang tải..."
+                } else {
+                    if (isEn) "View more videos" else "Xem thêm video"
+                },
                 color = colors.textStrong,
+                style = MaterialTheme.typography.caption,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
         }
     }
+}
+
+@Composable
+private fun LoadMoreDaysButton(
+    isLoading: Boolean,
+    isEn: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(spacing.radiusCompact))
+            .background(colors.surface)
+            .border(
+                width = spacing.borderThin,
+                color = colors.border,
+                shape = RoundedCornerShape(spacing.radiusCompact)
+            )
+            .clickable(enabled = !isLoading, onClick = onClick)
+            .padding(horizontal = spacing.space14, vertical = spacing.space8),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                color = colors.accent,
+                modifier = Modifier.size(spacing.iconSmall),
+                strokeWidth = spacing.progressStroke
+            )
+        } else {
+            Icon(
+                imageVector = LucideIcons.Calendar,
+                contentDescription = null,
+                tint = colors.accent,
+                modifier = Modifier.size(spacing.iconSmall)
+            )
+        }
+        Text(
+            text = if (isLoading) {
+                if (isEn) "Loading older days..." else "Đang tải thêm ngày..."
+            } else {
+                if (isEn) "Load older days" else "Tải thêm ngày cũ hơn"
+            },
+            color = colors.textStrong,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CameraEventsTabContent(
+    uiState: MonitorUiState,
+    cameraName: String,
+    listState: LazyListState,
+    bottomClearance: androidx.compose.ui.unit.Dp,
+    onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
+    onEventClick: (EventData) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val spacing = MaterialTheme.spacing
+
+    val shouldLoadMore by remember(listState) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 1 && lastVisibleIndex >= totalItems - CAMERA_EVENT_LOAD_MORE_THRESHOLD
+        }
+    }
+
+    LaunchedEffect(shouldLoadMore, uiState.cameraEvents.size, uiState.hasMoreCameraEvents) {
+        if ((shouldLoadMore || uiState.cameraEvents.size in 1..CAMERA_EVENT_AUTO_FILL_MAX) &&
+            uiState.hasMoreCameraEvents &&
+            !uiState.isLoadingCameraEvents &&
+            !uiState.isPaginatingCameraEvents
+        ) {
+            onLoadMore()
+        }
+    }
+
+    PullToRefreshBox(
+        isRefreshing = uiState.isRefreshingCameraEvents,
+        onRefresh = onRefresh,
+        modifier = modifier
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = spacing.space4, bottom = bottomClearance),
+            verticalArrangement = Arrangement.spacedBy(spacing.space10)
+        ) {
+            if (uiState.isLoadingCameraEvents && uiState.cameraEvents.isEmpty()) {
+                item(key = "cam_event_loading") {
+                    Box(
+                        modifier = Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        WaveDotsLoading()
+                    }
+                }
+            } else if (uiState.cameraEvents.isEmpty()) {
+                item(key = "cam_event_empty") {
+                    Box(
+                        modifier = Modifier.fillParentMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CommonEmptyState(text = stringResource(id = R.string.event_empty_state))
+                    }
+                }
+            } else {
+                items(
+                    items = uiState.cameraEvents,
+                    key = { event -> "cam_ev_${event.uniqueKey()}" }
+                ) { event ->
+                    Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
+                        MobileEventCard(
+                            event = event,
+                            cameraName = cameraName,
+                            isListView = true,
+                            enableSharedElement = false,
+                            onClick = { onEventClick(event) }
+                        )
+                    }
+                }
+
+                if (uiState.isPaginatingCameraEvents || (uiState.hasMoreCameraEvents && !uiState.isLoadingCameraEvents)) {
+                    item(key = "cam_event_paging") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(spacing.space16),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(spacing.space28),
+                                strokeWidth = spacing.space3
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatPlaybackDayLabel(dateKey: String, isEn: Boolean): String {
+    val parsed = runCatching {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateKey)
+    }.getOrNull() ?: return dateKey
+
+    val targetCal = Calendar.getInstance().apply { time = parsed }
+    val todayCal = Calendar.getInstance()
+    if (targetCal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) &&
+        targetCal.get(Calendar.DAY_OF_YEAR) == todayCal.get(Calendar.DAY_OF_YEAR)
+    ) {
+        return if (isEn) "Today" else "Hôm nay"
+    }
+
+    val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    if (targetCal.get(Calendar.YEAR) == yesterdayCal.get(Calendar.YEAR) &&
+        targetCal.get(Calendar.DAY_OF_YEAR) == yesterdayCal.get(Calendar.DAY_OF_YEAR)
+    ) {
+        return if (isEn) "Yesterday" else "Hôm qua"
+    }
+
+    return SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(parsed)
+}
+
+private fun formatPlaybackTimeOnly(timeStr: String): String {
+    val millis = parseVideoQueryTime(timeStr) ?: return timeStr
+    return SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(millis))
+}
+
+private fun formatPlaybackDateTime(timeStr: String): String {
+    val millis = parseVideoQueryTime(timeStr) ?: return timeStr
+    return SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault()).format(Date(millis))
 }
 
 @Composable
@@ -1029,114 +1866,6 @@ private fun restoreSystemOrientationAndBars(activity: Activity?) {
         WindowCompat.getInsetsController(it, it.decorView)
     }
     insetsController?.show(WindowInsetsCompat.Type.systemBars())
-}
-
-@Composable
-private fun LiveGrid2x2Stage(
-    uiState: MonitorUiState,
-    isTabActive: Boolean,
-    panelBg: Color,
-    gridDividerBg: Color,
-    onCellTap: (Int) -> Unit,
-    onRetryClick: (Int) -> Unit,
-    onSuccess: (Int) -> Unit,
-    onSnapshotError: (Int) -> Unit,
-    onReloadClick: (CameraModel, Int) -> Unit,
-    onRemoveClick: (Int) -> Unit
-) {
-    val spacing = MaterialTheme.spacing
-    val colors = MaterialTheme.appColors
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(gridDividerBg),
-        verticalArrangement = Arrangement.spacedBy(spacing.space2)
-    ) {
-        for (row in 0..1) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-            ) {
-                for (col in 0..1) {
-                    val slotIdx = row * 2 + col
-                    val selectedCam = uiState.selectedCameras.getOrNull(slotIdx)
-                    val isBlinking = uiState.blinkStates.getOrNull(slotIdx) == true
-                    val isActiveSlot = uiState.activeSlotIndex == slotIdx
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(panelBg)
-                            .then(
-                                if (isBlinking) {
-                                    Modifier.border(spacing.borderFocus, colors.accent)
-                                } else {
-                                    Modifier
-                                }
-                            )
-                    ) {
-                        if (selectedCam != null) {
-                            CameraGridItem(
-                                selectedCamera = selectedCam,
-                                isTabActive = isTabActive,
-                                onClick = { onCellTap(slotIdx) },
-                                onRetryClick = { onRetryClick(slotIdx) },
-                                onSuccess = { onSuccess(slotIdx) },
-                                onSnapshotError = { onSnapshotError(slotIdx) },
-                                onFullscreenClick = {},
-                                onBackToLiveClick = { onReloadClick(selectedCam.camera, slotIdx) },
-                                onRemoveClick = { onRemoveClick(slotIdx) },
-                                isFullscreen = false,
-                                isCompact = true,
-                                showFullscreenButton = false
-                            )
-                        } else {
-                            EmptyGridItem(
-                                onClick = { onCellTap(slotIdx) },
-                                isCompact = true,
-                                isActiveSlot = isActiveSlot
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GridOptionButton(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val colors = MaterialTheme.appColors
-    val spacing = MaterialTheme.spacing
-    val bgColor = if (isSelected) colors.accent else Color.Transparent
-    val contentColor = if (isSelected) colors.onAccent else colors.textSubtle
-
-    Box(
-        modifier = Modifier
-            .height(spacing.avatarSmall)
-            .clip(RoundedCornerShape(spacing.radiusSmall))
-            .background(bgColor)
-            .clickable(onClick = onClick)
-            .padding(horizontal = spacing.space8),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            color = contentColor,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
 }
 
 @Composable
@@ -1326,104 +2055,6 @@ private fun MobileCameraSnapshotCard(
                 overflow = TextOverflow.Ellipsis
             )
         }
-    }
-}
-
-@Composable
-private fun PlayingEqualizerBars(isTabActive: Boolean = true) {
-    val spacing = MaterialTheme.spacing
-    val colors = MaterialTheme.appColors
-    if (!isTabActive) {
-        Row(
-            modifier = Modifier.height(spacing.space10),
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(spacing.space2)
-                    .height(spacing.space4)
-                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-            )
-            Box(
-                modifier = Modifier
-                    .width(spacing.space2)
-                    .height(spacing.space8)
-                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-            )
-            Box(
-                modifier = Modifier
-                    .width(spacing.space2)
-                    .height(spacing.space6)
-                    .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-            )
-        }
-        return
-    }
-    val infiniteTransition = rememberInfiniteTransition(label = "playingEqualizer")
-    val scale1 by infiniteTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 450, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bar1"
-    )
-    val scale2 by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.45f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 450, delayMillis = 120, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bar2"
-    )
-    val scale3 by infiniteTransition.animateFloat(
-        initialValue = 0.55f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 450, delayMillis = 240, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "bar3"
-    )
-
-    Row(
-        modifier = Modifier.height(spacing.space10),
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-    ) {
-        Box(
-            modifier = Modifier
-                .width(spacing.space2)
-                .height(spacing.space4)
-                .graphicsLayer {
-                    scaleY = scale1
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                }
-                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-        )
-        Box(
-            modifier = Modifier
-                .width(spacing.space2)
-                .height(spacing.space10)
-                .graphicsLayer {
-                    scaleY = scale2
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                }
-                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-        )
-        Box(
-            modifier = Modifier
-                .width(spacing.space2)
-                .height(spacing.space6)
-                .graphicsLayer {
-                    scaleY = scale3
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                }
-                .background(colors.onAccent, RoundedCornerShape(spacing.space1))
-        )
     }
 }
 
@@ -1692,12 +2323,15 @@ fun CameraGridItem(
     onSnapshotError: () -> Unit = {},
     onFullscreenClick: () -> Unit,
     onBackToLiveClick: () -> Unit,
+    onSwitchChannel: (Int) -> Unit = {},
     onRemoveClick: () -> Unit = {},
     isFullscreen: Boolean = false,
     isCompact: Boolean = false,
     showFullscreenButton: Boolean = true,
     showCloseButton: Boolean = true
 ) {
+    val context = LocalContext.current
+    val isEn = rememberIsEnglish()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val deviceKey = UserSession.accessToken
@@ -1705,19 +2339,45 @@ fun CameraGridItem(
     var isLiveViewError by remember(selectedCamera.camera.id, selectedCamera.streamUrl, isTabActive) { mutableStateOf(false) }
     var snapshotFailed by remember(selectedCamera.camera.id, selectedCamera.fallbackImageUrl) { mutableStateOf(false) }
     val hasError = isLiveViewError || selectedCamera.streamUrl.startsWith("error://")
+    val hasSub = remember(selectedCamera.camera.id, selectedCamera.camera.sub, selectedCamera.camera.main) {
+        selectedCamera.camera.sub.isNotBlank() && selectedCamera.camera.main.isNotBlank()
+    }
 
-    // Mặc định ẩn toàn bộ overlay (tên camera, nút đóng, nút phóng to).
+    // Đồng bộ camera_fit_ratio_${camId} ('contain' / 'cover') từ LiveVideoView.vue
+    val ratioPrefs = remember(context) {
+        context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
+    }
+    var isOriginalRatio by remember(selectedCamera.camera.id) {
+        mutableStateOf(
+            ratioPrefs.getString("camera_fit_ratio_${selectedCamera.camera.id}", "cover") == "contain"
+        )
+    }
+    val toggleAspectRatio: () -> Unit = remember(selectedCamera.camera.id, ratioPrefs) {
+        {
+            val next = !isOriginalRatio
+            isOriginalRatio = next
+            ratioPrefs.edit()
+                .putString("camera_fit_ratio_${selectedCamera.camera.id}", if (next) "contain" else "cover")
+                .apply()
+        }
+    }
+
+    // Mặc định ẩn toàn bộ overlay (tên camera, các nút action, nút phóng to).
     // Chạm vào màn hình live: đang ẩn -> hiện lên và tự ẩn sau 3 giây; đang hiện -> chạm vùng trống sẽ ẩn ngay.
     var showInfo by remember(selectedCamera.camera.id) { mutableStateOf(false) }
+    var showChannelDropdown by remember(selectedCamera.camera.id) { mutableStateOf(false) }
     var autoHideToken by remember(selectedCamera.camera.id) { mutableIntStateOf(0) }
     LaunchedEffect(showInfo, autoHideToken) {
         if (showInfo) {
             delay(3000L)
             showInfo = false
+            showChannelDropdown = false
+        } else {
+            showChannelDropdown = false
         }
     }
 
-    val surfaceBg = if (isFullscreen) colors.mediaBg else colors.surface
+    val surfaceBg = if (isFullscreen || isOriginalRatio || !showCloseButton) colors.mediaBg else colors.surface
 
     val canPlayStream = isTabActive &&
         selectedCamera.streamUrl.isNotEmpty() &&
@@ -1733,6 +2393,7 @@ fun CameraGridItem(
                         onClick()
                         if (showInfo) {
                             showInfo = false
+                            showChannelDropdown = false
                         } else {
                             showInfo = true
                             autoHideToken++
@@ -1741,11 +2402,12 @@ fun CameraGridItem(
                     onDoubleTap = {
                         if (!isCompact && showFullscreenButton) {
                             showInfo = false
+                            showChannelDropdown = false
                             onFullscreenClick()
                         } else {
                             onClick()
                             showInfo = !showInfo
-                            if (showInfo) autoHideToken++
+                            if (showInfo) autoHideToken++ else showChannelDropdown = false
                         }
                     }
                 )
@@ -1757,6 +2419,7 @@ fun CameraGridItem(
                     wsUrl = selectedCamera.streamUrl,
                     cameraId = selectedCamera.camera.id,
                     altCameraId = selectedCamera.camera.cameraId,
+                    isOriginalRatio = isOriginalRatio,
                     showInternalOverlay = false,
                     onPlayingChange = {
                         isLiveViewPlaying = it
@@ -1776,6 +2439,7 @@ fun CameraGridItem(
                     videoUrl = selectedCamera.streamUrl,
                     thumbnailUrl = null,
                     deviceKey = deviceKey,
+                    isOriginalRatio = isOriginalRatio,
                     onPlayingChange = {
                         isLiveViewPlaying = it
                         if (it) {
@@ -1789,7 +2453,6 @@ fun CameraGridItem(
 
         // Cached Snapshot Preview + Loading Overlay (.cached-snapshot-preview & fade-snapshot 0.35s)
         val isLoadingStream = !isLiveViewPlaying && !hasError
-        val context = LocalContext.current
         val fallbackUrl = selectedCamera.fallbackImageUrl
         var lastFallbackCacheKey by remember(selectedCamera.camera.id) { mutableStateOf<String?>(null) }
         val targetFallbackMemKey = remember(fallbackUrl) {
@@ -1827,7 +2490,7 @@ fun CameraGridItem(
                     AsyncImage(
                         model = fallbackImageRequest,
                         contentDescription = selectedCamera.camera.name,
-                        contentScale = ContentScale.Crop,
+                        contentScale = if (isOriginalRatio) ContentScale.Fit else ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                         onSuccess = {
                             lastFallbackCacheKey = targetFallbackMemKey
@@ -1848,7 +2511,6 @@ fun CameraGridItem(
 
         // Error Overlay (chạm để tải lại luồng live giống reloadStream trong LiveVideoView.vue)
         if (hasError) {
-            val isEn = rememberIsEnglish()
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1856,6 +2518,7 @@ fun CameraGridItem(
                     .clickable {
                         onClick()
                         showInfo = true
+                        showChannelDropdown = false
                         autoHideToken++
                         onBackToLiveClick()
                     },
@@ -1870,8 +2533,8 @@ fun CameraGridItem(
             }
         }
 
-        // Top-Left Camera Name Pill (.info-name), Top-Right Close Button (.info-action),
-        // & Bottom-Right Fullscreen Button (.fullscreen-btn) — mặc định ẩn, chạm hiện 3s hoặc chạm vùng trống ẩn ngay
+        // Top-Left Camera Name Pill (.info-name), Top-Right Action Pill (.info-action),
+        // & Bottom-Right Fullscreen Button (.fullscreen-btn) — đồng bộ Web PC (LiveVideoView.vue)
         AnimatedVisibility(
             visible = showInfo,
             enter = fadeIn(animationSpec = tween(200)),
@@ -1881,56 +2544,219 @@ fun CameraGridItem(
             val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
             val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
             val edgePadding = if (isCompact) spacing.space4 else spacing.space8
+            val pillHeight = if (isCompact) spacing.iconMedium else spacing.iconButtonSmall
+            val pillInnerPad = if (isCompact) spacing.space1 else spacing.space2
+            val actionBtnSize = if (isCompact) spacing.iconRegular else spacing.iconMedium
+            val actionIconSize = if (isCompact) spacing.iconXSmall else spacing.iconSmall
+            val textStyle = if (isCompact) MaterialTheme.typography.caption else MaterialTheme.typography.labelMedium
+
+            val currentStreamLabel = if (selectedCamera.channel == 1) {
+                if (isEn) "Sub Stream" else "Luồng phụ"
+            } else {
+                if (isEn) "Main Stream" else "Luồng chính"
+            }
+            val alternateStreamLabel = if (selectedCamera.channel == 0) {
+                if (isEn) "Sub Stream" else "Luồng phụ"
+            } else {
+                if (isEn) "Main Stream" else "Luồng chính"
+            }
+            val alternateChannel = if (selectedCamera.channel == 0) 1 else 0
 
             Box(modifier = Modifier.fillMaxSize()) {
-                // .info-name
-                Box(
+                // .info-container -> .info
+                Row(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(edgePadding)
-                        .widthIn(max = if (isCompact) CameraInfoPillMaxWidthCompact else CameraInfoPillMaxWidthRegular)
-                        .clip(RoundedCornerShape(spacing.radiusSmall))
-                        .background(overlayPillBg)
-                        .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
-                        .padding(
-                            horizontal = if (isCompact) spacing.space6 else spacing.space8,
-                            vertical = if (isCompact) spacing.space2 else spacing.space3
-                        )
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(edgePadding),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Text(
-                        text = selectedCamera.camera.name,
-                        color = colors.onMedia,
-                        style = if (isCompact) MaterialTheme.typography.caption else MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // .info-action (Close button x-circle)
-                if (!isFullscreen && showCloseButton) {
+                    // .info-name (cùng chiều cao pillHeight với .info-action để cân đối trên 1 hàng)
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(edgePadding)
+                            .weight(1f, fill = false)
+                            .padding(end = spacing.space8)
+                            .height(pillHeight)
                             .clip(RoundedCornerShape(spacing.radiusSmall))
                             .background(overlayPillBg)
                             .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
-                            .padding(if (isCompact) spacing.space2 else spacing.space3)
+                            .padding(horizontal = if (isCompact) spacing.space6 else spacing.space8),
+                        contentAlignment = Alignment.CenterStart
                     ) {
-                        Box(
+                        Text(
+                            text = selectedCamera.camera.name,
+                            color = colors.onMedia,
+                            style = textStyle,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    // .info-action + .channel-dropdown
+                    Column(
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .size(if (isCompact) spacing.iconMedium else spacing.iconButtonSmall)
-                                .clip(RoundedCornerShape(spacing.radiusTiny))
-                                .clickable { onRemoveClick() },
-                            contentAlignment = Alignment.Center
+                                .height(pillHeight)
+                                .clip(RoundedCornerShape(spacing.radiusSmall))
+                                .background(overlayPillBg)
+                                .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                .padding(horizontal = pillInnerPad),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
                         ) {
-                            Icon(
-                                imageVector = LucideIcons.XCircle,
-                                contentDescription = "Đóng luồng trực tiếp",
-                                tint = colors.onMedia,
-                                modifier = Modifier.size(if (isCompact) spacing.iconXSmall else spacing.iconSmall)
-                            )
+                            // 1. .channel-selector (Luồng chính / Luồng phụ)
+                            Row(
+                                modifier = Modifier
+                                    .height(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(
+                                        if (showChannelDropdown && hasSub) {
+                                            colors.onMedia.copy(alpha = 0.2f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
+                                    .alpha(if (hasSub) 1f else 0.65f)
+                                    .then(
+                                        if (hasSub) {
+                                            Modifier.clickable {
+                                                showChannelDropdown = !showChannelDropdown
+                                                autoHideToken++
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .padding(horizontal = if (isCompact) spacing.space6 else spacing.space8),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space4)
+                            ) {
+                                Text(
+                                    text = currentStreamLabel,
+                                    color = colors.onMedia,
+                                    style = textStyle,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                if (hasSub) {
+                                    Icon(
+                                        imageVector = LucideIcons.CaretDown,
+                                        contentDescription = null,
+                                        tint = colors.onMedia.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(spacing.iconTiny)
+                                    )
+                                }
+                            }
+
+                            // 2. .aspect-ratio-btn (Tỷ lệ khung hình gốc / Lấp đầy khung 16:9)
+                            Box(
+                                modifier = Modifier
+                                    .size(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(
+                                        if (isOriginalRatio) {
+                                            BrandActiveNavDark.copy(alpha = 0.35f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        toggleAspectRatio()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
+                                    contentDescription = if (isOriginalRatio) {
+                                        if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
+                                    } else {
+                                        if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
+                                    },
+                                    tint = if (isOriginalRatio) BrandLight else colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
+                            }
+
+                            // 3. .reload-button (Tải lại luồng trực tiếp)
+                            Box(
+                                modifier = Modifier
+                                    .size(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        onBackToLiveClick()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.RotateCw,
+                                    contentDescription = if (isEn) "Reload live stream" else "Tải lại luồng trực tiếp",
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
+                            }
+
+                            // 4. .action-button (Close x-circle, nếu bật showCloseButton)
+                            if (!isFullscreen && showCloseButton) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clickable {
+                                            showChannelDropdown = false
+                                            onRemoveClick()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.XCircle,
+                                        contentDescription = if (isEn) "Close live stream" else "Đóng luồng trực tiếp",
+                                        tint = colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+                            }
+                        }
+
+                        // .channel-dropdown (nằm ngay dưới .channel-selector, cách 4dp)
+                        if (showChannelDropdown && hasSub) {
+                            Spacer(modifier = Modifier.height(spacing.space4))
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = if (isCompact) spacing.space2 else spacing.space3)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(colors.mediaOverlay.copy(alpha = 0.95f))
+                                    .border(
+                                        spacing.borderMedium,
+                                        colors.onMedia.copy(alpha = 0.15f),
+                                        RoundedCornerShape(spacing.radiusTiny)
+                                    )
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        onSwitchChannel(alternateChannel)
+                                    }
+                                    .padding(
+                                        horizontal = spacing.space10,
+                                        vertical = spacing.space5
+                                    ),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = alternateStreamLabel,
+                                    color = colors.onMedia.copy(alpha = 0.9f),
+                                    style = textStyle,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -1947,13 +2773,14 @@ fun CameraGridItem(
                             .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
                             .clickable {
                                 showInfo = false
+                                showChannelDropdown = false
                                 onFullscreenClick()
                             },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
-                            contentDescription = "Toàn màn hình",
+                            contentDescription = if (isEn) "Fullscreen" else "Toàn màn hình",
                             tint = colors.onMedia,
                             modifier = Modifier.size(if (isFullscreen) spacing.iconSmallMedium else spacing.iconSmall)
                         )
@@ -1961,31 +2788,5 @@ fun CameraGridItem(
                 }
             }
         }
-    }
-}
-
-@Composable
-fun EmptyGridItem(
-    onClick: () -> Unit,
-    isCompact: Boolean = false,
-    isActiveSlot: Boolean = false
-) {
-    val colors = MaterialTheme.appColors
-    val spacing = MaterialTheme.spacing
-    val iconColor = if (isActiveSlot) colors.accent else colors.textPlaceholder
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.surface)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = LucideIcons.Video,
-            contentDescription = "Chọn Camera",
-            tint = iconColor,
-            modifier = Modifier.size(if (isCompact) spacing.iconLarge else spacing.iconExtraLarge)
-        )
     }
 }

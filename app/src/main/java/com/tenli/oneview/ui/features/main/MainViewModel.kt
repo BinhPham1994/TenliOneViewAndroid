@@ -143,7 +143,7 @@ class MainViewModel(
                 Log.e(NOTIFY_LOG_TAG, "❌ [EXCEPTION KHI SYNC CẤU HÌNH] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}", e)
             }
             if (shouldRegisterToken) {
-                FcmTokenManager.registerDevicePushToken(force = true)
+                FcmTokenManager.registerDevicePushToken(force = false)
             } else {
                 Log.i(NOTIFY_LOG_TAG, "[SYNC CẤU HÌNH] Tài khoản đang tắt thông báo trên server (enabled=false) -> không đăng ký FCM token")
             }

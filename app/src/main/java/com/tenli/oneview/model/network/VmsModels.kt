@@ -163,6 +163,8 @@ data class CameraModel(
     val sub: String,
     val enableRecord: Boolean,
     val recordSchedule: RecordSchedule? = null,
+    val enableSubRecord: Boolean = false,
+    val subRecordSchedule: RecordSchedule? = null,
     val extra: CameraExtra? = null,
     val vmsId: Int,
     val cameraId: Int
@@ -191,6 +193,7 @@ data class LiveStreamModel(
     val videoCodecTag: String = ""
 )
 
+@Immutable
 data class VideoModel(
     val time: String,
     val videoLink: String,

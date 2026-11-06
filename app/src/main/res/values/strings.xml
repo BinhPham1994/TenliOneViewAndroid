@@ -91,6 +91,7 @@
 
     <string name="tab_home">Trang chủ</string>
     <string name="tab_monitor">Trực tiếp</string>
+    <string name="tab_playback">Xem lại</string>
     <string name="tab_event">Sự kiện</string>
     <string name="tab_setting">Cài đặt</string>
 

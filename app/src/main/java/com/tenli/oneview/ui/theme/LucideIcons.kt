@@ -1197,5 +1197,195 @@ object LucideIcons {
             }
         }
     }
+
+    val RotateCw: ImageVector by lazy {
+        lucideVector("LucideRotateCw") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8
+                moveTo(21f, 12f)
+                arcTo(9f, 9f, 0f, true, true, 12f, 3f)
+                curveTo(14.52f, 3f, 16.93f, 4f, 18.74f, 5.74f)
+                lineTo(21f, 8f)
+                // M21 3v5h-5
+                moveTo(21f, 3f)
+                verticalLineTo(8f)
+                horizontalLineTo(16f)
+            }
+        }
+    }
+
+    val Proportions: ImageVector by lazy {
+        lucideVector("LucideProportions") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // rect width="20" height="16" x="2" y="4" rx="2"
+                moveTo(4f, 4f)
+                horizontalLineTo(20f)
+                arcTo(2f, 2f, 0f, false, true, 22f, 6f)
+                verticalLineTo(18f)
+                arcTo(2f, 2f, 0f, false, true, 20f, 20f)
+                horizontalLineTo(4f)
+                arcTo(2f, 2f, 0f, false, true, 2f, 18f)
+                verticalLineTo(6f)
+                arcTo(2f, 2f, 0f, false, true, 4f, 4f)
+                close()
+                // M12 9v11
+                moveTo(12f, 9f)
+                verticalLineTo(20f)
+                // M2 9h13a2 2 0 0 1 2 2v9
+                moveTo(2f, 9f)
+                horizontalLineTo(15f)
+                arcTo(2f, 2f, 0f, false, true, 17f, 11f)
+                verticalLineTo(20f)
+            }
+        }
+    }
+
+    val StretchHorizontal: ImageVector by lazy {
+        lucideVector("LucideStretchHorizontal") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // rect width="20" height="6" x="2" y="4" rx="2"
+                moveTo(4f, 4f)
+                horizontalLineTo(20f)
+                arcTo(2f, 2f, 0f, false, true, 22f, 6f)
+                verticalLineTo(8f)
+                arcTo(2f, 2f, 0f, false, true, 20f, 10f)
+                horizontalLineTo(4f)
+                arcTo(2f, 2f, 0f, false, true, 2f, 8f)
+                verticalLineTo(6f)
+                arcTo(2f, 2f, 0f, false, true, 4f, 4f)
+                close()
+                // rect width="20" height="6" x="2" y="14" rx="2"
+                moveTo(4f, 14f)
+                horizontalLineTo(20f)
+                arcTo(2f, 2f, 0f, false, true, 22f, 16f)
+                verticalLineTo(18f)
+                arcTo(2f, 2f, 0f, false, true, 20f, 20f)
+                horizontalLineTo(4f)
+                arcTo(2f, 2f, 0f, false, true, 2f, 18f)
+                verticalLineTo(16f)
+                arcTo(2f, 2f, 0f, false, true, 4f, 14f)
+                close()
+            }
+        }
+    }
+
+    val CaretDown: ImageVector by lazy {
+        lucideVector("LucideCaretDown") {
+            path(
+                fill = SolidColor(Color.Black)
+            ) {
+                // M7 10l5 5 5-5z
+                moveTo(7f, 10f)
+                lineTo(12f, 15f)
+                lineTo(17f, 10f)
+                close()
+            }
+        }
+    }
+
+    val History: ImageVector by lazy {
+        lucideVector("LucideHistory") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8
+                moveTo(3f, 12f)
+                arcTo(9f, 9f, 0f, true, false, 12f, 3f)
+                arcTo(9.75f, 9.75f, 0f, false, false, 5.26f, 5.74f)
+                lineTo(3f, 8f)
+                // M3 3v5h5
+                moveTo(3f, 3f)
+                verticalLineTo(8f)
+                horizontalLineTo(8f)
+                // M12 7v5l4 2
+                moveTo(12f, 7f)
+                verticalLineTo(12f)
+                lineTo(16f, 14f)
+            }
+        }
+    }
+
+    val Play: ImageVector by lazy {
+        lucideVector("LucidePlay") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // polygon points="6 3 20 12 6 21 6 3"
+                moveTo(6f, 3f)
+                lineTo(20f, 12f)
+                lineTo(6f, 21f)
+                close()
+            }
+        }
+    }
+
+    val Layers: ImageVector by lazy {
+        lucideVector("LucideLayers") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z
+                moveTo(12f, 2f)
+                lineTo(2f, 7f)
+                lineTo(12f, 12f)
+                lineTo(22f, 7f)
+                close()
+                // m2 12 10 5 10-5
+                moveTo(2f, 12f)
+                lineTo(12f, 17f)
+                lineTo(22f, 12f)
+                // m2 17 10 5 10-5
+                moveTo(2f, 17f)
+                lineTo(12f, 22f)
+                lineTo(22f, 17f)
+            }
+        }
+    }
+
+    val PlusCircle: ImageVector by lazy {
+        lucideVector("LucidePlusCircle") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // circle cx="12" cy="12" r="10"
+                moveTo(22f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 2f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 22f, 12f)
+                close()
+                // M8 12h8 M12 8v8
+                moveTo(8f, 12f)
+                horizontalLineTo(16f)
+                moveTo(12f, 8f)
+                verticalLineTo(16f)
+            }
+        }
+    }
 }
 

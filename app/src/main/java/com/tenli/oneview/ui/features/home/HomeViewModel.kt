@@ -220,6 +220,7 @@ class HomeViewModel(
     fun setHomeTabActive(active: Boolean) {
         if (isHomeTabActive == active) return
         isHomeTabActive = active
+        webSocketManager.setReportsActive(active)
         if (!active) {
             recentEventsJob?.cancel()
             return

@@ -22,6 +22,17 @@ android {
                                 appIcon: "@mipmap/app_icon"]
     }
 
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
     packaging {
         resources {
             excludes += '/META-INF/versions/9/OSGI-INF/MANIFEST.MF'

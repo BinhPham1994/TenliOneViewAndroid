@@ -53,7 +53,8 @@ interface VmsApi {
         @Query("camera") camera: Int? = null,
         @Query("count") count: Int? = null,
         @Query("from") from: String? = null,
-        @Query("to") to: String? = null
+        @Query("to") to: String? = null,
+        @Query("channel") channel: String? = null
     ): Response<List<VideoModel>>
 
     // ==================== Report & Links ====================

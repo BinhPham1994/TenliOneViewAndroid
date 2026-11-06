@@ -67,7 +67,9 @@ object VideoFrameCache {
             clean.endsWith(".mov") ||
             clean.endsWith(".mkv") ||
             clean.endsWith(".webm") ||
-            clean.endsWith(".avi")
+            clean.endsWith(".avi") ||
+            clean.endsWith(".ts") ||
+            clean.contains("/video/")
     }
 }
 

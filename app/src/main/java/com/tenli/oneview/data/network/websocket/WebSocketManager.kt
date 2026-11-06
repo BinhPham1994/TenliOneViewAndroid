@@ -8,7 +8,6 @@ import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.CameraInfo
 import com.tenli.oneview.model.network.NotifyData
 import com.tenli.oneview.model.network.ReportPayload
-import com.tenli.oneview.model.network.StorageStatusModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,16 +54,15 @@ class WebSocketManager(
     // Trạng thái mong muốn (để tự khôi phục khi app quay lại foreground)
     @Volatile private var desiredNotifyBaseUrl: String? = null
     @Volatile private var reportsRequested = false
+    @Volatile private var isReportsTabActive = true
     @Volatile private var isAppInForeground = false
     @Volatile private var suspendedForBackground = false
     private var backgroundJob: Job? = null
+    private var reportInactiveJob: Job? = null
 
     // Exposed Flows
     private val _notifyEvent = MutableSharedFlow<NotifyData>(extraBufferCapacity = 10)
     val notifyEvent: SharedFlow<NotifyData> = _notifyEvent.asSharedFlow()
-
-    private val _storageStatusMap = MutableStateFlow<Map<Int, StorageStatusModel>>(emptyMap())
-    val storageStatusMap: StateFlow<Map<Int, StorageStatusModel>> = _storageStatusMap.asStateFlow()
 
     private val _cameraStatusMap = MutableStateFlow<Map<String, String>>(emptyMap())
     val cameraStatusMap: StateFlow<Map<String, String>> = _cameraStatusMap.asStateFlow()
@@ -89,13 +87,13 @@ class WebSocketManager(
             if (suspendedForBackground) {
                 suspendedForBackground = false
                 desiredNotifyBaseUrl?.let { connectNotify(it) }
-                if (reportsRequested) connectAllReports()
+                if (reportsRequested && isReportsTabActive) connectAllReports()
                 // Báo UI làm mới dữ liệu có thể đã lỡ trong lúc ở nền
                 _notifyEvent.tryEmit(NotifyData(event = TOPIC_APP_RESUMED))
             } else {
                 // Lần đầu vào foreground: thực hiện các kết nối đã được yêu cầu trước đó
                 desiredNotifyBaseUrl?.let { connectNotify(it) }
-                if (reportsRequested) connectAllReports()
+                if (reportsRequested && isReportsTabActive) connectAllReports()
             }
         } else {
             backgroundJob = scope.launch {
@@ -105,10 +103,34 @@ class WebSocketManager(
         }
     }
 
+    /**
+     * Chỉ giữ kết nối các WebSocket Report (trạng thái camera/ghi hình của từng VMS) khi đang ở tab Trang chủ.
+     * Khi rời sang tab khác quá [REPORT_INACTIVE_GRACE_MS], tự ngắt các socket Report để không tốn CPU/mạng/pin
+     * nhận bản tin JSON vài giây/lần và ping 15s/lần.
+     */
+    fun setReportsActive(active: Boolean) {
+        isReportsTabActive = active
+        reportInactiveJob?.cancel()
+        if (active) {
+            if (reportsRequested && isAppInForeground) {
+                connectAllReports()
+            }
+        } else {
+            reportInactiveJob = scope.launch {
+                delay(REPORT_INACTIVE_GRACE_MS)
+                if (!isReportsTabActive) {
+                    reportClients.values.forEach { it.disconnect() }
+                    reportClients.clear()
+                }
+            }
+        }
+    }
+
     /** Đóng socket khi app ở nền lâu nhưng giữ trạng thái mong muốn để khôi phục */
     private fun suspendConnections() {
         if (BuildConfig.DEBUG) Log.d(TAG, "App in background → suspend websockets")
         suspendedForBackground = true
+        reportInactiveJob?.cancel()
         synchronized(notifyLock) { notifyClient?.disconnect() }
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()
@@ -142,7 +164,7 @@ class WebSocketManager(
      */
     fun connectAllReports() {
         reportsRequested = true
-        if (!isAppInForeground) return
+        if (!isAppInForeground || !isReportsTabActive) return
         if (reportClients.isNotEmpty() && reportClients.values.all { it.isConnected() }) return
         if (!isConnectingReports.compareAndSet(false, true)) return
 
@@ -195,14 +217,7 @@ class WebSocketManager(
 
     private fun handleReportPayload(payload: ReportPayload, vmsId: Int) {
         val actual = payload.data ?: payload
-        // Update Storage Status
-        actual.storage?.let { storageList ->
-            _storageStatusMap.update { currentMap ->
-                currentMap.toMutableMap().apply { storageList.forEach { s -> put(s.id, s) } }
-            }
-        }
-
-        // Update Camera Status
+        // Chỉ xử lý trạng thái Camera (bỏ qua storage vì UI mobile không hiển thị dữ liệu ổ lưu trữ)
         actual.camera?.let { cameraList -> handleCameraReport(cameraList, vmsId) }
     }
 
@@ -277,6 +292,7 @@ class WebSocketManager(
         reportsRequested = false
         suspendedForBackground = false
         backgroundJob?.cancel()
+        reportInactiveJob?.cancel()
 
         synchronized(notifyLock) {
             notifyClient?.disconnect()
@@ -286,7 +302,6 @@ class WebSocketManager(
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()
 
-        _storageStatusMap.value = emptyMap()
         _cameraStatusMap.value = emptyMap()
         _recordStatusMap.value = emptyMap()
         synchronized(reportLock) {
@@ -304,6 +319,8 @@ class WebSocketManager(
         const val TOPIC_APP_RESUMED = "app_resumed"
         /** Thời gian chờ trước khi đóng socket khi app vào nền (tránh đóng/mở liên tục khi chuyển app nhanh) */
         private const val BACKGROUND_GRACE_MS = 30_000L
+        /** Thời gian chờ trước khi đóng các socket Report khi người dùng rời khỏi tab Trang chủ */
+        private const val REPORT_INACTIVE_GRACE_MS = 15_000L
 
         private val STATUS_CONNECTED = StatusLabel("green", "Connected")
         private val STATUS_CONNECTION_ERROR = StatusLabel("red", "Connection Error")

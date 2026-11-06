@@ -37,6 +37,7 @@ fun VideoPlayer(
     videoUrl: String,
     thumbnailUrl: String?,
     deviceKey: String,
+    isOriginalRatio: Boolean = false,
     initialSeekPositionMs: Long? = null,
     errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
@@ -138,17 +139,27 @@ fun VideoPlayer(
             .fillMaxSize()
             .background(containerBg)
     ) {
+        val targetResizeMode = if (isOriginalRatio) {
+            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        } else {
+            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+        }
         AndroidView(factory = { ctx ->
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
                     player = exoPlayer
                     useController = true
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    resizeMode = targetResizeMode
                 }
             }
         }, update = { view ->
-            (view as PlayerView).player = exoPlayer
+            (view as PlayerView).let {
+                it.player = exoPlayer
+                if (it.resizeMode != targetResizeMode) {
+                    it.resizeMode = targetResizeMode
+                }
+            }
         }, onRelease = { view ->
             (view as? PlayerView)?.player = null
         }, modifier = Modifier

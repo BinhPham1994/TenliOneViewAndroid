@@ -104,15 +104,29 @@ private const val NAV_ICON_SELECTED_SCALE = 1.04f
 /** Lực cản cao su khi kéo viên nang vượt mép (MobileLayout.vue lines 405-409) */
 private const val RUBBER_BAND_EXPONENT = 0.75f
 
-private data class NavItem(val tab: MainTab, @StringRes val labelRes: Int, val icon: ImageVector)
+enum class CameraDetailTab {
+    LIVE,
+    PLAYBACK,
+    EVENTS
+}
+
+private data class NavItem<T>(val tab: T, @StringRes val labelRes: Int, val icon: ImageVector)
 
 // Tab order matching tenli-oneview MobileLayout.vue:
 // 1. Trang chủ (Home) -> 2. Sự kiện (Event) -> 3. Trực tiếp (Monitor/Live) -> 4. Cài đặt (Setting)
-private val NavItems = listOf(
+private val MainNavItems = listOf(
     NavItem(MainTab.Home, R.string.tab_home, LucideIcons.Home),
     NavItem(MainTab.Event, R.string.tab_event, LucideIcons.Bell),
     NavItem(MainTab.Monitor, R.string.tab_monitor, LucideIcons.Video),
     NavItem(MainTab.Setting, R.string.tab_setting, LucideIcons.Settings)
+)
+
+// Menu bottom riêng cho màn hình chi tiết Camera:
+// 1. Trực tiếp (Live) -> 2. Xem lại (Playback VMS) -> 3. Sự kiện (Events theo camera UUID)
+private val CameraDetailNavItems = listOf(
+    NavItem(CameraDetailTab.LIVE, R.string.tab_monitor, LucideIcons.Video),
+    NavItem(CameraDetailTab.PLAYBACK, R.string.tab_playback, LucideIcons.History),
+    NavItem(CameraDetailTab.EVENTS, R.string.tab_event, LucideIcons.Bell)
 )
 
 // ---------------------------------------------------------------------------------------------
@@ -546,14 +560,43 @@ private fun rubberBand(rawLeft: Float, maxLeftPx: Float): Float = when {
     else -> rawLeft
 }
 
-private fun hoverIndexOf(leftPx: Float, tabWidthPx: Float): Int =
-    ((leftPx + tabWidthPx / 2f) / tabWidthPx).toInt().coerceIn(0, NavItems.size - 1)
+private fun hoverIndexOf(leftPx: Float, tabWidthPx: Float, itemCount: Int): Int =
+    ((leftPx + tabWidthPx / 2f) / tabWidthPx).toInt().coerceIn(0, (itemCount - 1).coerceAtLeast(0))
 
 @Composable
 fun MainBottomNavigation(
     currentTab: MainTab,
     onTabClick: (MainTab) -> Unit,
     onScrollToTop: (MainTab) -> Unit
+) {
+    LiquidGlassBottomNavigation(
+        items = MainNavItems,
+        currentTab = currentTab,
+        onTabClick = onTabClick,
+        onScrollToTop = onScrollToTop
+    )
+}
+
+@Composable
+fun CameraDetailBottomNavigation(
+    currentTab: CameraDetailTab,
+    onTabClick: (CameraDetailTab) -> Unit,
+    onScrollToTop: (CameraDetailTab) -> Unit = {}
+) {
+    LiquidGlassBottomNavigation(
+        items = CameraDetailNavItems,
+        currentTab = currentTab,
+        onTabClick = onTabClick,
+        onScrollToTop = onScrollToTop
+    )
+}
+
+@Composable
+private fun <T> LiquidGlassBottomNavigation(
+    items: List<NavItem<T>>,
+    currentTab: T,
+    onTabClick: (T) -> Unit,
+    onScrollToTop: (T) -> Unit
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
@@ -565,7 +608,7 @@ fun MainBottomNavigation(
     val activeContentColor = colors.activeContent
     val inactiveContentColor = if (isDark) Slate300 else Slate600
 
-    val selectedIndex = NavItems.indexOfFirst { it.tab == currentTab }.coerceAtLeast(0)
+    val selectedIndex = items.indexOfFirst { it.tab == currentTab }.coerceAtLeast(0)
     val scope = rememberCoroutineScope()
 
     // Đọc giá trị mới nhất trong gesture detector mà không phải khởi động lại pointerInput
@@ -597,9 +640,9 @@ fun MainBottomNavigation(
                 .iosLiquidGlassDock(isDark = isDark)
                 .padding(spacing.space5)
         ) {
-            val tabWidth = maxWidth / NavItems.size
+            val tabWidth = maxWidth / items.size
             val tabWidthPx = with(density) { tabWidth.toPx() }
-            val maxLeftPx = tabWidthPx * (NavItems.size - 1)
+            val maxLeftPx = tabWidthPx * (items.size - 1)
 
             // Unified pixel Animatable matching MobileLayout.vue:
             // transition: transform 0.32s cubic-bezier(0.18, 0.9, 0.3, 1)
@@ -646,7 +689,7 @@ fun MainBottomNavigation(
                     .fillMaxSize()
                     // Layer riêng cho icon/nhãn: animation màu/scale của tab không làm vẽ lại Dock
                     .graphicsLayer()
-                    .pointerInput(tabWidthPx) {
+                    .pointerInput(tabWidthPx, items.size) {
                         detectHorizontalDragGestures(
                             onDragStart = { startOffset ->
                                 isDraggingNav = true
@@ -654,7 +697,7 @@ fun MainBottomNavigation(
                                 rawDragLeftPx = initialLeft
                                 val dampedLeft = rubberBand(initialLeft, maxLeftPx)
                                 scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
-                                dragHoverIndex = hoverIndexOf(dampedLeft, tabWidthPx)
+                                dragHoverIndex = hoverIndexOf(dampedLeft, tabWidthPx, items.size)
                             },
                             onHorizontalDrag = { change, dragAmount ->
                                 change.consume()
@@ -662,7 +705,7 @@ fun MainBottomNavigation(
                                 rawDragLeftPx = nextRaw
                                 val dampedLeft = rubberBand(nextRaw, maxLeftPx)
                                 scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
-                                val idx = hoverIndexOf(dampedLeft, tabWidthPx)
+                                val idx = hoverIndexOf(dampedLeft, tabWidthPx, items.size)
                                 if (dragHoverIndex != idx) {
                                     dragHoverIndex = idx
                                     try {
@@ -675,8 +718,8 @@ fun MainBottomNavigation(
                                 val targetIdx = dragHoverIndex
                                 isDraggingNav = false
                                 dragHoverIndex = null
-                                if (targetIdx != null && targetIdx in NavItems.indices) {
-                                    val targetTab = NavItems[targetIdx].tab
+                                if (targetIdx != null && targetIdx in items.indices) {
+                                    val targetTab = items[targetIdx].tab
                                     if (targetTab == currentTabState) {
                                         onScrollToTopState(targetTab)
                                     } else {
@@ -693,7 +736,7 @@ fun MainBottomNavigation(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NavItems.forEachIndexed { index, item ->
+                items.forEachIndexed { index, item ->
                     val isSelected = if (isDraggingNav && dragHoverIndex != null) {
                         dragHoverIndex == index
                     } else {

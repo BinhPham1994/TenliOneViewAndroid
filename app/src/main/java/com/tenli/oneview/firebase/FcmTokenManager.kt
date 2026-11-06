@@ -163,6 +163,29 @@ object FcmTokenManager {
                     }
                 }
 
+                // Kiểm tra cache chống trùng lặp NGAY ĐẦU HÀM (trước khi gọi mạng / Google Play Services)
+                // để không đánh thức radio mạng hay IPC ngầm khi token vừa đăng ký chưa quá hạn.
+                val earlyNow = System.currentTimeMillis()
+                if (!force && overrideToken.isNullOrBlank() && prefs != null) {
+                    val lastToken = prefs.getString(PREF_REGISTERED_TOKEN, null)
+                    val lastUser = prefs.getString(PREF_REGISTERED_USER, null)
+                    val lastDomain = prefs.getString(PREF_REGISTERED_DOMAIN, null)
+                    val lastTime = prefs.getLong(PREF_REGISTERED_TIME, 0L)
+
+                    if (!lastToken.isNullOrBlank() &&
+                        lastUser == currentUserKey &&
+                        lastDomain == currentDomain &&
+                        earlyNow - lastTime < REGISTER_DEDUP_WINDOW_MS
+                    ) {
+                        val remainMin = (REGISTER_DEDUP_WINDOW_MS - (earlyNow - lastTime)) / 60_000L
+                        Log.i(
+                            LOG_TAG,
+                            "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Bỏ qua gọi mạng vì token đã đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (còn hiệu lực cache ${remainMin} phút)"
+                        )
+                        return@withLock lastToken
+                    }
+                }
+
                 var serverProjectId: String? = null
                 var serverSenderId: String? = null
                 var publicConfigFetched = false

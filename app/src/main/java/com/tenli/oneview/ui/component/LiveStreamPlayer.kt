@@ -93,6 +93,7 @@ fun LiveStreamPlayer(
     videoCodecTag: String = "",
     cameraId: Int = 0,
     altCameraId: Int = 0,
+    isOriginalRatio: Boolean = false,
     showInternalOverlay: Boolean = false,
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {}
@@ -236,6 +237,11 @@ fun LiveStreamPlayer(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val targetResizeMode = if (isOriginalRatio) {
+            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+        } else {
+            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+        }
         AndroidView(
             factory = { ctx ->
                 android.view.LayoutInflater.from(ctx).inflate(com.tenli.oneview.R.layout.view_exo_texture, null).apply {
@@ -244,7 +250,7 @@ fun LiveStreamPlayer(
                         player = exoPlayer
                         useController = false
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
+                        resizeMode = targetResizeMode
                     }
                 }
             },
@@ -252,6 +258,9 @@ fun LiveStreamPlayer(
                 (view as PlayerView).let {
                     playerViewRef = it
                     it.player = exoPlayer
+                    if (it.resizeMode != targetResizeMode) {
+                        it.resizeMode = targetResizeMode
+                    }
                 }
             },
             onRelease = { view ->

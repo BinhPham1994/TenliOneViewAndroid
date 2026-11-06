@@ -107,56 +107,7 @@ fun AppNavigation(
                                     skipExitAnimation = false
                                     lastEventDetailId = eventId
                                     activeEventDetailId = eventId
-                                },
-                                onNavigateToPlaybackDetail = { videoLink, time, imageLink, cameraName ->
-                                    val flags = android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
-                                    val vLinkEnc = android.util.Base64.encodeToString(videoLink.ifEmpty { " " }.toByteArray(), flags)
-                                    val pTimeEnc = android.util.Base64.encodeToString(time.ifEmpty { " " }.toByteArray(), flags)
-                                    val iLinkEnc = android.util.Base64.encodeToString(imageLink.ifEmpty { " " }.toByteArray(), flags)
-                                    val cNameEnc = android.util.Base64.encodeToString(cameraName.ifEmpty { " " }.toByteArray(), flags)
-                                    navController.navigate("playback_detail/$vLinkEnc/$pTimeEnc/$iLinkEnc/$cNameEnc")
                                 }
-                            )
-                        }
-                    }
-
-                    composable(
-                        route = "playback_detail/{videoLink}/{time}/{imageLink}/{cameraName}",
-                        arguments = listOf(
-                            androidx.navigation.navArgument("videoLink") { type = androidx.navigation.NavType.StringType },
-                            androidx.navigation.navArgument("time") { type = androidx.navigation.NavType.StringType },
-                            androidx.navigation.navArgument("imageLink") { type = androidx.navigation.NavType.StringType },
-                            androidx.navigation.navArgument("cameraName") { type = androidx.navigation.NavType.StringType }
-                        ),
-                        enterTransition = {
-                            androidx.compose.animation.fadeIn(
-                                animationSpec = tween(1000)
-                            )
-                        },
-                        exitTransition = {
-                            androidx.compose.animation.fadeOut(
-                                animationSpec = tween(300)
-                            )
-                        },
-                        popEnterTransition = { EnterTransition.None },
-                        popExitTransition = {
-                            androidx.compose.animation.fadeOut(
-                                animationSpec = tween(400)
-                            )
-                        }
-                    ) { backStackEntry ->
-                        val flags = android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING
-                        val vLink = String(android.util.Base64.decode(backStackEntry.arguments?.getString("videoLink") ?: "", flags)).trim()
-                        val pTime = String(android.util.Base64.decode(backStackEntry.arguments?.getString("time") ?: "", flags)).trim()
-                        val iLink = String(android.util.Base64.decode(backStackEntry.arguments?.getString("imageLink") ?: "", flags)).trim()
-                        val cName = String(android.util.Base64.decode(backStackEntry.arguments?.getString("cameraName") ?: "", flags)).trim()
-                        CompositionLocalProvider(LocalAnimatedVisibilityScope provides this@composable) {
-                            com.tenli.oneview.ui.features.monitor.detail.PlaybackDetailScreen(
-                                videoLink = vLink,
-                                time = pTime,
-                                imageLink = iLink,
-                                cameraName = cName,
-                                onBack = { navController.popBackStack() }
                             )
                         }
                     }
