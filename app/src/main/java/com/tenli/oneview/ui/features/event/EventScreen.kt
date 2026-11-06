@@ -37,6 +37,7 @@ import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.theme.LucideIcons
@@ -68,6 +69,13 @@ fun EventScreen(
 
     LaunchedEffect(Unit) {
         viewModel.syncViewModeFromPrefs()
+    }
+
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { errMsg ->
+            MobileTopPopupManager.error(errMsg)
+            viewModel.clearError()
+        }
     }
 
     val shouldLoadMore by remember(listState) {

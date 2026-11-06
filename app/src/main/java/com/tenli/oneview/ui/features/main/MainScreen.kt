@@ -16,6 +16,7 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,6 +41,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -85,6 +88,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -103,6 +107,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.component.IconBadge
@@ -204,11 +209,12 @@ fun MainScreen(
     val saveableStateHolder = rememberSaveableStateHolder()
     var showBottomBar by remember { mutableStateOf(true) }
     var showNotificationConfigPage by remember { mutableStateOf(false) }
+    var showAboutPage by remember { mutableStateOf(false) }
     var isLiveCameraPageOpen by remember { mutableStateOf(false) }
     val overlayHostState = remember { MobileOverlayHostState() }
 
     val homeListState = rememberLazyListState()
-    val monitorState = rememberLazyListState()
+    val monitorGridState: LazyGridState = rememberLazyGridState()
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
@@ -233,6 +239,7 @@ fun MainScreen(
         }
         if (targetTab != MainTab.Setting) {
             showNotificationConfigPage = false
+            showAboutPage = false
         }
         if (targetTab == MainTab.Home) {
             homeViewModel.syncViewModeFromPrefs()
@@ -266,9 +273,10 @@ fun MainScreen(
     val currentTabState by rememberUpdatedState(uiState.currentTab)
     val showBottomBarState by rememberUpdatedState(showBottomBar)
     val showNotificationConfigPageState by rememberUpdatedState(showNotificationConfigPage)
+    val showAboutPageState by rememberUpdatedState(showAboutPage)
     val isLiveCameraPageOpenState by rememberUpdatedState(isLiveCameraPageOpen)
 
-    val isScreenUncovered = !showNotificationConfigPage && !isOverlayCovered
+    val isScreenUncovered = !showNotificationConfigPage && !showAboutPage && !isOverlayCovered
     val isHomeActive = uiState.currentTab == MainTab.Home && isScreenUncovered
     val isEventActive = uiState.currentTab == MainTab.Event && isScreenUncovered
     val isMonitorActive = uiState.currentTab == MainTab.Monitor && isScreenUncovered
@@ -293,15 +301,31 @@ fun MainScreen(
         }
     }
     val onCloseNotificationConfig: () -> Unit = remember { { showNotificationConfigPage = false } }
+    val onOpenAbout: () -> Unit = remember { { showAboutPage = true } }
+    val onCloseAbout: () -> Unit = remember { { showAboutPage = false } }
 
     val scrollTabToTop: (MainTab) -> Unit = remember(scope, haptic) {
         { targetTab: MainTab ->
             scope.launch {
+                if (targetTab == MainTab.Monitor) {
+                    if (monitorGridState.firstVisibleItemIndex > 0 || monitorGridState.firstVisibleItemScrollOffset > 0) {
+                        try {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } catch (_: Exception) {
+                        }
+                        if (monitorGridState.firstVisibleItemIndex > SCROLL_TO_TOP_JUMP_THRESHOLD) {
+                            monitorGridState.scrollToItem(SCROLL_TO_TOP_JUMP_TARGET)
+                        }
+                        monitorGridState.animateScrollToItem(0, 0)
+                    }
+                    return@launch
+                }
+
                 val targetListState = when (targetTab) {
                     MainTab.Home -> homeListState
-                    MainTab.Monitor -> monitorState
                     MainTab.Event -> eventListState
                     MainTab.Setting -> settingListState
+                    MainTab.Monitor -> homeListState
                 }
                 if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
                     try {
@@ -340,14 +364,18 @@ fun MainScreen(
         enabled = uiState.currentTab != MainTab.Home &&
             showBottomBar &&
             !showNotificationConfigPage &&
+            !showAboutPage &&
             !isLiveCameraPageOpen
     ) {
         switchToTab(MainTab.Home, false)
     }
 
-    // Khi đang mở màn hình Cấu hình thông báo, ấn Back sẽ trượt đóng màn hình này từ trái sang phải
+    // Khi đang mở màn hình Cấu hình thông báo hoặc Giới thiệu, ấn Back sẽ trượt đóng màn hình này từ trái sang phải
     BackHandler(enabled = showNotificationConfigPage) {
         showNotificationConfigPage = false
+    }
+    BackHandler(enabled = showAboutPage) {
+        showAboutPage = false
     }
 
     val colors = MaterialTheme.appColors
@@ -399,6 +427,7 @@ fun MainScreen(
                             // or in the bottom navigation bar zone, or when video is in fullscreen
                             if (!showBottomBarState ||
                                 showNotificationConfigPageState ||
+                                showAboutPageState ||
                                 isLiveCameraPageOpenState ||
                                 overlayHostState.hasOverlays ||
                                 startX < edgeBufferPx ||
@@ -562,7 +591,7 @@ fun MainScreen(
                                             val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
                                             MonitorScreen(
                                                 viewModel = monitorViewModel,
-                                                listState = monitorState,
+                                                gridState = monitorGridState,
                                                 isTabActive = isMonitorActive,
                                                 onEventClick = onEventIdClick,
                                                 onFullscreenChange = onMonitorFullscreenChange
@@ -573,7 +602,8 @@ fun MainScreen(
                                             viewModel = viewModel,
                                             listState = settingListState,
                                             onLogoutClick = onLogoutClick,
-                                            onOpenNotificationConfig = onOpenNotificationConfig
+                                            onOpenNotificationConfig = onOpenNotificationConfig,
+                                            onOpenAbout = onOpenAbout
                                         )
                                     }
                                 }
@@ -635,6 +665,27 @@ fun MainScreen(
                     )
                 }
 
+                // Full-screen About ("Giới thiệu") Page sliding in from right & sliding out to right
+                AnimatedVisibility(
+                    visible = showAboutPage,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding())
+                        .zIndex(30f),
+                    enter = slideInHorizontally(
+                        initialOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(durationMillis = PAGE_ENTER_DURATION_MS, easing = PageEnterEasing)
+                    ),
+                    exit = slideOutHorizontally(
+                        targetOffsetX = { fullWidth -> fullWidth },
+                        animationSpec = tween(durationMillis = PAGE_EXIT_DURATION_MS, easing = PageExitEasing)
+                    )
+                ) {
+                    MobileAboutScreen(
+                        onBackClick = onCloseAbout
+                    )
+                }
+
                 // Edge-to-Edge Root Overlay Host (above status bar & bottom navigation bar, in the same Activity window so system bars never turn black)
                 if (overlayHostState.hasOverlays) {
                     Box(
@@ -655,7 +706,8 @@ fun SettingScreen(
     viewModel: MainViewModel,
     listState: LazyListState,
     onLogoutClick: () -> Unit,
-    onOpenNotificationConfig: () -> Unit
+    onOpenNotificationConfig: () -> Unit,
+    onOpenAbout: () -> Unit = {}
 ) {
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
     var showLogoutSheet by remember { mutableStateOf(false) }
@@ -732,6 +784,12 @@ fun SettingScreen(
                         iconTint = colors.warning,
                         title = stringResource(id = R.string.setting_notifications),
                         onClick = onOpenNotificationConfig
+                    )
+                    SettingsRow(
+                        icon = LucideIcons.Info,
+                        iconTint = colors.info,
+                        title = stringResource(id = R.string.setting_introduce),
+                        onClick = onOpenAbout
                     )
                 }
                 Spacer(modifier = Modifier.height(spacing.space8))
@@ -1139,7 +1197,6 @@ private fun MobileNotificationConfigScreen(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val backgroundColor = MaterialTheme.colorScheme.background
-    val titleColor = MaterialTheme.colorScheme.onBackground
 
     Column(
         modifier = Modifier
@@ -1151,40 +1208,10 @@ private fun MobileNotificationConfigScreen(
                 onClick = {}
             )
     ) {
-        // Header matching .drawer-header in MobileNotificationConfigModal.vue
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(spacing.topBarHeight)
-                .background(backgroundColor)
-                .padding(horizontal = spacing.space10),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(spacing.iconButton)
-                    .clip(CircleShape)
-                    .clickable(onClick = onBackClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = LucideIcons.ChevronLeft,
-                    contentDescription = stringResource(id = R.string.common_back),
-                    tint = titleColor,
-                    modifier = Modifier.size(spacing.iconMedium)
-                )
-            }
-            Text(
-                text = stringResource(id = R.string.setting_notifications),
-                style = MaterialTheme.typography.titleMedium,
-                color = titleColor,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(spacing.iconButton))
-        }
+        SettingSubPageHeader(
+            title = stringResource(id = R.string.setting_notifications),
+            onBackClick = onBackClick
+        )
 
         if (state.isLoading) {
             Box(
@@ -1332,6 +1359,98 @@ private fun MobileNotificationConfigScreen(
                     confirmColor = accentColor
                 )
             }
+        }
+    }
+}
+
+/** Thanh tiêu đề dùng chung cho các trang con trong Cài đặt (nút Back bên trái + tiêu đề căn giữa) */
+@Composable
+private fun SettingSubPageHeader(
+    title: String,
+    onBackClick: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val backgroundColor = MaterialTheme.colorScheme.background
+    val titleColor = MaterialTheme.colorScheme.onBackground
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(spacing.topBarHeight)
+            .background(backgroundColor)
+            .padding(horizontal = spacing.space10),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(spacing.iconButton)
+                .clip(CircleShape)
+                .clickable(onClick = onBackClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = LucideIcons.ChevronLeft,
+                contentDescription = stringResource(id = R.string.common_back),
+                tint = titleColor,
+                modifier = Modifier.size(spacing.iconMedium)
+            )
+        }
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = titleColor,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(spacing.iconButton))
+    }
+}
+
+/** Màn hình Giới thiệu: hiển thị icon ứng dụng và phiên bản lấy từ [BuildConfig.VERSION_NAME] */
+@Composable
+private fun MobileAboutScreen(
+    onBackClick: () -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val backgroundColor = MaterialTheme.colorScheme.background
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+    ) {
+        SettingSubPageHeader(
+            title = stringResource(id = R.string.setting_introduce),
+            onBackClick = onBackClick
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .navigationBarsPadding()
+                .padding(top = spacing.aboutTopPadding, start = spacing.paddingScreen, end = spacing.paddingScreen),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.logo_pwa),
+                contentDescription = stringResource(id = R.string.intro_logo_description),
+                modifier = Modifier.size(spacing.logoAbout)
+            )
+            Spacer(modifier = Modifier.height(spacing.space2))
+            Text(
+                text = stringResource(id = R.string.intro_version_label, BuildConfig.VERSION_NAME),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onBackground,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

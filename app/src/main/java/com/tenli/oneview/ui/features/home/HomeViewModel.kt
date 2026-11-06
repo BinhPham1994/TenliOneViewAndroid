@@ -24,6 +24,7 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -331,6 +332,12 @@ class HomeViewModel(
         }
     }
 
+    private data class RecentEventsFetchResult(
+        val events: List<EventData>,
+        val anySuccessful: Boolean,
+        val firstError: Throwable? = null
+    )
+
     /**
      * Khớp hoàn toàn với MobileHomePage.vue:
      * Fetch theo batch 50 sự kiện (tối đa 3 lần), lọc các loại AI được bật (AiTypeHelper.isAiTypeEnabled),
@@ -340,16 +347,17 @@ class HomeViewModel(
         fromSec: Long,
         toSec: Long,
         serviceId: Int?
-    ): Pair<List<EventData>, Boolean> {
+    ): RecentEventsFetchResult {
         val permitted = mutableListOf<EventData>()
         val seenIds = HashSet<Int>()
         var lastId: Int? = null
         var attempts = 0
         var anySuccessful = false
+        var firstError: Throwable? = null
 
         while (permitted.size < MAX_RECENT_EVENTS && attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
-            val resp = runCatching {
+            val result = safeApiCall {
                 eventApi.getDataList(
                     count = RECENT_BATCH_SIZE,
                     lastId = lastId,
@@ -357,9 +365,12 @@ class HomeViewModel(
                     to = toSec,
                     serviceId = serviceId
                 )
-            }.getOrNull()
-
-            if (resp == null || !resp.isSuccessful) break
+            }
+            val resp = result.getOrNull()
+            if (resp == null) {
+                if (firstError == null) firstError = result.exceptionOrNull()
+                break
+            }
             anySuccessful = true
             val data = resp.body() ?: emptyList()
             if (data.isEmpty()) break
@@ -375,7 +386,11 @@ class HomeViewModel(
             lastId = data.last().id
         }
 
-        return permitted.take(MAX_RECENT_EVENTS) to anySuccessful
+        return RecentEventsFetchResult(
+            events = permitted.take(MAX_RECENT_EVENTS),
+            anySuccessful = anySuccessful,
+            firstError = if (anySuccessful) null else firstError
+        )
     }
 
     private fun fetchRecentEvents() {
@@ -388,7 +403,7 @@ class HomeViewModel(
                 val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
                 coroutineScope {
                     val overviewDeferred = async {
-                        runCatching {
+                        safeApiCall {
                             bsApi.getVmsCountOverview(
                                 serviceId = serviceIdStr ?: "-1",
                                 fromTime = fromTime,
@@ -397,7 +412,7 @@ class HomeViewModel(
                         }.getOrNull()
                     }
                     val byTypeDeferred = async {
-                        runCatching {
+                        safeApiCall {
                             bsApi.getVmsEventCountByType(
                                 fromTime = fromTime,
                                 toTime = toTime,
@@ -414,7 +429,8 @@ class HomeViewModel(
                     }
                     val overviewResp = overviewDeferred.await()
                     val byTypeResp = byTypeDeferred.await()
-                    val (newEvents, _) = recentDeferred.await()
+                    val recentResult = recentDeferred.await()
+                    val newEvents = recentResult.events
 
                     if (newEvents.isNotEmpty()) {
                         EventCacheManager.cacheInMemory(events = newEvents)
@@ -528,22 +544,22 @@ class HomeViewModel(
                 coroutineScope {
                     val serviceIdStr = serviceId?.toString()
                     val overviewDeferred = async {
-                        runCatching {
+                        safeApiCall {
                             bsApi.getVmsCountOverview(
                                 serviceId = serviceIdStr ?: "-1",
                                 fromTime = fromTime,
                                 toTime = toTime
                             )
-                        }.getOrNull()
+                        }
                     }
                     val byTypeDeferred = async {
-                        runCatching {
+                        safeApiCall {
                             bsApi.getVmsEventCountByType(
                                 fromTime = fromTime,
                                 toTime = toTime,
                                 serviceId = serviceIdStr
                             )
-                        }.getOrNull()
+                        }
                     }
                     val recentEventsDeferred = async {
                         fetchPermittedRecentEvents(
@@ -553,28 +569,35 @@ class HomeViewModel(
                         )
                     }
                     val cameraDeferred = async {
-                        runCatching { vmsApi.getCameraList() }.getOrNull()
+                        safeApiCall { vmsApi.getCameraList() }
                     }
                     val aiServiceDeferred = async {
-                        runCatching { eventApi.getAIServiceList() }.getOrNull()
+                        safeApiCall { eventApi.getAIServiceList() }
                     }
 
                     // Pre-warm danh sách hồ sơ khuôn mặt trong nền nếu chưa có để màn Chi tiết sự kiện mở 0ms
                     launch {
                         if (EventCacheManager.getProfilesInMemory().isEmpty()) {
-                            val profiles = runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
-                            val groups = runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                            val profiles = safeApiCall { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                            val groups = safeApiCall { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
                             if (profiles.isNotEmpty() || groups.isNotEmpty()) {
                                 EventCacheManager.saveProfilesCache(getApplication(), profiles, groups)
                             }
                         }
                     }
 
-                    val overviewResponse = overviewDeferred.await()
-                    val byTypeResponse = byTypeDeferred.await()
-                    val (recentEvents, recentEventsSucceeded) = recentEventsDeferred.await()
-                    val cameraResponse = cameraDeferred.await()
-                    val aiServiceResponse = aiServiceDeferred.await()
+                    val overviewResult = overviewDeferred.await()
+                    val byTypeResult = byTypeDeferred.await()
+                    val recentResult = recentEventsDeferred.await()
+                    val cameraResult = cameraDeferred.await()
+                    val aiServiceResult = aiServiceDeferred.await()
+
+                    val overviewResponse = overviewResult.getOrNull()
+                    val byTypeResponse = byTypeResult.getOrNull()
+                    val recentEvents = recentResult.events
+                    val recentEventsSucceeded = recentResult.anySuccessful
+                    val cameraResponse = cameraResult.getOrNull()
+                    val aiServiceResponse = aiServiceResult.getOrNull()
 
                     val overviewStats = if (overviewResponse?.isSuccessful == true) {
                         overviewResponse.body() ?: emptyList()
@@ -612,7 +635,7 @@ class HomeViewModel(
                             val monitorResults = targetServices.map { srv ->
                                 async {
                                     val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
-                                    runCatching {
+                                    safeApiCall {
                                         if (host.isNotBlank() && srv.id != 0) {
                                             aiApi.getMonitorListExt(
                                                 url = "$host/api/Monitor",
@@ -633,6 +656,8 @@ class HomeViewModel(
                                 }
                             }
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                     }
@@ -644,10 +669,12 @@ class HomeViewModel(
                         runningTasks = overviewMonitorCount
                     }
 
-                    var errorMsg: String? = null
-                    if (overviewResponse != null && !overviewResponse.isSuccessful && cachedData == null) {
-                        errorMsg = "Lỗi Overview: ${overviewResponse.code()}"
-                    }
+                    // Báo lỗi backend kể cả khi đã có dữ liệu cache hiển thị trên màn hình
+                    val primaryFailure = overviewResult.exceptionOrNull()
+                        ?: recentResult.firstError
+                        ?: byTypeResult.exceptionOrNull()
+                        ?: cameraResult.exceptionOrNull()
+                    val errorMsg = primaryFailure?.toUserFriendlyMessage()
 
                     val finalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
                         recentEvents
@@ -700,11 +727,15 @@ class HomeViewModel(
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        error = if (cachedData == null) e.toUserFriendlyMessage() else null
+                        error = e.toUserFriendlyMessage()
                     )
                 }
             }
         }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
     }
 
     private fun HomeUiState.withRecomputedMetrics(): HomeUiState {

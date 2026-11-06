@@ -19,6 +19,7 @@ import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -169,7 +170,8 @@ class EventViewModel(
         val events: List<EventData>,
         val lastRawId: Int?,
         val hasMore: Boolean,
-        val apiSucceeded: Boolean
+        val apiSucceeded: Boolean,
+        val firstError: Throwable? = null
     )
 
     /**
@@ -192,10 +194,11 @@ class EventViewModel(
         var attempts = 0
         var reachedEnd = false
         var anySuccessful = false
+        var firstError: Throwable? = null
 
         while (attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
-            val response = runCatching {
+            val result = safeApiCall {
                 eventApi.getDataList(
                     lastId = currentLastId,
                     count = RAW_BATCH_SIZE,
@@ -205,9 +208,10 @@ class EventViewModel(
                     cameraUUID = cameraUuid,
                     type = resolvedType
                 )
-            }.getOrNull()
-
-            if (response == null || !response.isSuccessful) {
+            }
+            val response = result.getOrNull()
+            if (response == null) {
+                if (firstError == null) firstError = result.exceptionOrNull()
                 reachedEnd = true
                 break
             }
@@ -243,7 +247,13 @@ class EventViewModel(
 
         // Nếu sau 5 lượt (250 bản ghi thô) vẫn không có sự kiện hợp lệ nào thì dừng tự động phân trang để tránh vòng lặp vô hạn
         val hasMore = !reachedEnd && validData.isNotEmpty()
-        return EventBatchResult(validData, currentLastId, hasMore, anySuccessful)
+        return EventBatchResult(
+            events = validData,
+            lastRawId = currentLastId,
+            hasMore = hasMore,
+            apiSucceeded = anySuccessful,
+            firstError = if (anySuccessful) null else firstError
+        )
     }
 
     private fun fetchRecentEvents() {
@@ -397,10 +407,10 @@ class EventViewModel(
                     val needCameras = (reloadMetadata && !hasFreshMetadata) || _uiState.value.cameraList.isEmpty()
                     val needAiServices = (reloadMetadata && !hasFreshMetadata) || _uiState.value.aiServices.isEmpty()
                     val cameraDeferred = async {
-                        if (needCameras) runCatching { vmsApi.getCameraList() }.getOrNull() else null
+                        if (needCameras) safeApiCall { vmsApi.getCameraList() } else null
                     }
                     val aiServiceDeferred = async {
-                        if (needAiServices) runCatching { eventApi.getAIServiceList() }.getOrNull() else null
+                        if (needAiServices) safeApiCall { eventApi.getAIServiceList() } else null
                     }
                     val (from, to) = getTimeRange(filter)
                     val eventsDeferred = async {
@@ -414,9 +424,11 @@ class EventViewModel(
                         )
                     }
 
-                    val cameraResponse = cameraDeferred.await()
-                    val aiServiceResponse = aiServiceDeferred.await()
+                    val cameraResult = cameraDeferred.await()
+                    val aiServiceResult = aiServiceDeferred.await()
                     val batchResult = eventsDeferred.await()
+                    val cameraResponse = cameraResult?.getOrNull()
+                    val aiServiceResponse = aiServiceResult?.getOrNull()
                     val newEvents = batchResult.events
                     val nextLastId = batchResult.lastRawId
                     val hasMore = batchResult.hasMore
@@ -441,6 +453,10 @@ class EventViewModel(
                         currentState.events
                     }
 
+                    val failure = batchResult.firstError
+                        ?: cameraResult?.exceptionOrNull()
+                        ?: aiServiceResult?.exceptionOrNull()
+
                     EventCacheManager.cacheInMemory(
                         events = finalEvents,
                         cameras = cameraList,
@@ -462,7 +478,8 @@ class EventViewModel(
                             cameraNameMap = cameraNameMap,
                             aiServices = aiServices,
                             events = finalEvents,
-                            hasMore = hasMore
+                            hasMore = hasMore,
+                            error = failure?.toUserFriendlyMessage()
                         )
                     }
 
@@ -491,7 +508,7 @@ class EventViewModel(
                         isLoading = false,
                         isRefreshing = false,
                         hasMore = false,
-                        error = if (cachedData == null) e.toUserFriendlyMessage() else null
+                        error = e.toUserFriendlyMessage()
                     )
                 }
             }
@@ -509,7 +526,7 @@ class EventViewModel(
             try {
                 val startId = lastFetchedRawId ?: currentState.events.last().id
                 val (from, to) = getTimeRange(currentState.selectedFilter)
-                val (newEvents, nextLastId, hasMore) = fetchPermittedEventBatch(
+                val batchResult = fetchPermittedEventBatch(
                     startLastId = startId,
                     fromSec = from,
                     toSec = to,
@@ -517,6 +534,9 @@ class EventViewModel(
                     cameraUuid = currentState.selectedCameraUuid,
                     resolvedType = resolveApiEventType(currentState.selectedAiType)
                 )
+                val newEvents = batchResult.events
+                val nextLastId = batchResult.lastRawId
+                val hasMore = batchResult.hasMore
                 lastFetchedRawId = nextLastId
                 if (newEvents.isNotEmpty()) {
                     EventCacheManager.cacheInMemory(events = newEvents)
@@ -527,7 +547,8 @@ class EventViewModel(
                     it.copy(
                         isPaginating = false,
                         events = merged,
-                        hasMore = hasMore && merged.size > it.events.size
+                        hasMore = hasMore && merged.size > it.events.size,
+                        error = batchResult.firstError?.toUserFriendlyMessage()
                     )
                 }
             } catch (e: CancellationException) {
@@ -537,6 +558,10 @@ class EventViewModel(
                 _uiState.update { it.copy(isPaginating = false, hasMore = false, error = e.toUserFriendlyMessage()) }
             }
         }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
     }
 
     companion object {

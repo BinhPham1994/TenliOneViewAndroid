@@ -154,7 +154,7 @@ class LoginViewModel(
             error is UnknownHostException || errorMsg.contains("Unable to resolve host") ->
                 if (isEn) "Cannot connect to server. Please check your connection." else "Không thể kết nối tới máy chủ. Vui lòng kiểm tra đường truyền."
             error is SocketTimeoutException || errorMsg.contains("timeout") ->
-                if (isEn) "Connection timed out, please try again." else "Kết nối mạng quá hạn, vui lòng thử lại."
+                if (isEn) "Connection error to server, please try again later" else "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
             isUnexpected ->
                 if (isEn) "An error occurred, please try again later." else "Có lỗi xảy ra, vui lòng thử lại sau."
             else ->

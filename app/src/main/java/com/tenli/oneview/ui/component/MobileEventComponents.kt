@@ -279,21 +279,40 @@ object MobileTopPopupManager {
     private val _currentMessage = MutableStateFlow<MobileTopPopupMessage?>(null)
     val currentMessage: StateFlow<MobileTopPopupMessage?> = _currentMessage.asStateFlow()
 
+    @Volatile
+    private var lastErrorShownAtMs: Long = 0L
+    @Volatile
+    private var lastErrorText: String = ""
+    private const val ERROR_DEDUP_WINDOW_MS = 2500L
+
     fun show(
         text: String,
         type: MobileTopPopupType = MobileTopPopupType.INFO,
         durationMs: Long = 2600L
     ) {
-        if (text.isBlank()) return
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        val now = System.currentTimeMillis()
+        if (type == MobileTopPopupType.ERROR) {
+            val active = _currentMessage.value
+            if (active != null &&
+                active.type == MobileTopPopupType.ERROR &&
+                now - lastErrorShownAtMs < ERROR_DEDUP_WINDOW_MS
+            ) {
+                return
+            }
+            lastErrorShownAtMs = now
+            lastErrorText = trimmed
+        }
         _currentMessage.value = MobileTopPopupMessage(
             id = System.nanoTime(),
-            text = text.trim(),
+            text = trimmed,
             type = type,
             durationMs = durationMs
         )
     }
 
-    fun error(text: String, durationMs: Long = 2600L) {
+    fun error(text: String, durationMs: Long = 3000L) {
         show(text = text, type = MobileTopPopupType.ERROR, durationMs = durationMs)
     }
 

@@ -30,9 +30,12 @@ import com.tenli.oneview.ui.features.event.parseVideoQueryTime
 import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.safeApiCall
+import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -369,16 +372,16 @@ class EventDetailViewModel(
         fromTime: Long,
         toTime: Long,
         profiles: List<BsProfileModel>
-    ): List<EventData> {
+    ): Result<List<EventData>> {
         val typeLower = targetEvent.type.lowercase()
         val evData = targetEvent.data
         val serviceId = targetEvent.serviceId.takeIf { it > 0 }
         val cameraUUID = targetEvent.cameraUuidOrNull
 
-        val response = when {
+        val result = when {
             typeLower == "sensor-license-plate" || isPlateType(typeLower) || !evData?.plate?.plate.isNullOrBlank() -> {
                 val plate = (evData?.plate?.plate ?: evData?.plate?.number ?: targetEvent.plate)?.trim()
-                if (plate.isNullOrBlank()) return emptyList()
+                if (plate.isNullOrBlank()) return Result.success(emptyList())
                 val searchItems = listOf(
                     DataSearchPlateModel(
                         type = "plate",
@@ -386,7 +389,7 @@ class EventDetailViewModel(
                         param = ParamPlateModel(value = plate)
                     )
                 )
-                runCatching {
+                safeApiCall {
                     eventApi.searchAIData(
                         from = fromTime,
                         to = toTime,
@@ -395,7 +398,7 @@ class EventDetailViewModel(
                         fast = "yes",
                         searchItems = searchItems
                     )
-                }.getOrNull()
+                }
             }
 
             AiTypeHelper.isFaceEvent(targetEvent) -> {
@@ -410,7 +413,7 @@ class EventDetailViewModel(
                 }
 
                 if (profileUuid.isNotEmpty()) {
-                    runCatching {
+                    safeApiCall {
                         eventApi.getFaceDataByProfileUUID(
                             profileUUID = profileUuid,
                             count = 50,
@@ -418,9 +421,9 @@ class EventDetailViewModel(
                             to = toTime,
                             serviceId = serviceId
                         )
-                    }.getOrNull()
+                    }
                 } else {
-                    runCatching {
+                    safeApiCall {
                         eventApi.getDataList(
                             count = 50,
                             serviceId = serviceId,
@@ -429,7 +432,7 @@ class EventDetailViewModel(
                             to = toTime,
                             cameraUUID = cameraUUID
                         )
-                    }.getOrNull()
+                    }
                 }
             }
 
@@ -449,10 +452,10 @@ class EventDetailViewModel(
                 } else {
                     params["onlyProfileUnknown"] = "1"
                 }
-                runCatching { bsApi.getUniformData(params) }.getOrNull()
+                safeApiCall { bsApi.getUniformData(params) }
             }
 
-            else -> runCatching {
+            else -> safeApiCall {
                 eventApi.getDataList(
                     count = 50,
                     serviceId = serviceId,
@@ -461,10 +464,10 @@ class EventDetailViewModel(
                     to = toTime,
                     cameraUUID = cameraUUID
                 )
-            }.getOrNull()
+            }
         }
 
-        return if (response?.isSuccessful == true) response.body() ?: emptyList() else emptyList()
+        return result.map { it.body() ?: emptyList() }
     }
 
     fun loadRelatedEvents() {
@@ -483,7 +486,12 @@ class EventDetailViewModel(
             }
             try {
                 val (fromTime, toTime) = getJourneyTimeRange(period)
-                val fetched = fetchRelatedRaw(targetEvent, fromTime, toTime, _uiState.value.profileList)
+                val fetchedResult = fetchRelatedRaw(targetEvent, fromTime, toTime, _uiState.value.profileList)
+                val fetched = fetchedResult.getOrElse { err ->
+                    MobileTopPopupManager.error(err.toUserFriendlyMessage())
+                    _uiState.update { it.copy(isJourneyLoading = false) }
+                    return@launch
+                }
 
                 // Lọc / sắp xếp trên Dispatchers.Default để không chiếm Main thread
                 val sorted = withContext(Dispatchers.Default) {
@@ -514,6 +522,7 @@ class EventDetailViewModel(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching related events", e)
+                MobileTopPopupManager.error(e.toUserFriendlyMessage())
                 _uiState.update { it.copy(isJourneyLoading = false) }
             }
         }

@@ -92,16 +92,15 @@ fun LiveStreamPlayer(
     wsUrl: String,
     videoCodecTag: String = "",
     cameraId: Int = 0,
-    altCameraId: Int = 0,
     isOriginalRatio: Boolean = false,
     showInternalOverlay: Boolean = false,
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
-    var isPlaying by remember(wsUrl) { mutableStateOf(false) }
-    var isError by remember(wsUrl) { mutableStateOf(false) }
-    var playerViewRef by remember { mutableStateOf<PlayerView?>(null) }
+    var isPlaying by remember(cameraId, wsUrl) { mutableStateOf(false) }
+    var isError by remember(cameraId, wsUrl) { mutableStateOf(false) }
+    var playerViewRef by remember(cameraId, wsUrl) { mutableStateOf<PlayerView?>(null) }
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
 
@@ -126,10 +125,10 @@ fun LiveStreamPlayer(
         return // Component will be destroyed, saving battery and network
     }
 
-    fun captureCurrentFrameToCache() {
-        if (cameraId <= 0) return
+    fun captureCurrentFrameToCache(targetCameraId: Int, targetPlayerView: PlayerView?) {
+        if (targetCameraId <= 0) return
         try {
-            val textureView = playerViewRef?.videoSurfaceView as? TextureView ?: return
+            val textureView = targetPlayerView?.videoSurfaceView as? TextureView ?: return
             val w = textureView.width
             val h = textureView.height
             if (textureView.isAvailable && w > 0 && h > 0) {
@@ -137,7 +136,7 @@ fun LiveStreamPlayer(
                 val targetH = (h * (targetW.toFloat() / w)).toInt().coerceAtLeast(1)
                 val bmp = textureView.getBitmap(targetW, targetH)
                 if (bmp != null) {
-                    MonitorCacheManager.saveCapturedCameraFrame(context.applicationContext, cameraId, bmp, altCameraId)
+                    MonitorCacheManager.saveCapturedCameraFrame(context.applicationContext, targetCameraId, bmp)
                 }
             }
         } catch (_: Exception) {
@@ -145,14 +144,15 @@ fun LiveStreamPlayer(
     }
 
     // Đồng bộ LivePlayer.vue: chụp 1 frame sau 1200ms khi luồng live bắt đầu phát
-    LaunchedEffect(isPlaying, wsUrl) {
-        if (isPlaying && cameraId > 0) {
+    LaunchedEffect(isPlaying, cameraId, wsUrl) {
+        val boundCameraId = cameraId
+        if (isPlaying && boundCameraId > 0) {
             delay(1200)
-            captureCurrentFrameToCache()
+            captureCurrentFrameToCache(boundCameraId, playerViewRef)
         }
     }
 
-    val exoPlayer = remember(wsUrl) {
+    val exoPlayer = remember(cameraId, wsUrl) {
         val dataSourceFactory = DataSource.Factory {
             WebSocketDataSource(sharedWsStreamClient, UserSession.accessToken)
         }
@@ -226,10 +226,11 @@ fun LiveStreamPlayer(
             }
     }
 
-    DisposableEffect(exoPlayer) {
+    DisposableEffect(exoPlayer, cameraId) {
+        val boundCameraId = cameraId
         onDispose {
             if (isPlaying) {
-                captureCurrentFrameToCache()
+                captureCurrentFrameToCache(boundCameraId, playerViewRef)
             }
             exoPlayer.stop()
             exoPlayer.release()

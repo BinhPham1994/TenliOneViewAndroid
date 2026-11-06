@@ -26,7 +26,9 @@ import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
+import com.tenli.oneview.util.BackendHttpException
 import com.tenli.oneview.util.NetworkMonitor
+import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -252,12 +254,16 @@ class MainViewModel(
                         val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
                         "❌ [TẢI CẤU HÌNH THẤT BẠI] GET /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
                     }
+                    MobileTopPopupManager.error(
+                        BackendHttpException(resp.code(), resp.message()).toUserFriendlyMessage()
+                    )
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 logError(e) {
                     "❌ [EXCEPTION KHI TẢI CẤU HÌNH] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}"
                 }
+                MobileTopPopupManager.error(e.toUserFriendlyMessage())
             } finally {
                 _notificationConfigState.update { it.copy(isLoading = false) }
             }

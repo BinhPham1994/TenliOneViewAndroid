@@ -86,7 +86,14 @@ object MonitorCacheManager {
     }
 
     private fun getSnapshotCacheFile(context: Context): File {
-        return File(context.cacheDir, "monitor_camera_snapshots_v3.json")
+        return File(context.cacheDir, "monitor_camera_snapshots_v4.json")
+    }
+
+    private fun deleteLegacySnapshotCacheFiles(context: Context) {
+        runCatching {
+            val legacyV3 = File(context.cacheDir, "monitor_camera_snapshots_v3.json")
+            if (legacyV3.exists()) legacyV3.delete()
+        }
     }
 
     private fun getSnapshotImageDir(context: Context): File {
@@ -109,15 +116,17 @@ object MonitorCacheManager {
         snapshotsLoaded = true
         val now = System.currentTimeMillis()
         try {
+            deleteLegacySnapshotCacheFiles(context)
             val parsed: Map<String, SnapshotCacheItem>? = JsonFileStore.read(gson, getSnapshotCacheFile(context), snapshotMapType)
             if (parsed != null) {
                 parsed.forEach { (keyStr, item) ->
                     val id = keyStr.toIntOrNull()
-                    if (id != null && item.link.isNotBlank() && item.link != "NO_IMAGE") {
+                    if (id != null && id > 0 && item.link.isNotBlank() && item.link != "NO_IMAGE") {
                         if (now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
                             if (item.link.startsWith("file://")) {
                                 val rawPath = item.link.removePrefix("file://").substringBefore("?")
-                                if (File(rawPath).exists()) {
+                                val expectedSuffix = "/cam_${id}.jpg"
+                                if (rawPath.endsWith(expectedSuffix) && File(rawPath).exists()) {
                                     snapshotMap[id] = item
                                 }
                             } else {
@@ -135,6 +144,7 @@ object MonitorCacheManager {
                     val name = file.name
                     if (name.startsWith("cam_") && name.endsWith(".jpg") && file.length() > MIN_VALID_IMAGE_BYTES) {
                         val camId = name.removePrefix("cam_").removeSuffix(".jpg").toIntOrNull() ?: continue
+                        if (camId <= 0) continue
                         val lastMod = file.lastModified()
                         if (now - lastMod <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
                             val existing = snapshotMap[camId]
@@ -171,27 +181,22 @@ object MonitorCacheManager {
 
     /**
      * Tra cứu tức thì từ RAM (0ms, không chạm đĩa) khi snapshotMap đã được preload.
+     * Lưu ý: Chỉ dùng duy nhất `camera.id` (ID toàn cục trên OneView), tuyệt đối không fallback sang `camera.cameraId`
+     * (ID cục bộ trong từng VMS con, rất dễ trùng nhau giữa các VMS gây hiển thị nhầm ảnh của camera khác).
      */
-    fun getCachedCameraImageLinkInMemory(cameraId: Int, altCameraId: Int = 0): String? {
+    fun getCachedCameraImageLinkInMemory(cameraId: Int): String? {
+        if (cameraId <= 0) return null
         val now = System.currentTimeMillis()
-        if (cameraId > 0) {
-            val item = snapshotMap[cameraId]
-            if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE" && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
-                return item.link
-            }
-        }
-        if (altCameraId > 0 && altCameraId != cameraId) {
-            val item = snapshotMap[altCameraId]
-            if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE" && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
-                return item.link
-            }
+        val item = snapshotMap[cameraId]
+        if (item != null && item.link.isNotBlank() && item.link != "NO_IMAGE" && now - item.updatedAt <= SNAPSHOT_STORAGE_MAX_AGE_MS) {
+            return item.link
         }
         return null
     }
 
-    fun getCachedCameraImageLink(context: Context, cameraId: Int, altCameraId: Int = 0): String? {
+    fun getCachedCameraImageLink(context: Context, cameraId: Int): String? {
         ensureSnapshotsLoaded(context)
-        return getCachedCameraImageLinkInMemory(cameraId, altCameraId)
+        return getCachedCameraImageLinkInMemory(cameraId)
     }
 
     /**
@@ -213,14 +218,11 @@ object MonitorCacheManager {
         }
     }
 
-    fun setCachedCameraImageLink(context: Context, cameraId: Int, link: String, altCameraId: Int = 0) {
+    fun setCachedCameraImageLink(context: Context, cameraId: Int, link: String) {
         if (cameraId <= 0 || link.isBlank() || link == "NO_IMAGE") return
         ensureSnapshotsLoaded(context)
         val now = System.currentTimeMillis()
         sessionRefreshedAtMap[cameraId] = now
-        if (altCameraId > 0 && altCameraId != cameraId) {
-            sessionRefreshedAtMap[altCameraId] = now
-        }
         // Không ghi đè ảnh frame vừa chụp từ luồng live bằng link ảnh cũ hơn nếu frame đó còn rất mới (< 30s)
         val existing = snapshotMap[cameraId]
         if (existing != null &&
@@ -232,28 +234,22 @@ object MonitorCacheManager {
         }
         val newItem = SnapshotCacheItem(link = link, updatedAt = now)
         snapshotMap[cameraId] = newItem
-        if (altCameraId > 0 && altCameraId != cameraId) {
-            snapshotMap[altCameraId] = newItem
-        }
         _snapshotUpdates.tryEmit(cameraId to link)
         persistSnapshotsAsync(context)
     }
 
-    fun removeCachedCameraImageLink(context: Context, cameraId: Int, altCameraId: Int = 0) {
+    fun removeCachedCameraImageLink(context: Context, cameraId: Int) {
+        if (cameraId <= 0) return
         ensureSnapshotsLoaded(context)
         snapshotMap.remove(cameraId)
         sessionRefreshedAtMap.remove(cameraId)
-        if (altCameraId > 0) {
-            snapshotMap.remove(altCameraId)
-            sessionRefreshedAtMap.remove(altCameraId)
-        }
         persistSnapshotsAsync(context)
     }
 
     /**
      * Chụp frame từ luồng live (TextureView) và lưu vào cache đĩa giống `captureImmediateFrame()` trong `LivePlayer.vue`.
      */
-    fun saveCapturedCameraFrame(context: Context, cameraId: Int, bitmap: Bitmap, altCameraId: Int = 0) {
+    fun saveCapturedCameraFrame(context: Context, cameraId: Int, bitmap: Bitmap) {
         if (cameraId <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return
         val appContext = context.applicationContext
         ioScope.launch {
@@ -276,7 +272,7 @@ object MonitorCacheManager {
                 }
                 if (outFile.exists() && outFile.length() > MIN_VALID_IMAGE_BYTES) {
                     val fileUrl = "file://${outFile.absolutePath}?t=${System.currentTimeMillis()}"
-                    setCachedCameraImageLink(appContext, cameraId, fileUrl, altCameraId)
+                    setCachedCameraImageLink(appContext, cameraId, fileUrl)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -318,6 +314,7 @@ object MonitorCacheManager {
             if (snapFile.exists()) {
                 snapFile.delete()
             }
+            deleteLegacySnapshotCacheFiles(context)
             getSnapshotImageDir(context).listFiles()?.forEach { it.delete() }
             snapshotMap.clear()
             sessionRefreshedAtMap.clear()

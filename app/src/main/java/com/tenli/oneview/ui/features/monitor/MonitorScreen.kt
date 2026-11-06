@@ -48,6 +48,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -180,7 +181,7 @@ private val GroupRowBaseHeight = 38.dp
 @Composable
 fun MonitorScreen(
     viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
-    listState: LazyListState = rememberLazyListState(),
+    gridState: LazyGridState = rememberLazyGridState(),
     isTabActive: Boolean = true,
     onEventClick: (Int) -> Unit = {},
     onFullscreenChange: (Boolean) -> Unit = {}
@@ -204,7 +205,7 @@ fun MonitorScreen(
             }
         }
     }
-    val cameraGridState = rememberLazyGridState()
+    val cameraGridState = gridState
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
@@ -257,10 +258,9 @@ fun MonitorScreen(
     }
 
     LaunchedEffect(uiState.error, isTabActive) {
-        uiState.error?.let {
-            if (isTabActive) {
-                MobileTopPopupManager.error(it)
-            }
+        val errMsg = uiState.error ?: return@LaunchedEffect
+        if (isTabActive) {
+            MobileTopPopupManager.error(errMsg)
             viewModel.clearError()
         }
     }
@@ -2418,7 +2418,6 @@ fun CameraGridItem(
                 LiveStreamPlayer(
                     wsUrl = selectedCamera.streamUrl,
                     cameraId = selectedCamera.camera.id,
-                    altCameraId = selectedCamera.camera.cameraId,
                     isOriginalRatio = isOriginalRatio,
                     showInternalOverlay = false,
                     onPlayingChange = {
@@ -2458,6 +2457,9 @@ fun CameraGridItem(
         val targetFallbackMemKey = remember(fallbackUrl) {
             if (fallbackUrl.isEmpty()) null else "${fallbackUrl}_${LIVE_STAGE_SNAPSHOT_WIDTH_PX}x${LIVE_STAGE_SNAPSHOT_HEIGHT_PX}"
         }
+        val cardFallbackMemKey = remember(fallbackUrl) {
+            if (fallbackUrl.isEmpty()) null else "${fallbackUrl}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+        }
         val fallbackImageRequest = remember(fallbackUrl, lastFallbackCacheKey) {
             if (fallbackUrl.isEmpty()) {
                 null
@@ -2470,7 +2472,7 @@ fun CameraGridItem(
                     .crossfade(false)
                     .memoryCacheKey(targetFallbackMemKey)
                     .diskCacheKey(fallbackUrl)
-                    .placeholderMemoryCacheKey(lastFallbackCacheKey)
+                    .placeholderMemoryCacheKey(lastFallbackCacheKey ?: cardFallbackMemKey)
                     .build()
             }
         }
