@@ -985,6 +985,64 @@ object AiTypeHelper {
     }
 
     /**
+     * Suy luận `eventType` từ `title` / `body` của thông báo trong trường hợp bản tin FCM
+     * không gửi kèm trường `type` / `eventType` trong `data`.
+     */
+    fun inferEventTypeFromText(title: String?, body: String?): String {
+        val combined = "${title.orEmpty()} ${body.orEmpty()}".trim().lowercase()
+        if (combined.isEmpty()) return ""
+
+        // 1. Khớp trực tiếp theo mã sensorType / eventTypes / key
+        for (mod in defaultModules) {
+            if (mod.eventTypes.any { combined.contains(it.lowercase()) } ||
+                combined.contains(mod.sensorType.lowercase())
+            ) {
+                return mod.sensorType
+            }
+        }
+
+        // 2. Khớp theo tên bài AI tiếng Việt / tiếng Anh (kể cả bản rút gọn bỏ tiền tố "Phát hiện " / "Detected ")
+        for (mod in defaultModules) {
+            val viFull = mod.labelVi.lowercase()
+            val viShort = mod.labelVi.replace(REGEX_PREFIX_VI, "").trim().lowercase()
+            val enFull = mod.labelEn.lowercase()
+            val enShort = mod.labelEn.replace(REGEX_PREFIX_EN, "").trim().lowercase()
+            if (combined.contains(viFull) ||
+                (viShort.length >= 4 && combined.contains(viShort)) ||
+                combined.contains(enFull) ||
+                (enShort.length >= 4 && combined.contains(enShort))
+            ) {
+                return mod.sensorType
+            }
+        }
+
+        // 3. Một số từ khoá phổ biến trong nội dung cảnh báo
+        return when {
+            combined.contains("người lạ") || combined.contains("stranger") -> "sensor-face-unknown-camera"
+            combined.contains("khuôn mặt") -> "logic-face"
+            combined.contains("biển số") || combined.contains("license plate") -> "sensor-license-plate"
+            combined.contains("mũ bảo hiểm") || combined.contains("helmet") -> "sensor-helmet-camera"
+            combined.contains("cháy") || combined.contains("khói") -> "sensor-fire-camera"
+            combined.contains("đông người") || combined.contains("đám đông") -> "sensor-crowd-camera"
+            combined.contains("trang phục") || combined.contains("đồng phục") -> "sensor-uniform-camera"
+            combined.contains("xâm nhập") -> "sensor-person-camera"
+            combined.contains("đỗ xe") -> "sensor-parking-camera"
+            combined.contains("xả rác") -> "sensor-littering-camera"
+            combined.contains("vỉa hè") || combined.contains("lấn chiếm") -> "sensor-encroachment-camera"
+            combined.contains("thi công") -> "sensor-construction-camera"
+            combined.contains("ngược chiều") -> "sensor-crossing-tracking"
+            combined.contains("đánh nhau") || combined.contains("bạo lực") -> "sensor-violence"
+            combined.contains("hút thuốc") -> "sensor-smoking"
+            combined.contains("người ngã") || combined.contains("té ngã") -> "sensor-fall-person-camera"
+            combined.contains("găng tay") -> "sensor-gloves"
+            combined.contains("mũ bảo hộ") -> "sensor-hairnet"
+            combined.contains("khẩu trang") -> "sensor-face-masked"
+            combined.contains("ngập lụt") || combined.contains("ngập nước") -> "flooding"
+            else -> ""
+        }
+    }
+
+    /**
      * Tra cứu cấu hình `(enabled, alarmMode)` cho một `eventType` cụ thể khi nhận FCM push.
      */
     fun resolveEventNotificationRule(

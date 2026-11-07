@@ -6,10 +6,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import android.view.WindowManager
 import android.window.SplashScreen
@@ -55,9 +59,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -74,18 +82,38 @@ import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
 import coil.compose.SubcomposeAsyncImage
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.main.MainActivity
+import com.tenli.oneview.model.network.AIServiceModel
+import com.tenli.oneview.model.network.BsProfileGroupModel
+import com.tenli.oneview.model.network.BsProfileModel
+import com.tenli.oneview.model.network.CameraModel
+import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
+import com.tenli.oneview.ui.component.isUuidString
 import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.features.event.detail.EventDetailDisplay
+import com.tenli.oneview.ui.features.event.detail.buildEventDetailDisplay
+import com.tenli.oneview.ui.features.event.formatEventTimeAndDate
+import com.tenli.oneview.ui.features.event.resolveCameraForEvent
+import com.tenli.oneview.ui.theme.ErrorRed
 import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.OrangeDeep
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "CallComingActivity"
 
@@ -97,6 +125,10 @@ private const val EXTRA_BODY = "BODY"
 private const val EXTRA_URL = "URL"
 private const val EXTRA_EID = "EID"
 private const val EXTRA_NOTIFICATION_ID = "NOTIFICATION_ID"
+private const val EXTRA_EVENT_TYPE = "EVENT_TYPE"
+private const val EXTRA_CAMERA_UUID = "CAMERA_UUID"
+private const val EXTRA_CAMERA_NAME = "CAMERA_NAME"
+private const val EXTRA_EVENT_TIME = "EVENT_TIME"
 private const val EXTRA_EVENT_ID = "EVENT_ID"
 private const val EXTRA_FROM_CALL = "FROM_CALL"
 
@@ -111,6 +143,8 @@ private val CallCardShadowAmbientDark = 0.42f
 private val CallCardShadowAmbientLight = 0.14f
 private val CallCardShadowSpotDark = 0.52f
 private val CallCardShadowSpotLight = 0.18f
+private const val CALL_BOUNDING_BOX_STROKE_PX = 3.5f
+private const val CALL_CROP_ASPECT_RATIO = 72f / 90f
 
 /** Dữ liệu cuộc gọi cảnh báo nhận từ EventMessagingService */
 @Immutable
@@ -119,22 +153,37 @@ private data class IncomingCall(
     val body: String,
     val imageUrl: String?,
     val eventId: String,
-    val notificationId: Int = 0
+    val notificationId: Int = 0,
+    val eventType: String = "",
+    val cameraUuid: String = "",
+    val cameraName: String = "",
+    val eventTime: Double = 0.0
 )
 
 private fun Intent.toIncomingCall() = IncomingCall(
     title = getStringExtra(EXTRA_TITLE) ?: "Cảnh báo an ninh",
-    body = getStringExtra(EXTRA_BODY) ?: "Phát hiện sự kiện lạ",
+    body = getStringExtra(EXTRA_BODY) ?: "",
     imageUrl = getStringExtra(EXTRA_URL),
     eventId = getStringExtra(EXTRA_EID).orEmpty(),
-    notificationId = getIntExtra(EXTRA_NOTIFICATION_ID, 0)
+    notificationId = getIntExtra(EXTRA_NOTIFICATION_ID, 0),
+    eventType = getStringExtra(EXTRA_EVENT_TYPE).orEmpty(),
+    cameraUuid = getStringExtra(EXTRA_CAMERA_UUID).orEmpty(),
+    cameraName = getStringExtra(EXTRA_CAMERA_NAME).orEmpty(),
+    eventTime = getDoubleExtra(EXTRA_EVENT_TIME, 0.0)
 )
 
 class CallComingActivity : ComponentActivity() {
 
     private var call by mutableStateOf(IncomingCall("", "", null, ""))
+    private var enrichedEvent by mutableStateOf<EventData?>(null)
+    private var enrichedCamera by mutableStateOf<CameraModel?>(null)
+    private var enrichedAiService by mutableStateOf<AIServiceModel?>(null)
+    private var enrichedProfiles by mutableStateOf<List<BsProfileModel>>(emptyList())
+    private var enrichedGroups by mutableStateOf<List<BsProfileGroupModel>>(emptyList())
     private var ringtone: Ringtone? = null
+    private var vibrator: Vibrator? = null
     private var timeoutJob: Job? = null
+    private var eventFetchJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableAppEdgeToEdge()
@@ -143,7 +192,9 @@ class CallComingActivity : ComponentActivity() {
 
         UserSession.ensureRestored()
         AppState.isShowCallActivity = true
-        call = intent.toIncomingCall()
+        val initialCall = intent.toIncomingCall()
+        call = initialCall
+        loadEventDetailsForCall(initialCall)
         startRinging()
         scheduleTimeout()
 
@@ -151,6 +202,11 @@ class CallComingActivity : ComponentActivity() {
             TenliAIoTTheme {
                 CallScreenContent(
                     call = call,
+                    enrichedEvent = enrichedEvent,
+                    enrichedCamera = enrichedCamera,
+                    enrichedAiService = enrichedAiService,
+                    enrichedProfiles = enrichedProfiles,
+                    enrichedGroups = enrichedGroups,
                     onDecline = ::declineCall,
                     onAccept = ::acceptCall
                 )
@@ -158,37 +214,192 @@ class CallComingActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        AppState.isShowCallActivity = true
+        // Khi màn hình Call đã hiển thị trực tiếp trước mặt người dùng, gỡ thông báo Heads-Up trên thanh trạng thái
+        // để không bị đè banner lên giao diện Call và không phát 2 tiếng nhạc chuông chồng nhau.
+        cancelCallNotification(call.eventId, call.notificationId)
+    }
+
     /** singleInstance: cảnh báo mới đến khi màn đang mở → cập nhật nội dung và đếm lại thời gian chờ */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val previous = call
         val next = intent.toIncomingCall()
-        if (previous.eventId != next.eventId || previous.notificationId != next.notificationId) {
-            cancelCallNotification(previous.eventId, previous.notificationId)
-        }
+        cancelCallNotification(previous.eventId, previous.notificationId)
+        cancelCallNotification(next.eventId, next.notificationId)
         setIntent(intent)
         call = next
+        loadEventDetailsForCall(next)
         if (ringtone?.isPlaying != true) startRinging()
         scheduleTimeout()
     }
 
     override fun onDestroy() {
         timeoutJob?.cancel()
+        eventFetchJob?.cancel()
         stopRinging()
         AppState.isShowCallActivity = false
         super.onDestroy()
     }
 
+    /**
+     * Tải đầy đủ chi tiết sự kiện (`EventData`, camera, hệ thống AI, hồ sơ khuôn mặt/đồng phục)
+     * từ cache hoặc API theo `eventId` để màn hình cuộc gọi luôn hiển thị trọn vẹn thông tin
+     * (tên bài AI, đối tượng/biển số, tên camera, thời gian, ảnh sự kiện + khung bounding box + ảnh crop).
+     */
+    private fun loadEventDetailsForCall(incoming: IncomingCall) {
+        eventFetchJob?.cancel()
+        val memCameras = EventCacheManager.getCamerasInMemory()
+        val memServices = EventCacheManager.getAiServicesInMemory()
+        val memProfiles = EventCacheManager.getProfilesInMemory()
+        val memGroups = EventCacheManager.getProfileGroupsInMemory()
+
+        enrichedEvent = null
+        enrichedCamera = if (incoming.cameraUuid.isNotBlank()) {
+            memCameras.find { it.extra?.uuid.equals(incoming.cameraUuid, ignoreCase = true) }
+        } else {
+            null
+        }
+        enrichedAiService = null
+        enrichedProfiles = memProfiles
+        enrichedGroups = memGroups
+
+        val eventIdInt = incoming.eventId.trim().toIntOrNull() ?: return
+        EventCacheManager.getEventInMemory(eventIdInt)?.let { cachedEv ->
+            enrichedEvent = cachedEv
+            enrichedCamera = resolveCameraForEvent(cachedEv, memCameras) ?: enrichedCamera
+            enrichedAiService = memServices.find { it.id == cachedEv.serviceId }
+        }
+
+        eventFetchJob = lifecycleScope.launch {
+            runCatching {
+                var foundEvent = enrichedEvent
+                var cameraList = memCameras
+
+                if (foundEvent == null) {
+                    val diskPair = withContext(Dispatchers.IO) {
+                        EventCacheManager.findEventById(applicationContext, eventIdInt)
+                    }
+                    if (diskPair != null) {
+                        foundEvent = diskPair.first
+                        if (diskPair.second.isNotEmpty()) {
+                            cameraList = diskPair.second
+                        }
+                    }
+                }
+
+                if (foundEvent == null) {
+                    val resp = withContext(Dispatchers.IO) {
+                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 1) }.getOrNull()
+                    }
+                    val fetched = resp?.body()?.firstOrNull { it.id == eventIdInt }
+                    if (fetched != null) {
+                        foundEvent = fetched
+                    }
+                }
+
+                val targetEvent = foundEvent ?: return@runCatching
+                val needProfiles = AiTypeHelper.isFaceEvent(targetEvent) ||
+                    targetEvent.type.lowercase().contains("uniform")
+
+                val resolvedCamInitial = resolveCameraForEvent(targetEvent, cameraList) ?: enrichedCamera
+                val resolvedSvcInitial = memServices.find { it.id == targetEvent.serviceId }
+                enrichedEvent = targetEvent
+                enrichedCamera = resolvedCamInitial
+                enrichedAiService = resolvedSvcInitial
+
+                val fetchCameras = cameraList.isEmpty()
+                val fetchServices = memServices.isEmpty()
+                val fetchProfiles = needProfiles && memProfiles.isEmpty()
+                val fetchGroups = needProfiles && memGroups.isEmpty()
+
+                if (fetchCameras || fetchServices || fetchProfiles || fetchGroups) {
+                    coroutineScope {
+                        val camDef = async(Dispatchers.IO) {
+                            if (fetchCameras) {
+                                runCatching { ApiProvider.vmsApi.getCameraList() }.getOrNull()?.body() ?: emptyList()
+                            } else cameraList
+                        }
+                        val svcDef = async(Dispatchers.IO) {
+                            if (fetchServices) {
+                                runCatching { ApiProvider.eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                            } else memServices
+                        }
+                        val profDef = async(Dispatchers.IO) {
+                            if (fetchProfiles) {
+                                runCatching { ApiProvider.bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                            } else memProfiles
+                        }
+                        val grpDef = async(Dispatchers.IO) {
+                            if (fetchGroups) {
+                                runCatching { ApiProvider.bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                            } else memGroups
+                        }
+
+                        val finalCameras = camDef.await()
+                        val finalServices = svcDef.await()
+                        val finalProfiles = profDef.await()
+                        val finalGroups = grpDef.await()
+
+                        EventCacheManager.cacheInMemory(
+                            events = listOf(targetEvent),
+                            cameras = finalCameras,
+                            aiServices = finalServices
+                        )
+                        enrichedCamera = resolveCameraForEvent(targetEvent, finalCameras) ?: enrichedCamera
+                        enrichedAiService = finalServices.find { it.id == targetEvent.serviceId }
+                        enrichedProfiles = finalProfiles
+                        enrichedGroups = finalGroups
+                    }
+                } else {
+                    EventCacheManager.cacheInMemory(
+                        events = listOf(targetEvent),
+                        cameras = cameraList,
+                        aiServices = memServices
+                    )
+                }
+            }
+        }
+    }
+
     private fun startRinging() {
         stopRinging()
+        val ringAttrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
         ringtone = try {
-            RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))?.apply {
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            RingtoneManager.getRingtone(this, uri)?.apply {
+                audioAttributes = ringAttrs
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
                 play()
             }
         } catch (e: Exception) {
             Log.w(TAG, "Cannot play ringtone", e)
             null
+        }
+
+        // Bật rung lặp theo nhịp cuộc gọi (tương thích mọi máy kể cả khi để chế độ Rung)
+        runCatching {
+            val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+            if (vib?.hasVibrator() == true) {
+                vibrator = vib
+                val pattern = longArrayOf(0L, 1000L, 800L)
+                @Suppress("DEPRECATION")
+                vib.vibrate(VibrationEffect.createWaveform(pattern, 0), ringAttrs)
+            }
         }
     }
 
@@ -201,6 +412,10 @@ class CallComingActivity : ComponentActivity() {
             }
         }
         ringtone = null
+        vibrator?.let {
+            runCatching { it.cancel() }
+        }
+        vibrator = null
     }
 
     private fun scheduleTimeout() {
@@ -280,6 +495,11 @@ class CallComingActivity : ComponentActivity() {
 @Composable
 private fun CallScreenContent(
     call: IncomingCall,
+    enrichedEvent: EventData?,
+    enrichedCamera: CameraModel?,
+    enrichedAiService: AIServiceModel?,
+    enrichedProfiles: List<BsProfileModel>,
+    enrichedGroups: List<BsProfileGroupModel>,
     onDecline: () -> Unit,
     onAccept: () -> Unit
 ) {
@@ -287,6 +507,68 @@ private fun CallScreenContent(
     val spacing = MaterialTheme.spacing
     val isEn = rememberIsEnglish()
     val isDark = colors.isDark
+
+    val display: EventDetailDisplay? = remember(
+        enrichedEvent,
+        enrichedCamera,
+        enrichedAiService,
+        enrichedProfiles,
+        enrichedGroups,
+        isEn
+    ) {
+        enrichedEvent?.let { ev ->
+            buildEventDetailDisplay(
+                event = ev,
+                camera = enrichedCamera,
+                aiService = enrichedAiService,
+                profiles = enrichedProfiles,
+                groups = enrichedGroups,
+                isEn = isEn
+            )
+        }
+    }
+
+    val effectiveTitle = remember(display, call.title, call.eventType, isEn) {
+        display?.aiTaskTitle?.takeIf { it.isNotBlank() }
+            ?: call.title.takeIf { it.isNotBlank() }
+            ?: if (call.eventType.isNotBlank()) AiTypeHelper.getTypeName(call.eventType, isEn) else if (isEn) "Security Alert" else "Cảnh báo an ninh"
+    }
+
+    val effectiveLocation = remember(display, enrichedCamera, call.cameraName) {
+        display?.locationText?.takeIf { it.isNotBlank() && it != "---" }
+            ?: enrichedCamera?.name?.takeIf { it.isNotBlank() && !isUuidString(it) }
+            ?: call.cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
+            ?: ""
+    }
+
+    val effectiveTimeText = remember(display, call.eventTime, isEn) {
+        when {
+            display != null && display.formattedTime.isNotBlank() && display.formattedTime != "--" -> {
+                if (display.formattedDate.isNotBlank()) {
+                    "${display.formattedTime} • ${display.formattedDate}"
+                } else {
+                    display.formattedTime
+                }
+            }
+            call.eventTime > 0.0 -> {
+                val (t, d) = formatEventTimeAndDate(call.eventTime, isEn)
+                if (t.isNotBlank() && t != "--") {
+                    if (d.isNotBlank()) "$t • $d" else t
+                } else ""
+            }
+            else -> ""
+        }
+    }
+
+    val effectiveImageUrl = remember(display, call.imageUrl) {
+        display?.imageUrl?.takeIf { it.isNotBlank() } ?: call.imageUrl?.takeIf { it.isNotBlank() }
+    }
+
+    val primaryCropUrl = remember(display) {
+        display?.cropUrls?.firstOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    val boxes = display?.boxes.orEmpty()
 
     val brandTitle = remember(colors.textTitle, colors.accent) {
         buildAnnotatedString {
@@ -317,6 +599,7 @@ private fun CallScreenContent(
 
     val cardShape = RoundedCornerShape(spacing.radiusExtraLarge)
     val snapshotShape = RoundedCornerShape(spacing.radiusCompact)
+    val cropShape = RoundedCornerShape(spacing.radiusSmall)
 
     Box(
         modifier = Modifier
@@ -343,8 +626,8 @@ private fun CallScreenContent(
                 .fillMaxSize()
                 .safeDrawingPadding()
                 .padding(
-                    top = spacing.space24,
-                    bottom = spacing.space32,
+                    top = spacing.space20,
+                    bottom = spacing.space28,
                     start = spacing.paddingScreen,
                     end = spacing.paddingScreen
                 ),
@@ -371,7 +654,7 @@ private fun CallScreenContent(
                 )
             }
 
-            Spacer(modifier = Modifier.height(spacing.space10))
+            Spacer(modifier = Modifier.height(spacing.space8))
 
             Text(
                 text = brandTitle,
@@ -380,7 +663,7 @@ private fun CallScreenContent(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(spacing.space8))
+            Spacer(modifier = Modifier.height(spacing.space6))
 
             // Pill trạng thái cuộc gọi khẩn cấp (nền đỏ, chữ trắng)
             Row(
@@ -406,7 +689,7 @@ private fun CallScreenContent(
                 )
             }
 
-            Spacer(modifier = Modifier.height(spacing.space20))
+            Spacer(modifier = Modifier.height(spacing.space16))
 
             // 2. Thẻ thông tin sự kiện & Ảnh chụp camera (đồng bộ style Card với LoginCard / SettingsGroupCard)
             Surface(
@@ -438,7 +721,7 @@ private fun CallScreenContent(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = call.title,
+                        text = effectiveTitle,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                         color = colors.textStrong,
@@ -447,21 +730,85 @@ private fun CallScreenContent(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    if (call.body.isNotBlank()) {
+                    // Hàng Badge đối tượng phát hiện (Tên khuôn mặt / Người lạ / Biển số / Đồng phục / Cháy khói / Đám đông)
+                    CallEventSubjectBadges(
+                        display = display,
+                        enrichedEvent = enrichedEvent,
+                        isEn = isEn
+                    )
+
+                    val showBodyLine = call.body.isNotBlank() &&
+                        !call.body.equals(effectiveLocation, ignoreCase = true) &&
+                        !call.body.equals(effectiveTitle, ignoreCase = true)
+
+                    if (showBodyLine) {
                         Spacer(modifier = Modifier.height(spacing.space6))
                         Text(
                             text = call.body,
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.textMuted,
                             textAlign = TextAlign.Center,
-                            maxLines = 3,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(spacing.space14))
+                    // Hàng thông tin Camera & Thời gian sự kiện
+                    if (effectiveLocation.isNotBlank() || effectiveTimeText.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(spacing.space8))
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(spacing.space4)
+                        ) {
+                            if (effectiveLocation.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.Video,
+                                        contentDescription = null,
+                                        tint = colors.accent,
+                                        modifier = Modifier.size(spacing.iconXSmall)
+                                    )
+                                    Spacer(modifier = Modifier.width(spacing.space6))
+                                    Text(
+                                        text = effectiveLocation,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = colors.textBody,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (effectiveTimeText.isNotBlank()) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.Clock,
+                                        contentDescription = null,
+                                        tint = colors.textMuted,
+                                        modifier = Modifier.size(spacing.iconTiny)
+                                    )
+                                    Spacer(modifier = Modifier.width(spacing.space4))
+                                    Text(
+                                        text = effectiveTimeText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = colors.textMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
 
-                    // Khung ảnh sự kiện tỉ lệ 16:9 chuẩn camera
+                    Spacer(modifier = Modifier.height(spacing.space12))
+
+                    // Khung ảnh sự kiện tỉ lệ 16:9 chuẩn camera (hỗ trợ cả ảnh tĩnh và .mp4 + vẽ bounding box + ảnh crop)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -475,21 +822,33 @@ private fun CallScreenContent(
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!call.imageUrl.isNullOrBlank()) {
-                            SubcomposeAsyncImage(
-                                model = call.imageUrl,
-                                contentDescription = call.title,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
-                                loading = {
-                                    CallSnapshotPlaceholder(isEn = isEn)
-                                },
-                                error = {
-                                    CallSnapshotPlaceholder(isEn = isEn)
-                                }
+                        if (!effectiveImageUrl.isNullOrBlank()) {
+                            VideoFrameImage(
+                                url = effectiveImageUrl,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .then(if (boxes.isEmpty()) Modifier else Modifier.callBoundingBoxes(boxes)),
+                                contentScale = ContentScale.Crop
                             )
                         } else {
                             CallSnapshotPlaceholder(isEn = isEn)
+                        }
+
+                        // Ảnh crop cận cảnh (khuôn mặt / biển số / đối tượng) ở góc phải trên
+                        if (!primaryCropUrl.isNullOrBlank() && primaryCropUrl != effectiveImageUrl) {
+                            SubcomposeAsyncImage(
+                                model = primaryCropUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(spacing.space6)
+                                    .width(spacing.avatarLarge)
+                                    .aspectRatio(CALL_CROP_ASPECT_RATIO)
+                                    .clip(cropShape)
+                                    .background(colors.mediaOverlay)
+                                    .border(spacing.borderMedium, colors.onMedia.copy(alpha = 0.3f), cropShape)
+                            )
                         }
 
                         // Badge góc trên trái của ảnh
@@ -563,6 +922,110 @@ private fun CallScreenContent(
             }
 
             Spacer(modifier = Modifier.height(spacing.space16))
+        }
+    }
+}
+
+/** Hiển thị badge đối tượng chính của sự kiện trên màn hình cuộc gọi (khuôn mặt, biển số, đồng phục, cháy/khói, đám đông) */
+@Composable
+private fun CallEventSubjectBadges(
+    display: EventDetailDisplay?,
+    enrichedEvent: EventData?,
+    isEn: Boolean
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val pillShape = RoundedCornerShape(spacing.radiusTiny)
+
+    val badges = remember(display, enrichedEvent, isEn, colors.error) {
+        buildList<Pair<String, Color>> {
+            when {
+                display?.face != null -> {
+                    val face = display.face
+                    if (face.profileName.isNotBlank() && face.profileName != "---") {
+                        add(face.profileName to face.groupColor)
+                    }
+                    if (face.groupName.isNotBlank() &&
+                        face.groupName != "---" &&
+                        !face.groupName.equals(face.profileName, ignoreCase = true)
+                    ) {
+                        add(face.groupName to face.groupColor.copy(alpha = 0.85f))
+                    }
+                }
+                !display?.plateNumber.isNullOrBlank() -> {
+                    val plateColor = if (display!!.isPlateBlacklist) colors.error else OrangeDeep
+                    add(display.plateNumber to plateColor)
+                    if (display.vehicleType.isNotBlank()) {
+                        add(display.vehicleType to AiTypeHelper.getAiColor(enrichedEvent?.type))
+                    }
+                }
+                display?.uniform != null -> {
+                    val uni = display.uniform
+                    if (uni.isIdentified && uni.personName.isNotBlank()) {
+                        add(uni.personName to uni.color)
+                    }
+                    if (uni.uniformLabel.isNotBlank()) {
+                        add(uni.uniformLabel to uni.color)
+                    }
+                }
+                !display?.fireAlertLabel.isNullOrBlank() -> {
+                    add(display!!.fireAlertLabel!! to colors.error)
+                }
+                display?.crowd != null -> {
+                    add(display.crowd.countText to AiTypeHelper.getAiColor(enrichedEvent?.type))
+                }
+                enrichedEvent != null -> {
+                    val label = AiTypeHelper.getEventBadgeLabel(enrichedEvent, isEn)
+                    if (label.isNotBlank() && !label.equals(display?.aiTaskTitle, ignoreCase = true)) {
+                        add(label to AiTypeHelper.getAiColor(enrichedEvent))
+                    }
+                }
+            }
+        }
+    }
+
+    if (badges.isEmpty()) return
+
+    Spacer(modifier = Modifier.height(spacing.space8))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(spacing.space6, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        badges.forEach { (text, bgColor) ->
+            Box(
+                modifier = Modifier
+                    .clip(pillShape)
+                    .background(bgColor)
+                    .padding(horizontal = spacing.space10, vertical = spacing.space4),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.onAccent,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+private fun Modifier.callBoundingBoxes(boxes: List<List<Float>>): Modifier = drawWithContent {
+    drawContent()
+    boxes.forEach { boxArr ->
+        if (boxArr.size >= 4) {
+            val minX = boxArr[0]
+            val minY = boxArr[1]
+            val maxX = boxArr[2]
+            val maxY = boxArr[3]
+            drawRect(
+                color = ErrorRed,
+                topLeft = Offset(minX * size.width, minY * size.height),
+                size = Size((maxX - minX) * size.width, (maxY - minY) * size.height),
+                style = Stroke(width = CALL_BOUNDING_BOX_STROKE_PX)
+            )
         }
     }
 }

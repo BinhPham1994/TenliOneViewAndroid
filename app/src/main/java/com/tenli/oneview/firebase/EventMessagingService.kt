@@ -1,6 +1,7 @@
 package com.tenli.oneview.firebase
 
 import android.app.ActivityOptions
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -25,14 +26,61 @@ import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.main.MainActivity
+import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.ui.utils.AppState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 class EventMessagingService : FirebaseMessagingService() {
+
+    /**
+     * Bảo hiểm 100% cho trường hợp backend gửi gói FCM kèm khối `notification` (`gcm.n.e = 1`) khi app đang ở nền/bị kill:
+     * Mặc định SDK Firebase sẽ chặn bản tin có `gcm.n.e = 1` ở background để tự hiện thông báo hệ thống đơn giản
+     * và KHÔNG gọi `onMessageReceived()`, khiến màn hình Cuộc gọi (`CallComingActivity`) không thể bật lên.
+     * Hàm này chuyển thông tin `gcm.n.title` / `gcm.n.body` / `gcm.n.image` sang `data` và gỡ cờ `gcm.n.e`
+     * để mọi bản tin FCM đều đi vào `onMessageReceived()` xử lý đồng nhất.
+     */
+    override fun handleIntent(intent: Intent?) {
+        if (intent == null) {
+            super.handleIntent(null)
+            return
+        }
+        val patchedIntent = runCatching {
+            val extras = intent.extras ?: return@runCatching intent
+            val isNotifPayload = extras.getString("gcm.n.e") == "1" ||
+                extras.getString("gcm.notification.e") == "1"
+            if (!isNotifPayload) return@runCatching intent
+
+            Intent(intent).apply {
+                val gcmTitle = extras.getString("gcm.n.title") ?: extras.getString("gcm.notification.title")
+                val gcmBody = extras.getString("gcm.n.body") ?: extras.getString("gcm.notification.body")
+                val gcmImage = extras.getString("gcm.n.image") ?: extras.getString("gcm.notification.image")
+
+                if (!gcmTitle.isNullOrBlank() && extras.getString("title").isNullOrBlank()) {
+                    putExtra("title", gcmTitle)
+                }
+                if (!gcmBody.isNullOrBlank() && extras.getString("body").isNullOrBlank()) {
+                    putExtra("body", gcmBody)
+                }
+                if (!gcmImage.isNullOrBlank() && extras.getString("imageUrl").isNullOrBlank()) {
+                    putExtra("imageUrl", gcmImage)
+                }
+                removeExtra("gcm.n.e")
+                removeExtra("gcm.notification.e")
+            }
+        }.getOrElse { intent }
+
+        super.handleIntent(patchedIntent)
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -63,7 +111,79 @@ class EventMessagingService : FirebaseMessagingService() {
         }
 
         val data = remoteMessage.data
-        val eventType = (data["type"] ?: data["eventType"] ?: data["event_type"]).orEmpty().trim()
+        val notif = remoteMessage.notification
+        if (BuildConfig.DEBUG) {
+            Log.i(
+                FcmTokenManager.LOG_TAG,
+                "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
+            )
+        }
+
+        val eventId = (
+            data["eId"] ?: data["eventId"] ?: data["event_id"] ?: data["id"] ?: data["OPEN_EVENT_DETAIL"] ?: data["EVENT_ID"]
+            ).orEmpty().trim()
+
+        val rawTitle = data["title"]
+            ?: notif?.title
+            ?: ""
+        val rawBody = data["body"]
+            ?: data["message"]
+            ?: data["content"]
+            ?: notif?.body
+            ?: ""
+
+        var eventType = (
+            data["type"] ?: data["eventType"] ?: data["event_type"] ?: data["sensorType"] ?: data["sensor_type"]
+            ).orEmpty().trim()
+        var pushCameraUuid = (
+            data["cameraUUID"] ?: data["cameraId"] ?: data["camera_uuid"] ?: data["camera_id"]
+            ).orEmpty().trim()
+        var cameraName = (
+            data["cameraName"] ?: data["camera_name"] ?: data["camera"] ?: data["deviceName"] ?: data["device_name"]
+            ).orEmpty().trim()
+        var rawImageUrl = data["imageUrl"]
+            ?: data["image"]
+            ?: data["snapshotUrl"]
+            ?: data["image_url"]
+            ?: data["imagePath"]
+            ?: data["image_path"]
+            ?: data["picture"]
+            ?: notif?.imageUrl?.toString()
+        var rawEventTime = (data["time"] ?: data["timestamp"] ?: data["eventTime"] ?: data["event_time"])?.toDoubleOrNull()
+
+        // Nếu gói FCM thiếu `eventType` (hoặc thiếu ảnh/camera) nhưng có `eventId`, truy vấn nhanh EventData
+        // để luôn xác định chính xác loại bài AI và áp dụng đúng cấu hình Cuộc gọi / Thông báo
+        val eventIdInt = eventId.toIntOrNull()
+        if (eventIdInt != null && (eventType.isEmpty() || rawImageUrl.isNullOrBlank() || pushCameraUuid.isEmpty())) {
+            val resolvedEvent = fetchEventQuickly(eventIdInt)
+            if (resolvedEvent != null) {
+                if (eventType.isEmpty()) eventType = resolvedEvent.type.trim()
+                if (pushCameraUuid.isEmpty()) {
+                    pushCameraUuid = (
+                        resolvedEvent.data?.cameraUUID
+                            ?: resolvedEvent.data?.cameraUuidLower
+                            ?: resolvedEvent.cameraId?.toString()
+                        ).orEmpty().trim()
+                }
+                if (cameraName.isEmpty()) {
+                    cameraName = (resolvedEvent.cameraName ?: resolvedEvent.data?.cameraName).orEmpty().trim()
+                }
+                if (rawImageUrl.isNullOrBlank()) {
+                    rawImageUrl = (
+                        resolvedEvent.data?.fullImage
+                            ?: resolvedEvent.data?.image
+                            ?: resolvedEvent.data?.cropImage
+                        )?.trim()
+                }
+                if (rawEventTime == null && resolvedEvent.time > 0.0) rawEventTime = resolvedEvent.time
+            }
+        }
+
+        // Nếu gói FCM hoàn toàn không gửi kèm `type` và cũng không lấy được từ `eventId`, suy luận từ `title` / `body`
+        if (eventType.isEmpty()) {
+            eventType = AiTypeHelper.inferEventTypeFromText(rawTitle, rawBody)
+        }
+
         if (eventType.isNotEmpty() && !AiTypeHelper.isAiTypeEnabled(eventType)) {
             if (BuildConfig.DEBUG) {
                 Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Loại sự kiện '$eventType' không nằm trong quyền của user")
@@ -93,7 +213,6 @@ class EventMessagingService : FirebaseMessagingService() {
             return
         }
 
-        val pushCameraUuid = (data["cameraUUID"] ?: data["cameraId"] ?: data["camera_uuid"]).orEmpty().trim()
         if (pushCameraUuid.isNotEmpty() && UserPermissionManager.isCustomCameraPermission()) {
             val cachedCameras = EventCacheManager.getCamerasInMemory()
             if (cachedCameras.isNotEmpty()) {
@@ -106,13 +225,7 @@ class EventMessagingService : FirebaseMessagingService() {
                 }
             }
         }
-        val notif = remoteMessage.notification
-        if (BuildConfig.DEBUG) {
-            Log.i(
-                FcmTokenManager.LOG_TAG,
-                "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
-            )
-        }
+
         val explicitMakeCall = (
             data["makeCall"] ?: data["make_call"] ?: data["isCall"] ?: data["is_call"] ?: data["call"]
             ).orEmpty().trim()
@@ -127,45 +240,82 @@ class EventMessagingService : FirebaseMessagingService() {
             explicitAlarmMode.equals("call", ignoreCase = true) ||
             (!isExplicitlyDisabledCall && localAlarmMode.equals("call", ignoreCase = true))
 
-        val title = data["title"]
-            ?: remoteMessage.notification?.title
-            ?: getString(R.string.notif_default_title)
-        val body = data["body"]
-            ?: data["message"]
-            ?: data["content"]
-            ?: remoteMessage.notification?.body
-            ?: ""
-        val rawImageUrl = data["imageUrl"]
-            ?: data["image"]
-            ?: data["snapshotUrl"]
-            ?: data["image_url"]
-            ?: data["picture"]
-            ?: remoteMessage.notification?.imageUrl?.toString()
+        val title = rawTitle.ifBlank {
+            if (eventType.isNotEmpty()) AiTypeHelper.getTypeName(eventType) else getString(R.string.notif_default_title)
+        }
+        val body = rawBody
         val imageUrl = resolveNotificationImageUrl(rawImageUrl)
-        val eventId = (data["eId"] ?: data["eventId"] ?: data["event_id"] ?: data["id"]).orEmpty()
+        val effectiveEventTime = rawEventTime
+            ?: if (remoteMessage.sentTime > 0L) remoteMessage.sentTime.toDouble() else System.currentTimeMillis().toDouble()
 
         if (BuildConfig.DEBUG) {
             Log.i(
                 FcmTokenManager.LOG_TAG,
-                "[XỬ LÝ NOTIFY] isCall=$isCall | eventId=$eventId | title='$title' | body='$body' | imageUrl=$imageUrl"
+                "[XỬ LÝ NOTIFY] isCall=$isCall | eventId=$eventId | eventType='$eventType' | cameraName='$cameraName' | title='$title' | body='$body' | imageUrl=$imageUrl"
             )
         }
 
         if (isCall) {
-            // Firebase tự động cung cấp sentTime (miliseconds)
-            val delay = if (remoteMessage.sentTime > 0L) {
-                System.currentTimeMillis() - remoteMessage.sentTime
-            } else {
-                0L
-            }
-            if (delay > MISSED_CALL_THRESHOLD_MS) {
+            if (isStaleDelayedCall(remoteMessage.sentTime, rawEventTime)) {
                 showMissedCallNotification(title, body, imageUrl, eventId)
             } else {
-                handleIncomingCall(title, body, imageUrl, eventId)
+                handleIncomingCall(
+                    title = title,
+                    body = body,
+                    url = imageUrl,
+                    eId = eventId,
+                    eventType = eventType,
+                    cameraUuid = pushCameraUuid,
+                    cameraName = cameraName,
+                    eventTime = effectiveEventTime
+                )
             }
         } else {
             showRegularNotification(title, body, imageUrl, eventId)
         }
+    }
+
+    /**
+     * Truy vấn nhanh `EventData` theo `eventId` từ RAM cache, Disk cache hoặc API (giới hạn tối đa 2.5s)
+     * khi bản tin FCM gửi thiếu trường `type` / `imageUrl` / `cameraUUID`.
+     */
+    private fun fetchEventQuickly(eventIdInt: Int): EventData? {
+        EventCacheManager.getEventInMemory(eventIdInt)?.let { return it }
+        return runCatching {
+            runBlocking(Dispatchers.IO) {
+                withTimeoutOrNull(QUICK_EVENT_FETCH_TIMEOUT_MS) {
+                    EventCacheManager.findEventById(applicationContext, eventIdInt)?.first
+                        ?: runCatching {
+                            ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 1)
+                                .body()
+                                ?.firstOrNull { it.id == eventIdInt }
+                        }.getOrNull()
+                }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Kiểm tra bản tin cuộc gọi có thực sự bị trễ quá lâu (vd. máy tắt mạng/chế độ máy bay rồi mới bật lại) hay không,
+     * đồng thời tránh lỗi đồng hồ trên điện thoại bị chỉnh lệch vài phút khiến cuộc gọi mới bị biến thành cuộc gọi nhỡ.
+     */
+    private fun isStaleDelayedCall(sentTimeMs: Long, rawEventTime: Double?): Boolean {
+        if (sentTimeMs <= 0L) return false
+        val nowMs = System.currentTimeMillis()
+        val phoneDeltaMs = nowMs - sentTimeMs
+        if (phoneDeltaMs <= MISSED_CALL_THRESHOLD_MS) return false
+
+        // Nếu có cả thời gian sự kiện từ server và sentTime từ Google FCM (cả hai đều là giờ chuẩn server),
+        // kiểm tra độ trễ giữa thời điểm phát sinh sự kiện và thời điểm gửi FCM
+        if (rawEventTime != null && rawEventTime > 0.0) {
+            val eventTimeMs = if (rawEventTime < 1e11) (rawEventTime * 1000.0).toLong() else rawEventTime.toLong()
+            val serverDeltaMs = kotlin.math.abs(sentTimeMs - eventTimeMs)
+            // Nếu sự kiện vừa mới xảy ra trên server và FCM gửi đi tức thì, chỉ coi là cuộc gọi nhỡ nếu lệch > 30 phút
+            if (serverDeltaMs < 60_000L && phoneDeltaMs < MAX_CLOCK_DRIFT_TOLERANCE_MS) {
+                return false
+            }
+        }
+        return true
     }
 
     /**
@@ -189,10 +339,16 @@ class EventMessagingService : FirebaseMessagingService() {
     }
 
     /** Intent mở chi tiết sự kiện trong MainActivity (giữ nguyên instance đang mở nếu có) */
-    private fun eventDetailPendingIntent(eId: String, requestCode: Int, fromNotification: Boolean): PendingIntent {
+    private fun eventDetailPendingIntent(
+        eId: String,
+        requestCode: Int,
+        fromNotification: Boolean,
+        notificationIdToCancel: Int = 0
+    ): PendingIntent {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(EXTRA_EVENT_ID, eId)
             if (fromNotification) putExtra(EXTRA_FROM_NOTIFICATION, true)
+            if (notificationIdToCancel != 0) putExtra("NOTIFICATION_ID", notificationIdToCancel)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -203,6 +359,20 @@ class EventMessagingService : FirebaseMessagingService() {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             splashIconOptionsBundle()
+        )
+    }
+
+    private fun dismissCallPendingIntent(eId: String, notificationId: Int): PendingIntent {
+        val intent = Intent(this, CallNotificationActionReceiver::class.java).apply {
+            action = CallNotificationActionReceiver.ACTION_DISMISS_CALL_NOTIFICATION
+            putExtra(CallNotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            putExtra(CallNotificationActionReceiver.EXTRA_EVENT_ID, eId)
+        }
+        return PendingIntent.getBroadcast(
+            this,
+            notificationId + 3,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
@@ -290,7 +460,16 @@ class EventMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun handleIncomingCall(title: String, body: String, url: String?, eId: String) {
+    private fun handleIncomingCall(
+        title: String,
+        body: String,
+        url: String?,
+        eId: String,
+        eventType: String,
+        cameraUuid: String,
+        cameraName: String,
+        eventTime: Double
+    ) {
         wakeUpScreenForIncomingCall()
 
         val manager = NotificationManagerCompat.from(this)
@@ -308,6 +487,10 @@ class EventMessagingService : FirebaseMessagingService() {
             putExtra("URL", url)
             putExtra("EID", eId)
             putExtra("NOTIFICATION_ID", notificationId)
+            putExtra("EVENT_TYPE", eventType)
+            putExtra("CAMERA_UUID", cameraUuid)
+            putExtra("CAMERA_NAME", cameraName)
+            putExtra("EVENT_TIME", eventTime)
         }
         val pendingIntentOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ActivityOptions.makeBasic()
@@ -326,6 +509,18 @@ class EventMessagingService : FirebaseMessagingService() {
             pendingIntentOptions
         )
 
+        val acceptPendingIntent = eventDetailPendingIntent(
+            eId = eId,
+            requestCode = notificationId + 2,
+            fromNotification = true,
+            notificationIdToCancel = notificationId
+        )
+        val dismissPendingIntent = dismissCallPendingIntent(eId, notificationId)
+
+        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(this).equals("en", ignoreCase = true)
+        val declineLabel = if (isEn) "Decline" else "Từ chối"
+        val acceptLabel = if (isEn) "View now" else "Xem ngay"
+
         val builder = NotificationCompat.Builder(this, NotificationChannels.EMERGENCY_CALL)
             .setSmallIcon(R.mipmap.app_icon_notify)
             .setContentTitle(title)
@@ -333,9 +528,12 @@ class EventMessagingService : FirebaseMessagingService() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setFullScreenIntent(callPendingIntent, true)
-            .setContentIntent(eventDetailPendingIntent(eId, notificationId + 2, fromNotification = true))
+            .setContentIntent(callPendingIntent)
+            .addAction(0, declineLabel, dismissPendingIntent)
+            .addAction(0, acceptLabel, acceptPendingIntent)
             .setOngoing(true)
             .setAutoCancel(true)
+            .setTimeoutAfter(CALL_NOTIFICATION_TIMEOUT_MS)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         notifySafely(manager, notificationId, builder)
@@ -350,6 +548,21 @@ class EventMessagingService : FirebaseMessagingService() {
         // Gọi trực tiếp và bồi thêm trên MainLooper để đảm bảo bật màn hình Call kể cả khi tiến trình vừa cold-start từ trạng thái bị kill
         launchCallScreen.run()
         Handler(Looper.getMainLooper()).post(launchCallScreen)
+
+        // Bảo hiểm trường hợp hệ điều hành chỉ hiển thị Heads-Up Notification mà chặn mở CallComingActivity:
+        // Sau 30s tự động huỷ thông báo đang reo và chuyển thành thông báo cuộc gọi nhỡ
+        val app = applicationContext as? TenliApp
+        app?.appScope?.launch {
+            delay(CALL_NOTIFICATION_TIMEOUT_MS + 500L)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@launch
+            val isStillActive = runCatching {
+                nm.activeNotifications.any { it.id == notificationId }
+            }.getOrDefault(false)
+            if (isStillActive && !AppState.isShowCallActivity) {
+                runCatching { nm.cancel(notificationId) }
+                showMissedCallNotification(title, body, url, eId)
+            }
+        }
     }
 
     /**
@@ -389,6 +602,9 @@ class EventMessagingService : FirebaseMessagingService() {
         const val EXTRA_EVENT_ID = "EVENT_ID"
         const val EXTRA_FROM_NOTIFICATION = "FROM_NOTIFICATION"
         const val MISSED_CALL_THRESHOLD_MS = 300_000L
+        const val MAX_CLOCK_DRIFT_TOLERANCE_MS = 1_800_000L
+        const val CALL_NOTIFICATION_TIMEOUT_MS = 30_000L
+        const val QUICK_EVENT_FETCH_TIMEOUT_MS = 2_500L
         const val MISSED_CALL_BODY_PREVIEW = 20
         const val NOTIFICATION_IMAGE_MAX_PX = 1024
     }

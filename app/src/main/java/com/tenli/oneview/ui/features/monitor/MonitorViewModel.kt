@@ -188,7 +188,7 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
         tree.forEach { collect(it, vmsName = "", groupPath = "", parentGroupKey = "") }
         vmsNodes = tree.filterIsInstance<CameraTreeNode.VMSNode>().filter { count(it) > 0 }
         allCameras = mergeUnique(tree.map { camerasOf(it) })
-        totalCameraCount = tree.sumOf { count(it) }
+        totalCameraCount = allCameras.size
         cameraById = allCameras.associate { it.camera.id to it.camera }
         for (item in allCameras) {
             val cam = item.camera
@@ -511,15 +511,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val treeData = mutableListOf<CameraTreeNode>()
             val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
 
-            val fullVmsList = (
-                listOf(VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")) +
-                    vmsList
-                ).distinctBy { it.id }
-
             val camerasByVms = permittedCameraList.distinctBy { it.id }.groupBy { it.vmsId }
             val groupsByVms = groupList.distinctBy { "${it.vmsId}_${it.id}" }.groupBy { it.vmsId }
             val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
             val cameraById = permittedCameraList.associateBy { it.id }
+
+            val baseVmsList = (
+                listOf(VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")) +
+                    vmsList
+                ).distinctBy { it.id }
+            val knownVmsIds = baseVmsList.mapTo(HashSet()) { it.id }
+            val extraVmsServices = camerasByVms.keys
+                .filter { it !in knownVmsIds }
+                .map { vmsId ->
+                    VMSServiceModel(id = vmsId, name = "VMS $vmsId", privateHost = "", publicHost = "", apiKey = "")
+                }
+            val fullVmsList = baseVmsList + extraVmsServices
 
             for (item in cameraInGroups) {
                 val cam = cameraById[item.cameraId] ?: continue
@@ -536,14 +543,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val vmsNode = CameraTreeNode.VMSNode(service, mutableListOf(), "vms-$serviceId")
                 treeData.add(vmsNode)
 
-                for (group in groups) {
-                    if (group.parentGroupId == 0) continue
-
+                val nonRootGroups = groups.filter { it.parentGroupId != 0 }
+                for (group in nonRootGroups) {
                     val groupNodeKey = "group-$serviceId-${group.id}"
-                    val groupNode = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
-                    groupMapData[groupNodeKey] = groupNode
-
-                    val parentNode = groupMapData["group-$serviceId-${group.parentGroupId}"]
+                    groupMapData[groupNodeKey] = CameraTreeNode.GroupNode(group, mutableListOf(), groupNodeKey)
+                }
+                for (group in nonRootGroups) {
+                    val groupNodeKey = "group-$serviceId-${group.id}"
+                    val groupNode = groupMapData[groupNodeKey] ?: continue
+                    val parentKey = "group-$serviceId-${group.parentGroupId}"
+                    val parentNode = if (parentKey != groupNodeKey) groupMapData[parentKey] else null
                     if (parentNode != null) {
                         parentNode.children.add(groupNode)
                     } else {
@@ -552,13 +561,17 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 val groupedCameraIds = mutableSetOf<Int>()
+                val addedInGroup = HashSet<String>()
                 fun camKey(cam: CameraModel) = "cam-$serviceId-${cam.id}"
 
                 for (item in camGroups) {
                     val cam = cameraById[item.cameraId] ?: continue
+                    val groupNodeKey = "group-$serviceId-${item.groupId}"
+                    val groupNode = groupMapData[groupNodeKey] ?: continue
                     groupedCameraIds.add(cam.id)
-                    val groupNode = groupMapData["group-$serviceId-${item.groupId}"] ?: continue
-                    groupNode.children.add(CameraTreeNode.CameraLeaf(cam, camKey(cam)))
+                    if (addedInGroup.add("$groupNodeKey-${cam.id}")) {
+                        groupNode.children.add(CameraTreeNode.CameraLeaf(cam, camKey(cam)))
+                    }
                 }
 
                 for (cam in cameras) {
@@ -1552,13 +1565,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         var resolvedVideo: VideoModel? = null
         var resolvedPlaying = false
         _uiState.update { state ->
-            val nextVideo = if (tab == CameraDetailTab.PLAYBACK) state.selectedPlaybackVideo else null
-            val nextPlaying = if (nextVideo != null) state.isPlaybackPlaying else false
+            val firstAvailableVideo = state.playbackDayGroups
+                .firstOrNull { it.videos.isNotEmpty() }
+                ?.videos
+                ?.firstOrNull()
+            val nextVideo = if (tab == CameraDetailTab.PLAYBACK) {
+                state.selectedPlaybackVideo ?: firstAvailableVideo
+            } else {
+                null
+            }
+            val nextPlaying = nextVideo != null
             resolvedVideo = nextVideo
             resolvedPlaying = nextPlaying
             state.copy(
                 cameraDetailTab = tab,
-                // Khi rời tab Xem lại thì đóng trình phát video ghi hình đang mở (nếu có)
+                // Khi vào tab Xem lại: nếu đã có danh sách playback thì tự động phát ngay video đầu tiên;
+                // khi rời tab Xem lại thì đóng trình phát video ghi hình đang mở (nếu có).
                 selectedPlaybackVideo = nextVideo,
                 isPlaybackPlaying = nextPlaying
             )
@@ -2107,14 +2129,20 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val normalizedChannel = if (channel == "sub") "sub" else "main"
         val cameraId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id ?: 0
         val cached = getPlaybackSessionCache(cameraId, filter, normalizedChannel)
-        activePlaybackVideo = null
-        activePlaybackPlaying = false
+        val isPlaybackTab = _uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK
+        val firstCachedVideo = if (isPlaybackTab) {
+            cached?.dayGroups?.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
+        } else {
+            null
+        }
+        activePlaybackVideo = firstCachedVideo
+        activePlaybackPlaying = firstCachedVideo != null
         _uiState.update {
             it.copy(
                 playbackTimeFilter = filter,
                 playbackChannel = normalizedChannel,
-                selectedPlaybackVideo = null,
-                isPlaybackPlaying = false,
+                selectedPlaybackVideo = firstCachedVideo,
+                isPlaybackPlaying = firstCachedVideo != null,
                 playbackDayGroups = cached?.dayGroups ?: emptyList(),
                 hasMorePlaybackDays = cached?.hasMoreDays ?: false
             )
@@ -2197,13 +2225,33 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val cached = getPlaybackSessionCache(camera.id, filter, channel)
         val hasCachedGroups = cached != null && cached.dayGroups.isNotEmpty()
 
-        _uiState.update {
-            it.copy(
+        var resolvedAutoVideo: VideoModel? = null
+        var resolvedAutoPlaying = false
+        _uiState.update { state ->
+            val cachedGroups = if (hasCachedGroups) cached!!.dayGroups else emptyList()
+            val shouldAutoSelectFirst = state.cameraDetailTab == CameraDetailTab.PLAYBACK &&
+                state.selectedPlaybackVideo == null &&
+                cachedGroups.isNotEmpty()
+            val firstVideo = if (shouldAutoSelectFirst) {
+                cachedGroups.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
+            } else {
+                state.selectedPlaybackVideo
+            }
+            val nextPlaying = if (shouldAutoSelectFirst && firstVideo != null) true else state.isPlaybackPlaying
+            resolvedAutoVideo = firstVideo
+            resolvedAutoPlaying = nextPlaying
+            state.copy(
                 isLoadingPlaybacks = !isBackgroundPrewarm && !hasCachedGroups,
                 isLoadingMorePlaybackDays = false,
                 hasMorePlaybackDays = if (hasCachedGroups) cached!!.hasMoreDays else false,
-                playbackDayGroups = if (hasCachedGroups) cached!!.dayGroups else emptyList()
+                playbackDayGroups = cachedGroups,
+                selectedPlaybackVideo = firstVideo,
+                isPlaybackPlaying = nextPlaying
             )
+        }
+        if (_uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && resolvedAutoVideo != null) {
+            activePlaybackVideo = resolvedAutoVideo
+            activePlaybackPlaying = resolvedAutoPlaying
         }
 
         playbackFetchJob = viewModelScope.launch(Dispatchers.IO) {
@@ -2359,6 +2407,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
         var finalMergedGroups: List<PlaybackDayGroup> = emptyList()
         val effectiveHasMoreDays = hasMoreDays && anyBatchSucceeded
+        var autoSelectedVideo: VideoModel? = null
+        var autoSelectedPlaying = false
 
         _uiState.update { state ->
             val merged = if (isInitial) {
@@ -2371,13 +2421,30 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 existingByKey.values.sortedByDescending { it.dateKey }
             }
             finalMergedGroups = merged
+            val shouldAutoSelectFirst = state.cameraDetailTab == CameraDetailTab.PLAYBACK &&
+                state.selectedPlaybackVideo == null &&
+                merged.isNotEmpty()
+            val firstVideo = if (shouldAutoSelectFirst) {
+                merged.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
+            } else {
+                state.selectedPlaybackVideo
+            }
+            val nextPlaying = if (shouldAutoSelectFirst && firstVideo != null) true else state.isPlaybackPlaying
+            autoSelectedVideo = firstVideo
+            autoSelectedPlaying = nextPlaying
             state.copy(
                 playbackDayGroups = merged,
+                selectedPlaybackVideo = firstVideo,
+                isPlaybackPlaying = nextPlaying,
                 isLoadingPlaybacks = false,
                 isLoadingMorePlaybackDays = false,
                 hasMorePlaybackDays = effectiveHasMoreDays,
                 error = if (!anyBatchSucceeded) firstBatchError?.toUserFriendlyMessage() ?: state.error else state.error
             )
+        }
+        if (_uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && autoSelectedVideo != null) {
+            activePlaybackVideo = autoSelectedVideo
+            activePlaybackPlaying = autoSelectedPlaying
         }
 
         if (anyBatchSucceeded) {

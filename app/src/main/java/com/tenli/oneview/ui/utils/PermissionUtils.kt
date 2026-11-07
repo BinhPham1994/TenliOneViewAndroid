@@ -1,7 +1,10 @@
 package com.tenli.oneview.ui.utils
 
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -25,12 +28,72 @@ object PermissionUtils {
     }
 
     /**
+     * Kiểm tra quyền hiển thị thông báo toàn màn hình (USE_FULL_SCREEN_INTENT) trên Android 14+ (API 34+).
+     * Trên Android 13 trở xuống quyền này được cấp tự động khi khai báo trong Manifest.
+     */
+    fun canUseFullScreenIntent(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val nm = context.getSystemService(NotificationManager::class.java)
+            nm?.canUseFullScreenIntent() ?: true
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Kiểm tra đủ quyền hiển thị màn hình Cuộc gọi khẩn cấp trên mọi trạng thái (đang mở máy + khoá màn hình):
+     * - `Settings.canDrawOverlays`: cho phép bật Activity cuộc gọi đè lên ứng dụng khác.
+     * - `canUseFullScreenIntent`: cho phép đánh thức màn hình khoá bằng FullScreenIntent trên Android 14+.
+     */
+    fun isEmergencyCallPermissionGranted(context: Context): Boolean {
+        return Settings.canDrawOverlays(context) && canUseFullScreenIntent(context)
+    }
+
+    /**
      * Tổng hợp tất cả các quyền để biết App có thể nhận Call 100% hay chưa.
      */
     fun isCallReady(context: Context): Boolean {
-        return Settings.canDrawOverlays(context) &&
+        return isEmergencyCallPermissionGranted(context) &&
                 isNotificationEnabled(context) &&
                 isIgnoringBattery(context)
+    }
+
+    /**
+     * Mở trang cài đặt quyền còn thiếu cho Cuộc gọi khẩn cấp:
+     * - Nếu thiếu `SYSTEM_ALERT_WINDOW` -> mở cài đặt "Hiển thị trên ứng dụng khác" (hoặc cài đặt OEM).
+     * - Nếu đã có `SYSTEM_ALERT_WINDOW` nhưng thiếu `USE_FULL_SCREEN_INTENT` (Android 14+) -> mở trang cấp quyền Full-screen intent.
+     */
+    fun openEmergencyCallPermissionSettings(context: Context, preferManufacturerSettings: Boolean = false) {
+        val pkgUri = Uri.parse("package:${context.packageName}")
+        if (!Settings.canDrawOverlays(context)) {
+            if (preferManufacturerSettings) {
+                openManufacturerPermissions(context)
+                return
+            }
+            try {
+                context.startActivity(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkgUri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+                return
+            } catch (_: Exception) {
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !canUseFullScreenIntent(context)) {
+            try {
+                context.startActivity(
+                    Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkgUri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+                return
+            } catch (_: Exception) {
+            }
+        }
+
+        openManufacturerPermissions(context)
     }
 
     /**

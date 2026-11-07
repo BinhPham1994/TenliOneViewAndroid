@@ -1252,7 +1252,7 @@ private fun hasOsNotificationPermission(context: Context): Boolean {
 }
 
 private fun hasOverlayPermission(context: Context): Boolean {
-    return Settings.canDrawOverlays(context)
+    return com.tenli.oneview.ui.utils.PermissionUtils.isEmergencyCallPermissionGranted(context)
 }
 
 @Composable
@@ -1292,18 +1292,10 @@ private fun MobileNotificationConfigScreen(
     }
 
     val openOverlayPermissionSettings: () -> Unit = {
-        try {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${context.packageName}")
-            )
-            context.startActivity(intent)
-        } catch (_: Exception) {
-            try {
-                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
-            } catch (_: Exception) {
-            }
-        }
+        com.tenli.oneview.ui.utils.PermissionUtils.openEmergencyCallPermissionSettings(
+            context = context,
+            preferManufacturerSettings = false
+        )
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(

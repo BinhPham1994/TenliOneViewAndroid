@@ -980,6 +980,9 @@ private fun MobileLiveCameraScreen(
                 activeDetailTab = targetTab
                 detailPartnerSide = -dir
                 isDraggingDetailTab = false
+                if (activeDetailTab != currentDetailTabState) {
+                    currentOnSelectDetailTab(activeDetailTab)
+                }
                 scope.launch {
                     detailActiveOffsetFraction.snapTo(dir.toFloat())
                     detailActiveOffsetFraction.animateTo(targetValue = 0f, animationSpec = DetailTabSwitchAnimSpec)
@@ -1180,6 +1183,9 @@ private fun MobileLiveCameraScreen(
                             activeDetailTab = neighborTab
                             detailPartnerSide = -side
                             detailDragOffsetFraction = newStartOffset
+                            if (activeDetailTab != currentDetailTabState) {
+                                currentOnSelectDetailTab(activeDetailTab)
+                            }
                             scope.launch {
                                 detailActiveOffsetFraction.snapTo(newStartOffset)
                                 isDraggingDetailTab = false

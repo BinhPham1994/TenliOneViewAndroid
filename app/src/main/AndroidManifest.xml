@@ -57,6 +57,14 @@
             </intent-filter>
         </service>
 
+        <receiver
+            android:name=".firebase.CallNotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.tenli.oneview.action.DISMISS_CALL_NOTIFICATION" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
             android:enabled="false"

@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
 
         // Chỉ kiểm tra cập nhật ở lần tạo đầu (không lặp lại khi recreate do đổi ngôn ngữ)
         if (savedInstanceState == null) {
+            intent.cancelOriginNotificationIfPresent(this)
             intent.extractEventId()?.let { rawId ->
                 pendingEventNav = PendingEventNav(eventId = rawId, isColdStart = true)
             }
@@ -177,6 +178,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        intent.cancelOriginNotificationIfPresent(this)
         intent.extractEventId()?.let { rawId ->
             // App đang mở sẵn → điều hướng hiển thị ngay chi tiết sự kiện mà không mở lại app
             pendingEventNav = PendingEventNav(eventId = rawId, isColdStart = false)
@@ -224,6 +226,20 @@ private fun Intent.extractEventId(): String? =
 
 private fun Intent.clearEventIdExtras() {
     EVENT_ID_EXTRA_KEYS.forEach { removeExtra(it) }
+    removeExtra("NOTIFICATION_ID")
+}
+
+private fun Intent.cancelOriginNotificationIfPresent(context: Context) {
+    runCatching {
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager ?: return
+        val notifId = getIntExtra("NOTIFICATION_ID", 0)
+        if (notifId != 0) {
+            nm.cancel(notifId)
+        }
+        extractEventId()?.takeIf { it.isNotEmpty() }?.let { eId ->
+            nm.cancel(eId.hashCode())
+        }
+    }
 }
 
 private enum class StartupPermissionDialog { NONE, NOTIFICATION, OVERLAY, BATTERY }
@@ -252,7 +268,7 @@ private fun StartupPermissionDialogs() {
         }
         activeDialog = when {
             !hasNotificationPerm -> StartupPermissionDialog.NOTIFICATION
-            !Settings.canDrawOverlays(context) -> StartupPermissionDialog.OVERLAY
+            !PermissionUtils.isEmergencyCallPermissionGranted(context) -> StartupPermissionDialog.OVERLAY
             !PermissionUtils.isIgnoringBattery(context) -> StartupPermissionDialog.BATTERY
             else -> StartupPermissionDialog.NONE
         }
@@ -318,17 +334,10 @@ private fun StartupPermissionDialogs() {
             },
             onConfirm = {
                 dismiss()
-                if (isChinesePhone) {
-                    PermissionUtils.openManufacturerPermissions(context)
-                } else {
-                    runCatching {
-                        context.startActivity(
-                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:${context.packageName}".toUri())
-                        )
-                    }.onFailure {
-                        openAppDetails()
-                    }
-                }
+                PermissionUtils.openEmergencyCallPermissionSettings(
+                    context = context,
+                    preferManufacturerSettings = isChinesePhone
+                )
             },
             onDismiss = dismiss
         )
