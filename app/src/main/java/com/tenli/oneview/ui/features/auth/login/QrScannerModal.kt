@@ -92,6 +92,7 @@ import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
 import com.google.zxing.common.HybridBinarizer
 import com.tenli.oneview.ui.theme.BrandPrimary
+import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.delay
 import java.util.EnumMap
 import java.util.concurrent.Executors
@@ -328,13 +329,14 @@ private fun CameraQrPreview(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
+                val errorShape = RoundedCornerShape(MaterialTheme.spacing.radiusCompact)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 14.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(errorShape)
                         .background(Color(0xFFDC2626).copy(alpha = 0.92f))
-                        .border(1.dp, Color(0xFFF87171).copy(alpha = 0.5f), RoundedCornerShape(14.dp))
+                        .border(1.dp, Color(0xFFF87171).copy(alpha = 0.5f), errorShape)
                         .padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -356,12 +358,13 @@ private fun CameraQrPreview(
                 }
             }
 
+            val infoCardShape = RoundedCornerShape(MaterialTheme.spacing.radiusMedium)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(infoCardShape)
                     .background(Color(0xFF0F172A).copy(alpha = 0.86f))
-                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.12f), infoCardShape)
                     .padding(horizontal = 18.dp, vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -567,7 +570,7 @@ private fun PermissionRequiredContent(
                     containerColor = Color.White.copy(alpha = 0.1f),
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(MaterialTheme.spacing.radiusCompact)
             ) {
                 Text(text = if (isVietnamese) "Đóng" else "Close")
             }
@@ -577,7 +580,7 @@ private fun PermissionRequiredContent(
                     containerColor = BrandPrimary,
                     contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(MaterialTheme.spacing.radiusCompact)
             ) {
                 Text(text = if (isVietnamese) "Cấp quyền Camera" else "Grant Permission")
             }

@@ -1331,10 +1331,14 @@ object LucideIcons {
                 strokeLineCap = StrokeCap.Round,
                 strokeLineJoin = StrokeJoin.Round
             ) {
-                // polygon points="6 3 20 12 6 21 6 3"
-                moveTo(6f, 3f)
-                lineTo(20f, 12f)
-                lineTo(6f, 21f)
+                // Tam giác bo tròn 3 đỉnh + cạnh hơi bầu mềm mại (squircle play triangle, cân tâm thị giác)
+                moveTo(6.5f, 6.8f)
+                quadTo(6.5f, 3.8f, 9.1f, 5.35f)
+                quadTo(13.3f, 7.65f, 17.1f, 10.25f)
+                quadTo(19.6f, 12.0f, 17.1f, 13.75f)
+                quadTo(13.3f, 16.35f, 9.1f, 18.65f)
+                quadTo(6.5f, 20.2f, 6.5f, 17.2f)
+                quadTo(6.25f, 12.0f, 6.5f, 6.8f)
                 close()
             }
         }
@@ -1348,27 +1352,27 @@ object LucideIcons {
                 strokeLineCap = StrokeCap.Round,
                 strokeLineJoin = StrokeJoin.Round
             ) {
-                // rect x="6" y="4" width="4" height="16" rx="1"
-                moveTo(7f, 4f)
-                horizontalLineTo(9f)
-                arcTo(1f, 1f, 0f, false, true, 10f, 5f)
-                verticalLineTo(19f)
-                arcTo(1f, 1f, 0f, false, true, 9f, 20f)
-                horizontalLineTo(7f)
-                arcTo(1f, 1f, 0f, false, true, 6f, 19f)
-                verticalLineTo(5f)
-                arcTo(1f, 1f, 0f, false, true, 7f, 4f)
+                // 2 thanh dọc bo tròn đầu dạng viên thuốc (rx = 1.75)
+                moveTo(7.75f, 4.5f)
+                horizontalLineTo(8.25f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 10f, 6.25f)
+                verticalLineTo(17.75f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 8.25f, 19.5f)
+                horizontalLineTo(7.75f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 6f, 17.75f)
+                verticalLineTo(6.25f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 7.75f, 4.5f)
                 close()
-                // rect x="14" y="4" width="4" height="16" rx="1"
-                moveTo(15f, 4f)
-                horizontalLineTo(17f)
-                arcTo(1f, 1f, 0f, false, true, 18f, 5f)
-                verticalLineTo(19f)
-                arcTo(1f, 1f, 0f, false, true, 17f, 20f)
-                horizontalLineTo(15f)
-                arcTo(1f, 1f, 0f, false, true, 14f, 19f)
-                verticalLineTo(5f)
-                arcTo(1f, 1f, 0f, false, true, 15f, 4f)
+
+                moveTo(15.75f, 4.5f)
+                horizontalLineTo(16.25f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 18f, 6.25f)
+                verticalLineTo(17.75f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 16.25f, 19.5f)
+                horizontalLineTo(15.75f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 14f, 17.75f)
+                verticalLineTo(6.25f)
+                arcTo(1.75f, 1.75f, 0f, false, true, 15.75f, 4.5f)
                 close()
             }
         }

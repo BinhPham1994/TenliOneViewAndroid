@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -71,6 +72,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,11 +88,13 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -525,7 +529,7 @@ fun MonitorScreen(
                                 .align(Alignment.CenterEnd)
                                 .width(currentSearchWidth)
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                .clip(RoundedCornerShape(spacing.radiusSmall))
                                 .background(controlBg)
                                 .then(
                                     if (!isSearchExpanded) {
@@ -837,13 +841,11 @@ private val DetailTabSwitchAnimSpec = tween<Float>(durationMillis = DETAIL_TAB_S
 
 private val DetailSwipeEdgeBuffer = 20.dp
 private val DetailSwipeBottomNavExclusion = 96.dp
-private val DetailSwipeDirectionLockThreshold = 10.dp
-private val DetailSwipeMinFlickDistance = 30.dp
-private val DetailSwipeMinDragDistance = 45.dp
-private val DetailSwipeLongDragDistance = 90.dp
-private const val DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.28f
-private const val DETAIL_SWIPE_MAX_DRAG_DURATION_MS = 700L
-private const val DETAIL_SWIPE_HORIZONTAL_DOMINANCE = 1.25f
+private val DetailSwipeDirectionLockThreshold = 8.dp
+private val DetailSwipeMinFlickDistance = 26.dp
+private val DetailSwipeSeekbarZoneHeight = 76.dp
+private const val DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.25f
+private const val DETAIL_SWIPE_HORIZONTAL_DOMINANCE = 1.2f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -910,42 +912,84 @@ private fun MobileLiveCameraScreen(
     var mountedDetailTabs by remember(selectedCamera.camera.id) { mutableStateOf(setOf(uiState.cameraDetailTab)) }
     var activeDetailTab by remember(selectedCamera.camera.id) { mutableStateOf(uiState.cameraDetailTab) }
     var outgoingDetailTab by remember(selectedCamera.camera.id) { mutableStateOf<CameraDetailTab?>(null) }
-    var detailSlideDirection by remember(selectedCamera.camera.id) { mutableIntStateOf(1) }
-    val detailTransitionProgress = remember(selectedCamera.camera.id) { Animatable(1f) }
+    var detailPartnerSide by remember(selectedCamera.camera.id) { mutableIntStateOf(1) }
+    var isDraggingDetailTab by remember(selectedCamera.camera.id) { mutableStateOf(false) }
+    var detailDragOffsetFraction by remember(selectedCamera.camera.id) { mutableFloatStateOf(0f) }
+    val detailActiveOffsetFraction = remember(selectedCamera.camera.id) { Animatable(0f) }
 
-    LaunchedEffect(uiState.cameraDetailTab) {
+    LaunchedEffect(uiState.cameraDetailTab, visibleDetailTabs) {
         val targetTab = uiState.cameraDetailTab
         if (targetTab !in mountedDetailTabs) {
             mountedDetailTabs = mountedDetailTabs + targetTab
         }
-        if (targetTab == activeDetailTab) {
-            detailTransitionProgress.animateTo(targetValue = 1f, animationSpec = DetailTabSwitchAnimSpec)
-            outgoingDetailTab = null
-            return@LaunchedEffect
+        if (targetTab != activeDetailTab) {
+            val fromIdx = OrderedCameraDetailTabs.indexOf(activeDetailTab)
+            val toIdx = OrderedCameraDetailTabs.indexOf(targetTab)
+            val dir = if (toIdx >= fromIdx) 1 else -1
+            outgoingDetailTab = activeDetailTab
+            activeDetailTab = targetTab
+            detailPartnerSide = -dir
+            isDraggingDetailTab = false
+            detailActiveOffsetFraction.snapTo(dir.toFloat())
+            detailActiveOffsetFraction.animateTo(targetValue = 0f, animationSpec = DetailTabSwitchAnimSpec)
+            if (!isDraggingDetailTab) {
+                outgoingDetailTab = null
+            }
         }
-        val fromIdx = OrderedCameraDetailTabs.indexOf(activeDetailTab)
-        val toIdx = OrderedCameraDetailTabs.indexOf(targetTab)
-        detailSlideDirection = if (toIdx >= fromIdx) 1 else -1
-        outgoingDetailTab = activeDetailTab
-        activeDetailTab = targetTab
-        detailTransitionProgress.snapTo(0f)
-        detailTransitionProgress.animateTo(targetValue = 1f, animationSpec = DetailTabSwitchAnimSpec)
-        outgoingDetailTab = null
+
+        // Pre-mount & pre-measure toàn bộ 3 tab chi tiết camera khi màn hình nghỉ để vuốt ngang qua lại đạt 0ms measure hitch
+        val currIdx = visibleDetailTabs.indexOf(targetTab)
+        if (currIdx != -1) {
+            val neighbors = buildSet {
+                visibleDetailTabs.getOrNull(currIdx - 1)?.let { add(it) }
+                visibleDetailTabs.getOrNull(currIdx + 1)?.let { add(it) }
+            }
+            if (!mountedDetailTabs.containsAll(neighbors)) {
+                delay(100L)
+                mountedDetailTabs = mountedDetailTabs + neighbors
+            }
+        }
+        if (!mountedDetailTabs.containsAll(visibleDetailTabs)) {
+            delay(140L)
+            mountedDetailTabs = mountedDetailTabs + visibleDetailTabs
+        }
     }
 
     val currentDetailTabState by rememberUpdatedState(uiState.cameraDetailTab)
     val isFullscreenState by rememberUpdatedState(isFullscreen)
     val isFilterSheetOpenState by rememberUpdatedState(showPlaybackFilterSheet || showEventFilterSheet)
+    val hasActivePlaybackVideoState by rememberUpdatedState(activePlaybackVideo != null)
+    val isPlaybackPlayingState by rememberUpdatedState(isPlaybackPlaying)
     val currentOnSelectDetailTab by rememberUpdatedState(onSelectDetailTab)
+    val currentOnSetPlaybackPlaying by rememberUpdatedState(onSetPlaybackPlaying)
+    val topBarHeightDp = spacing.topBarHeight
 
-    val switchDetailTabBySwipe: (CameraDetailTab) -> Unit = remember(haptic) {
+    val onBottomDetailTabClick: (CameraDetailTab) -> Unit = remember(scope) {
         { targetTab: CameraDetailTab ->
-            if (targetTab != currentDetailTabState) {
-                try {
-                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                } catch (_: Exception) {
+            if (targetTab != activeDetailTab) {
+                if (activeDetailTab == CameraDetailTab.PLAYBACK && isPlaybackPlayingState) {
+                    currentOnSetPlaybackPlaying(false)
                 }
-                currentOnSelectDetailTab(targetTab)
+                val fromIdx = OrderedCameraDetailTabs.indexOf(activeDetailTab)
+                val toIdx = OrderedCameraDetailTabs.indexOf(targetTab)
+                val dir = if (toIdx >= fromIdx) 1 else -1
+                if (targetTab !in mountedDetailTabs) {
+                    mountedDetailTabs = mountedDetailTabs + targetTab
+                }
+                outgoingDetailTab = activeDetailTab
+                activeDetailTab = targetTab
+                detailPartnerSide = -dir
+                isDraggingDetailTab = false
+                scope.launch {
+                    detailActiveOffsetFraction.snapTo(dir.toFloat())
+                    detailActiveOffsetFraction.animateTo(targetValue = 0f, animationSpec = DetailTabSwitchAnimSpec)
+                    if (!isDraggingDetailTab) {
+                        outgoingDetailTab = null
+                        if (activeDetailTab != currentDetailTabState) {
+                            currentOnSelectDetailTab(activeDetailTab)
+                        }
+                    }
+                }
             }
         }
     }
@@ -969,8 +1013,8 @@ private fun MobileLiveCameraScreen(
                 val bottomNavExclusionPx = DetailSwipeBottomNavExclusion.toPx()
                 val lockThresholdPx = DetailSwipeDirectionLockThreshold.toPx()
                 val minFlickDistPx = DetailSwipeMinFlickDistance.toPx()
-                val minDragDistPx = DetailSwipeMinDragDistance.toPx()
-                val longDragDistPx = DetailSwipeLongDragDistance.toPx()
+                val topBarHeightPx = topBarHeightDp.toPx()
+                val seekbarZoneHeightPx = DetailSwipeSeekbarZoneHeight.toPx()
 
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -979,8 +1023,16 @@ private fun MobileLiveCameraScreen(
                     val startX = down.position.x
                     val startY = down.position.y
 
+                    val playerStageBottomY = topBarHeightPx + (widthPx / LIVE_STAGE_ASPECT_RATIO)
+                    val isTouchInPlaybackSeekbar =
+                        activeDetailTab == CameraDetailTab.PLAYBACK &&
+                            hasActivePlaybackVideoState &&
+                            startY >= (playerStageBottomY - seekbarZoneHeightPx) &&
+                            startY <= playerStageBottomY
+
                     if (isFullscreenState ||
                         isFilterSheetOpenState ||
+                        isTouchInPlaybackSeekbar ||
                         startX < edgeBufferPx ||
                         startX > widthPx - edgeBufferPx ||
                         startY > heightPx - bottomNavExclusionPx
@@ -993,6 +1045,11 @@ private fun MobileLiveCameraScreen(
                     var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
                     var lastX = startX
                     var lastY = startY
+                    var dragAnchorX = startX
+                    var recentX = startX
+                    var recentTime = startTime
+                    var prevRecentX = startX
+                    var prevRecentTime = startTime
 
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -1010,6 +1067,13 @@ private fun MobileLiveCameraScreen(
 
                         if (!change.pressed) break
 
+                        if (endTime - recentTime >= 40L) {
+                            prevRecentX = recentX
+                            prevRecentTime = recentTime
+                            recentX = lastX
+                            recentTime = endTime
+                        }
+
                         lastX = change.position.x
                         lastY = change.position.y
                         val dx = lastX - startX
@@ -1017,7 +1081,28 @@ private fun MobileLiveCameraScreen(
 
                         if (gestureDirection == 0) {
                             if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
+                                if (abs(dy) >= abs(dx) || abs(dx) < abs(dy) * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
+                                    gestureDirection = 2
+                                } else {
+                                    gestureDirection = 1
+                                    val currentVisibleTabs = visibleDetailTabsState
+                                    val currIdx = currentVisibleTabs.indexOf(activeDetailTab)
+                                    val inFlightOffset =
+                                        if (!isDraggingDetailTab && outgoingDetailTab != null) detailActiveOffsetFraction.value else 0f
+                                    val canCatchInFlight =
+                                        (inFlightOffset > 0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx - 1)) ||
+                                            (inFlightOffset < -0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx + 1))
+                                    dragAnchorX = if (canCatchInFlight) lastX - inFlightOffset * widthPx else lastX
+                                    if (canCatchInFlight) {
+                                        detailDragOffsetFraction = inFlightOffset
+                                        isDraggingDetailTab = true
+                                        scope.launch { detailActiveOffsetFraction.stop() }
+                                    }
+                                    recentX = lastX
+                                    recentTime = endTime
+                                    prevRecentX = lastX
+                                    prevRecentTime = endTime
+                                }
                             }
                         }
 
@@ -1025,29 +1110,105 @@ private fun MobileLiveCameraScreen(
                             break
                         } else if (gestureDirection == 1) {
                             change.consume()
+                            val currentVisibleTabs = visibleDetailTabsState
+                            val currIdx = currentVisibleTabs.indexOf(activeDetailTab)
+                            val effectiveDx = lastX - dragAnchorX
+                            val rawFraction = if (widthPx > 0f) effectiveDx / widthPx else 0f
+
+                            if (rawFraction < 0f) {
+                                val nextTab = currentVisibleTabs.getOrNull(currIdx + 1)
+                                if (nextTab != null) {
+                                    if (nextTab !in mountedDetailTabs) mountedDetailTabs = mountedDetailTabs + nextTab
+                                    outgoingDetailTab = nextTab
+                                    detailPartnerSide = 1
+                                    detailDragOffsetFraction = rawFraction.coerceIn(-1f, 0f)
+                                    isDraggingDetailTab = true
+                                } else {
+                                    outgoingDetailTab = null
+                                    detailDragOffsetFraction = 0f
+                                    isDraggingDetailTab = false
+                                }
+                            } else if (rawFraction > 0f) {
+                                val prevTab = currentVisibleTabs.getOrNull(currIdx - 1)
+                                if (prevTab != null) {
+                                    if (prevTab !in mountedDetailTabs) mountedDetailTabs = mountedDetailTabs + prevTab
+                                    outgoingDetailTab = prevTab
+                                    detailPartnerSide = -1
+                                    detailDragOffsetFraction = rawFraction.coerceIn(0f, 1f)
+                                    isDraggingDetailTab = true
+                                } else {
+                                    outgoingDetailTab = null
+                                    detailDragOffsetFraction = 0f
+                                    isDraggingDetailTab = false
+                                }
+                            } else {
+                                detailDragOffsetFraction = 0f
+                            }
                         }
                     }
 
-                    if (gestureDirection == 1) {
-                        val diffX = lastX - startX
-                        val diffY = lastY - startY
-                        val absX = abs(diffX)
-                        val absY = abs(diffY)
-                        val elapsed = (endTime - startTime).coerceAtLeast(1L)
-                        val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
+                    if (gestureDirection == 1 && isDraggingDetailTab) {
+                        val neighborTab = outgoingDetailTab
+                        val side = detailPartnerSide
+                        val draggedProgress = (-detailDragOffsetFraction * side).coerceIn(0f, 1f)
+                        val usePrevWindow = (endTime - recentTime) < 20L && prevRecentTime < recentTime
+                        val refX = if (usePrevWindow) prevRecentX else recentX
+                        val refTime = if (usePrevWindow) prevRecentTime else recentTime
+                        val dt = (endTime - refTime).coerceAtLeast(1L).toFloat()
+                        val velocityX = (lastX - refX).toDp().value / dt
+                        val velocityTowardPartner = -velocityX * side
+                        val totalAbsX = abs(lastX - startX)
 
-                        val isFlick = velocityDpPerMs > DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
-                        val isDrag = absX >= minDragDistPx && elapsed <= DETAIL_SWIPE_MAX_DRAG_DURATION_MS
-                        val isLongDrag = absX >= longDragDistPx
+                        val isFlickTowardPartner =
+                            velocityTowardPartner >= DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS &&
+                                totalAbsX >= minFlickDistPx &&
+                                draggedProgress >= 0.03f
+                        val isFlickBack = velocityTowardPartner <= -DETAIL_SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS
+                        val isDraggedPastThreshold = !isFlickBack && draggedProgress >= 0.26f
 
-                        if ((isFlick || isDrag || isLongDrag) && absX >= absY * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
-                            val currentVisibleTabs = visibleDetailTabsState
-                            val currIdx = currentVisibleTabs.indexOf(currentDetailTabState)
-                            if (currIdx != -1) {
-                                if (diffX < 0f && currIdx < currentVisibleTabs.size - 1) {
-                                    switchDetailTabBySwipe(currentVisibleTabs[currIdx + 1])
-                                } else if (diffX > 0f && currIdx > 0) {
-                                    switchDetailTabBySwipe(currentVisibleTabs[currIdx - 1])
+                        if (neighborTab != null && (isFlickTowardPartner || isDraggedPastThreshold)) {
+                            if (activeDetailTab == CameraDetailTab.PLAYBACK && isPlaybackPlayingState) {
+                                currentOnSetPlaybackPlaying(false)
+                            }
+                            try {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } catch (_: Exception) {
+                            }
+                            val newStartOffset = (detailDragOffsetFraction + side).coerceIn(-1f, 1f)
+                            val settleDurationMs = (140 + (abs(newStartOffset) * 115f).toInt()).coerceIn(140, 250)
+                            outgoingDetailTab = activeDetailTab
+                            activeDetailTab = neighborTab
+                            detailPartnerSide = -side
+                            detailDragOffsetFraction = newStartOffset
+                            scope.launch {
+                                detailActiveOffsetFraction.snapTo(newStartOffset)
+                                isDraggingDetailTab = false
+                                detailActiveOffsetFraction.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(durationMillis = settleDurationMs, easing = DetailTabSwitchEasing)
+                                )
+                                if (!isDraggingDetailTab) {
+                                    outgoingDetailTab = null
+                                    if (activeDetailTab != currentDetailTabState) {
+                                        currentOnSelectDetailTab(activeDetailTab)
+                                    }
+                                }
+                            }
+                        } else {
+                            val startFrom = detailDragOffsetFraction
+                            val settleDurationMs = (130 + (abs(startFrom) * 120f).toInt()).coerceIn(130, 230)
+                            scope.launch {
+                                detailActiveOffsetFraction.snapTo(startFrom)
+                                isDraggingDetailTab = false
+                                detailActiveOffsetFraction.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = tween(durationMillis = settleDurationMs, easing = DetailTabSwitchEasing)
+                                )
+                                if (!isDraggingDetailTab) {
+                                    outgoingDetailTab = null
+                                    if (activeDetailTab != currentDetailTabState) {
+                                        currentOnSelectDetailTab(activeDetailTab)
+                                    }
                                 }
                             }
                         }
@@ -1080,7 +1241,7 @@ private fun MobileLiveCameraScreen(
                             )
                         }
                     },
-                    rightAction = when (uiState.cameraDetailTab) {
+                    rightAction = when (activeDetailTab) {
                         CameraDetailTab.LIVE -> null
                         CameraDetailTab.PLAYBACK -> {
                             {
@@ -1106,18 +1267,8 @@ private fun MobileLiveCameraScreen(
                 )
             }
 
-            val effectiveMountedDetailTabs = remember(
-                mountedDetailTabs,
-                uiState.cameraDetailTab,
-                activeDetailTab,
-                outgoingDetailTab
-            ) {
-                buildSet {
-                    addAll(mountedDetailTabs)
-                    add(uiState.cameraDetailTab)
-                    add(activeDetailTab)
-                    outgoingDetailTab?.let { add(it) }
-                }
+            val effectiveMountedDetailTabs = remember(mountedDetailTabs, uiState.cameraDetailTab) {
+                mountedDetailTabs + uiState.cameraDetailTab
             }
 
             Box(
@@ -1130,30 +1281,28 @@ private fun MobileLiveCameraScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .zIndex(
-                                    when (tab) {
-                                        activeDetailTab -> 2f
-                                        outgoingDetailTab -> 1f
-                                        else -> 0f
-                                    }
-                                )
                                 .layout { measurable, constraints ->
-                                    val currentOutgoing = outgoingDetailTab
-                                    if (tab != activeDetailTab && tab != currentOutgoing) {
-                                        layout(0, 0) {}
-                                    } else {
-                                        val placeable = measurable.measure(constraints)
-                                        layout(placeable.width, placeable.height) {
-                                            val progress = detailTransitionProgress.value
-                                            val offsetX = when (tab) {
-                                                activeDetailTab -> if (currentOutgoing != null) {
-                                                    (detailSlideDirection * (1f - progress) * placeable.width).toInt()
-                                                } else {
-                                                    0
-                                                }
-                                                else -> (-detailSlideDirection * progress * placeable.width).toInt()
+                                    val placeable = measurable.measure(constraints)
+                                    layout(placeable.width, placeable.height) {
+                                        val currentActive = activeDetailTab
+                                        val currentOutgoing = outgoingDetailTab
+                                        if (tab == currentActive || tab == currentOutgoing) {
+                                            val offsetFraction =
+                                                if (isDraggingDetailTab) detailDragOffsetFraction else detailActiveOffsetFraction.value
+                                            val tabFraction = when (tab) {
+                                                currentActive -> if (currentOutgoing != null) offsetFraction else 0f
+                                                else -> offsetFraction + detailPartnerSide
                                             }
-                                            placeable.placeRelativeWithLayer(offsetX, 0)
+                                            val offsetX = (tabFraction * placeable.width).toInt()
+                                            val visibility = (1f - abs(tabFraction)).coerceIn(0f, 1f)
+                                            val pageAlpha = visibility * visibility * (3f - 2f * visibility)
+                                            placeable.placeRelativeWithLayer(
+                                                x = offsetX,
+                                                y = 0,
+                                                zIndex = if (tab == currentActive) 2f else 1f
+                                            ) {
+                                                alpha = pageAlpha
+                                            }
                                         }
                                     }
                                 }
@@ -1161,8 +1310,6 @@ private fun MobileLiveCameraScreen(
                             when (tab) {
                                 CameraDetailTab.LIVE -> {
                                     val isEnteringLivePage = isSliding && !isClosing
-                                    val isClosingOrLeavingLive = isClosing ||
-                                        (outgoingDetailTab == CameraDetailTab.LIVE && activeDetailTab != CameraDetailTab.LIVE)
                                     Column(modifier = Modifier.fillMaxSize()) {
                                         Box(
                                             modifier = if (isFullscreen) {
@@ -1180,7 +1327,7 @@ private fun MobileLiveCameraScreen(
                                                 selectedCamera = selectedCamera,
                                                 isTabActive = isTabActive && uiState.cameraDetailTab == CameraDetailTab.LIVE,
                                                 isEntering = isEnteringLivePage,
-                                                isClosing = isClosingOrLeavingLive,
+                                                isClosing = isClosing,
                                                 onClick = {},
                                                 onRetryClick = onRetryClick,
                                                 onSuccess = onSuccess,
@@ -1202,14 +1349,12 @@ private fun MobileLiveCameraScreen(
                                 }
 
                                 CameraDetailTab.PLAYBACK -> {
-                                    val isPlaybackTabVisible = isTabActive &&
-                                        (activeDetailTab == CameraDetailTab.PLAYBACK || outgoingDetailTab == CameraDetailTab.PLAYBACK)
                                     CameraPlaybackTabContent(
                                         uiState = uiState,
                                         activePlaybackVideo = activePlaybackVideo,
                                         isPlaybackPlaying = isPlaybackPlaying,
                                         selectedCamera = selectedCamera,
-                                        isTabVisible = isPlaybackTabVisible,
+                                        isTabVisible = isTabActive && uiState.cameraDetailTab == CameraDetailTab.PLAYBACK,
                                         isFullscreen = isFullscreen && uiState.cameraDetailTab == CameraDetailTab.PLAYBACK,
                                         listState = playbackListState,
                                         bottomClearance = bottomClearance,
@@ -1223,12 +1368,10 @@ private fun MobileLiveCameraScreen(
                                 }
 
                                 CameraDetailTab.EVENTS -> {
-                                    val isEventsTabVisible = isTabActive &&
-                                        (activeDetailTab == CameraDetailTab.EVENTS || outgoingDetailTab == CameraDetailTab.EVENTS)
                                     CameraEventsTabContent(
                                         uiState = uiState,
                                         cameraName = selectedCamera.camera.name,
-                                        isTabVisible = isEventsTabVisible,
+                                        isTabVisible = isTabActive && uiState.cameraDetailTab == CameraDetailTab.EVENTS,
                                         listState = eventListState,
                                         bottomClearance = bottomClearance,
                                         onRefresh = onRefreshEvents,
@@ -1250,8 +1393,8 @@ private fun MobileLiveCameraScreen(
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 CameraDetailBottomNavigation(
-                    currentTab = uiState.cameraDetailTab,
-                    onTabClick = onSelectDetailTab,
+                    currentTab = activeDetailTab,
+                    onTabClick = onBottomDetailTabClick,
                     onScrollToTop = { tab ->
                         scope.launch {
                             when (tab) {
@@ -1319,28 +1462,9 @@ private fun CameraPlaybackTabContent(
     onLoadMoreDays: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val isEn = rememberIsEnglish()
-
-    val ratioPrefs = remember(context) {
-        context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
-    }
-    var isOriginalRatio by remember(selectedCamera.camera.id) {
-        mutableStateOf(
-            ratioPrefs.getString("camera_fit_ratio_${selectedCamera.camera.id}", "cover") == "contain"
-        )
-    }
-    val toggleAspectRatio: () -> Unit = remember(selectedCamera.camera.id, ratioPrefs) {
-        {
-            val next = !isOriginalRatio
-            isOriginalRatio = next
-            ratioPrefs.edit()
-                .putString("camera_fit_ratio_${selectedCamera.camera.id}", if (next) "contain" else "cover")
-                .apply()
-        }
-    }
 
     Column(modifier = modifier) {
         // Trình phát video ghi hình VMS tràn viền ngang (hỗ trợ xoay ngang toàn màn hình giống Live Camera)
@@ -1357,7 +1481,6 @@ private fun CameraPlaybackTabContent(
             val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
             val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
             val pillHeight = spacing.iconButtonSmall
-            val actionBtnSize = spacing.iconMedium
             val actionIconSize = spacing.iconSmall
 
             Box(
@@ -1377,7 +1500,7 @@ private fun CameraPlaybackTabContent(
                     videoUrl = activeVideo.videoLink,
                     thumbnailUrl = null,
                     deviceKey = UserSession.accessToken,
-                    isOriginalRatio = isOriginalRatio,
+                    isOriginalRatio = false,
                     isFullscreen = isFullscreen,
                     playWhenReady = isPlaybackPlaying,
                     onPlayingChange = { isPlaybackVideoReady = it },
@@ -1431,62 +1554,27 @@ private fun CameraPlaybackTabContent(
                                 )
                             }
 
-                            // Top-Right: Tỷ lệ khung hình & Đóng (.info-action style)
-                            Row(
+                            // Top-Right: Nút Đóng (.info-action style)
+                            Box(
                                 modifier = Modifier
-                                    .height(pillHeight)
+                                    .size(pillHeight)
                                     .clip(RoundedCornerShape(spacing.radiusSmall))
                                     .background(overlayPillBg)
                                     .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
-                                    .padding(horizontal = spacing.space2),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                                    .clickable {
+                                        if (isFullscreen) {
+                                            onToggleFullscreen()
+                                        }
+                                        onSelectVideo(null)
+                                    },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .background(
-                                            if (isOriginalRatio) {
-                                                BrandActiveNavDark.copy(alpha = 0.35f)
-                                            } else {
-                                                Color.Transparent
-                                            }
-                                        )
-                                        .clickable { toggleAspectRatio() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
-                                        contentDescription = if (isOriginalRatio) {
-                                            if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
-                                        } else {
-                                            if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
-                                        },
-                                        tint = if (isOriginalRatio) BrandLight else colors.onMedia,
-                                        modifier = Modifier.size(actionIconSize)
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .clickable {
-                                            if (isFullscreen) {
-                                                onToggleFullscreen()
-                                            }
-                                            onSelectVideo(null)
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = LucideIcons.X,
-                                        contentDescription = stringResource(id = R.string.dialog_btn_close),
-                                        tint = colors.onMedia,
-                                        modifier = Modifier.size(actionIconSize)
-                                    )
-                                }
+                                Icon(
+                                    imageVector = LucideIcons.X,
+                                    contentDescription = stringResource(id = R.string.dialog_btn_close),
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
                             }
                         }
                     }
@@ -1700,12 +1788,11 @@ private fun PlaybackVideoGridCard(
     val context = LocalContext.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
+    val shape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     val timeBadgeShape = remember(spacing.radiusXSmall) { RoundedCornerShape(spacing.radiusXSmall) }
 
-    // Đồng bộ màu nền & viền với các nút điều khiển trong ô Live Camera (CameraGridItem)
+    // Đồng bộ màu nền với các nút điều khiển trong ô Live Camera (CameraGridItem)
     val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
-    val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
 
     // Ưu tiên ảnh thumbnail/image của bản ghi, nếu không có hoặc bị lỗi thì fallback sang ảnh snapshot đã cache của camera
     val primaryThumbUrl = video.thumbnailLink.ifEmpty { video.imageLink }
@@ -1795,29 +1882,40 @@ private fun PlaybackVideoGridCard(
             )
         }
 
+        // Phủ lớp nền tối nhẹ lên các item chưa phát; khi item được chọn phát thì bỏ lớp tối để nổi bật rõ
+        if (!isSelected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(colors.mediaBg.copy(alpha = 0.24f))
+            )
+        }
+
         // Play / Pause icon overlay (.play-overlay)
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
                 .size(spacing.iconButton)
                 .clip(CircleShape)
-                .background(overlayPillBg)
-                .border(
-                    width = spacing.borderThin,
-                    color = colors.onMedia.copy(alpha = 0.28f),
-                    shape = CircleShape
-                ),
+                .background(overlayPillBg),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = if (isPlaying) LucideIcons.Pause else LucideIcons.Play,
-                contentDescription = null,
-                tint = colors.onMedia,
-                modifier = Modifier.size(spacing.iconRegular)
-            )
+            if (isPlaying) {
+                PlayingBarsIndicator(
+                    color = colors.onMedia,
+                    modifier = Modifier.size(spacing.iconRegular)
+                )
+            } else {
+                Icon(
+                    imageVector = LucideIcons.Play,
+                    contentDescription = null,
+                    tint = colors.onMedia,
+                    modifier = Modifier.size(spacing.iconRegular)
+                )
+            }
         }
 
-        // .video-time-overlay (đồng bộ màu nền & viền với các nút trong ô Live Camera)
+        // .video-time-overlay
         if (timeOnlyText.isNotEmpty()) {
             Box(
                 modifier = Modifier
@@ -1825,22 +1923,70 @@ private fun PlaybackVideoGridCard(
                     .padding(spacing.space6)
                     .clip(timeBadgeShape)
                     .background(overlayPillBg)
-                    .border(
-                        width = spacing.borderMedium,
-                        color = overlayPillBorder,
-                        shape = timeBadgeShape
-                    )
-                    .padding(horizontal = spacing.space6, vertical = spacing.space2)
+                    .padding(horizontal = spacing.space6, vertical = spacing.space3)
             ) {
                 Text(
                     text = timeOnlyText,
                     color = colors.onMedia,
-                    style = MaterialTheme.typography.micro,
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1
                 )
             }
         }
+    }
+}
+
+/**
+ * Icon 2 thanh song song bo tròn có hiệu ứng nhô lên nhô xuống luân phiên khi video đang phát.
+ */
+@Composable
+private fun PlayingBarsIndicator(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "playbackPlayingBars")
+    val phase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 460, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "playingBarPhase"
+    )
+
+    Canvas(modifier = modifier) {
+        val scale = size.width / 24f
+        val strokeWidthPx = 2f * scale
+        val cornerPx = CornerRadius(1.75f * scale, 1.75f * scale)
+        val barWidthPx = 4f * scale
+
+        // Thanh trái và thanh phải nhấp nhô ngược pha nhau (1 thanh vươn lên thì thanh kia hạ xuống)
+        val pLeft = phase
+        val pRight = 1f - phase
+
+        val topLeftY = (10.8f - 6.8f * pLeft) * scale
+        val bottomLeftY = (19.6f - 1.1f * pLeft) * scale
+
+        val topRightY = (10.8f - 6.8f * pRight) * scale
+        val bottomRightY = (19.6f - 1.1f * pRight) * scale
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(6f * scale, topLeftY),
+            size = Size(barWidthPx, (bottomLeftY - topLeftY).coerceAtLeast(barWidthPx)),
+            cornerRadius = cornerPx,
+            style = Stroke(width = strokeWidthPx)
+        )
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(14f * scale, topRightY),
+            size = Size(barWidthPx, (bottomRightY - topRightY).coerceAtLeast(barWidthPx)),
+            cornerRadius = cornerPx,
+            style = Stroke(width = strokeWidthPx)
+        )
     }
 }
 
@@ -1853,7 +1999,7 @@ private fun LoadMoreDayVideosCard(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusSmall)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
 
     Box(
         modifier = modifier
@@ -1889,7 +2035,7 @@ private fun LoadMoreDayVideosCard(
                     if (isEn) "View more videos" else "Xem thêm video"
                 },
                 color = colors.textStrong,
-                style = MaterialTheme.typography.caption,
+                style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2243,7 +2389,7 @@ private fun MobileCameraSnapshotCard(
                 scaleX = pressScale
                 scaleY = pressScale
             }
-            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+            .clip(RoundedCornerShape(spacing.radiusCompact))
             .background(cardBg)
             .clickable(
                 interactionSource = interactionSource,
@@ -2427,7 +2573,7 @@ private fun MobileGroupFilterBottomSheet(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(GroupFilterEmptyHeight)
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .clip(RoundedCornerShape(spacing.radiusMedium))
                             .background(colors.surfaceRaised),
                         contentAlignment = Alignment.Center
                     ) {
@@ -2437,7 +2583,7 @@ private fun MobileGroupFilterBottomSheet(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .clip(RoundedCornerShape(spacing.radiusMedium))
                             .background(colors.surfaceRaised)
                             .padding(vertical = spacing.space4),
                         verticalArrangement = Arrangement.spacedBy(spacing.space2)

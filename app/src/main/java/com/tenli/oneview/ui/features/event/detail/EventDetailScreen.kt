@@ -1631,7 +1631,7 @@ private fun RelatedPlatesSection(
 private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: () -> Unit) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val cardShape = RoundedCornerShape(spacing.radiusSmallMedium)
+    val cardShape = RoundedCornerShape(spacing.radiusCompact)
     val plateText = remember(plateEvent) { plateEvent.data?.plate?.plate ?: plateEvent.data?.plate?.number ?: "---" }
     val timeText = remember(plateEvent) { formatEventTimeOnly(plateEvent.time) }
     val snapshotUrl = remember(plateEvent) {
@@ -1662,7 +1662,7 @@ private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: 
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(spacing.radiusTiny)),
+                .clip(RoundedCornerShape(spacing.radiusSmall)),
             contentScale = ContentScale.Crop
         )
         PlateBadgePill(plate = plateText, isBlacklist = plateEvent.isPlateBlacklisted)
@@ -1777,8 +1777,8 @@ private fun JourneyPeriodMenu(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val menuShape = RoundedCornerShape(spacing.radiusRegular)
-    val itemShape = RoundedCornerShape(spacing.radiusSmallMedium)
+    val menuShape = RoundedCornerShape(spacing.radiusCompact)
+    val itemShape = RoundedCornerShape(spacing.radiusSmall)
     val selectedPillBg = colors.accent.copy(alpha = if (colors.isDark) 0.18f else 0.10f)
 
     Popup(

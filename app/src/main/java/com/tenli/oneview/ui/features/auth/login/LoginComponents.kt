@@ -108,7 +108,7 @@ fun LoginInputField(
     val keyboardController = LocalSoftwareKeyboardController.current
     var isFocused by remember { mutableStateOf(false) }
 
-    val shape = RoundedCornerShape(spacing.radiusRegular)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
     val leadingIconTint = if (isFocused) colors.accent else colors.textSubtle
     val textStyle = MaterialTheme.typography.bodyMedium.copy(color = colors.textTitle)
 
@@ -211,7 +211,7 @@ internal fun LoginGradientButton(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusMedium)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
     val brush = remember { Brush.linearGradient(listOf(BrandPrimary, LoginButtonGradientEnd)) }
 
     Button(
@@ -267,7 +267,7 @@ internal fun LoginSecondaryButton(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusMedium)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
 
     Button(
         onClick = onClick,
@@ -344,7 +344,7 @@ internal fun LoginTopPill(
     Row(
         modifier = modifier
             .height(spacing.space32)
-            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+            .clip(RoundedCornerShape(spacing.radiusSmall))
             .background(MaterialTheme.appColors.buttonSecondaryBg)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -367,7 +367,7 @@ internal fun LoginDropdownPopup(
     val spacing = MaterialTheme.spacing
     val isDark = colors.isDark
     val offsetY = with(LocalDensity.current) { (spacing.space32 + spacing.space6).roundToPx() }
-    val shape = RoundedCornerShape(spacing.radiusRegular)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
 
     Popup(
         alignment = Alignment.TopEnd,
@@ -410,7 +410,7 @@ internal fun LoginMenuOption(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+            .clip(RoundedCornerShape(spacing.radiusSmall))
             .background(if (selected) selectedBg else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = spacing.space12, vertical = spacing.space8),

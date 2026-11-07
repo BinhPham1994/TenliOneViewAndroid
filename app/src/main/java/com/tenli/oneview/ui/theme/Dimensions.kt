@@ -61,15 +61,22 @@ class Dimensions(val scaleFactor: Float = 1f) {
     val iconExtraLarge: Dp = s(48f)
     val iconHuge: Dp = s(64f)
 
-    // ---------------- Corner radius ----------------
+    // ---------------- Corner radius (Chuẩn hóa đồng bộ 5 cấp chính) ----------------
+    /** Badge / Tag trạng thái nhỏ (4dp) */
     val radiusXSmall: Dp = s(4f)
+    /** Nút điều khiển phụ trên video / checkbox (6dp) */
     val radiusTiny: Dp = s(6f)
+    /** Phần tử con trong thẻ (ảnh thumbnail, item chọn trong menu, nút icon TopBar, IconBadge) (8dp) */
     val radiusSmall: Dp = s(8f)
     val radiusSmallMedium: Dp = s(10f)
+    /** Thẻ danh sách/lưới độc lập (Sự kiện, Trực tiếp, Xem lại), Nút bấm, Ô Input, Khung Dropdown (12dp) */
     val radiusCompact: Dp = s(12f)
     val radiusRegular: Dp = s(14f)
+    /** Khối nhóm Section / Card lớn (SettingsGroupCard, SectionCard, khung nhóm trong BottomSheet) (16dp) */
     val radiusMedium: Dp = s(16f)
+    /** Bottom Sheet & Popup Dialog lớn (20dp) */
     val radiusLarge: Dp = s(20f)
+    /** Card trung tâm màn Đăng nhập / Thanh điều hướng nổi (24dp) */
     val radiusExtraLarge: Dp = s(24f)
     val radiusSheet: Dp = s(28f)
 

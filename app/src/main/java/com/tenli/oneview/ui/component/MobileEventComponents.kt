@@ -382,7 +382,7 @@ fun MobileTopPopupHost(
 private fun MobileTopPopupCard(msg: MobileTopPopupMessage) {
     val spacing = MaterialTheme.spacing
     val contentColor = MaterialTheme.appColors.onAccent
-    val shape = RoundedCornerShape(spacing.radiusSmallMedium)
+    val shape = RoundedCornerShape(spacing.radiusCompact)
     Row(
         modifier = Modifier
             .widthIn(max = spacing.dialogMaxWidth)
@@ -877,7 +877,7 @@ fun MobileTopActionButton(
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
 
-    TopBarIconBox(onClick = onClick, cornerRadius = spacing.radiusSmallMedium) {
+    TopBarIconBox(onClick = onClick, cornerRadius = spacing.radiusSmall) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
@@ -1120,7 +1120,7 @@ private fun EventListCard(
     }
 
     val cardShape = remember(spacing) { RoundedCornerShape(spacing.radiusCompact) }
-    val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmallMedium) }
+    val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmall) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
     val thumbWidth = ListThumbnailBaseWidth * spacing.scaleFactor
 
@@ -1561,7 +1561,7 @@ fun MobileFilterBottomSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .clip(RoundedCornerShape(spacing.radiusMedium))
                             .background(colors.surfaceRaised)
                             .padding(vertical = spacing.space4)
                     ) {
@@ -2149,7 +2149,7 @@ private fun AppDatePickerPopup(
                                 backgroundColor = WarningOrange,
                                 size = spacing.iconButton,
                                 iconSize = spacing.iconRegular,
-                                cornerRadius = spacing.radiusSmallMedium,
+                                cornerRadius = spacing.radiusSmall,
                                 tint = Color.White
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
@@ -2180,7 +2180,7 @@ private fun AppDatePickerPopup(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .clip(RoundedCornerShape(spacing.radiusMedium))
                             .background(colors.surfaceRaised)
                             .padding(spacing.space12)
                     ) {
@@ -2254,7 +2254,7 @@ private fun AppDatePickerPopup(
                         val gridStartDate = remember(firstOfMonth) {
                             firstOfMonth.minusDays((firstOfMonth.dayOfWeek.value - 1).toLong())
                         }
-                        val dayCellShape = RoundedCornerShape(spacing.radiusSmallMedium)
+                        val dayCellShape = RoundedCornerShape(spacing.radiusSmall)
 
                         for (row in 0 until 6) {
                             Row(modifier = Modifier.fillMaxWidth()) {
@@ -2416,7 +2416,7 @@ private fun AppTimePickerPopup(
                                 backgroundColor = WarningOrange,
                                 size = spacing.iconButton,
                                 iconSize = spacing.iconRegular,
-                                cornerRadius = spacing.radiusSmallMedium,
+                                cornerRadius = spacing.radiusSmall,
                                 tint = Color.White
                             )
                             Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
@@ -2445,7 +2445,7 @@ private fun AppTimePickerPopup(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .clip(RoundedCornerShape(spacing.radiusMedium))
                             .background(colors.surfaceRaised)
                             .padding(spacing.space12),
                         verticalAlignment = Alignment.CenterVertically,
@@ -2475,7 +2475,7 @@ private fun AppTimePickerPopup(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                            .clip(RoundedCornerShape(spacing.radiusSmall))
                                             .background(if (isSelected) BrandPrimary else Color.Transparent)
                                             .clickable { selectedHour = hour },
                                         contentAlignment = Alignment.Center
@@ -2522,7 +2522,7 @@ private fun AppTimePickerPopup(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                            .clip(RoundedCornerShape(spacing.radiusSmall))
                                             .background(if (isSelected) BrandPrimary else Color.Transparent)
                                             .clickable { selectedMinute = minute },
                                         contentAlignment = Alignment.Center
@@ -2781,7 +2781,7 @@ private fun PickerField(
     Box(
         modifier = modifier
             .heightIn(min = spacing.iconButtonLarge)
-            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+            .clip(RoundedCornerShape(spacing.radiusCompact))
             .background(MaterialTheme.appColors.surfaceRaised)
             .clickable(onClick = onClick)
             .padding(horizontal = spacing.space12),

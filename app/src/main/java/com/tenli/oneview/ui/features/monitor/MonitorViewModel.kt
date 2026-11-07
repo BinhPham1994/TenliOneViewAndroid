@@ -1474,14 +1474,23 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         addCamera(camera, 0, startPolling = true)
-        // Pre-warm danh sách playback ngầm sau khi hiệu ứng trượt mở Live hoàn tất (~350ms)
-        // để khi người dùng chuyển sang tab "Xem lại", danh sách hiển thị tức thì 0ms.
+        // Pre-warm danh sách playback & sự kiện ngầm sau khi hiệu ứng trượt mở Live hoàn tất (~350ms)
+        // để khi người dùng vuốt ngang sang tab "Xem lại" hoặc "Sự kiện", dữ liệu hiển thị tức thì 0ms.
         if (UserPermissionManager.canAccessPlayback()) {
             playbackFetchJob = viewModelScope.launch(Dispatchers.IO) {
                 delay(350L)
                 val activeCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
                 if (activeCam?.id == camera.id && playbackLoadedForCameraId != camera.id) {
                     fetchCameraPlaybacks(isBackgroundPrewarm = true)
+                }
+            }
+        }
+        if (UserPermissionManager.canAccessEvents()) {
+            cameraEventFetchJob = viewModelScope.launch(Dispatchers.IO) {
+                delay(480L)
+                val activeCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
+                if (activeCam?.id == camera.id && eventsLoadedForCameraId != camera.id) {
+                    fetchCameraEvents(isUserRefresh = false, isBackgroundPrewarm = true)
                 }
             }
         }
@@ -2516,7 +2525,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    fun fetchCameraEvents(isUserRefresh: Boolean = false) {
+    fun fetchCameraEvents(isUserRefresh: Boolean = false, isBackgroundPrewarm: Boolean = false) {
         val camera = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
         val cameraUuid = camera.extra?.uuid?.trim().orEmpty()
 
@@ -2543,12 +2552,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val filter = state.cameraEventTimeFilter
         val aiType = state.cameraEventAiType
 
-        _uiState.update {
-            it.copy(
-                isLoadingCameraEvents = !isUserRefresh,
-                isPaginatingCameraEvents = false,
-                hasMoreCameraEvents = true
-            )
+        if (!isBackgroundPrewarm) {
+            _uiState.update {
+                it.copy(
+                    isLoadingCameraEvents = !isUserRefresh,
+                    isPaginatingCameraEvents = false,
+                    hasMoreCameraEvents = true
+                )
+            }
         }
 
         cameraEventFetchJob = viewModelScope.launch(Dispatchers.IO) {
@@ -2590,7 +2601,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
                         hasMoreCameraEvents = hasMore,
-                        error = batchResult.firstError?.toUserFriendlyMessage() ?: it.error
+                        error = if (!isBackgroundPrewarm) batchResult.firstError?.toUserFriendlyMessage() ?: it.error else it.error
                     )
                 }
             } catch (e: CancellationException) {
@@ -2602,7 +2613,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
                         hasMoreCameraEvents = false,
-                        error = e.toUserFriendlyMessage()
+                        error = if (!isBackgroundPrewarm) e.toUserFriendlyMessage() else it.error
                     )
                 }
             }

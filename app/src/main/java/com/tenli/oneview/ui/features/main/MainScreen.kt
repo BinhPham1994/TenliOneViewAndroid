@@ -64,6 +64,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -161,13 +162,10 @@ private val SwipeEdgeBuffer = 20.dp
 /** Bỏ qua vùng thanh điều hướng dưới cùng */
 private val SwipeBottomNavExclusion = 96.dp
 /** Khoảng di chuyển tối thiểu để khóa hướng (ngang/dọc) */
-private val SwipeDirectionLockThreshold = 10.dp
-private val SwipeMinFlickDistance = 30.dp
-private val SwipeMinDragDistance = 45.dp
-private val SwipeLongDragDistance = 90.dp
-private const val SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.28f
-private const val SWIPE_MAX_DRAG_DURATION_MS = 700L
-private const val SWIPE_HORIZONTAL_DOMINANCE = 1.25f
+private val SwipeDirectionLockThreshold = 8.dp
+private val SwipeMinFlickDistance = 26.dp
+private const val SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS = 0.25f
+private const val SWIPE_HORIZONTAL_DOMINANCE = 1.2f
 
 // --- Cuộn về đầu danh sách ---
 private const val SCROLL_TO_TOP_JUMP_THRESHOLD = 12
@@ -247,10 +245,12 @@ fun MainScreen(
 
     var activeTab by remember { mutableStateOf(uiState.currentTab) }
     var outgoingTab by remember { mutableStateOf<MainTab?>(null) }
-    var slideDirection by remember { mutableIntStateOf(1) }
-    val transitionProgress = remember { Animatable(1f) }
+    var partnerSide by remember { mutableIntStateOf(1) }
+    var isDraggingTab by remember { mutableStateOf(false) }
+    var dragOffsetFraction by remember { mutableFloatStateOf(0f) }
+    val activeOffsetFraction = remember { Animatable(0f) }
 
-    LaunchedEffect(uiState.currentTab) {
+    LaunchedEffect(uiState.currentTab, visibleMainTabs) {
         val targetTab = uiState.currentTab
         if (targetTab !in mountedTabs) {
             mountedTabs = mountedTabs + targetTab
@@ -266,20 +266,40 @@ fun MainScreen(
             homeViewModel.syncViewModeFromPrefs()
         }
 
-        if (targetTab == activeTab) {
-            transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
-            outgoingTab = null
-            return@LaunchedEffect
+        // Chỉ chạy hiệu ứng chuyển tab tự động khi bấm thanh điều hướng dưới / nút Back (targetTab != activeTab).
+        // Nếu người dùng vừa vuốt tay sang targetTab thì pointerInput đã tự khởi chạy animation settle ở ngay Frame 0.
+        if (targetTab != activeTab) {
+            val fromIdx = OrderedMainTabs.indexOf(activeTab)
+            val toIdx = OrderedMainTabs.indexOf(targetTab)
+            val dir = if (toIdx >= fromIdx) 1 else -1
+            outgoingTab = activeTab
+            activeTab = targetTab
+            partnerSide = -dir
+            isDraggingTab = false
+            activeOffsetFraction.snapTo(dir.toFloat())
+            activeOffsetFraction.animateTo(targetValue = 0f, animationSpec = TabSwitchAnimSpec)
+            if (!isDraggingTab) {
+                outgoingTab = null
+            }
         }
 
-        val fromIdx = OrderedMainTabs.indexOf(activeTab)
-        val toIdx = OrderedMainTabs.indexOf(targetTab)
-        slideDirection = if (toIdx >= fromIdx) 1 else -1
-        outgoingTab = activeTab
-        activeTab = targetTab
-        transitionProgress.snapTo(0f)
-        transitionProgress.animateTo(targetValue = 1f, animationSpec = TabSwitchAnimSpec)
-        outgoingTab = null
+        // Pre-mount & pre-measure toàn bộ các tab được phép truy cập theo 2 nhịp ngắn khi màn hình đang nghỉ,
+        // đảm bảo khi người dùng vuốt ngang qua lại giữa bất kỳ tab nào đều đạt 0ms measure hitch & 0 recomposition.
+        val currIdx = visibleMainTabs.indexOf(targetTab)
+        if (currIdx != -1) {
+            val neighbors = buildSet {
+                visibleMainTabs.getOrNull(currIdx - 1)?.let { add(it) }
+                visibleMainTabs.getOrNull(currIdx + 1)?.let { add(it) }
+            }
+            if (!mountedTabs.containsAll(neighbors)) {
+                delay(100L)
+                mountedTabs = mountedTabs + neighbors
+            }
+        }
+        if (!mountedTabs.containsAll(visibleMainTabs)) {
+            delay(140L)
+            mountedTabs = mountedTabs + visibleMainTabs
+        }
     }
 
     val currentOnLogoutRequest by rememberUpdatedState(onLogoutRequest)
@@ -413,8 +433,6 @@ fun MainScreen(
                         val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
                         val lockThresholdPx = SwipeDirectionLockThreshold.toPx()
                         val minFlickDistPx = SwipeMinFlickDistance.toPx()
-                        val minDragDistPx = SwipeMinDragDistance.toPx()
-                        val longDragDistPx = SwipeLongDragDistance.toPx()
 
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -442,6 +460,11 @@ fun MainScreen(
                             var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
                             var lastX = startX
                             var lastY = startY
+                            var dragAnchorX = startX
+                            var recentX = startX
+                            var recentTime = startTime
+                            var prevRecentX = startX
+                            var prevRecentTime = startTime
 
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -459,6 +482,13 @@ fun MainScreen(
 
                                 if (!change.pressed) break
 
+                                if (endTime - recentTime >= 40L) {
+                                    prevRecentX = recentX
+                                    prevRecentTime = recentTime
+                                    recentX = lastX
+                                    recentTime = endTime
+                                }
+
                                 lastX = change.position.x
                                 lastY = change.position.y
                                 val dx = lastX - startX
@@ -466,7 +496,28 @@ fun MainScreen(
 
                                 if (gestureDirection == 0) {
                                     if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                        gestureDirection = if (abs(dy) >= abs(dx)) 2 else 1
+                                        if (abs(dy) >= abs(dx) || abs(dx) < abs(dy) * SWIPE_HORIZONTAL_DOMINANCE) {
+                                            gestureDirection = 2
+                                        } else {
+                                            gestureDirection = 1
+                                            val currentVisibleTabs = visibleMainTabsState
+                                            val currIdx = currentVisibleTabs.indexOf(activeTab)
+                                            val inFlightOffset =
+                                                if (!isDraggingTab && outgoingTab != null) activeOffsetFraction.value else 0f
+                                            val canCatchInFlight =
+                                                (inFlightOffset > 0.002f && outgoingTab == currentVisibleTabs.getOrNull(currIdx - 1)) ||
+                                                    (inFlightOffset < -0.002f && outgoingTab == currentVisibleTabs.getOrNull(currIdx + 1))
+                                            dragAnchorX = if (canCatchInFlight) lastX - inFlightOffset * widthPx else lastX
+                                            if (canCatchInFlight) {
+                                                dragOffsetFraction = inFlightOffset
+                                                isDraggingTab = true
+                                                scope.launch { activeOffsetFraction.stop() }
+                                            }
+                                            recentX = lastX
+                                            recentTime = endTime
+                                            prevRecentX = lastX
+                                            prevRecentTime = endTime
+                                        }
                                     }
                                 }
 
@@ -474,37 +525,97 @@ fun MainScreen(
                                     // Locked to vertical scrolling -> let child LazyColumn handle it
                                     break
                                 } else if (gestureDirection == 1) {
-                                    // Consume horizontal drag so child views don't trigger accidental clicks
+                                    // Consume horizontal drag & di chuyển 2 màn hình tab song song 1:1 theo ngón tay (kiểu Facebook)
                                     change.consume()
+                                    val currentVisibleTabs = visibleMainTabsState
+                                    val currIdx = currentVisibleTabs.indexOf(activeTab)
+                                    val effectiveDx = lastX - dragAnchorX
+                                    val rawFraction = if (widthPx > 0f) effectiveDx / widthPx else 0f
+
+                                    if (rawFraction < 0f) {
+                                        val nextTab = currentVisibleTabs.getOrNull(currIdx + 1)
+                                        if (nextTab != null) {
+                                            if (nextTab !in mountedTabs) mountedTabs = mountedTabs + nextTab
+                                            outgoingTab = nextTab
+                                            partnerSide = 1
+                                            dragOffsetFraction = rawFraction.coerceIn(-1f, 0f)
+                                            isDraggingTab = true
+                                        } else {
+                                            outgoingTab = null
+                                            dragOffsetFraction = 0f
+                                            isDraggingTab = false
+                                        }
+                                    } else if (rawFraction > 0f) {
+                                        val prevTab = currentVisibleTabs.getOrNull(currIdx - 1)
+                                        if (prevTab != null) {
+                                            if (prevTab !in mountedTabs) mountedTabs = mountedTabs + prevTab
+                                            outgoingTab = prevTab
+                                            partnerSide = -1
+                                            dragOffsetFraction = rawFraction.coerceIn(0f, 1f)
+                                            isDraggingTab = true
+                                        } else {
+                                            outgoingTab = null
+                                            dragOffsetFraction = 0f
+                                            isDraggingTab = false
+                                        }
+                                    } else {
+                                        dragOffsetFraction = 0f
+                                    }
                                 }
                             }
 
-                            if (gestureDirection == 1) {
-                                val diffX = lastX - startX
-                                val diffY = lastY - startY
-                                val absX = abs(diffX)
-                                val absY = abs(diffY)
-                                val elapsed = (endTime - startTime).coerceAtLeast(1L)
-                                val velocityDpPerMs = absX.toDp().value / elapsed.toFloat()
+                            if (gestureDirection == 1 && isDraggingTab) {
+                                val neighborTab = outgoingTab
+                                val side = partnerSide
+                                val draggedProgress = (-dragOffsetFraction * side).coerceIn(0f, 1f)
+                                val usePrevWindow = (endTime - recentTime) < 20L && prevRecentTime < recentTime
+                                val refX = if (usePrevWindow) prevRecentX else recentX
+                                val refTime = if (usePrevWindow) prevRecentTime else recentTime
+                                val dt = (endTime - refTime).coerceAtLeast(1L).toFloat()
+                                val velocityX = (lastX - refX).toDp().value / dt
+                                val velocityTowardPartner = -velocityX * side
+                                val totalAbsX = abs(lastX - startX)
 
-                                // Match MobileLayout.vue thresholds:
-                                // 1. Flick: velocity > 0.28 dp/ms && distance > 30dp
-                                // 2. Drag: distance >= 45dp && elapsed <= 700ms
-                                // 3. Long drag: distance >= 90dp
-                                val isFlick = velocityDpPerMs > SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS && absX > minFlickDistPx
-                                val isDrag = absX >= minDragDistPx && elapsed <= SWIPE_MAX_DRAG_DURATION_MS
-                                val isLongDrag = absX >= longDragDistPx
+                                val isFlickTowardPartner =
+                                    velocityTowardPartner >= SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS &&
+                                        totalAbsX >= minFlickDistPx &&
+                                        draggedProgress >= 0.03f
+                                val isFlickBack = velocityTowardPartner <= -SWIPE_MIN_FLICK_VELOCITY_DP_PER_MS
+                                val isDraggedPastThreshold = !isFlickBack && draggedProgress >= 0.26f
 
-                                if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
-                                    val currentVisibleTabs = visibleMainTabsState
-                                    val currIdx = currentVisibleTabs.indexOf(currentTabState)
-                                    if (currIdx != -1) {
-                                        if (diffX < 0f && currIdx < currentVisibleTabs.size - 1) {
-                                            // Swipe right-to-left -> next tab
-                                            switchToTab(currentVisibleTabs[currIdx + 1], true)
-                                        } else if (diffX > 0f && currIdx > 0) {
-                                            // Swipe left-to-right -> previous tab
-                                            switchToTab(currentVisibleTabs[currIdx - 1], true)
+                                if (neighborTab != null && (isFlickTowardPartner || isDraggedPastThreshold)) {
+                                    val newStartOffset = (dragOffsetFraction + side).coerceIn(-1f, 1f)
+                                    val settleDurationMs = (140 + (abs(newStartOffset) * 115f).toInt()).coerceIn(140, 250)
+                                    outgoingTab = activeTab
+                                    activeTab = neighborTab
+                                    partnerSide = -side
+                                    dragOffsetFraction = newStartOffset
+                                    scope.launch {
+                                        activeOffsetFraction.snapTo(newStartOffset)
+                                        isDraggingTab = false
+                                        activeOffsetFraction.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = tween(durationMillis = settleDurationMs, easing = TabSwitchEasing)
+                                        )
+                                        if (!isDraggingTab) {
+                                            outgoingTab = null
+                                        }
+                                    }
+                                    if (neighborTab != currentTabState) {
+                                        switchToTab(neighborTab, true)
+                                    }
+                                } else {
+                                    val startFrom = dragOffsetFraction
+                                    val settleDurationMs = (130 + (abs(startFrom) * 120f).toInt()).coerceIn(130, 230)
+                                    scope.launch {
+                                        activeOffsetFraction.snapTo(startFrom)
+                                        isDraggingTab = false
+                                        activeOffsetFraction.animateTo(
+                                            targetValue = 0f,
+                                            animationSpec = tween(durationMillis = settleDurationMs, easing = TabSwitchEasing)
+                                        )
+                                        if (!isDraggingTab) {
+                                            outgoingTab = null
                                         }
                                     }
                                 }
@@ -512,18 +623,15 @@ fun MainScreen(
                         }
                     }
             ) {
-                val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab, activeTab, outgoingTab) {
-                    buildSet {
-                        addAll(mountedTabs)
-                        add(uiState.currentTab)
-                        add(activeTab)
-                        outgoingTab?.let { add(it) }
-                    }
+                val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab) {
+                    mountedTabs + uiState.currentTab
                 }
 
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
-                // All 4 tabs remain mounted in the composition tree so their LazyColumn items and images are immediately ready with zero blank flash.
-                // Tab không hiển thị sẽ không được place => không vẽ, không tốn GPU.
+                // Tất cả các tab được pre-measure sẵn 1 lần khi màn hình nghỉ; trong suốt lúc kéo tay và trượt:
+                // - 0 recomposition
+                // - 0 layout re-measurement
+                // - Chỉ chạy khối placement nhẹ 120Hz (tab không hiển thị không được place => hoàn toàn không tốn GPU draw).
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -535,32 +643,28 @@ fun MainScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .zIndex(
-                                        when (tab) {
-                                            activeTab -> 2f
-                                            outgoingTab -> 1f
-                                            else -> 0f
-                                        }
-                                    )
                                     .layout { measurable, constraints ->
-                                        val currentOutgoing = outgoingTab
-                                        if (tab != activeTab && tab != currentOutgoing) {
-                                            // Tab đang ẩn hoàn toàn: bỏ qua cả pha measure lẫn place để tiết kiệm CPU/GPU
-                                            layout(0, 0) {}
-                                        } else {
-                                            val placeable = measurable.measure(constraints)
-                                            layout(placeable.width, placeable.height) {
-                                                // Đọc animation value ở pha placement (không gây recompose mỗi frame)
-                                                val progress = transitionProgress.value
-                                                val offsetX = when (tab) {
-                                                    activeTab -> if (currentOutgoing != null) {
-                                                        (slideDirection * (1f - progress) * placeable.width).toInt()
-                                                    } else {
-                                                        0
-                                                    }
-                                                    else -> (-slideDirection * progress * placeable.width).toInt()
+                                        val placeable = measurable.measure(constraints)
+                                        layout(placeable.width, placeable.height) {
+                                            val currentActive = activeTab
+                                            val currentOutgoing = outgoingTab
+                                            if (tab == currentActive || tab == currentOutgoing) {
+                                                val offsetFraction =
+                                                    if (isDraggingTab) dragOffsetFraction else activeOffsetFraction.value
+                                                val tabFraction = when (tab) {
+                                                    currentActive -> if (currentOutgoing != null) offsetFraction else 0f
+                                                    else -> offsetFraction + partnerSide
                                                 }
-                                                placeable.placeRelativeWithLayer(offsetX, 0)
+                                                val offsetX = (tabFraction * placeable.width).toInt()
+                                                val visibility = (1f - abs(tabFraction)).coerceIn(0f, 1f)
+                                                val pageAlpha = visibility * visibility * (3f - 2f * visibility)
+                                                placeable.placeRelativeWithLayer(
+                                                    x = offsetX,
+                                                    y = 0,
+                                                    zIndex = if (tab == currentActive) 2f else 1f
+                                                ) {
+                                                    alpha = pageAlpha
+                                                }
                                             }
                                         }
                                     }
@@ -970,7 +1074,7 @@ private fun SettingTopCard(
             contentDescription = label,
             size = spacing.iconExtraLarge,
             iconSize = spacing.iconMedium,
-            cornerRadius = spacing.radiusRegular
+            cornerRadius = spacing.radiusCompact
         )
         Spacer(modifier = Modifier.height(spacing.space10))
         Text(
@@ -1021,7 +1125,7 @@ private fun OptionsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusRegular))
+            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusMedium))
             .background(MaterialTheme.appColors.surfaceRaised)
             .padding(vertical = MaterialTheme.spacing.space4),
         content = content
@@ -1496,7 +1600,7 @@ private fun NotificationSettingRow(
             backgroundColor = iconColor,
             size = spacing.iconButton,
             iconSize = spacing.iconSmallMedium,
-            cornerRadius = spacing.radiusSmallMedium
+            cornerRadius = spacing.radiusSmall
         )
         Spacer(modifier = Modifier.width(spacing.space14))
         Column(modifier = Modifier.weight(1f)) {
@@ -1613,7 +1717,7 @@ private fun MobilePasswordChangeSheet(
     ) {
         val error = state.error
         if (error != null) {
-            val errorShape = RoundedCornerShape(spacing.radiusSmallMedium)
+            val errorShape = RoundedCornerShape(spacing.radiusCompact)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
