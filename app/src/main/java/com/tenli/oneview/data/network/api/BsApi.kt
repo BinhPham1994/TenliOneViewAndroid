@@ -71,5 +71,5 @@ interface BsApi {
     suspend fun unregisterNotificationToken(@Path("token") token: String): Response<Any>
 
     @GET("ts/api/v1/config/public")
-    suspend fun getPublicConfig(@Query("client_id") clientId: String = "oneview-web"): Response<PublicConfigModel>
+    suspend fun getPublicConfig(@Query("client_id") clientId: String = "oneview-android"): Response<PublicConfigModel>
 }

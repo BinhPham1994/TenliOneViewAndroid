@@ -28,23 +28,25 @@ import kotlin.coroutines.resume
 /**
  * Quản lý vòng đời đăng ký / huỷ đăng ký FCM Push Token với backend Tenli OneView,
  * đồng bộ 100% với `src/services/firebaseMessaging.ts` trên `tenli-oneview` Web:
- * - Tự động kiểm tra `GET /ts/api/v1/config/public?client_id=oneview-web` của server đang đăng nhập
+ * - Tự động kiểm tra `GET /ts/api/v1/config/public?client_id=oneview-android` của server đang đăng nhập
  *   và lưu cache `serverSenderId` / `serverProjectId` theo từng domain để khi chạy ngầm (`KeepAliveWorker`)
  *   nếu mạng chập chờn không bao giờ bị fallback nhầm về `defaultSenderId` (`kk`) ghi đè mất token `kk-dev`.
  * - Nếu `mobilesdk_app_id` trong `google-services.json` thay đổi giữa các bản build, tự động làm mới
  *   token cục bộ để tránh gửi token cũ không còn hợp lệ.
- * - Đăng ký: `POST /ts/api/v1/notification-tokens` (`type = "firebase"`, `status = 1`, `client_id = "oneview-web"`)
+ * - Đăng ký: `POST /ts/api/v1/notification-tokens` (`type = "firebase"`, `status = 1`, `client_id = "oneview-android"`)
  * - Huỷ đăng ký: `DELETE /ts/api/v1/notification-tokens/{token}` (gọi trước khi xoá accessToken khi logout / tắt thông báo)
  * - Log chi tiết với tag `FCM_DEBUG` để dễ dàng lọc trong Logcat (`adb logcat -s FCM_DEBUG`).
  */
 object FcmTokenManager {
 
     const val LOG_TAG = "FCM_DEBUG"
+    const val CLIENT_ID = "oneview-android"
 
     private const val PREF_REGISTERED_TOKEN = "fcm_registered_token"
     private const val PREF_REGISTERED_USER = "fcm_registered_user"
     private const val PREF_REGISTERED_DOMAIN = "fcm_registered_domain"
     private const val PREF_REGISTERED_SENDER = "fcm_registered_sender"
+    private const val PREF_REGISTERED_CLIENT_ID = "fcm_registered_client_id"
     private const val PREF_REGISTERED_TIME = "fcm_registered_time"
     private const val PREF_LATEST_DEVICE_TOKEN = "fcm_latest_device_token"
     private const val PREF_CACHED_SERVER_DOMAIN = "fcm_cached_server_domain"
@@ -184,16 +186,18 @@ object FcmTokenManager {
                     val lastToken = prefs.getString(PREF_REGISTERED_TOKEN, null)
                     val lastUser = prefs.getString(PREF_REGISTERED_USER, null)
                     val lastDomain = prefs.getString(PREF_REGISTERED_DOMAIN, null)
+                    val lastClientId = prefs.getString(PREF_REGISTERED_CLIENT_ID, null)
                     val lastTime = prefs.getLong(PREF_REGISTERED_TIME, 0L)
 
                     if (!lastToken.isNullOrBlank() &&
                         lastUser == currentUserKey &&
                         lastDomain == currentDomain &&
+                        lastClientId == CLIENT_ID &&
                         earlyNow - lastTime < REGISTER_DEDUP_WINDOW_MS
                     ) {
                         logInfo {
                             val remainMin = (REGISTER_DEDUP_WINDOW_MS - (earlyNow - lastTime)) / 60_000L
-                            "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Bỏ qua gọi mạng vì token đã đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (còn hiệu lực cache ${remainMin} phút)"
+                            "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Bỏ qua gọi mạng vì token đã đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (client_id=$CLIENT_ID, còn hiệu lực cache ${remainMin} phút)"
                         }
                         return@withLock lastToken
                     }
@@ -203,9 +207,9 @@ object FcmTokenManager {
                 var serverSenderId: String? = null
                 var publicConfigFetched = false
 
-                // 1. Lấy cấu hình Firebase từ server (/ts/api/v1/config/public?client_id=oneview-web) giống tenli-oneview Web
+                // 1. Lấy cấu hình Firebase từ server (/ts/api/v1/config/public?client_id=oneview-android)
                 runCatching {
-                    val pubResp = ApiProvider.bsApi.getPublicConfig()
+                    val pubResp = ApiProvider.bsApi.getPublicConfig(clientId = CLIENT_ID)
                     if (pubResp.isSuccessful) {
                         publicConfigFetched = true
                         val srvFb = pubResp.body()?.firebase
@@ -303,17 +307,19 @@ object FcmTokenManager {
                     val lastUser = prefs.getString(PREF_REGISTERED_USER, null)
                     val lastDomain = prefs.getString(PREF_REGISTERED_DOMAIN, null)
                     val lastSender = prefs.getString(PREF_REGISTERED_SENDER, null)
+                    val lastClientId = prefs.getString(PREF_REGISTERED_CLIENT_ID, null)
                     val lastTime = prefs.getLong(PREF_REGISTERED_TIME, 0L)
 
                     if (lastToken == token &&
                         lastUser == currentUserKey &&
                         lastDomain == currentDomain &&
                         lastSender == targetSenderId &&
+                        lastClientId == CLIENT_ID &&
                         now - lastTime < REGISTER_DEDUP_WINDOW_MS
                     ) {
                         logInfo {
                             val remainMin = (REGISTER_DEDUP_WINDOW_MS - (now - lastTime)) / 60_000L
-                            "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Token đã được đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (senderId=$targetSenderId, còn hiệu lực cache ${remainMin} phút)"
+                            "✅ [ĐÃ ĐĂNG KÝ TRƯỚC ĐÓ] Token đã được đăng ký cho user='$currentUserKey' tại domain='$currentDomain' (senderId=$targetSenderId, client_id=$CLIENT_ID, còn hiệu lực cache ${remainMin} phút)"
                         }
                         return@withLock token
                     }
@@ -323,7 +329,7 @@ object FcmTokenManager {
                     token = token,
                     type = "firebase",
                     status = 1,
-                    clientId = "oneview-web"
+                    clientId = CLIENT_ID
                 )
                 logInfo {
                     "[GỬI API] POST $currentDomain/ts/api/v1/notification-tokens | payload={type=${payload.type}, status=${payload.status}, client_id=${payload.clientId}, senderId=$targetSenderId, token=${token.take(24)}...}"
@@ -337,6 +343,7 @@ object FcmTokenManager {
                         putString(PREF_REGISTERED_USER, currentUserKey)
                         putString(PREF_REGISTERED_DOMAIN, currentDomain)
                         putString(PREF_REGISTERED_SENDER, targetSenderId)
+                        putString(PREF_REGISTERED_CLIENT_ID, CLIENT_ID)
                         putLong(PREF_REGISTERED_TIME, now)
                     }
                     logInfo {

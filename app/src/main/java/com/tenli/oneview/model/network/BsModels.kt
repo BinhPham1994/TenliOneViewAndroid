@@ -153,7 +153,7 @@ data class NotificationTokenRegisterModel(
     val type: String = "firebase",
     val status: Int = 1,
     @SerializedName("client_id")
-    val clientId: String = "oneview-web"
+    val clientId: String = "oneview-android"
 )
 
 data class FirebaseConfigModel(
