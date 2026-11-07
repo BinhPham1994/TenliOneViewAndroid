@@ -25,6 +25,7 @@ import com.tenli.oneview.model.network.ChangePasswordModel
 import com.tenli.oneview.model.network.UserNotificationGlobalSetting
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.BackendHttpException
@@ -63,6 +64,7 @@ class MainViewModel(
 
     private var logoutJob: Job? = null
     private var notificationLoadJob: Job? = null
+    private var aiModuleSaveJob: Job? = null
     private var passwordChangeJob: Job? = null
 
     @Volatile
@@ -153,10 +155,15 @@ class MainViewModel(
                     }
                     val explicitEnabled = body?.global?.enabled
                     if (body != null && explicitEnabled != null) {
-                        cachedNotificationSettings = body
+                        saveNotificationSettingsCache(body)
                         shouldRegisterToken = explicitEnabled
                         savePushEnabledPref(explicitEnabled)
-                        _notificationConfigState.update { it.copy(pushEnabled = explicitEnabled) }
+                        _notificationConfigState.update {
+                            it.copy(
+                                pushEnabled = explicitEnabled,
+                                aiModules = buildAiModuleConfigs(body)
+                            )
+                        }
                     } else {
                         // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
                         val initModel = UserNotificationSettingsModel(
@@ -171,19 +178,25 @@ class MainViewModel(
                             "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
                         }
                         val putResp = ApiProvider.bsApi.updateUserNotificationSettings(initModel)
-                        if (putResp.isSuccessful) {
-                            cachedNotificationSettings = putResp.body() ?: initModel
+                        val effectiveModel = if (putResp.isSuccessful) {
                             logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
+                            putResp.body() ?: initModel
                         } else {
-                            cachedNotificationSettings = initModel
                             logWarn {
                                 val putErr = runCatching { putResp.errorBody()?.string() }.getOrNull()
                                 "⚠️ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THẤT BẠI] HTTP ${putResp.code()} | errorBody=$putErr"
                             }
+                            initModel
                         }
+                        saveNotificationSettingsCache(effectiveModel)
                         shouldRegisterToken = true
                         savePushEnabledPref(true)
-                        _notificationConfigState.update { it.copy(pushEnabled = true) }
+                        _notificationConfigState.update {
+                            it.copy(
+                                pushEnabled = true,
+                                aiModules = buildAiModuleConfigs(effectiveModel)
+                            )
+                        }
                     }
                 } else {
                     logError {
@@ -225,6 +238,7 @@ class MainViewModel(
                     remove(AppKeys.GROUP_ID)
                     remove(AppKeys.GROUP_ID_CAMERA)
                     remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
+                    remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
                     if (!rememberMe) {
                         remove(AppKeys.USERNAME_KEY)
                         remove(AppKeys.PASSWORD_KEY)
@@ -252,10 +266,15 @@ class MainViewModel(
         val prefs = GlobalData.preferences
         val hasCachedPref = prefs.contains(PREF_PUSH_NOTIFICATIONS_ENABLED)
         val cachedEnabled = prefs.getBoolean(PREF_PUSH_NOTIFICATIONS_ENABLED, true)
+        if (cachedNotificationSettings == null) {
+            cachedNotificationSettings = loadCachedNotificationSettingsFromPrefs()
+        }
+        val initialModules = buildAiModuleConfigs(cachedNotificationSettings)
         _notificationConfigState.value = NotificationConfigState(
-            isLoading = !hasCachedPref,
+            isLoading = !hasCachedPref && cachedNotificationSettings == null,
             isSaving = false,
-            pushEnabled = cachedEnabled
+            pushEnabled = cachedEnabled,
+            aiModules = initialModules
         )
 
         notificationLoadJob?.cancel()
@@ -272,9 +291,20 @@ class MainViewModel(
                         "✅ [TẢI CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
                     }
                     if (body != null) {
-                        cachedNotificationSettings = body
-                        val enabled = body.global?.enabled ?: true
-                        _notificationConfigState.update { it.copy(pushEnabled = enabled) }
+                        val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                        val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
+                            localOverrides = localSnapshot?.overrides,
+                            serverOverrides = body.overrides
+                        )
+                        val mergedModel = body.copy(overrides = mergedOverrides)
+                        saveNotificationSettingsCache(mergedModel)
+                        val enabled = mergedModel.global?.enabled ?: true
+                        _notificationConfigState.update {
+                            it.copy(
+                                pushEnabled = enabled,
+                                aiModules = buildAiModuleConfigs(mergedModel)
+                            )
+                        }
                         savePushEnabledPref(enabled)
                     }
                 } else {
@@ -305,6 +335,8 @@ class MainViewModel(
      * @param hasOsPermission Thiết bị đã cấp quyền POST_NOTIFICATIONS hay chưa (để chọn nội dung popup).
      */
     fun setPushNotificationsEnabled(enabled: Boolean, hasOsPermission: Boolean) {
+        notificationLoadJob?.cancel()
+        aiModuleSaveJob?.cancel()
         val previousEnabled = _notificationConfigState.value.pushEnabled
         _notificationConfigState.update { it.copy(pushEnabled = enabled, isSaving = true) }
         savePushEnabledPref(enabled)
@@ -314,25 +346,9 @@ class MainViewModel(
                 logInfo {
                     "[LƯU CẤU HÌNH - BẮT ĐẦU] enabled=$enabled, hasOsPermission=$hasOsPermission, hasCachedModel=${cachedNotificationSettings != null} | ${currentAccountDebugInfo()}"
                 }
-                val baseSettings = cachedNotificationSettings ?: runCatching {
-                    logInfo { "[LƯU CẤU HÌNH] cachedNotificationSettings=null -> gọi GET /ts/api/v1/user/settings/notification_settings trước khi PUT" }
-                    val getResp = ApiProvider.bsApi.getUserNotificationSettings()
-                    if (getResp.isSuccessful) {
-                        val getBody = getResp.body()
-                        logInfo {
-                            "[LƯU CẤU HÌNH] GET trước PUT thành công -> HTTP ${getResp.code()} | body=${runCatching { LoginAuthClient.gson.toJson(getBody) }.getOrNull()}"
-                        }
-                        getBody
-                    } else {
-                        logWarn {
-                            val getErrBody = runCatching { getResp.errorBody()?.string() }.getOrNull()
-                            "⚠️ [LƯU CẤU HÌNH] GET trước PUT thất bại -> HTTP ${getResp.code()} | errorBody=$getErrBody"
-                        }
-                        null
-                    }
-                }.onFailure { getErr ->
-                    logWarn(getErr) { "⚠️ [LƯU CẤU HÌNH] Exception khi GET trước PUT: ${getErr.javaClass.simpleName}: ${getErr.message}" }
-                }.getOrNull()
+                val baseSettings = cachedNotificationSettings
+                    ?: loadCachedNotificationSettingsFromPrefs()
+                    ?: fetchServerNotificationSettingsQuietly()
 
                 val baseGlobal = baseSettings?.global ?: UserNotificationGlobalSetting()
                 val baseOverrides = baseSettings?.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson()
@@ -349,6 +365,8 @@ class MainViewModel(
                     )
                 }
 
+                saveNotificationSettingsCache(updatedModel)
+
                 logInfo {
                     val requestJson = runCatching { LoginAuthClient.gson.toJson(updatedModel) }.getOrNull()
                     "[LƯU CẤU HÌNH - GỬI PUT] PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson | ${currentAccountDebugInfo()}"
@@ -361,7 +379,11 @@ class MainViewModel(
                         val respJson = runCatching { LoginAuthClient.gson.toJson(respBody) }.getOrNull()
                         "✅ [LƯU CẤU HÌNH THÀNH CÔNG] PUT /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | response=$respJson"
                     }
-                    cachedNotificationSettings = respBody ?: updatedModel
+                    // Giữ nguyên updatedModel (không ghi đè bằng resp.body() vì PUT trả về model rỗng overrides)
+                    saveNotificationSettingsCache(updatedModel)
+                    _notificationConfigState.update {
+                        it.copy(aiModules = buildAiModuleConfigs(updatedModel))
+                    }
                     runCatching {
                         if (enabled) {
                             FcmTokenManager.registerDevicePushToken(force = true)
@@ -407,6 +429,145 @@ class MainViewModel(
                 _notificationConfigState.update { it.copy(isSaving = false) }
             }
         }
+    }
+
+    /**
+     * Cập nhật bật/tắt thông báo hoặc chế độ cảnh báo (Thông báo / Cuộc gọi) cho từng bài AI (`overrides.event_types`).
+     */
+    fun updateAiModuleNotifyConfig(
+        moduleKey: String,
+        enabled: Boolean,
+        alarmMode: AiAlarmMode
+    ) {
+        val module = AiTypeHelper.findModuleByKey(moduleKey) ?: return
+        notificationLoadJob?.cancel()
+
+        val previousModules = _notificationConfigState.value.aiModules
+        val previousSettings = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+
+        val baseGlobal = previousSettings?.global
+            ?: UserNotificationGlobalSetting(enabled = _notificationConfigState.value.pushEnabled)
+        val updatedOverrides = AiTypeHelper.applyModuleOverrideToJson(
+            baseOverrides = previousSettings?.overrides,
+            module = module,
+            enabled = enabled,
+            alarmMode = alarmMode.apiValue
+        )
+        val optimisticModel = if (previousSettings != null) {
+            previousSettings.copy(
+                global = baseGlobal,
+                overrides = updatedOverrides
+            )
+        } else {
+            UserNotificationSettingsModel(
+                global = baseGlobal,
+                overrides = updatedOverrides
+            )
+        }
+
+        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread để chuyển tab Thông báo / Cuộc gọi mượt ngay lập tức
+        saveNotificationSettingsCache(optimisticModel)
+        _notificationConfigState.update { state ->
+            state.copy(
+                aiModules = state.aiModules.map { item ->
+                    if (item.moduleKey == module.key) {
+                        item.copy(enabled = enabled, alarmMode = alarmMode)
+                    } else {
+                        item
+                    }
+                }
+            )
+        }
+
+        aiModuleSaveJob?.cancel()
+        aiModuleSaveJob = viewModelScope.launch {
+            val saveFailedMsg = localized("Failed to save notification settings", "Không thể lưu cấu hình thông báo")
+            try {
+                val modelToSave = cachedNotificationSettings ?: optimisticModel
+                logInfo {
+                    val requestJson = runCatching { LoginAuthClient.gson.toJson(modelToSave) }.getOrNull()
+                    "[LƯU CẤU HÌNH BÀI AI] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} | PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson"
+                }
+
+                val resp = ApiProvider.bsApi.updateUserNotificationSettings(modelToSave)
+                if (resp.isSuccessful) {
+                    logInfo {
+                        "✅ [LƯU CẤU HÌNH BÀI AI THÀNH CÔNG] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} -> HTTP ${resp.code()}"
+                    }
+                    // Lưu ý: Không ghi đè cachedNotificationSettings bằng resp.body() vì API PUT trả về object không chứa overrides.event_types
+                } else {
+                    logError {
+                        val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
+                        "❌ [LƯU CẤU HÌNH BÀI AI THẤT BẠI] module=${module.key} -> HTTP ${resp.code()} | errorBody=$errBody"
+                    }
+                    saveNotificationSettingsCache(previousSettings)
+                    _notificationConfigState.update { it.copy(aiModules = previousModules) }
+                    MobileTopPopupManager.error(saveFailedMsg)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                logError(e) {
+                    "❌ [EXCEPTION LƯU CẤU HÌNH BÀI AI] module=${module.key} -> ${e.javaClass.simpleName}: ${e.message}"
+                }
+                saveNotificationSettingsCache(previousSettings)
+                _notificationConfigState.update { it.copy(aiModules = previousModules) }
+                MobileTopPopupManager.error(saveFailedMsg)
+            }
+        }
+    }
+
+    private suspend fun fetchServerNotificationSettingsQuietly(): UserNotificationSettingsModel? {
+        return runCatching {
+            logInfo { "[LƯU CẤU HÌNH] cachedNotificationSettings=null -> gọi GET /ts/api/v1/user/settings/notification_settings trước khi PUT" }
+            val getResp = ApiProvider.bsApi.getUserNotificationSettings()
+            if (getResp.isSuccessful) {
+                getResp.body()
+            } else {
+                null
+            }
+        }.getOrNull()
+    }
+
+    private fun buildAiModuleConfigs(
+        settings: UserNotificationSettingsModel?
+    ): List<AiModuleNotifyConfig> {
+        val overrides = settings?.overrides
+        return AiTypeHelper.activeModules.map { mod ->
+            val (enabled, modeStr) = AiTypeHelper.extractModuleNotifyConfig(mod, overrides)
+            AiModuleNotifyConfig(
+                moduleKey = mod.key,
+                sensorType = mod.sensorType,
+                labelVi = mod.labelVi,
+                labelEn = mod.labelEn,
+                eventTypes = mod.eventTypes,
+                enabled = enabled,
+                alarmMode = AiAlarmMode.fromApiValue(modeStr)
+            )
+        }
+    }
+
+    private fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {
+        cachedNotificationSettings = model
+        runCatching {
+            val json = if (model != null) LoginAuthClient.gson.toJson(model) else null
+            GlobalData.preferences.edit {
+                if (json != null) {
+                    putString(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON, json)
+                } else {
+                    remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                }
+            }
+        }
+    }
+
+    private fun loadCachedNotificationSettingsFromPrefs(): UserNotificationSettingsModel? {
+        return runCatching {
+            val raw = GlobalData.preferences.getString(
+                AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON,
+                null
+            ) ?: return null
+            LoginAuthClient.gson.fromJson(raw, UserNotificationSettingsModel::class.java)
+        }.getOrNull()
     }
 
     private fun savePushEnabledPref(enabled: Boolean) {

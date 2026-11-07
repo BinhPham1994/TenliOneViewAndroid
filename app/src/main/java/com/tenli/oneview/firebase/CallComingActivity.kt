@@ -15,13 +15,17 @@ import android.view.WindowManager
 import android.window.SplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,14 +38,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -49,27 +50,35 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.lifecycleScope
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
-import com.tenli.oneview.ui.theme.IosGreen
-import com.tenli.oneview.ui.theme.IosRed
+import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.TenliAIoTTheme
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
@@ -90,9 +99,17 @@ private const val EXTRA_EID = "EID"
 private const val EXTRA_EVENT_ID = "EVENT_ID"
 private const val EXTRA_FROM_CALL = "FROM_CALL"
 
-private const val PULSE_DURATION_MS = 1200
-private const val PULSE_MAX_SCALE = 1.6f
-private const val PULSE_START_ALPHA = 0.4f
+private const val PULSE_DURATION_MS = 1400
+private const val PULSE_MAX_SCALE = 1.62f
+private const val PULSE_START_ALPHA = 0.36f
+private const val PULSE_INNER_MAX_SCALE = 1.32f
+private const val PULSE_INNER_START_ALPHA = 0.25f
+
+private val CallLogoSize = 72.dp
+private val CallCardShadowAmbientDark = 0.42f
+private val CallCardShadowAmbientLight = 0.14f
+private val CallCardShadowSpotDark = 0.52f
+private val CallCardShadowSpotLight = 0.18f
 
 /** Dữ liệu cuộc gọi cảnh báo nhận từ EventMessagingService */
 @Immutable
@@ -121,6 +138,7 @@ class CallComingActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setupWindowFlags()
 
+        UserSession.ensureRestored()
         AppState.isShowCallActivity = true
         call = intent.toIncomingCall()
         startRinging()
@@ -249,96 +267,316 @@ private fun CallScreenContent(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    val isEn = rememberIsEnglish()
+    val isDark = colors.isDark
 
+    val brandTitle = remember(colors.textTitle, colors.accent) {
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = colors.textTitle)) { append("Tenli ") }
+            withStyle(SpanStyle(color = colors.accent)) { append("OneView") }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "callHeaderPulse")
+    val liveDotAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(750, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "liveDotAlpha"
+    )
+    val logoGlowScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1300, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "logoGlowScale"
+    )
+
+    val cardShape = RoundedCornerShape(spacing.radiusExtraLarge)
+    val snapshotShape = RoundedCornerShape(spacing.radiusCompact)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.pageBg)
+    ) {
+        // Lớp ánh sáng nền nhẹ phía trên tạo chiều sâu theo đúng tone thương hiệu
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(spacing.space64 * 4)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            colors.accent.copy(alpha = if (isDark) 0.14f else 0.08f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(
+                    top = spacing.space24,
+                    bottom = spacing.space32,
+                    start = spacing.paddingScreen,
+                    end = spacing.paddingScreen
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 1. Cụm Logo App chính thức (logo_pwa) + Tên thương hiệu + Nhãn trạng thái cuộc gọi cảnh báo
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(CallLogoSize + spacing.space16)
+                        .graphicsLayer {
+                            scaleX = logoGlowScale
+                            scaleY = logoGlowScale
+                        }
+                        .background(
+                            color = colors.accent.copy(alpha = if (isDark) 0.18f else 0.10f),
+                            shape = RoundedCornerShape(spacing.radiusLarge)
+                        )
+                )
+                Image(
+                    painter = painterResource(id = R.drawable.logo_pwa),
+                    contentDescription = "Tenli OneView",
+                    modifier = Modifier.size(CallLogoSize)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(spacing.space10))
+
+            Text(
+                text = brandTitle,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(spacing.space8))
+
+            // Pill trạng thái cuộc gọi khẩn cấp
+            Row(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(colors.error.copy(alpha = if (isDark) 0.18f else 0.10f))
+                    .border(
+                        width = spacing.borderThin,
+                        color = colors.error.copy(alpha = 0.30f),
+                        shape = CircleShape
+                    )
+                    .padding(horizontal = spacing.space12, vertical = spacing.space5),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(spacing.statusDot)
+                        .graphicsLayer { alpha = liveDotAlpha }
+                        .background(colors.error, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(spacing.space6))
+                Text(
+                    text = if (isEn) "AI SECURITY ALERT • INCOMING CALL" else "CẢNH BÁO AN NINH AI • CUỘC GỌI ĐẾN",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.error
+                )
+            }
+
+            Spacer(modifier = Modifier.height(spacing.space20))
+
+            // 2. Thẻ thông tin sự kiện & Ảnh chụp camera (đồng bộ style Card với LoginCard / SettingsGroupCard)
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = spacing.contentMaxWidth)
+                    .shadow(
+                        elevation = if (isDark) spacing.space20 else spacing.space16,
+                        shape = cardShape,
+                        ambientColor = Color.Black.copy(
+                            alpha = if (isDark) CallCardShadowAmbientDark else CallCardShadowAmbientLight
+                        ),
+                        spotColor = Color.Black.copy(
+                            alpha = if (isDark) CallCardShadowSpotDark else CallCardShadowSpotLight
+                        )
+                    )
+                    .border(
+                        width = spacing.borderThin,
+                        color = colors.border,
+                        shape = cardShape
+                    ),
+                shape = cardShape,
+                color = colors.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(spacing.space16),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = call.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textStrong,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    if (call.body.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(spacing.space6))
+                        Text(
+                            text = call.body,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textMuted,
+                            textAlign = TextAlign.Center,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(spacing.space14))
+
+                    // Khung ảnh sự kiện tỉ lệ 16:9 chuẩn camera
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(16f / 9f)
+                            .clip(snapshotShape)
+                            .background(colors.thumbnailBg)
+                            .border(
+                                width = spacing.borderThin,
+                                color = colors.border,
+                                shape = snapshotShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!call.imageUrl.isNullOrBlank()) {
+                            SubcomposeAsyncImage(
+                                model = call.imageUrl,
+                                contentDescription = call.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                                loading = {
+                                    CallSnapshotPlaceholder(isEn = isEn)
+                                },
+                                error = {
+                                    CallSnapshotPlaceholder(isEn = isEn)
+                                }
+                            )
+                        } else {
+                            CallSnapshotPlaceholder(isEn = isEn)
+                        }
+
+                        // Badge góc trên trái của ảnh
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(spacing.space8)
+                                .clip(RoundedCornerShape(spacing.radiusTiny))
+                                .background(colors.mediaOverlay)
+                                .padding(horizontal = spacing.space8, vertical = spacing.space4),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = LucideIcons.Video,
+                                contentDescription = null,
+                                tint = colors.onMedia,
+                                modifier = Modifier.size(spacing.iconTiny)
+                            )
+                            Spacer(modifier = Modifier.width(spacing.space4))
+                            Text(
+                                text = if (isEn) "AI Snapshot" else "Ảnh sự kiện",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.onMedia
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Đẩy cụm nút hành động xuống đáy màn hình
+            Spacer(modifier = Modifier.weight(1f))
+
+            Text(
+                text = if (isEn) {
+                    "Tap \"View now\" to open event details immediately"
+                } else {
+                    "Bấm \"Xem ngay\" để mở chi tiết sự kiện cảnh báo"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSubtle,
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(spacing.space20))
+
+            // 3. Cụm nút Từ chối / Xem ngay chuẩn hệ thống
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = spacing.dialogMaxWidth),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CallActionControl(
+                    icon = LucideIcons.X,
+                    label = if (isEn) "Decline" else "Từ chối",
+                    color = colors.error,
+                    labelColor = colors.textBody,
+                    isPulse = false,
+                    onClick = onDecline
+                )
+                CallActionControl(
+                    icon = LucideIcons.PhoneCall,
+                    label = if (isEn) "View now" else "Xem ngay",
+                    color = colors.success,
+                    labelColor = colors.success,
+                    isPulse = true,
+                    onClick = onAccept
+                )
+            }
+
+            Spacer(modifier = Modifier.height(spacing.space16))
+        }
+    }
+}
+
+@Composable
+private fun CallSnapshotPlaceholder(isEn: Boolean) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.surfaceGrouped)
-            .safeDrawingPadding()
-            .padding(top = spacing.space40),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(spacing.space16),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Surface(
-            shape = CircleShape,
-            color = colors.surface,
-            shadowElevation = spacing.space4,
-            modifier = Modifier.size(spacing.iconHuge)
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.logo_app),
-                contentDescription = null,
-                modifier = Modifier.padding(spacing.space12),
-                tint = Color.Unspecified
-            )
-        }
-        Spacer(modifier = Modifier.height(spacing.space24))
-        Text(
-            text = call.title,
-            style = MaterialTheme.typography.titleLarge,
-            color = colors.textTitle,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = spacing.space20)
+        Icon(
+            imageVector = LucideIcons.ShieldAlert,
+            contentDescription = null,
+            tint = colors.textPlaceholder,
+            modifier = Modifier.size(spacing.iconLarge)
         )
+        Spacer(modifier = Modifier.height(spacing.space6))
         Text(
-            text = call.body,
-            style = MaterialTheme.typography.bodyLarge,
-            color = colors.textMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = spacing.space4, start = spacing.space20, end = spacing.space20)
+            text = if (isEn) "Camera event snapshot" else "Hình ảnh sự kiện từ camera",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textPlaceholder
         )
-
-        Spacer(modifier = Modifier.height(spacing.space40))
-
-        // Ảnh sự kiện tỉ lệ 16:9 chuẩn camera, giới hạn bề rộng trên màn hình lớn
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = spacing.space10)
-                .widthIn(max = spacing.contentMaxWidth)
-                .aspectRatio(16f / 9f),
-            shape = RoundedCornerShape(spacing.radiusMedium),
-            shadowElevation = spacing.space1,
-            color = colors.surface
-        ) {
-            AsyncImage(
-                model = call.imageUrl,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.FillBounds
-            )
-        }
-
-        // Đẩy cụm nút xuống đáy; tự co lại trên máy màn hình thấp để không chồng lên nội dung
-        Spacer(modifier = Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            CallActionControl(
-                icon = Icons.Default.Close,
-                label = "Từ chối",
-                color = IosRed,
-                labelColor = colors.textMuted,
-                isPulse = false,
-                onClick = onDecline
-            )
-            CallActionControl(
-                icon = Icons.Default.Call,
-                label = "Xem ngay",
-                color = IosGreen,
-                labelColor = IosGreen,
-                isPulse = true,
-                onClick = onAccept
-            )
-        }
-
-        Spacer(modifier = Modifier.height(spacing.space64 + spacing.space32))
     }
 }
 
@@ -395,62 +633,100 @@ private fun CallActionControl(
     onClick: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
     val buttonSize = spacing.avatarExtraLarge
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.size(buttonSize + spacing.space24),
+            contentAlignment = Alignment.Center
+        ) {
             if (isPulse) {
-                // Hiệu ứng vòng tròn lan tỏa
                 PulseAnimation(color = color, size = buttonSize)
             }
 
-            IconButton(
-                onClick = onClick,
+            Box(
                 modifier = Modifier
                     .size(buttonSize)
-                    .shadow(if (isPulse) spacing.space8 else 0.dp, CircleShape)
+                    .shadow(
+                        elevation = spacing.space10,
+                        shape = CircleShape,
+                        ambientColor = color.copy(alpha = 0.35f),
+                        spotColor = color.copy(alpha = 0.45f)
+                    )
+                    .clip(CircleShape)
                     .background(color, CircleShape)
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.appColors.onAccent,
+                    contentDescription = label,
+                    tint = colors.onAccent,
                     modifier = Modifier.size(spacing.space28)
                 )
             }
         }
+        Spacer(modifier = Modifier.height(spacing.space6))
         Text(
             text = label,
             color = labelColor,
-            modifier = Modifier.padding(top = spacing.space16),
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold
         )
     }
 }
 
 @Composable
-private fun PulseAnimation(color: Color, size: androidx.compose.ui.unit.Dp) {
+private fun PulseAnimation(color: Color, size: Dp) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseSpec = infiniteRepeatable<Float>(
-        animation = tween(PULSE_DURATION_MS, easing = LinearEasing),
-        repeatMode = RepeatMode.Restart
+    val outerScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = PULSE_MAX_SCALE,
+        animationSpec = infiniteRepeatable(
+            animation = tween(PULSE_DURATION_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "outerScale"
     )
-    val scale by infiniteTransition.animateFloat(
-        initialValue = 1f, targetValue = PULSE_MAX_SCALE, animationSpec = pulseSpec, label = "scale"
+    val outerAlpha by infiniteTransition.animateFloat(
+        initialValue = PULSE_START_ALPHA,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(PULSE_DURATION_MS, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "outerAlpha"
     )
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = PULSE_START_ALPHA, targetValue = 0f, animationSpec = pulseSpec, label = "alpha"
+    val innerScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = PULSE_INNER_MAX_SCALE,
+        animationSpec = infiniteRepeatable(
+            animation = tween(PULSE_DURATION_MS, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "innerScale"
     )
 
-    // Đọc giá trị animation trong graphicsLayer {} → chỉ vẽ lại, không recompose mỗi frame
-    Box(
-        modifier = Modifier
-            .size(size)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                this.alpha = alpha
-            }
-            .background(color, CircleShape)
-    )
+    Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    scaleX = outerScale
+                    scaleY = outerScale
+                    alpha = outerAlpha
+                }
+                .background(color, CircleShape)
+        )
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    scaleX = innerScale
+                    scaleY = innerScale
+                    alpha = PULSE_INNER_START_ALPHA
+                }
+                .background(color, CircleShape)
+        )
+    }
 }

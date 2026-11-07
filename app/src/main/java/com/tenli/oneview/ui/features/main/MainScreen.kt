@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
@@ -14,6 +15,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
@@ -74,6 +79,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -135,6 +141,7 @@ import com.tenli.oneview.ui.theme.Slate500
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1241,6 +1248,10 @@ private fun hasOsNotificationPermission(context: Context): Boolean {
     }
 }
 
+private fun hasOverlayPermission(context: Context): Boolean {
+    return Settings.canDrawOverlays(context)
+}
+
 @Composable
 private fun MobileNotificationConfigScreen(
     viewModel: MainViewModel,
@@ -1251,11 +1262,14 @@ private fun MobileNotificationConfigScreen(
     val state by viewModel.notificationConfigState.collectAsStateWithLifecycle()
 
     var hasOsPermission by remember { mutableStateOf(hasOsNotificationPermission(context)) }
+    var hasOverlayPerm by remember { mutableStateOf(hasOverlayPermission(context)) }
+    var showOverlayPermissionPrompt by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 hasOsPermission = hasOsNotificationPermission(context)
+                hasOverlayPerm = hasOverlayPermission(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1271,6 +1285,21 @@ private fun MobileNotificationConfigScreen(
             }
             context.startActivity(intent)
         } catch (_: Exception) {
+        }
+    }
+
+    val openOverlayPermissionSettings: () -> Unit = {
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:${context.packageName}")
+            )
+            context.startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                context.startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION))
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -1352,9 +1381,9 @@ private fun MobileNotificationConfigScreen(
                 ) {
                     val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space10)
 
-                    // 1. Device Permission Status Card matching MobileNotificationConfigModal.vue
+                    // 1. Device Permission Status Card (Thông báo + Hiển thị cuộc gọi trên ứng dụng khác)
                     SettingsSectionHeader(
-                        text = if (isEn) "Device Notification Permission" else "Quyền thông báo trên thiết bị",
+                        text = if (isEn) "Device Permissions" else "Quyền trên thiết bị",
                         modifier = sectionHeaderModifier
                     )
                     SettingsGroupCard {
@@ -1374,7 +1403,7 @@ private fun MobileNotificationConfigScreen(
                             NotificationSettingRow(
                                 icon = LucideIcons.Bell,
                                 iconColor = colors.warning,
-                                title = if (isEn) "Permission not granted on device" else "Chưa cấp quyền trên thiết bị",
+                                title = if (isEn) "Permission not granted on device" else "Chưa cấp quyền thông báo",
                                 subtitle = if (isEn) {
                                     "Notification permission is required to receive alerts for new events."
                                 } else {
@@ -1385,6 +1414,46 @@ private fun MobileNotificationConfigScreen(
                                     text = if (isEn) "Grant now" else "Cấp quyền ngay",
                                     color = colors.accent,
                                     onClick = requestOrOpenPermission
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(
+                            color = colors.divider,
+                            thickness = spacing.borderThin
+                        )
+
+                        if (hasOverlayPerm) {
+                            NotificationSettingRow(
+                                icon = LucideIcons.PhoneCall,
+                                iconColor = colors.success,
+                                title = if (isEn) "Display over other apps" else "Quyền hiển thị cuộc gọi khẩn cấp",
+                                subtitle = if (isEn) {
+                                    "Allows incoming call alerts to pop up over other apps."
+                                } else {
+                                    "Cho phép bật màn hình cuộc gọi cảnh báo đè lên ứng dụng khác."
+                                }
+                            ) {
+                                StatusChip(
+                                    text = if (isEn) "Enabled" else "Đang bật",
+                                    color = colors.success
+                                )
+                            }
+                        } else {
+                            NotificationSettingRow(
+                                icon = LucideIcons.PhoneCall,
+                                iconColor = colors.warning,
+                                title = if (isEn) "Display over other apps" else "Quyền hiển thị cuộc gọi khẩn cấp",
+                                subtitle = if (isEn) {
+                                    "Required to pop up the incoming call screen when the app is in background."
+                                } else {
+                                    "Cần cấp quyền hiển thị trên ứng dụng khác để bật màn hình cuộc gọi khi có cảnh báo."
+                                }
+                            ) {
+                                StatusChip(
+                                    text = if (isEn) "Grant now" else "Cấp quyền ngay",
+                                    color = colors.accent,
+                                    onClick = openOverlayPermissionSettings
                                 )
                             }
                         }
@@ -1419,6 +1488,54 @@ private fun MobileNotificationConfigScreen(
                                     checkedTrackColor = colors.accent
                                 )
                             )
+                        }
+                    }
+
+                    // 3. Cấu hình chi tiết theo từng bài AI (overrides.event_types)
+                    if (state.aiModules.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(spacing.space10))
+
+                        SettingsSectionHeader(
+                            text = if (isEn) "AI Event Alert Configuration" else "Cấu hình thông báo theo bài AI",
+                            modifier = sectionHeaderModifier
+                        )
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(if (state.pushEnabled) 1f else 0.5f),
+                            verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                        ) {
+                            state.aiModules.forEach { moduleConfig ->
+                                SettingsGroupCard {
+                                    AiModuleNotifyRow(
+                                        config = moduleConfig,
+                                        isEn = isEn,
+                                        masterEnabled = state.pushEnabled,
+                                        isSaving = state.isSaving,
+                                        hasOverlayPermission = hasOverlayPerm,
+                                        onToggleEnabled = { nextEnabled ->
+                                            viewModel.updateAiModuleNotifyConfig(
+                                                moduleKey = moduleConfig.moduleKey,
+                                                enabled = nextEnabled,
+                                                alarmMode = moduleConfig.alarmMode
+                                            )
+                                        },
+                                        onSelectAlarmMode = { nextMode ->
+                                            if (nextMode != moduleConfig.alarmMode) {
+                                                viewModel.updateAiModuleNotifyConfig(
+                                                    moduleKey = moduleConfig.moduleKey,
+                                                    enabled = moduleConfig.enabled,
+                                                    alarmMode = nextMode
+                                                )
+                                            }
+                                            if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
+                                                showOverlayPermissionPrompt = true
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1469,6 +1586,209 @@ private fun MobileNotificationConfigScreen(
                 )
             }
         }
+
+        // Bottom Sheet nhắc cấp quyền Hiển thị trên ứng dụng khác khi chọn hình thức "Cuộc gọi"
+        if (showOverlayPermissionPrompt) {
+            MobileNativeBottomSheet(
+                title = null,
+                onDismiss = { showOverlayPermissionPrompt = false }
+            ) {
+                ConfirmSheetMessage(
+                    icon = LucideIcons.PhoneCall,
+                    accentColor = colors.accent,
+                    title = if (isEn) {
+                        "Grant call overlay permission?"
+                    } else {
+                        "Cấp quyền hiển thị cuộc gọi?"
+                    },
+                    message = if (isEn) {
+                        "To automatically display the incoming call alert screen when your phone is on another app or locked, please allow Tenli OneView to display over other apps."
+                    } else {
+                        "Để ứng dụng tự động bật màn hình cuộc gọi đến khi phát hiện sự kiện AI (kể cả khi đang mở ứng dụng khác hoặc chạy ngầm), vui lòng cấp quyền \"Hiển thị trên ứng dụng khác\"."
+                    }
+                )
+                Spacer(modifier = Modifier.height(spacing.space14))
+                SheetActionButtons(
+                    cancelText = if (isEn) "Later" else "Để sau",
+                    confirmText = if (isEn) "Grant now" else "Cấp quyền ngay",
+                    onCancel = { showOverlayPermissionPrompt = false },
+                    onConfirm = {
+                        showOverlayPermissionPrompt = false
+                        openOverlayPermissionSettings()
+                    },
+                    confirmColor = colors.accent
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AiModuleNotifyRow(
+    config: AiModuleNotifyConfig,
+    isEn: Boolean,
+    masterEnabled: Boolean,
+    isSaving: Boolean,
+    hasOverlayPermission: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onSelectAlarmMode: (AiAlarmMode) -> Unit
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val badgeColor = remember(config.sensorType) {
+        AiTypeHelper.getAiColor(config.sensorType)
+    }
+    val isInteractive = masterEnabled
+
+    val subtitleText = when {
+        !config.enabled -> if (isEn) "Alerts disabled for this AI module" else "Đang tắt thông báo cho bài AI này"
+        config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission ->
+            if (isEn) "Incoming Call • Overlay permission recommended" else "Hình thức: Cuộc gọi • Cần cấp quyền hiển thị đè"
+        config.alarmMode == AiAlarmMode.Call ->
+            if (isEn) "Alert mode: Incoming call screen" else "Hình thức: Đổ chuông màn hình cuộc gọi"
+        else ->
+            if (isEn) "Alert mode: Push notification" else "Hình thức: Thông báo đẩy"
+    }
+
+    val subtitleColor = when {
+        !config.enabled -> colors.textSubtle
+        config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission -> colors.warning
+        config.alarmMode == AiAlarmMode.Call -> colors.accent
+        else -> colors.textMuted
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(spacing.space14)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconBadge(
+                icon = if (config.enabled && config.alarmMode == AiAlarmMode.Call) {
+                    LucideIcons.PhoneCall
+                } else {
+                    LucideIcons.Bell
+                },
+                backgroundColor = if (config.enabled) badgeColor else colors.textSubtle,
+                size = spacing.iconButton,
+                iconSize = spacing.iconSmallMedium,
+                cornerRadius = spacing.radiusSmall
+            )
+            Spacer(modifier = Modifier.width(spacing.space12))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isEn) config.labelEn else config.labelVi,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(spacing.space2))
+                Text(
+                    text = subtitleText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subtitleColor
+                )
+            }
+            Spacer(modifier = Modifier.width(spacing.space10))
+            Switch(
+                checked = config.enabled,
+                enabled = isInteractive,
+                onCheckedChange = onToggleEnabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = colors.onAccent,
+                    checkedTrackColor = colors.accent
+                )
+            )
+        }
+
+        AnimatedVisibility(
+            visible = config.enabled,
+            enter = expandVertically(tween(200)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(180)) + fadeOut(tween(150))
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(modifier = Modifier.height(spacing.space12))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(spacing.radiusCompact))
+                        .background(colors.controlBg)
+                        .border(
+                            width = spacing.borderThin,
+                            color = colors.border,
+                            shape = RoundedCornerShape(spacing.radiusCompact)
+                        )
+                        .padding(spacing.space4),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                ) {
+                    AlarmModeOptionButton(
+                        modifier = Modifier.weight(1f),
+                        icon = LucideIcons.Bell,
+                        label = if (isEn) "Notification" else "Thông báo",
+                        selected = config.alarmMode == AiAlarmMode.Push,
+                        activeColor = colors.accent,
+                        enabled = isInteractive,
+                        onClick = { onSelectAlarmMode(AiAlarmMode.Push) }
+                    )
+                    AlarmModeOptionButton(
+                        modifier = Modifier.weight(1f),
+                        icon = LucideIcons.PhoneCall,
+                        label = if (isEn) "Incoming Call" else "Cuộc gọi",
+                        selected = config.alarmMode == AiAlarmMode.Call,
+                        activeColor = colors.success,
+                        enabled = isInteractive,
+                        onClick = { onSelectAlarmMode(AiAlarmMode.Call) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlarmModeOptionButton(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    activeColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val shape = RoundedCornerShape(spacing.radiusSmall)
+    val bgColor = if (selected) activeColor else Color.Transparent
+    val contentColor = if (selected) colors.onAccent else colors.textMuted
+
+    Row(
+        modifier = modifier
+            .heightIn(min = spacing.avatarSmall)
+            .clip(shape)
+            .background(bgColor)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = spacing.space10, vertical = spacing.space8),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = contentColor,
+            modifier = Modifier.size(spacing.iconSmall)
+        )
+        Spacer(modifier = Modifier.width(spacing.space6))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = contentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

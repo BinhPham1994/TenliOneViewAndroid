@@ -1425,5 +1425,42 @@ object LucideIcons {
             }
         }
     }
+
+    val PhoneCall: ImageVector by lazy {
+        lucideVector("LucidePhoneCall") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M15.05 5A5 5 0 0 1 19 8.95
+                moveTo(15.05f, 5f)
+                arcTo(5f, 5f, 0f, false, true, 19f, 8.95f)
+                // M15.05 1A9 9 0 0 1 23 8.94
+                moveTo(15.05f, 1f)
+                arcTo(9f, 9f, 0f, false, true, 23f, 8.94f)
+                // Phone handset: M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z
+                moveTo(22f, 16.92f)
+                verticalLineToRelative(3f)
+                arcToRelative(2f, 2f, 0f, false, true, -2.18f, 2f)
+                arcToRelative(19.79f, 19.79f, 0f, false, true, -8.63f, -3.07f)
+                arcToRelative(19.5f, 19.5f, 0f, false, true, -6f, -6f)
+                arcToRelative(19.79f, 19.79f, 0f, false, true, -3.07f, -8.67f)
+                arcTo(2f, 2f, 0f, false, true, 4.11f, 2f)
+                horizontalLineToRelative(3f)
+                arcToRelative(2f, 2f, 0f, false, true, 2f, 1.72f)
+                arcToRelative(12.84f, 12.84f, 0f, false, false, 0.7f, 2.81f)
+                arcToRelative(2f, 2f, 0f, false, true, -0.45f, 2.11f)
+                lineTo(8.09f, 9.91f)
+                arcToRelative(16f, 16f, 0f, false, false, 6f, 6f)
+                lineToRelative(1.27f, -1.27f)
+                arcToRelative(2f, 2f, 0f, false, true, 2.11f, -0.45f)
+                arcToRelative(12.84f, 12.84f, 0f, false, false, 2.81f, 0.7f)
+                arcTo(2f, 2f, 0f, false, true, 22f, 16.92f)
+                close()
+            }
+        }
+    }
 }
 

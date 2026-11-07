@@ -2,7 +2,10 @@ package com.tenli.oneview.ui.utils
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.model.network.UserPermissions
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
 import com.tenli.oneview.ui.theme.ErrorRed
@@ -210,7 +213,7 @@ object AiTypeHelper {
             "flooding",
             "Phát hiện ngập lụt",
             "Flooding detection",
-            listOf("flooding")
+            listOf("flooding", "sensor-flooding-camera")
         )
     )
 
@@ -879,5 +882,270 @@ object AiTypeHelper {
         val data = event.data ?: return null
         val videoFile = data.video ?: data.videoUrl ?: data.focusVideo
         return resolveMediaUrl(event, baseDomain, videoFile)
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Cấu hình thông báo theo bài AI (overrides.event_types)
+    // ---------------------------------------------------------------------------------
+
+    const val PREF_USER_NOTIFICATION_SETTINGS_JSON = "user_notification_settings_json"
+
+    fun findModuleByKey(moduleKey: String): AiModuleOption? {
+        val target = moduleKey.trim()
+        if (target.isEmpty()) return null
+        return defaultModules.firstOrNull {
+            it.key.equals(target, ignoreCase = true) ||
+                it.sensorType.equals(target, ignoreCase = true)
+        }
+    }
+
+    fun findModuleByEventType(eventType: String): AiModuleOption? {
+        val target = eventType.trim().lowercase()
+        if (target.isEmpty()) return null
+        return defaultModules.firstOrNull { mod ->
+            mod.key.equals(target, ignoreCase = true) ||
+                mod.sensorType.equals(target, ignoreCase = true) ||
+                mod.eventTypes.any { it.equals(target, ignoreCase = true) }
+        }
+    }
+
+    private fun extractEventTypeEntryRule(entryElement: JsonElement?): Pair<Boolean?, String?> {
+        val entryObj = entryElement?.takeIf { it.isJsonObject }?.asJsonObject ?: return null to null
+        val notifObj = entryObj.get("notification")?.takeIf { it.isJsonObject }?.asJsonObject ?: entryObj
+
+        val enabledVal = notifObj.get("enabled")
+            ?.takeIf { it.isJsonPrimitive }
+            ?.asJsonPrimitive
+            ?.let { prim ->
+                when {
+                    prim.isBoolean -> prim.asBoolean
+                    prim.isString -> prim.asString.equals("true", ignoreCase = true)
+                    else -> null
+                }
+            }
+
+        val alarmEl = notifObj.get("alarmMode") ?: notifObj.get("alarm_mode")
+        val alarmVal = when {
+            alarmEl == null || alarmEl.isJsonNull -> null
+            alarmEl.isJsonPrimitive -> alarmEl.asString
+            alarmEl.isJsonObject -> {
+                val alarmObj = alarmEl.asJsonObject
+                alarmObj.get("default")?.takeIf { it.isJsonPrimitive }?.asString
+            }
+            else -> null
+        }?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+
+        return enabledVal to alarmVal
+    }
+
+    private fun getEventTypesJsonObject(overridesElement: JsonElement?): JsonObject? {
+        val overridesObj = overridesElement?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+        return (overridesObj.get("event_types") ?: overridesObj.get("eventTypes"))
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+    }
+
+    private fun findEventTypeEntryCaseInsensitive(eventTypesObj: JsonObject, key: String): JsonElement? {
+        eventTypesObj.get(key)?.let { return it }
+        val lower = key.lowercase()
+        for ((k, v) in eventTypesObj.entrySet()) {
+            if (k.lowercase() == lower) return v
+        }
+        return null
+    }
+
+    /**
+     * Đọc cấu hình `(enabled, alarmMode)` của một bài AI từ `overrides.event_types`.
+     * Mặc định: `enabled = true`, `alarmMode = "push"`.
+     */
+    fun extractModuleNotifyConfig(
+        module: AiModuleOption,
+        overridesElement: JsonElement?
+    ): Pair<Boolean, String> {
+        val eventTypesObj = getEventTypesJsonObject(overridesElement) ?: return true to "push"
+        val candidateKeys = (listOf(module.key, module.sensorType) + module.eventTypes)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+        var resolvedEnabled: Boolean? = null
+        var resolvedAlarmMode: String? = null
+
+        for (key in candidateKeys) {
+            val entry = findEventTypeEntryCaseInsensitive(eventTypesObj, key) ?: continue
+            val (en, mode) = extractEventTypeEntryRule(entry)
+            if (resolvedEnabled == null && en != null) resolvedEnabled = en
+            if (resolvedAlarmMode == null && mode != null) resolvedAlarmMode = mode
+            if (resolvedEnabled != null && resolvedAlarmMode != null) break
+        }
+
+        val finalEnabled = resolvedEnabled ?: true
+        val finalMode = if (resolvedAlarmMode == "call") "call" else "push"
+        return finalEnabled to finalMode
+    }
+
+    /**
+     * Tra cứu cấu hình `(enabled, alarmMode)` cho một `eventType` cụ thể khi nhận FCM push.
+     */
+    fun resolveEventNotificationRule(
+        eventType: String,
+        overridesElement: JsonElement?
+    ): Pair<Boolean, String> {
+        val trimmed = eventType.trim()
+        if (trimmed.isEmpty()) return true to "push"
+
+        val eventTypesObj = getEventTypesJsonObject(overridesElement) ?: return true to "push"
+        val directEntry = findEventTypeEntryCaseInsensitive(eventTypesObj, trimmed)
+        val (directEnabled, directMode) = extractEventTypeEntryRule(directEntry)
+        if (directEnabled != null || directMode != null) {
+            return (directEnabled ?: true) to (if (directMode == "call") "call" else "push")
+        }
+
+        val module = findModuleByEventType(trimmed)
+        if (module != null) {
+            return extractModuleNotifyConfig(module, overridesElement)
+        }
+        return true to "push"
+    }
+
+    /**
+     * Gộp `overrides` từ cache cục bộ và `overrides` trả về từ server để không bị mất cấu hình
+     * khi server trả về `event_types` rỗng hoặc lược bỏ các key chưa phát sinh sự kiện.
+     */
+    fun mergeNotificationOverrides(
+        localOverrides: JsonElement?,
+        serverOverrides: JsonElement?
+    ): JsonObject {
+        val result = localOverrides
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?.deepCopy()
+            ?: UserNotificationSettingsModel.defaultNotificationOverridesJson()
+
+        if (!result.has("event_type_groups") || !result.get("event_type_groups").isJsonObject) {
+            result.add("event_type_groups", JsonObject())
+        }
+        if (!result.has("event_types") || !result.get("event_types").isJsonObject) {
+            result.add("event_types", JsonObject())
+        }
+
+        val serverObj = serverOverrides?.takeIf { it.isJsonObject }?.asJsonObject ?: return result
+
+        serverObj.get("event_type_groups")?.takeIf { it.isJsonObject }?.asJsonObject?.let { serverGroups ->
+            val targetGroups = result.getAsJsonObject("event_type_groups")
+            for ((k, v) in serverGroups.entrySet()) {
+                targetGroups.add(k, v.deepCopy())
+            }
+        }
+
+        val serverEventTypes = (serverObj.get("event_types") ?: serverObj.get("eventTypes"))
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+
+        if (serverEventTypes != null) {
+            val targetEventTypes = result.getAsJsonObject("event_types")
+            for ((k, serverEntryEl) in serverEventTypes.entrySet()) {
+                val serverEntry = serverEntryEl.takeIf { it.isJsonObject }?.asJsonObject
+                if (serverEntry == null) {
+                    targetEventTypes.add(k, serverEntryEl.deepCopy())
+                    continue
+                }
+                val localEntry = targetEventTypes.get(k)?.takeIf { it.isJsonObject }?.asJsonObject?.deepCopy()
+                    ?: JsonObject()
+                for ((entryKey, entryVal) in serverEntry.entrySet()) {
+                    if (entryKey == "notification" && entryVal.isJsonObject && localEntry.get("notification")?.isJsonObject == true) {
+                        val mergedNotif = localEntry.getAsJsonObject("notification").deepCopy()
+                        for ((nk, nv) in entryVal.asJsonObject.entrySet()) {
+                            mergedNotif.add(nk, nv.deepCopy())
+                        }
+                        localEntry.add("notification", mergedNotif)
+                    } else {
+                        localEntry.add(entryKey, entryVal.deepCopy())
+                    }
+                }
+                targetEventTypes.add(k, localEntry)
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Cập nhật `enabled` và `alarmMode` ("push" | "call") cho tất cả các `eventTypes` thuộc `module`
+     * trong `overrides.event_types` mà vẫn giữ nguyên các trường cấu hình khác trên server.
+     */
+    fun applyModuleOverrideToJson(
+        baseOverrides: JsonElement?,
+        module: AiModuleOption,
+        enabled: Boolean,
+        alarmMode: String
+    ): JsonObject {
+        val overridesObj = baseOverrides
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?.deepCopy()
+            ?: UserNotificationSettingsModel.defaultNotificationOverridesJson()
+
+        if (!overridesObj.has("event_type_groups") || !overridesObj.get("event_type_groups").isJsonObject) {
+            overridesObj.add("event_type_groups", JsonObject())
+        }
+
+        val eventTypesObj = (overridesObj.get("event_types") ?: overridesObj.get("eventTypes"))
+            ?.takeIf { it.isJsonObject }
+            ?.asJsonObject
+            ?.deepCopy()
+            ?: JsonObject()
+
+        val normalizedMode = if (alarmMode.equals("call", ignoreCase = true)) "call" else "push"
+        val targetKeys = buildList {
+            add(module.key)
+            add(module.sensorType)
+            addAll(module.eventTypes)
+        }.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+        for (rawKey in targetKeys) {
+            val existingActualKey = eventTypesObj.entrySet()
+                .firstOrNull { it.key.equals(rawKey, ignoreCase = true) }
+                ?.key
+            val key = existingActualKey ?: rawKey
+
+            val entryObj = eventTypesObj.get(key)
+                ?.takeIf { it.isJsonObject }
+                ?.asJsonObject
+                ?.deepCopy()
+                ?: JsonObject()
+
+            val notifObj = entryObj.get("notification")
+                ?.takeIf { it.isJsonObject }
+                ?.asJsonObject
+                ?.deepCopy()
+                ?: JsonObject()
+
+            notifObj.addProperty("enabled", enabled)
+
+            val alarmModeObj = notifObj.get("alarmMode")
+                ?.takeIf { it.isJsonObject }
+                ?.asJsonObject
+                ?.deepCopy()
+                ?: JsonObject()
+            alarmModeObj.addProperty("default", normalizedMode)
+            notifObj.add("alarmMode", alarmModeObj)
+
+            if (notifObj.has("alarm_mode")) {
+                val snakeObj = notifObj.get("alarm_mode")
+                    ?.takeIf { it.isJsonObject }
+                    ?.asJsonObject
+                    ?.deepCopy()
+                    ?: JsonObject()
+                snakeObj.addProperty("default", normalizedMode)
+                notifObj.add("alarm_mode", snakeObj)
+            }
+
+            entryObj.add("notification", notifObj)
+            eventTypesObj.add(key, entryObj)
+        }
+
+        overridesObj.add("event_types", eventTypesObj)
+        return overridesObj
     }
 }

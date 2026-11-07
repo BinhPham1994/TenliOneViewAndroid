@@ -18,9 +18,12 @@ import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.main.MainActivity
+import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import kotlinx.coroutines.launch
@@ -46,6 +49,14 @@ class EventMessagingService : FirebaseMessagingService() {
             return
         }
 
+        val prefs = runCatching { GlobalData.preferences }.getOrNull()
+        if (prefs != null && !prefs.getBoolean("push_notifications_enabled", true)) {
+            if (BuildConfig.DEBUG) {
+                Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Người dùng đang tắt nhận thông báo chung")
+            }
+            return
+        }
+
         val data = remoteMessage.data
         val eventType = (data["type"] ?: data["eventType"] ?: data["event_type"]).orEmpty().trim()
         if (eventType.isNotEmpty() && !AiTypeHelper.isAiTypeEnabled(eventType)) {
@@ -54,6 +65,29 @@ class EventMessagingService : FirebaseMessagingService() {
             }
             return
         }
+
+        val localSettings = runCatching {
+            val rawJson = prefs?.getString(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON, null)
+            if (!rawJson.isNullOrBlank()) {
+                LoginAuthClient.gson.fromJson(rawJson, UserNotificationSettingsModel::class.java)
+            } else {
+                null
+            }
+        }.getOrNull()
+
+        val (localTypeEnabled, localAlarmMode) = if (eventType.isNotEmpty()) {
+            AiTypeHelper.resolveEventNotificationRule(eventType, localSettings?.overrides)
+        } else {
+            true to "push"
+        }
+
+        if (!localTypeEnabled) {
+            if (BuildConfig.DEBUG) {
+                Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Bài AI '$eventType' đang được tắt thông báo trong cấu hình")
+            }
+            return
+        }
+
         val pushCameraUuid = (data["cameraUUID"] ?: data["cameraId"] ?: data["camera_uuid"]).orEmpty().trim()
         if (pushCameraUuid.isNotEmpty() && UserPermissionManager.isCustomCameraPermission()) {
             val cachedCameras = EventCacheManager.getCamerasInMemory()
@@ -74,8 +108,11 @@ class EventMessagingService : FirebaseMessagingService() {
                 "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
             )
         }
-        val isCall = data["makeCall"].equals("true", ignoreCase = true) ||
-            data["alarmMode"].equals("call", ignoreCase = true)
+        val explicitMakeCall = (data["makeCall"] ?: data["make_call"]).orEmpty().trim()
+        val explicitAlarmMode = (data["alarmMode"] ?: data["alarm_mode"]).orEmpty().trim()
+        val isCall = explicitMakeCall.equals("true", ignoreCase = true) ||
+            explicitAlarmMode.equals("call", ignoreCase = true) ||
+            (explicitAlarmMode.isEmpty() && localAlarmMode.equals("call", ignoreCase = true))
 
         val title = data["title"]
             ?: remoteMessage.notification?.title
