@@ -14,6 +14,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -81,10 +82,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -1491,8 +1494,31 @@ private fun MobileNotificationConfigScreen(
                         }
                     }
 
-                    // 3. Cấu hình chi tiết theo từng bài AI (overrides.event_types)
+                    // 3. Cấu hình chi tiết theo từng bài AI (overrides.event_types) - Gom gọn trong 1 Card + Thu gọn/Mở rộng
                     if (state.aiModules.isNotEmpty()) {
+                        var isAiModulesExpanded by remember { mutableStateOf(false) }
+                        val previewCount = 3
+                        val primaryModules = remember(state.aiModules) {
+                            state.aiModules.take(previewCount)
+                        }
+                        val extraModules = remember(state.aiModules) {
+                            state.aiModules.drop(previewCount)
+                        }
+                        val callCount = remember(state.aiModules) {
+                            state.aiModules.count { it.enabled && it.alarmMode == AiAlarmMode.Call }
+                        }
+                        val pushCount = remember(state.aiModules) {
+                            state.aiModules.count { it.enabled && it.alarmMode == AiAlarmMode.Push }
+                        }
+                        val offCount = remember(state.aiModules) {
+                            state.aiModules.count { !it.enabled }
+                        }
+                        val chevronRotation by animateFloatAsState(
+                            targetValue = if (isAiModulesExpanded) 180f else 0f,
+                            animationSpec = tween(220),
+                            label = "aiModulesChevron"
+                        )
+
                         Spacer(modifier = Modifier.height(spacing.space10))
 
                         SettingsSectionHeader(
@@ -1500,40 +1526,144 @@ private fun MobileNotificationConfigScreen(
                             modifier = sectionHeaderModifier
                         )
 
-                        Column(
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .alpha(if (state.pushEnabled) 1f else 0.5f),
-                            verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                                .alpha(if (state.pushEnabled) 1f else 0.5f)
                         ) {
-                            state.aiModules.forEach { moduleConfig ->
-                                SettingsGroupCard {
-                                    AiModuleNotifyRow(
-                                        config = moduleConfig,
-                                        isEn = isEn,
-                                        masterEnabled = state.pushEnabled,
-                                        isSaving = state.isSaving,
-                                        hasOverlayPermission = hasOverlayPerm,
-                                        onToggleEnabled = { nextEnabled ->
-                                            viewModel.updateAiModuleNotifyConfig(
-                                                moduleKey = moduleConfig.moduleKey,
-                                                enabled = nextEnabled,
-                                                alarmMode = moduleConfig.alarmMode
+                            SettingsGroupCard {
+                                // Thanh tóm tắt trạng thái các bài AI ở đầu thẻ
+                                AiNotifySummaryBar(
+                                    isEn = isEn,
+                                    pushCount = pushCount,
+                                    callCount = callCount,
+                                    offCount = offCount
+                                )
+
+                                HorizontalDivider(
+                                    color = colors.divider,
+                                    thickness = spacing.borderThin
+                                )
+
+                                // 3 bài AI đầu tiên hiển thị mặc định (ưu tiên: Cuộc gọi -> Tắt thông báo -> Thông báo)
+                                primaryModules.forEachIndexed { index, moduleConfig ->
+                                    androidx.compose.runtime.key(moduleConfig.moduleKey) {
+                                        if (index > 0) {
+                                            HorizontalDivider(
+                                                color = colors.divider,
+                                                thickness = spacing.borderThin
                                             )
-                                        },
-                                        onSelectAlarmMode = { nextMode ->
-                                            if (nextMode != moduleConfig.alarmMode) {
+                                        }
+                                        AiModuleNotifyRow(
+                                            config = moduleConfig,
+                                            isEn = isEn,
+                                            masterEnabled = state.pushEnabled,
+                                            hasOverlayPermission = hasOverlayPerm,
+                                            onToggleEnabled = { nextEnabled ->
                                                 viewModel.updateAiModuleNotifyConfig(
                                                     moduleKey = moduleConfig.moduleKey,
-                                                    enabled = moduleConfig.enabled,
-                                                    alarmMode = nextMode
+                                                    enabled = nextEnabled,
+                                                    alarmMode = moduleConfig.alarmMode
                                                 )
+                                            },
+                                            onSelectAlarmMode = { nextMode ->
+                                                if (nextMode != moduleConfig.alarmMode) {
+                                                    viewModel.updateAiModuleNotifyConfig(
+                                                        moduleKey = moduleConfig.moduleKey,
+                                                        enabled = moduleConfig.enabled,
+                                                        alarmMode = nextMode
+                                                    )
+                                                }
+                                                if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
+                                                    showOverlayPermissionPrompt = true
+                                                }
                                             }
-                                            if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
-                                                showOverlayPermissionPrompt = true
+                                        )
+                                    }
+                                }
+
+                                // Phần danh sách mở rộng
+                                if (extraModules.isNotEmpty()) {
+                                    AnimatedVisibility(
+                                        visible = isAiModulesExpanded,
+                                        enter = expandVertically(tween(240)) + fadeIn(tween(200)),
+                                        exit = shrinkVertically(tween(200)) + fadeOut(tween(150))
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                            extraModules.forEach { moduleConfig ->
+                                                androidx.compose.runtime.key(moduleConfig.moduleKey) {
+                                                    HorizontalDivider(
+                                                        color = colors.divider,
+                                                        thickness = spacing.borderThin
+                                                    )
+                                                    AiModuleNotifyRow(
+                                                        config = moduleConfig,
+                                                        isEn = isEn,
+                                                        masterEnabled = state.pushEnabled,
+                                                        hasOverlayPermission = hasOverlayPerm,
+                                                        onToggleEnabled = { nextEnabled ->
+                                                            viewModel.updateAiModuleNotifyConfig(
+                                                                moduleKey = moduleConfig.moduleKey,
+                                                                enabled = nextEnabled,
+                                                                alarmMode = moduleConfig.alarmMode
+                                                            )
+                                                        },
+                                                        onSelectAlarmMode = { nextMode ->
+                                                            if (nextMode != moduleConfig.alarmMode) {
+                                                                viewModel.updateAiModuleNotifyConfig(
+                                                                    moduleKey = moduleConfig.moduleKey,
+                                                                    enabled = moduleConfig.enabled,
+                                                                    alarmMode = nextMode
+                                                                )
+                                                            }
+                                                            if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
+                                                                showOverlayPermissionPrompt = true
+                                                            }
+                                                        }
+                                                    )
+                                                }
                                             }
                                         }
+                                    }
+
+                                    HorizontalDivider(
+                                        color = colors.divider,
+                                        thickness = spacing.borderThin
                                     )
+
+                                    // Nút Xem tất cả / Thu gọn
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { isAiModulesExpanded = !isAiModulesExpanded }
+                                            .padding(horizontal = spacing.space14, vertical = spacing.space12),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (isAiModulesExpanded) {
+                                                if (isEn) "Show less" else "Thu gọn danh sách"
+                                            } else {
+                                                if (isEn) {
+                                                    "View all ${state.aiModules.size} AI modules (+${extraModules.size})"
+                                                } else {
+                                                    "Xem tất cả ${state.aiModules.size} bài AI (+${extraModules.size} bài khác)"
+                                                }
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.accent
+                                        )
+                                        Spacer(modifier = Modifier.width(spacing.space6))
+                                        Icon(
+                                            imageVector = LucideIcons.ChevronDown,
+                                            contentDescription = null,
+                                            tint = colors.accent,
+                                            modifier = Modifier
+                                                .size(spacing.iconSmall)
+                                                .graphicsLayer { rotationZ = chevronRotation }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1624,11 +1754,79 @@ private fun MobileNotificationConfigScreen(
 }
 
 @Composable
+private fun AiNotifySummaryBar(
+    isEn: Boolean,
+    pushCount: Int,
+    callCount: Int,
+    offCount: Int
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.controlBg.copy(alpha = 0.55f))
+            .padding(horizontal = spacing.space14, vertical = spacing.space10),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+    ) {
+        AiSummaryBadge(
+            icon = LucideIcons.PhoneCall,
+            text = if (isEn) "$callCount Call" else "$callCount Cuộc gọi",
+            tint = colors.error
+        )
+        if (offCount > 0) {
+            AiSummaryBadge(
+                icon = null,
+                text = if (isEn) "$offCount Off" else "$offCount Tắt",
+                tint = colors.textMuted
+            )
+        }
+        AiSummaryBadge(
+            icon = LucideIcons.Bell,
+            text = if (isEn) "$pushCount Push" else "$pushCount Thông báo",
+            tint = colors.accent
+        )
+    }
+}
+
+@Composable
+private fun AiSummaryBadge(
+    icon: ImageVector?,
+    text: String,
+    tint: Color
+) {
+    val spacing = MaterialTheme.spacing
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(spacing.radiusTiny))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = spacing.space8, vertical = spacing.space4),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(spacing.iconTiny)
+            )
+            Spacer(modifier = Modifier.width(spacing.space4))
+        }
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = tint
+        )
+    }
+}
+
+@Composable
 private fun AiModuleNotifyRow(
     config: AiModuleNotifyConfig,
     isEn: Boolean,
     masterEnabled: Boolean,
-    isSaving: Boolean,
     hasOverlayPermission: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onSelectAlarmMode: (AiAlarmMode) -> Unit
@@ -1641,26 +1839,26 @@ private fun AiModuleNotifyRow(
     val isInteractive = masterEnabled
 
     val subtitleText = when {
-        !config.enabled -> if (isEn) "Alerts disabled for this AI module" else "Đang tắt thông báo cho bài AI này"
+        !config.enabled -> if (isEn) "Alerts disabled for this AI module" else "Đang tắt thông báo"
         config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission ->
-            if (isEn) "Incoming Call • Overlay permission recommended" else "Hình thức: Cuộc gọi • Cần cấp quyền hiển thị đè"
+            if (isEn) "Incoming Call • Grant overlay permission" else "Hình thức: Cuộc gọi • Cần cấp quyền đè"
         config.alarmMode == AiAlarmMode.Call ->
-            if (isEn) "Alert mode: Incoming call screen" else "Hình thức: Đổ chuông màn hình cuộc gọi"
+            if (isEn) "Alert mode: Incoming call" else "Hình thức: Đổ chuông cuộc gọi"
         else ->
             if (isEn) "Alert mode: Push notification" else "Hình thức: Thông báo đẩy"
     }
 
     val subtitleColor = when {
-        !config.enabled -> colors.textSubtle
+        !config.enabled -> colors.textPlaceholder
         config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission -> colors.warning
-        config.alarmMode == AiAlarmMode.Call -> colors.accent
+        config.alarmMode == AiAlarmMode.Call -> colors.error
         else -> colors.textMuted
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(spacing.space14)
+            .padding(horizontal = spacing.space14, vertical = spacing.space12)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1683,13 +1881,17 @@ private fun AiModuleNotifyRow(
                     text = if (isEn) config.labelEn else config.labelVi,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onBackground
+                    color = if (config.enabled) MaterialTheme.colorScheme.onBackground else colors.textMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(spacing.space2))
                 Text(
                     text = subtitleText,
                     style = MaterialTheme.typography.labelSmall,
-                    color = subtitleColor
+                    color = subtitleColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.width(spacing.space10))
@@ -1697,6 +1899,7 @@ private fun AiModuleNotifyRow(
                 checked = config.enabled,
                 enabled = isInteractive,
                 onCheckedChange = onToggleEnabled,
+                modifier = Modifier.scale(0.88f),
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = colors.onAccent,
                     checkedTrackColor = colors.accent
@@ -1710,19 +1913,14 @@ private fun AiModuleNotifyRow(
             exit = shrinkVertically(tween(180)) + fadeOut(tween(150))
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
-                Spacer(modifier = Modifier.height(spacing.space12))
+                Spacer(modifier = Modifier.height(spacing.space10))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(spacing.radiusCompact))
+                        .clip(RoundedCornerShape(spacing.radiusSmallMedium))
                         .background(colors.controlBg)
-                        .border(
-                            width = spacing.borderThin,
-                            color = colors.border,
-                            shape = RoundedCornerShape(spacing.radiusCompact)
-                        )
-                        .padding(spacing.space4),
-                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                        .padding(spacing.space3),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.space4)
                 ) {
                     AlarmModeOptionButton(
                         modifier = Modifier.weight(1f),
@@ -1738,7 +1936,7 @@ private fun AiModuleNotifyRow(
                         icon = LucideIcons.PhoneCall,
                         label = if (isEn) "Incoming Call" else "Cuộc gọi",
                         selected = config.alarmMode == AiAlarmMode.Call,
-                        activeColor = colors.success,
+                        activeColor = colors.error,
                         enabled = isInteractive,
                         onClick = { onSelectAlarmMode(AiAlarmMode.Call) }
                     )
@@ -1766,11 +1964,10 @@ private fun AlarmModeOptionButton(
 
     Row(
         modifier = modifier
-            .heightIn(min = spacing.avatarSmall)
             .clip(shape)
             .background(bgColor)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = spacing.space10, vertical = spacing.space8),
+            .padding(horizontal = spacing.space10, vertical = spacing.space6),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1778,7 +1975,7 @@ private fun AlarmModeOptionButton(
             imageVector = icon,
             contentDescription = label,
             tint = contentColor,
-            modifier = Modifier.size(spacing.iconSmall)
+            modifier = Modifier.size(spacing.iconXSmall)
         )
         Spacer(modifier = Modifier.width(spacing.space6))
         Text(

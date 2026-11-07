@@ -465,17 +465,11 @@ class MainViewModel(
             )
         }
 
-        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread để chuyển tab Thông báo / Cuộc gọi mượt ngay lập tức
+        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread (tự động sắp xếp lại theo thứ tự ưu tiên: Cuộc gọi -> Tắt -> Thông báo)
         saveNotificationSettingsCache(optimisticModel)
         _notificationConfigState.update { state ->
             state.copy(
-                aiModules = state.aiModules.map { item ->
-                    if (item.moduleKey == module.key) {
-                        item.copy(enabled = enabled, alarmMode = alarmMode)
-                    } else {
-                        item
-                    }
-                }
+                aiModules = buildAiModuleConfigs(optimisticModel)
             )
         }
 
@@ -528,13 +522,25 @@ class MainViewModel(
         }.getOrNull()
     }
 
+    /**
+     * Thứ tự ưu tiên hiển thị bài AI:
+     * 1. Cuộc gọi (`enabled = true`, `alarmMode = Call`) -> 0
+     * 2. Tắt thông báo (`enabled = false`) -> 1
+     * 3. Thông báo đẩy (`enabled = true`, `alarmMode = Push`) -> 2
+     */
+    private fun aiModuleSortPriority(item: AiModuleNotifyConfig): Int = when {
+        item.enabled && item.alarmMode == AiAlarmMode.Call -> 0
+        !item.enabled -> 1
+        else -> 2
+    }
+
     private fun buildAiModuleConfigs(
         settings: UserNotificationSettingsModel?
     ): List<AiModuleNotifyConfig> {
         val overrides = settings?.overrides
-        return AiTypeHelper.activeModules.map { mod ->
+        return AiTypeHelper.activeModules.mapIndexed { index, mod ->
             val (enabled, modeStr) = AiTypeHelper.extractModuleNotifyConfig(mod, overrides)
-            AiModuleNotifyConfig(
+            index to AiModuleNotifyConfig(
                 moduleKey = mod.key,
                 sensorType = mod.sensorType,
                 labelVi = mod.labelVi,
@@ -543,7 +549,10 @@ class MainViewModel(
                 enabled = enabled,
                 alarmMode = AiAlarmMode.fromApiValue(modeStr)
             )
-        }
+        }.sortedWith(
+            compareBy<Pair<Int, AiModuleNotifyConfig>> { (_, item) -> aiModuleSortPriority(item) }
+                .thenBy { (originalIndex, _) -> originalIndex }
+        ).map { (_, item) -> item }
     }
 
     private fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {

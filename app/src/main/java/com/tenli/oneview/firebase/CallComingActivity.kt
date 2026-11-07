@@ -364,17 +364,12 @@ private fun CallScreenContent(
 
             Spacer(modifier = Modifier.height(spacing.space8))
 
-            // Pill trạng thái cuộc gọi khẩn cấp
+            // Pill trạng thái cuộc gọi khẩn cấp (nền đỏ, chữ trắng)
             Row(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(colors.error.copy(alpha = if (isDark) 0.18f else 0.10f))
-                    .border(
-                        width = spacing.borderThin,
-                        color = colors.error.copy(alpha = 0.30f),
-                        shape = CircleShape
-                    )
-                    .padding(horizontal = spacing.space12, vertical = spacing.space5),
+                    .background(colors.error)
+                    .padding(horizontal = spacing.space12, vertical = spacing.space6),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
@@ -382,14 +377,14 @@ private fun CallScreenContent(
                     modifier = Modifier
                         .size(spacing.statusDot)
                         .graphicsLayer { alpha = liveDotAlpha }
-                        .background(colors.error, CircleShape)
+                        .background(colors.onAccent, CircleShape)
                 )
                 Spacer(modifier = Modifier.width(spacing.space6))
                 Text(
                     text = if (isEn) "AI SECURITY ALERT • INCOMING CALL" else "CẢNH BÁO AN NINH AI • CUỘC GỌI ĐẾN",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = colors.error
+                    color = colors.onAccent
                 )
             }
 
