@@ -155,13 +155,19 @@ class MainViewModel(
                     }
                     val explicitEnabled = body?.global?.enabled
                     if (body != null && explicitEnabled != null) {
-                        saveNotificationSettingsCache(body)
+                        val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                        val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
+                            localOverrides = localSnapshot?.overrides,
+                            serverOverrides = body.overrides
+                        )
+                        val mergedModel = body.copy(overrides = mergedOverrides)
+                        saveNotificationSettingsCache(mergedModel)
                         shouldRegisterToken = explicitEnabled
                         savePushEnabledPref(explicitEnabled)
                         _notificationConfigState.update {
                             it.copy(
                                 pushEnabled = explicitEnabled,
-                                aiModules = buildAiModuleConfigs(body)
+                                aiModules = buildAiModuleConfigs(mergedModel)
                             )
                         }
                     } else {

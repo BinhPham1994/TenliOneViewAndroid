@@ -2,10 +2,14 @@ package com.tenli.oneview.firebase
 
 import android.app.ActivityOptions
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import android.window.SplashScreen
 import androidx.core.app.NotificationCompat
@@ -39,8 +43,9 @@ class EventMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        // Đảm bảo phiên đăng nhập (domain + accessToken) đã được nạp vào RAM kể cả khi app đang bị kill
+        // Đảm bảo phiên đăng nhập (domain + accessToken) và kênh thông báo đã sẵn sàng kể cả khi app đang bị kill
         UserSession.ensureRestored()
+        runCatching { NotificationChannels.createAll(this) }
 
         if (!UserPermissionManager.canAccessEvents()) {
             if (BuildConfig.DEBUG) {
@@ -108,11 +113,19 @@ class EventMessagingService : FirebaseMessagingService() {
                 "=== [NHẬN ĐƯỢC NOTIFY TỪ FIREBASE] messageId=${remoteMessage.messageId} | from=${remoteMessage.from} | sentTime=${remoteMessage.sentTime} | notification={title=${notif?.title}, body=${notif?.body}, image=${notif?.imageUrl}} | data=$data ==="
             )
         }
-        val explicitMakeCall = (data["makeCall"] ?: data["make_call"]).orEmpty().trim()
-        val explicitAlarmMode = (data["alarmMode"] ?: data["alarm_mode"]).orEmpty().trim()
+        val explicitMakeCall = (
+            data["makeCall"] ?: data["make_call"] ?: data["isCall"] ?: data["is_call"] ?: data["call"]
+            ).orEmpty().trim()
+        val explicitAlarmMode = (
+            data["alarmMode"] ?: data["alarm_mode"] ?: data["notifyType"] ?: data["notify_type"] ?: data["notificationType"] ?: data["notification_type"]
+            ).orEmpty().trim()
+        val isExplicitlyDisabledCall = explicitMakeCall.equals("false", ignoreCase = true) ||
+            explicitMakeCall == "0" ||
+            explicitAlarmMode.equals("push", ignoreCase = true)
         val isCall = explicitMakeCall.equals("true", ignoreCase = true) ||
+            explicitMakeCall == "1" ||
             explicitAlarmMode.equals("call", ignoreCase = true) ||
-            (explicitAlarmMode.isEmpty() && localAlarmMode.equals("call", ignoreCase = true))
+            (!isExplicitlyDisabledCall && localAlarmMode.equals("call", ignoreCase = true))
 
         val title = data["title"]
             ?: remoteMessage.notification?.title
@@ -278,19 +291,38 @@ class EventMessagingService : FirebaseMessagingService() {
     }
 
     private fun handleIncomingCall(title: String, body: String, url: String?, eId: String) {
+        wakeUpScreenForIncomingCall()
+
         val manager = NotificationManagerCompat.from(this)
         val notificationId = getSafeNotificationId(eId)
 
         val callIntent = Intent(this, CallComingActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            )
             putExtra("TITLE", title)
             putExtra("BODY", body)
             putExtra("URL", url)
             putExtra("EID", eId)
         }
+        val pendingIntentOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityOptions.makeBasic()
+                .setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                )
+                .toBundle()
+        } else {
+            null
+        }
         val callPendingIntent = PendingIntent.getActivity(
-            this, notificationId, callIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this,
+            notificationId,
+            callIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            pendingIntentOptions
         )
 
         val builder = NotificationCompat.Builder(this, NotificationChannels.EMERGENCY_CALL)
@@ -307,10 +339,33 @@ class EventMessagingService : FirebaseMessagingService() {
 
         notifySafely(manager, notificationId, builder)
 
-        try {
-            startActivity(callIntent)
-        } catch (e: Exception) {
-            if (BuildConfig.DEBUG) Log.w(TAG, "Cannot start call activity: ${e.message}")
+        val launchCallScreen = Runnable {
+            try {
+                startActivity(callIntent)
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.w(TAG, "Cannot start call activity directly: ${e.message}")
+            }
+        }
+        // Gọi trực tiếp và bồi thêm trên MainLooper để đảm bảo bật màn hình Call kể cả khi tiến trình vừa cold-start từ trạng thái bị kill
+        launchCallScreen.run()
+        Handler(Looper.getMainLooper()).post(launchCallScreen)
+    }
+
+    /**
+     * Đánh thức màn hình trong 10 giây khi nhận cuộc gọi cảnh báo lúc máy đang tắt màn hình / app bị kill.
+     */
+    private fun wakeUpScreenForIncomingCall() {
+        runCatching {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+            @Suppress("DEPRECATION")
+            val wakeLock = pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "tenli:incoming_call_wakelock"
+            )
+            wakeLock.setReferenceCounted(false)
+            wakeLock.acquire(10_000L)
         }
     }
 
@@ -332,7 +387,7 @@ class EventMessagingService : FirebaseMessagingService() {
         const val TAG = "EventMessagingService"
         const val EXTRA_EVENT_ID = "EVENT_ID"
         const val EXTRA_FROM_NOTIFICATION = "FROM_NOTIFICATION"
-        const val MISSED_CALL_THRESHOLD_MS = 60_000L
+        const val MISSED_CALL_THRESHOLD_MS = 300_000L
         const val MISSED_CALL_BODY_PREVIEW = 20
         const val NOTIFICATION_IMAGE_MAX_PX = 1024
     }
