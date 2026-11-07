@@ -46,8 +46,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -140,9 +143,12 @@ import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle as JavaTextStyle
 import java.util.Calendar
+import java.util.Locale
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -2040,55 +2046,520 @@ private fun <K> AnchoredFilterDropdownMenu(
 }
 
 // =====================================================================================
-// Chọn ngày / khoảng thời gian tùy chỉnh
+// Chọn ngày / khoảng thời gian tùy chỉnh (Compose Popup đồng bộ style hệ thống)
 // =====================================================================================
 
-/**
- * Mở DatePicker hệ thống.
- * @param preserveTimeOfDay true = giữ giờ/phút của [currentMs]; false = giờ hiện tại (hành vi cũ của chọn 1 ngày).
- */
-private fun showSystemDatePicker(
-    context: Context,
-    currentMs: Long,
-    preserveTimeOfDay: Boolean,
-    onResult: (Long) -> Unit
-) {
-    val cal = Calendar.getInstance().apply { timeInMillis = currentMs }
-    android.app.DatePickerDialog(
-        context,
-        { _, year, month, dayOfMonth ->
-            val c = Calendar.getInstance().apply {
-                if (preserveTimeOfDay) timeInMillis = currentMs
-                set(Calendar.YEAR, year)
-                set(Calendar.MONTH, month)
-                set(Calendar.DAY_OF_MONTH, dayOfMonth)
-            }
-            onResult(c.timeInMillis)
-        },
-        cal.get(Calendar.YEAR),
-        cal.get(Calendar.MONTH),
-        cal.get(Calendar.DAY_OF_MONTH)
-    ).show()
+private fun formatSelectedDateSubtitle(date: LocalDate, isEn: Boolean): String {
+    val formattedDate = DayMonthYearFormatter.format(date)
+    val dayOfWeekLabel = if (isEn) {
+        date.dayOfWeek.getDisplayName(JavaTextStyle.SHORT, Locale.ENGLISH)
+    } else {
+        when (date.dayOfWeek.value) {
+            1 -> "Thứ 2"
+            2 -> "Thứ 3"
+            3 -> "Thứ 4"
+            4 -> "Thứ 5"
+            5 -> "Thứ 6"
+            6 -> "Thứ 7"
+            else -> "Chủ nhật"
+        }
+    }
+    return "$dayOfWeekLabel, $formattedDate"
 }
 
-/** Mở TimePicker hệ thống (24h), giữ nguyên ngày của [currentMs]. */
-private fun showSystemTimePicker(context: Context, currentMs: Long, onResult: (Long) -> Unit) {
-    val cal = Calendar.getInstance().apply { timeInMillis = currentMs }
-    android.app.TimePickerDialog(
-        context,
-        { _, hourOfDay, minute ->
-            val c = Calendar.getInstance().apply {
-                timeInMillis = currentMs
-                set(Calendar.HOUR_OF_DAY, hourOfDay)
-                set(Calendar.MINUTE, minute)
-                set(Calendar.SECOND, 0)
+private fun formatMonthYearTitle(yearMonth: YearMonth, isEn: Boolean): String {
+    return if (isEn) {
+        val monthName = yearMonth.month.getDisplayName(JavaTextStyle.FULL, Locale.ENGLISH)
+        "$monthName ${yearMonth.year}"
+    } else {
+        "Tháng ${yearMonth.monthValue}, ${yearMonth.year}"
+    }
+}
+
+@Composable
+private fun AppDatePickerPopup(
+    initialMillis: Long,
+    preserveTimeOfDay: Boolean,
+    isEn: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val typography = MaterialTheme.typography
+    val zone = remember { ZoneId.systemDefault() }
+    val initialDate = remember(initialMillis, zone) {
+        Instant.ofEpochMilli(initialMillis).atZone(zone).toLocalDate()
+    }
+    var selectedDate by remember(initialDate) { mutableStateOf(initialDate) }
+    var displayedMonth by remember(initialDate) { mutableStateOf(YearMonth.from(initialDate)) }
+    val today = remember(zone) { LocalDate.now(zone) }
+    val weekDays = remember(isEn) {
+        if (isEn) listOf("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+        else listOf("T2", "T3", "T4", "T5", "T6", "T7", "CN")
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = spacing.space16)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = spacing.dialogMaxWidth)
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedCornerShape(spacing.radiusLarge),
+                color = colors.surfaceGrouped,
+                shadowElevation = spacing.space16,
+                border = BorderStroke(spacing.borderThin, colors.border)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(spacing.space16)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space10),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            IconBadge(
+                                icon = LucideIcons.Calendar,
+                                backgroundColor = WarningOrange,
+                                size = spacing.iconButton,
+                                iconSize = spacing.iconRegular,
+                                cornerRadius = spacing.radiusSmallMedium,
+                                tint = Color.White
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
+                                Text(
+                                    text = if (isEn) "Select Date" else "Chọn ngày",
+                                    style = typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textStrong,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = formatSelectedDateSubtitle(selectedDate, isEn),
+                                    style = typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.activeContent,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        SheetCloseButton(onClick = onDismiss)
+                    }
+
+                    Spacer(modifier = Modifier.height(spacing.space14))
+
+                    // Calendar Card
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .background(colors.surfaceRaised)
+                            .padding(spacing.space12)
+                    ) {
+                        // Month navigation
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(spacing.iconButtonSmall)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(colors.controlBg)
+                                    .clickable { displayedMonth = displayedMonth.minusMonths(1) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.ChevronLeft,
+                                    contentDescription = if (isEn) "Previous month" else "Tháng trước",
+                                    tint = colors.textStrong,
+                                    modifier = Modifier.size(spacing.iconSmallMedium)
+                                )
+                            }
+
+                            Text(
+                                text = formatMonthYearTitle(displayedMonth, isEn),
+                                style = typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.textStrong,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Box(
+                                modifier = Modifier
+                                    .size(spacing.iconButtonSmall)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(colors.controlBg)
+                                    .clickable { displayedMonth = displayedMonth.plusMonths(1) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.ChevronRight,
+                                    contentDescription = if (isEn) "Next month" else "Tháng sau",
+                                    tint = colors.textStrong,
+                                    modifier = Modifier.size(spacing.iconSmallMedium)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(spacing.space12))
+
+                        // Weekday labels
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            weekDays.forEachIndexed { index, dayLabel ->
+                                Text(
+                                    text = dayLabel,
+                                    style = typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (index >= 5) colors.activeContent.copy(alpha = 0.85f) else colors.textMuted,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(spacing.space6))
+
+                        // 6x7 Calendar Grid (Monday first)
+                        val firstOfMonth = remember(displayedMonth) { displayedMonth.atDay(1) }
+                        val gridStartDate = remember(firstOfMonth) {
+                            firstOfMonth.minusDays((firstOfMonth.dayOfWeek.value - 1).toLong())
+                        }
+                        val dayCellShape = RoundedCornerShape(spacing.radiusSmallMedium)
+
+                        for (row in 0 until 6) {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                for (col in 0 until 7) {
+                                    val cellDate = gridStartDate.plusDays((row * 7 + col).toLong())
+                                    val isCurrentMonth =
+                                        cellDate.month == displayedMonth.month && cellDate.year == displayedMonth.year
+                                    val isSelected = cellDate == selectedDate
+                                    val isToday = cellDate == today
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                            .padding(spacing.space2)
+                                            .clip(dayCellShape)
+                                            .background(
+                                                when {
+                                                    isSelected -> BrandPrimary
+                                                    isToday -> BrandPrimary.copy(alpha = if (colors.isDark) 0.18f else 0.10f)
+                                                    else -> Color.Transparent
+                                                }
+                                            )
+                                            .then(
+                                                if (isToday && !isSelected) {
+                                                    Modifier.border(
+                                                        width = spacing.borderThin,
+                                                        color = BrandPrimary.copy(alpha = 0.45f),
+                                                        shape = dayCellShape
+                                                    )
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
+                                            .clickable {
+                                                selectedDate = cellDate
+                                                if (!isCurrentMonth) {
+                                                    displayedMonth = YearMonth.from(cellDate)
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = cellDate.dayOfMonth.toString(),
+                                            style = typography.bodyMedium,
+                                            fontWeight = when {
+                                                isSelected || isToday -> FontWeight.Bold
+                                                isCurrentMonth -> FontWeight.Medium
+                                                else -> FontWeight.Normal
+                                            },
+                                            color = when {
+                                                isSelected -> Color.White
+                                                isToday -> colors.activeContent
+                                                isCurrentMonth -> colors.textStrong
+                                                else -> colors.textPlaceholder.copy(alpha = 0.45f)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(spacing.space16))
+
+                    SheetActionButtons(
+                        cancelText = if (isEn) "Cancel" else "Hủy",
+                        confirmText = if (isEn) "Confirm" else "Xác nhận",
+                        onCancel = onDismiss,
+                        onConfirm = {
+                            val c = Calendar.getInstance().apply {
+                                if (preserveTimeOfDay) timeInMillis = initialMillis
+                                set(Calendar.YEAR, selectedDate.year)
+                                set(Calendar.MONTH, selectedDate.monthValue - 1)
+                                set(Calendar.DAY_OF_MONTH, selectedDate.dayOfMonth)
+                            }
+                            onConfirm(c.timeInMillis)
+                        },
+                        confirmColor = BrandPrimary
+                    )
+                }
             }
-            onResult(c.timeInMillis)
-        },
-        cal.get(Calendar.HOUR_OF_DAY),
-        cal.get(Calendar.MINUTE),
-        true
-    ).show()
+        }
+    }
+}
+
+@Composable
+private fun AppTimePickerPopup(
+    initialMillis: Long,
+    isEn: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Long) -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    val typography = MaterialTheme.typography
+    val initialCal = remember(initialMillis) {
+        Calendar.getInstance().apply { timeInMillis = initialMillis }
+    }
+    var selectedHour by remember(initialMillis) { mutableIntStateOf(initialCal.get(Calendar.HOUR_OF_DAY)) }
+    var selectedMinute by remember(initialMillis) { mutableIntStateOf(initialCal.get(Calendar.MINUTE)) }
+
+    val hourListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (selectedHour - 2).coerceAtLeast(0)
+    )
+    val minuteListState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (selectedMinute - 2).coerceAtLeast(0)
+    )
+    val hours = remember { (0..23).toList() }
+    val minutes = remember { (0..59).toList() }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = spacing.space16)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = spacing.dialogMaxWidth)
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
+                shape = RoundedCornerShape(spacing.radiusLarge),
+                color = colors.surfaceGrouped,
+                shadowElevation = spacing.space16,
+                border = BorderStroke(spacing.borderThin, colors.border)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(spacing.space16)
+                ) {
+                    // Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space10),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            IconBadge(
+                                icon = LucideIcons.Clock,
+                                backgroundColor = WarningOrange,
+                                size = spacing.iconButton,
+                                iconSize = spacing.iconRegular,
+                                cornerRadius = spacing.radiusSmallMedium,
+                                tint = Color.White
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(spacing.space2)) {
+                                Text(
+                                    text = if (isEn) "Select Time" else "Chọn thời gian",
+                                    style = typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colors.textStrong,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute),
+                                    style = typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.activeContent,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        SheetCloseButton(onClick = onDismiss)
+                    }
+
+                    Spacer(modifier = Modifier.height(spacing.space14))
+
+                    // Time columns card
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(spacing.radiusRegular))
+                            .background(colors.surfaceRaised)
+                            .padding(spacing.space12),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (isEn) "Hour" else "Giờ",
+                                style = typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textMuted
+                            )
+                            Spacer(modifier = Modifier.height(spacing.space6))
+                            LazyColumn(
+                                state = hourListState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(spacing.buttonHeightSmall * 5),
+                                verticalArrangement = Arrangement.spacedBy(spacing.space4)
+                            ) {
+                                items(hours, key = { it }) { hour ->
+                                    val isSelected = hour == selectedHour
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(spacing.buttonHeightSmall)
+                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                            .background(if (isSelected) BrandPrimary else Color.Transparent)
+                                            .clickable { selectedHour = hour },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = String.format(Locale.US, "%02d", hour),
+                                            style = typography.bodyMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else colors.textStrong
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = ":",
+                            style = typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textStrong
+                        )
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (isEn) "Minute" else "Phút",
+                                style = typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textMuted
+                            )
+                            Spacer(modifier = Modifier.height(spacing.space6))
+                            LazyColumn(
+                                state = minuteListState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(spacing.buttonHeightSmall * 5),
+                                verticalArrangement = Arrangement.spacedBy(spacing.space4)
+                            ) {
+                                items(minutes, key = { it }) { minute ->
+                                    val isSelected = minute == selectedMinute
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(spacing.buttonHeightSmall)
+                                            .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                                            .background(if (isSelected) BrandPrimary else Color.Transparent)
+                                            .clickable { selectedMinute = minute },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = String.format(Locale.US, "%02d", minute),
+                                            style = typography.bodyMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else colors.textStrong
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(spacing.space16))
+
+                    SheetActionButtons(
+                        cancelText = if (isEn) "Cancel" else "Hủy",
+                        confirmText = if (isEn) "Confirm" else "Xác nhận",
+                        onCancel = onDismiss,
+                        onConfirm = {
+                            val c = Calendar.getInstance().apply {
+                                timeInMillis = initialMillis
+                                set(Calendar.HOUR_OF_DAY, selectedHour)
+                                set(Calendar.MINUTE, selectedMinute)
+                                set(Calendar.SECOND, 0)
+                            }
+                            onConfirm(c.timeInMillis)
+                        },
+                        confirmColor = BrandPrimary
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -2099,12 +2570,11 @@ fun CustomDatePickerDialogModal(
     onDismiss: () -> Unit,
     onConfirm: (Long) -> Unit
 ) {
-    val context = LocalContext.current
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
     val typography = MaterialTheme.typography
     var selectedMillis by remember(initialMillis) { mutableLongStateOf(initialMillis) }
-    val subColor = MaterialTheme.colorScheme.onSurfaceVariant
+    var showDatePopup by remember { mutableStateOf(false) }
 
     MobileNativeBottomSheet(
         title = if (isEn) "Select Date" else "Tùy chọn ngày",
@@ -2112,24 +2582,13 @@ fun CustomDatePickerDialogModal(
         iconColor = WarningOrange,
         onDismiss = onDismiss
     ) {
-        Text(
-            text = if (isEn) "Choose a date to filter events (00:00 - 23:59)" else "Chọn ngày cần tra cứu dữ liệu (00:00 - 23:59)",
-            color = subColor,
-            style = typography.bodySmall,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Spacer(modifier = Modifier.height(spacing.space14))
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = spacing.inputHeight)
                 .clip(RoundedCornerShape(spacing.radiusCompact))
                 .background(colors.surfaceRaised)
-                .clickable {
-                    showSystemDatePicker(context, selectedMillis, preserveTimeOfDay = false) { selectedMillis = it }
-                }
+                .clickable { showDatePopup = true }
                 .padding(horizontal = spacing.space14),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(spacing.space10)
@@ -2148,13 +2607,6 @@ fun CustomDatePickerDialogModal(
                 maxLines = 1,
                 modifier = Modifier.weight(1f)
             )
-            Text(
-                text = if (isEn) "Change" else "Chọn lịch",
-                color = colors.accent,
-                style = typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1
-            )
         }
 
         Spacer(modifier = Modifier.height(spacing.space20))
@@ -2167,6 +2619,26 @@ fun CustomDatePickerDialogModal(
             confirmColor = BrandPrimary
         )
     }
+
+    if (showDatePopup) {
+        AppDatePickerPopup(
+            initialMillis = selectedMillis,
+            preserveTimeOfDay = false,
+            isEn = isEn,
+            onDismiss = { showDatePopup = false },
+            onConfirm = { pickedMillis ->
+                selectedMillis = pickedMillis
+                showDatePopup = false
+            }
+        )
+    }
+}
+
+private enum class RangePickerModalTarget {
+    FROM_DATE,
+    FROM_TIME,
+    TO_DATE,
+    TO_TIME
 }
 
 @Composable
@@ -2178,10 +2650,10 @@ fun CustomRangePickerDialogModal(
     onDismiss: () -> Unit,
     onConfirm: (Long, Long) -> Unit
 ) {
-    val context = LocalContext.current
     val spacing = MaterialTheme.spacing
     var fromMillis by remember(initialFromMillis) { mutableLongStateOf(initialFromMillis) }
     var toMillis by remember(initialToMillis) { mutableLongStateOf(initialToMillis) }
+    var activePopupTarget by remember { mutableStateOf<RangePickerModalTarget?>(null) }
 
     MobileNativeBottomSheet(
         title = if (isEn) "Custom Time Range" else "Tùy chỉnh thời gian",
@@ -2192,8 +2664,8 @@ fun CustomRangePickerDialogModal(
         RangeDateTimeRow(
             label = if (isEn) "From" else "Từ thời gian",
             millis = fromMillis,
-            onPickDate = { showSystemDatePicker(context, fromMillis, preserveTimeOfDay = true) { fromMillis = it } },
-            onPickTime = { showSystemTimePicker(context, fromMillis) { fromMillis = it } }
+            onPickDate = { activePopupTarget = RangePickerModalTarget.FROM_DATE },
+            onPickTime = { activePopupTarget = RangePickerModalTarget.FROM_TIME }
         )
 
         Spacer(modifier = Modifier.height(spacing.space12))
@@ -2201,8 +2673,8 @@ fun CustomRangePickerDialogModal(
         RangeDateTimeRow(
             label = if (isEn) "To" else "Đến thời gian",
             millis = toMillis,
-            onPickDate = { showSystemDatePicker(context, toMillis, preserveTimeOfDay = true) { toMillis = it } },
-            onPickTime = { showSystemTimePicker(context, toMillis) { toMillis = it } }
+            onPickDate = { activePopupTarget = RangePickerModalTarget.TO_DATE },
+            onPickTime = { activePopupTarget = RangePickerModalTarget.TO_TIME }
         )
 
         Spacer(modifier = Modifier.height(spacing.space20))
@@ -2214,6 +2686,56 @@ fun CustomRangePickerDialogModal(
             onConfirm = { onConfirm(fromMillis, toMillis) },
             confirmColor = BrandPrimary
         )
+    }
+
+    when (activePopupTarget) {
+        RangePickerModalTarget.FROM_DATE -> {
+            AppDatePickerPopup(
+                initialMillis = fromMillis,
+                preserveTimeOfDay = true,
+                isEn = isEn,
+                onDismiss = { activePopupTarget = null },
+                onConfirm = { pickedMillis ->
+                    fromMillis = pickedMillis
+                    activePopupTarget = null
+                }
+            )
+        }
+        RangePickerModalTarget.FROM_TIME -> {
+            AppTimePickerPopup(
+                initialMillis = fromMillis,
+                isEn = isEn,
+                onDismiss = { activePopupTarget = null },
+                onConfirm = { pickedMillis ->
+                    fromMillis = pickedMillis
+                    activePopupTarget = null
+                }
+            )
+        }
+        RangePickerModalTarget.TO_DATE -> {
+            AppDatePickerPopup(
+                initialMillis = toMillis,
+                preserveTimeOfDay = true,
+                isEn = isEn,
+                onDismiss = { activePopupTarget = null },
+                onConfirm = { pickedMillis ->
+                    toMillis = pickedMillis
+                    activePopupTarget = null
+                }
+            )
+        }
+        RangePickerModalTarget.TO_TIME -> {
+            AppTimePickerPopup(
+                initialMillis = toMillis,
+                isEn = isEn,
+                onDismiss = { activePopupTarget = null },
+                onConfirm = { pickedMillis ->
+                    toMillis = pickedMillis
+                    activePopupTarget = null
+                }
+            )
+        }
+        null -> Unit
     }
 }
 

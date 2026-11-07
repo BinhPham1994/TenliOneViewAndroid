@@ -1340,6 +1340,40 @@ object LucideIcons {
         }
     }
 
+    val Pause: ImageVector by lazy {
+        lucideVector("LucidePause") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // rect x="6" y="4" width="4" height="16" rx="1"
+                moveTo(7f, 4f)
+                horizontalLineTo(9f)
+                arcTo(1f, 1f, 0f, false, true, 10f, 5f)
+                verticalLineTo(19f)
+                arcTo(1f, 1f, 0f, false, true, 9f, 20f)
+                horizontalLineTo(7f)
+                arcTo(1f, 1f, 0f, false, true, 6f, 19f)
+                verticalLineTo(5f)
+                arcTo(1f, 1f, 0f, false, true, 7f, 4f)
+                close()
+                // rect x="14" y="4" width="4" height="16" rx="1"
+                moveTo(15f, 4f)
+                horizontalLineTo(17f)
+                arcTo(1f, 1f, 0f, false, true, 18f, 5f)
+                verticalLineTo(19f)
+                arcTo(1f, 1f, 0f, false, true, 17f, 20f)
+                horizontalLineTo(15f)
+                arcTo(1f, 1f, 0f, false, true, 14f, 19f)
+                verticalLineTo(5f)
+                arcTo(1f, 1f, 0f, false, true, 15f, 4f)
+                close()
+            }
+        }
+    }
+
     val Layers: ImageVector by lazy {
         lucideVector("LucideLayers") {
             path(

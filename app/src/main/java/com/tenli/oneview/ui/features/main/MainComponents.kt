@@ -80,8 +80,6 @@ import com.tenli.oneview.ui.theme.BrandLighter
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.Slate300
-import com.tenli.oneview.ui.theme.Slate400
-import com.tenli.oneview.ui.theme.Slate50
 import com.tenli.oneview.ui.theme.Slate500
 import com.tenli.oneview.ui.theme.Slate600
 import com.tenli.oneview.ui.theme.Slate900
@@ -135,44 +133,48 @@ private val CameraDetailNavItems = listOf(
 private val DockGlassDarkTop = Color(0xF219263E)
 private val DockGlassDarkMid = Color(0xF50E1729)
 private val DockGlassDarkBottom = Color(0xF2142238)
-private val DockGlassLightTop = Color(0xF6E3EAF5)
-private val DockGlassLightMid = Color(0xF6D5DFEE)
-private val DockGlassLightBottom = Color(0xF6DFE7F4)
+private val DockGlassLightTop = Color(0xF7FFFFFF)
+private val DockGlassLightMid = Color(0xEFF7F8FB)
+private val DockGlassLightBottom = Color(0xF7FFFFFF)
 private val GlassCausticSky = Color(0xFF38BDF8)
 private val PillBlueDeep = Color(0xFF1D4ED8)
-private val PillLightMid = Color(0xFFF8FBFF)
-private val PillLightBottom = Color(0xFFEEF5FF)
-private val PillLightBottomDragging = Color(0xFFE6F0FF)
-private val PillLightSpecular = Color(0xFFE0ECFF)
+private val PillLightMid = Color(0xFFF4F8FF)
+private val PillLightBottom = Color(0xFFE9F2FF)
+private val PillLightBottomDragging = Color(0xFFDDEBFF)
+private val PillLightSpecular = Color(0xFFE8F1FF)
 
 // Kích thước hiệu ứng (px tính trong DrawScope – không phụ thuộc thang spacing)
 private val DockAmbientShadowBlur = 18.dp
-private val DockAmbientShadowOffsetY = 7.dp
+private val DockAmbientShadowOffsetY = 6.dp
 private val DockContactShadowBlur = 5.dp
 private val DockContactShadowOffsetY = 2.dp
 private val DockAmbientShadowInset = 2.dp
 private val DockContactShadowInset = 1.dp
-private val DockInnerBevelStroke = 2.dp
-private val DockInnerBevelInset = 1.6.dp
-private val DockSpecularRimStroke = 1.35.dp
-private val DockSpecularRimInset = 0.75.dp
-private val DockOuterContourStroke = 0.85.dp
-private val PillShadowBlur = 8.dp
-private val PillShadowBlurDragging = 12.dp
+private val DockRimBloomStroke = 5.dp
+private val DockRimBloomBlur = 4.5.dp
+private val DockInnerBevelStroke = 1.6.dp
+private val DockInnerBevelInset = 2.1.dp
+private val DockSpecularRimStroke = 1.65.dp
+private val DockSpecularRimInset = 0.7.dp
+private val DockOuterContourStroke = 0.65.dp
+private val PillShadowBlur = 9.dp
+private val PillShadowBlurDragging = 13.dp
 private val PillShadowOffsetY = 2.5.dp
 private val PillShadowOffsetYDragging = 4.dp
 private val PillShadowInset = 1.dp
-private val PillInnerSpecularStroke = 1.2.dp
-private val PillInnerSpecularInset = 0.7.dp
-private val PillOuterContourStroke = 0.8.dp
+private val PillRimBloomStroke = 3.5.dp
+private val PillRimBloomBlur = 3.dp
+private val PillInnerSpecularStroke = 1.4.dp
+private val PillInnerSpecularInset = 0.65.dp
+private val PillOuterContourStroke = 0.85.dp
 
 /**
  * Custom modifier vẽ hiệu ứng "iPhone iOS 26 Liquid Glass" cho thanh Dock chính:
  * - Bóng đổ (Drop Shadow) vẽ tách biệt bên ngoài viên nang (ClipOp.Difference) để không làm đục mặt kính bên trong.
- * - Thân kính lỏng đa lớp (Smoky/Pearlescent Frosted Glass ở Light Mode & Deep Obsidian Glass ở Dark Mode)
- *   giúp nổi bật rõ ràng ngay cả khi đè lên thẻ sự kiện màu trắng (#FFFFFF).
+ * - Thân kính lỏng đa lớp: Light Mode thiên về trắng trong trẻo (#F7F8FB -> #FFFFFF) kết hợp vầng lóa viền
+ *   quang học (Optical Rim Glare / Specular Rim Bloom) chuẩn iOS Liquid Glass; Dark Mode dùng Deep Obsidian Glass.
  * - Lớp phản chiếu mặt kính cong phía trên (Top Curved Lens Sheen) & khúc xạ đáy (Bottom Bounce).
- * - Viền khúc xạ ánh sáng 3D (Diagonal Specular Rim + Inner Bevel + Outer Micro-Contour).
+ * - Viền khúc xạ ánh sáng 3D (Optical Rim Bloom + Diagonal Specular Rim + Inner Bevel + Outer Micro-Contour).
  *
  * Toàn bộ Path/Brush/Paint được tạo trong drawWithCache => chỉ tạo lại khi đổi kích thước hoặc theme.
  */
@@ -194,7 +196,7 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     val ambientShadowColor = if (isDark) {
         Color.Black.copy(alpha = 0.62f)
     } else {
-        Slate900.copy(alpha = 0.18f)
+        Slate900.copy(alpha = 0.13f)
     }
     val ambientShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = ambientShadowColor.toArgb()
@@ -205,7 +207,7 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     val contactShadowColor = if (isDark) {
         Color.Black.copy(alpha = 0.42f)
     } else {
-        Slate900.copy(alpha = 0.10f)
+        Slate900.copy(alpha = 0.07f)
     }
     val contactShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = contactShadowColor.toArgb()
@@ -215,7 +217,7 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     val contactInsetPx = DockContactShadowInset.toPx()
 
     // 2. Thân kính lỏng (Liquid Glass Body)
-    // Light Mode dùng tông kính khói ngọc trai (Smoky Ice-Slate Glass) để tách biệt rõ với thẻ trắng #FFFFFF
+    // Light Mode dùng nền trắng kính trong trẻo, không bị ám xám xanh
     val baseGlassBrush = if (isDark) {
         Brush.verticalGradient(
             0.0f to DockGlassDarkTop,
@@ -225,7 +227,7 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
     } else {
         Brush.verticalGradient(
             0.0f to DockGlassLightTop,
-            0.50f to DockGlassLightMid,
+            0.52f to DockGlassLightMid,
             1.0f to DockGlassLightBottom
         )
     }
@@ -240,10 +242,10 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
             )
         } else {
             listOf(
-                Color.White.copy(alpha = 0.42f),
-                Slate400.copy(alpha = 0.14f),
-                Slate300.copy(alpha = 0.10f),
-                Color.White.copy(alpha = 0.48f)
+                Color.White.copy(alpha = 0.92f),
+                Color(0xFFF8FAFC).copy(alpha = 0.35f),
+                Color(0xFFF3F6FA).copy(alpha = 0.28f),
+                Color.White.copy(alpha = 0.95f)
             )
         },
         start = Offset.Zero,
@@ -260,13 +262,13 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
             )
         } else {
             listOf(
-                Color.White.copy(alpha = 0.72f),
-                Color.White.copy(alpha = 0.25f),
+                Color.White.copy(alpha = 0.95f),
+                Color.White.copy(alpha = 0.45f),
                 Color.Transparent
             )
         },
         startY = 0f,
-        endY = size.height * 0.48f
+        endY = size.height * 0.46f
     )
 
     // Ánh sáng dội ngược dưới đáy kính (Bottom Internal Bounce)
@@ -274,13 +276,22 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
         colors = if (isDark) {
             listOf(Color.Transparent, BrandLight.copy(alpha = 0.10f))
         } else {
-            listOf(Color.Transparent, Color.White.copy(alpha = 0.55f))
+            listOf(Color.Transparent, Color.White.copy(alpha = 0.88f))
         },
-        startY = size.height * 0.68f,
+        startY = size.height * 0.66f,
         endY = size.height
     )
 
-    // 4. Viền dày khối kính 3D bên trong (Inner 3D Bevel Thickness)
+    // Vầng lóa viền quang học bên trong mép kính (iOS Liquid Glass Optical Rim Bloom)
+    val rimBloomStrokePx = DockRimBloomStroke.toPx()
+    val rimBloomPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
+        style = FrameworkPaint.Style.STROKE
+        strokeWidth = rimBloomStrokePx
+        color = (if (isDark) Color.White.copy(alpha = 0.22f) else Color.White).toArgb()
+        maskFilter = BlurMaskFilter(DockRimBloomBlur.toPx(), BlurMaskFilter.Blur.NORMAL)
+    }
+
+    // 4. Viền khúc xạ thấu kính bên trong (Inner Curved Lens Refraction Bevel)
     val innerBevelStrokePx = DockInnerBevelStroke.toPx()
     val innerBevelInsetPx = DockInnerBevelInset.toPx()
     val innerBevelBrush = Brush.verticalGradient(
@@ -292,14 +303,14 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
             )
         } else {
             listOf(
-                Color.White.copy(alpha = 0.85f),
-                Slate500.copy(alpha = 0.22f),
-                Color.White.copy(alpha = 0.78f)
+                Color.White.copy(alpha = 0.95f),
+                Slate300.copy(alpha = 0.34f),
+                Color.White.copy(alpha = 0.92f)
             )
         }
     )
 
-    // 5. Viền phản quang kim cương 3D (Signature iOS 26 Diagonal Specular Rim)
+    // 5. Viền lóa sáng phản quang kim cương 3D (Signature iOS 26 Diagonal Specular Rim Glare)
     val specularRimStrokePx = DockSpecularRimStroke.toPx()
     val specularRimInsetPx = DockSpecularRimInset.toPx()
     val specularRimBrush = Brush.linearGradient(
@@ -314,9 +325,9 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
         } else {
             listOf(
                 Color.White,
-                Color.White.copy(alpha = 0.88f),
-                Slate50.copy(alpha = 0.60f),
-                Color.White.copy(alpha = 0.88f),
+                Color.White.copy(alpha = 0.96f),
+                Color(0xFFEFF6FF).copy(alpha = 0.85f),
+                Color.White.copy(alpha = 0.96f),
                 Color.White
             )
         },
@@ -324,18 +335,18 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
         end = Offset(size.width, size.height)
     )
 
-    // 6. Viền định hình siêu mảnh ngoài cùng (Outer Micro-Contour giúp tách nền trắng 100%)
+    // 6. Viền định hình siêu mảnh ngoài cùng (Outer Micro-Contour giữ nét viền lóa trên nền trắng)
     val outerContourStrokePx = DockOuterContourStroke.toPx()
     val outerContourColor = if (isDark) {
         Color.Black.copy(alpha = 0.60f)
     } else {
-        Slate900.copy(alpha = 0.15f)
+        Slate500.copy(alpha = 0.13f)
     }
 
     // Hình học tính sẵn (không cấp phát trong onDrawBehind)
-    val topSheenSize = Size(size.width, size.height * 0.48f)
-    val bottomBounceTopLeft = Offset(0f, size.height * 0.68f)
-    val bottomBounceSize = Size(size.width, size.height * 0.32f)
+    val topSheenSize = Size(size.width, size.height * 0.46f)
+    val bottomBounceTopLeft = Offset(0f, size.height * 0.66f)
+    val bottomBounceSize = Size(size.width, size.height * 0.34f)
     val innerBevelTopLeft = Offset(innerBevelInsetPx, innerBevelInsetPx)
     val innerBevelSize = Size(size.width - innerBevelInsetPx * 2f, size.height - innerBevelInsetPx * 2f)
     val innerBevelRadius = (cornerRadiusPx - innerBevelInsetPx).coerceAtLeast(0f)
@@ -373,15 +384,26 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
             }
         }
 
-        // Vẽ các lớp kính lỏng bên trong viên nang
+        // Vẽ các lớp kính lỏng + vầng lóa viền bên trong viên nang
         clipPath(capsulePath) {
             drawRoundRect(brush = baseGlassBrush, cornerRadius = cornerRadius)
             drawRoundRect(brush = diagonalRefractionBrush, cornerRadius = cornerRadius)
             drawRect(brush = topLensSheenBrush, topLeft = Offset.Zero, size = topSheenSize)
             drawRect(brush = bottomBounceBrush, topLeft = bottomBounceTopLeft, size = bottomBounceSize)
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawRoundRect(
+                    0f,
+                    0f,
+                    size.width,
+                    size.height,
+                    cornerRadiusPx,
+                    cornerRadiusPx,
+                    rimBloomPaint
+                )
+            }
         }
 
-        // Vẽ viền khối 3D bên trong (Inner Bevel)
+        // Vẽ viền khúc xạ thấu kính 3D bên trong (Inner Bevel)
         drawRoundRect(
             brush = innerBevelBrush,
             topLeft = innerBevelTopLeft,
@@ -390,7 +412,7 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
             style = innerBevelStroke
         )
 
-        // Vẽ viền phản quang ánh sáng 3D (Specular Rim)
+        // Vẽ viền lóa sáng phản quang 3D (Specular Rim)
         drawRoundRect(
             brush = specularRimBrush,
             topLeft = specularTopLeft,
@@ -412,8 +434,8 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
 
 /**
  * Custom modifier vẽ viên nang kính lỏng cho Tab đang chọn (Sliding Active Liquid Glass Capsule):
- * - Nổi khối 3D rõ rệt trên nền kính khói của Dock.
- * - Có bóng đổ ánh xanh dịu bên ngoài viên nang, mặt kính cong phản quang phía trên và viền sáng 3D.
+ * - Nổi khối 3D rõ rệt trên nền kính trắng của Dock với vầng lóa viền sáng (Optical Rim Glare).
+ * - Có bóng đổ dịu bên ngoài viên nang, mặt kính cong phản quang phía trên và viền sáng 3D.
  */
 private fun Modifier.iosLiquidGlassActivePill(
     isDark: Boolean,
@@ -437,11 +459,18 @@ private fun Modifier.iosLiquidGlassActivePill(
     val pillShadowColor = if (isDark) {
         if (isDragging) BrandPrimary.copy(alpha = 0.42f) else Color.Black.copy(alpha = 0.48f)
     } else {
-        if (isDragging) BrandPrimary.copy(alpha = 0.24f) else BrandContainerDark.copy(alpha = 0.16f)
+        if (isDragging) BrandPrimary.copy(alpha = 0.22f) else BrandContainerDark.copy(alpha = 0.14f)
     }
     val pillShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         color = pillShadowColor.toArgb()
         maskFilter = BlurMaskFilter(shadowBlurPx, BlurMaskFilter.Blur.NORMAL)
+    }
+
+    val pillRimBloomPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
+        style = FrameworkPaint.Style.STROKE
+        strokeWidth = PillRimBloomStroke.toPx()
+        color = (if (isDark) Color.White.copy(alpha = 0.25f) else Color.White).toArgb()
+        maskFilter = BlurMaskFilter(PillRimBloomBlur.toPx(), BlurMaskFilter.Blur.NORMAL)
     }
 
     val pillBodyBrush = if (isDark) {
@@ -453,7 +482,7 @@ private fun Modifier.iosLiquidGlassActivePill(
     } else {
         Brush.verticalGradient(
             0.0f to Color.White,
-            0.55f to PillLightMid,
+            0.52f to PillLightMid,
             1.0f to if (isDragging) PillLightBottomDragging else PillLightBottom
         )
     }
@@ -498,7 +527,7 @@ private fun Modifier.iosLiquidGlassActivePill(
     val outerPillContourColor = if (isDark) {
         BrandActiveNavDark.copy(alpha = if (isDragging) 0.55f else 0.35f)
     } else {
-        BrandPrimary.copy(alpha = if (isDragging) 0.30f else 0.18f)
+        BrandPrimary.copy(alpha = if (isDragging) 0.26f else 0.15f)
     }
 
     // Hình học tính sẵn (không cấp phát trong onDrawBehind)
@@ -527,10 +556,21 @@ private fun Modifier.iosLiquidGlassActivePill(
             }
         }
 
-        // Thân kính của viên nang đang chọn
+        // Thân kính + vầng lóa viền của viên nang đang chọn
         clipPath(pillPath) {
             drawRoundRect(brush = pillBodyBrush, cornerRadius = cornerRadius)
             drawRect(brush = pillTopSheenBrush, topLeft = Offset.Zero, size = topSheenSize)
+            drawIntoCanvas { canvas ->
+                canvas.nativeCanvas.drawRoundRect(
+                    0f,
+                    0f,
+                    size.width,
+                    size.height,
+                    cornerRadiusPx,
+                    cornerRadiusPx,
+                    pillRimBloomPaint
+                )
+            }
         }
 
         // Viền phản quang 3D bên trong viên nang

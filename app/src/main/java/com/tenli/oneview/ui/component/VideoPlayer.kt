@@ -39,11 +39,15 @@ fun VideoPlayer(
     thumbnailUrl: String?,
     deviceKey: String,
     isOriginalRatio: Boolean = false,
+    isFullscreen: Boolean = false,
+    playWhenReady: Boolean = true,
     initialSeekPositionMs: Long? = null,
     errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
+    onPlayWhenReadyChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {},
     onControllerVisibilityChange: (Boolean) -> Unit = {},
+    onFullscreenToggle: (() -> Unit)? = null,
     onTimeUpdate: ((Long) -> Unit)? = null
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
@@ -53,9 +57,12 @@ fun VideoPlayer(
     val colors = MaterialTheme.appColors
     val containerBg = colors.surface
     val stageBg = if (isVideoReady && !isError) colors.mediaBg else containerBg
+    val currentPlayWhenReady by rememberUpdatedState(playWhenReady)
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
+    val currentOnPlayWhenReadyChange by rememberUpdatedState(onPlayWhenReadyChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
+    val currentOnFullscreenToggle by rememberUpdatedState(onFullscreenToggle)
 
     val exoPlayer = remember(videoUrl) {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
@@ -87,23 +94,52 @@ fun VideoPlayer(
                 if (initialSeekPositionMs != null) {
                     seekTo(initialSeekPositionMs)
                 }
+                this.playWhenReady = currentPlayWhenReady
                 prepare()
-                playWhenReady = true
                 addListener(object : Player.Listener {
                     override fun onRenderedFirstFrame() {
                         isVideoReady = true; isError = false
                         currentOnPlayingChange(true)
+                        currentOnPlayWhenReadyChange(this@apply.playWhenReady && playbackState != Player.STATE_ENDED)
                         currentOnErrorChange(false)
+                    }
+
+                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                        currentOnPlayWhenReadyChange(playWhenReady && playbackState != Player.STATE_ENDED)
+                    }
+
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == Player.STATE_ENDED) {
+                            currentOnPlayWhenReadyChange(false)
+                        } else if (playbackState == Player.STATE_READY) {
+                            currentOnPlayWhenReadyChange(this@apply.playWhenReady)
+                        }
                     }
 
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
                         isError = true; isVideoReady = false
                         currentOnPlayingChange(false)
+                        currentOnPlayWhenReadyChange(false)
                         currentOnErrorChange(true)
                     }
                 })
             }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(exoPlayer, playWhenReady) {
+        if (playWhenReady) {
+            if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                exoPlayer.seekTo(0)
+            }
+            if (!exoPlayer.playWhenReady) {
+                exoPlayer.play()
+            }
+        } else {
+            if (exoPlayer.playWhenReady) {
+                exoPlayer.pause()
+            }
+        }
     }
 
     DisposableEffect(exoPlayer) {
@@ -119,7 +155,9 @@ fun VideoPlayer(
             if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
                 exoPlayer.pause()
             } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                exoPlayer.play()
+                if (currentPlayWhenReady && exoPlayer.playbackState != Player.STATE_ENDED) {
+                    exoPlayer.play()
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -171,6 +209,16 @@ fun VideoPlayer(
                             currentOnControllerVisibilityChange(visibility == android.view.View.VISIBLE)
                         }
                     )
+                    if (currentOnFullscreenToggle != null) {
+                        setFullscreenButtonClickListener(
+                            PlayerView.FullscreenButtonClickListener {
+                                currentOnFullscreenToggle?.invoke()
+                            }
+                        )
+                        setFullscreenButtonState(isFullscreen)
+                    } else {
+                        setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
+                    }
                 }
             }
         }, update = { view ->
@@ -180,12 +228,16 @@ fun VideoPlayer(
                 if (it.resizeMode != targetResizeMode) {
                     it.resizeMode = targetResizeMode
                 }
+                if (currentOnFullscreenToggle != null) {
+                    it.setFullscreenButtonState(isFullscreen)
+                }
             }
         }, onRelease = { view ->
             if (playerViewRef === view) {
                 playerViewRef = null
             }
             (view as? PlayerView)?.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
+            (view as? PlayerView)?.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
             (view as? PlayerView)?.player = null
         }, modifier = Modifier
             .fillMaxSize()

@@ -5,7 +5,8 @@ import com.tenli.oneview.data.local.UserSession
 
 data class LoginResponseData(
     val target: UserData,
-    val credential: UserCredential
+    val credential: UserCredential,
+    val resolvedDomain: String = ""
 )
 
 data class UserCredential(

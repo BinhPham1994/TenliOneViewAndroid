@@ -54,7 +54,7 @@ class LoginViewModel(
     fun loadSavedCredentials() {
         val prefs = GlobalData.preferences
         val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-        val savedDomain = prefs.getString(DOMAIN_KEY, "").orEmpty()
+        val savedDomain = stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
         val savedUser = if (rememberMe) prefs.getString(AppKeys.USERNAME_KEY, "").orEmpty() else ""
         val savedPass = if (rememberMe) prefs.getString(AppKeys.PASSWORD_KEY, "").orEmpty() else ""
         _uiState.update {
@@ -68,6 +68,12 @@ class LoginViewModel(
         }
     }
 
+    private fun stripDomainScheme(raw: String): String =
+        raw.trim()
+            .replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("/m/?$", RegexOption.IGNORE_CASE), "")
+            .trimEnd('/')
+
     fun onRememberMeChanged(rememberMe: Boolean) {
         _uiState.update { it.copy(rememberMe = rememberMe) }
         if (!rememberMe) {
@@ -80,7 +86,12 @@ class LoginViewModel(
     }
 
     fun onDomainChanged(domain: String) {
-        _uiState.update { it.copy(domain = domain) }
+        val cleaned = if (domain.contains("://")) {
+            domain.replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+        } else {
+            domain
+        }
+        _uiState.update { it.copy(domain = cleaned) }
     }
 
     fun onEmailChanged(email: String) {
@@ -180,7 +191,16 @@ class LoginViewModel(
         password: String,
         rememberMe: Boolean
     ) {
-        val formattedDomain = if (!domain.startsWith("http://") && !domain.startsWith("https://")) "http://$domain" else domain
+        val cleanHost = stripDomainScheme(domain)
+        val formattedDomain = loginData.resolvedDomain.ifEmpty {
+            if (!domain.startsWith("http://", ignoreCase = true) &&
+                !domain.startsWith("https://", ignoreCase = true)
+            ) {
+                "https://$cleanHost"
+            } else {
+                domain.trim().trimEnd('/')
+            }
+        }
         UserSession.apply {
             userData = loginData.target
             accessToken = loginData.credential.accessToken

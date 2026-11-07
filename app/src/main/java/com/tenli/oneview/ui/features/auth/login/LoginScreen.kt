@@ -292,7 +292,7 @@ private fun LoginContent(
                                 LoginInputField(
                                     value = uiState.domain,
                                     onValueChange = onDomainChange,
-                                    label = if (isVietnamese) "Nhập domain dự án (VD: https://app.tenli.ai)" else "Enter project domain (e.g. https://app.tenli.ai)",
+                                    label = if (isVietnamese) "Nhập domain dự án" else "Enter project domain",
                                     leadingIcon = Icons.Outlined.Public,
                                     onClear = { onDomainChange("") },
                                     keyboardOptions = KeyboardOptions(

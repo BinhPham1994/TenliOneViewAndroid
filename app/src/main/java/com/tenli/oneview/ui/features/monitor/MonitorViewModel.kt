@@ -40,6 +40,9 @@ import com.tenli.oneview.util.NetworkMonitor
 import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -141,6 +144,7 @@ data class MonitorUiState(
     val isLoadingMorePlaybackDays: Boolean = false,
     val hasMorePlaybackDays: Boolean = false,
     val selectedPlaybackVideo: VideoModel? = null,
+    val isPlaybackPlaying: Boolean = false,
 
     // Sự kiện theo UUID của camera đang chọn
     val cameraEvents: List<EventData> = emptyList(),
@@ -371,6 +375,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
+
+    var activePlaybackVideo by mutableStateOf<VideoModel?>(null)
+        private set
+    var activePlaybackPlaying by mutableStateOf(false)
+        private set
 
     /** Chỉ được đọc/ghi trên Main thread (cùng luồng với _uiState.update) */
     private var treeIndex = CameraTreeIndex(emptyList())
@@ -1439,6 +1448,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             playbackRangeMinMs = cachedPlayback.rangeMinMs
             playbackRangeMaxMs = cachedPlayback.rangeMaxMs
         }
+        activePlaybackVideo = null
+        activePlaybackPlaying = false
         _uiState.update {
             it.copy(
                 gridSize = 1,
@@ -1452,6 +1463,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 isLoadingMorePlaybackDays = false,
                 hasMorePlaybackDays = cachedPlayback?.hasMoreDays ?: false,
                 selectedPlaybackVideo = null,
+                isPlaybackPlaying = false,
                 cameraEvents = emptyList(),
                 isLoadingCameraEvents = false,
                 isRefreshingCameraEvents = false,
@@ -1525,13 +1537,22 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        var resolvedVideo: VideoModel? = null
+        var resolvedPlaying = false
         _uiState.update { state ->
+            val nextVideo = if (tab == CameraDetailTab.PLAYBACK) state.selectedPlaybackVideo else null
+            val nextPlaying = if (nextVideo != null) state.isPlaybackPlaying else false
+            resolvedVideo = nextVideo
+            resolvedPlaying = nextPlaying
             state.copy(
                 cameraDetailTab = tab,
                 // Khi rời tab Xem lại thì đóng trình phát video ghi hình đang mở (nếu có)
-                selectedPlaybackVideo = if (tab == CameraDetailTab.PLAYBACK) state.selectedPlaybackVideo else null
+                selectedPlaybackVideo = nextVideo,
+                isPlaybackPlaying = nextPlaying
             )
         }
+        activePlaybackVideo = resolvedVideo
+        activePlaybackPlaying = resolvedPlaying
 
         when (tab) {
             CameraDetailTab.LIVE -> {
@@ -1576,6 +1597,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         cancelCameraDetailSubJobs()
         playbackLoadedForCameraId = null
         eventsLoadedForCameraId = null
+        activePlaybackVideo = null
+        activePlaybackPlaying = false
         removeCamera(0)
     }
 
@@ -2072,11 +2095,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val normalizedChannel = if (channel == "sub") "sub" else "main"
         val cameraId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id ?: 0
         val cached = getPlaybackSessionCache(cameraId, filter, normalizedChannel)
+        activePlaybackVideo = null
+        activePlaybackPlaying = false
         _uiState.update {
             it.copy(
                 playbackTimeFilter = filter,
                 playbackChannel = normalizedChannel,
                 selectedPlaybackVideo = null,
+                isPlaybackPlaying = false,
                 playbackDayGroups = cached?.dayGroups ?: emptyList(),
                 hasMorePlaybackDays = cached?.hasMoreDays ?: false
             )
@@ -2090,7 +2116,49 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectPlaybackVideo(video: VideoModel?) {
-        _uiState.update { it.copy(selectedPlaybackVideo = video) }
+        var resolvedVideo: VideoModel? = null
+        var resolvedPlaying = false
+        _uiState.update { state ->
+            if (video == null) {
+                resolvedVideo = null
+                resolvedPlaying = false
+                state.copy(selectedPlaybackVideo = null, isPlaybackPlaying = false)
+            } else {
+                val current = state.selectedPlaybackVideo
+                val isSame = current != null &&
+                    current.videoLink == video.videoLink &&
+                    current.time == video.time
+                if (isSame) {
+                    val nextPlaying = !state.isPlaybackPlaying
+                    resolvedVideo = current
+                    resolvedPlaying = nextPlaying
+                    state.copy(isPlaybackPlaying = nextPlaying)
+                } else {
+                    resolvedVideo = video
+                    resolvedPlaying = true
+                    state.copy(selectedPlaybackVideo = video, isPlaybackPlaying = true)
+                }
+            }
+        }
+        activePlaybackVideo = resolvedVideo
+        activePlaybackPlaying = resolvedPlaying
+    }
+
+    fun setPlaybackPlaying(isPlaying: Boolean) {
+        var resolvedPlaying = false
+        _uiState.update { state ->
+            if (state.selectedPlaybackVideo == null) {
+                resolvedPlaying = false
+                if (!state.isPlaybackPlaying) state else state.copy(isPlaybackPlaying = false)
+            } else if (state.isPlaybackPlaying == isPlaying) {
+                resolvedPlaying = isPlaying
+                state
+            } else {
+                resolvedPlaying = isPlaying
+                state.copy(isPlaybackPlaying = isPlaying)
+            }
+        }
+        activePlaybackPlaying = resolvedPlaying
     }
 
     /**

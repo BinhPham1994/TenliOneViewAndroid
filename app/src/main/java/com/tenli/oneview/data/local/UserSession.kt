@@ -39,7 +39,15 @@ object UserSession {
         if (accessToken.isNotEmpty() || refreshToken.isNotEmpty()) return
         accessToken = sp.getString(AppKeys.ACCESS_TOKEN_KEY, "").orEmpty()
         refreshToken = sp.getString(AppKeys.REFRESH_TOKEN_KEY, "").orEmpty()
-        domain = sp.getString(DOMAIN_KEY, "").orEmpty()
+        val rawDomain = sp.getString(DOMAIN_KEY, "").orEmpty().trim()
+        domain = if (rawDomain.isNotEmpty() &&
+            !rawDomain.startsWith("http://", ignoreCase = true) &&
+            !rawDomain.startsWith("https://", ignoreCase = true)
+        ) {
+            "https://$rawDomain"
+        } else {
+            rawDomain
+        }
         savedUsername = sp.getString(AppKeys.USERNAME_KEY, "").orEmpty()
         savedPassword = sp.getString(AppKeys.PASSWORD_KEY, "").orEmpty()
         val userDataJson = sp.getString(AppKeys.USER_DATA_KEY, null)

@@ -344,7 +344,6 @@ fun MonitorScreen(
         cameraGridState.scrollToItem(0)
     }
 
-    val panelBg = colors.surface
     val bottomClearance = spacing.bottomNavHeight + spacing.space20
 
     // Khi màn hình Live đã trượt vào che kín 100% màn hình (sau 280ms), tạm ngưng place lưới camera bên dưới
@@ -430,21 +429,14 @@ fun MonitorScreen(
                     CommonEmptyState(text = if (isEn) "No cameras available" else "Không có camera nào")
                 }
             } else {
-                Spacer(modifier = Modifier.height(spacing.space4))
-
                 // Camera Panel (.mobile-camera-panel) chiếm toàn bộ chiều cao màn hình
-                val controlBg = colors.controlBg
+                val controlBg = colors.surface
                 val placeholderColor = colors.textPlaceholder
 
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .navigationBarsPadding()
-                        .padding(horizontal = spacing.space10)
-                        .padding(bottom = bottomClearance)
-                        .clip(RoundedCornerShape(spacing.radiusRegular))
-                        .background(panelBg)
                 ) {
                     // .camera-filter-header: Bên trái hiển thị đường dẫn nhóm ("Tất cả camera" hoặc "Nhóm - VMS"),
                     // bên phải là nút icon tìm kiếm thu gọn; khi bấm vào sẽ trượt rộng ra toàn chiều ngang.
@@ -454,7 +446,7 @@ fun MonitorScreen(
                             .padding(
                                 start = spacing.space10,
                                 end = spacing.space10,
-                                top = spacing.space8,
+                                top = spacing.space4,
                                 bottom = spacing.space4
                             )
                             .height(spacing.buttonHeightSmall)
@@ -623,7 +615,8 @@ fun MonitorScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
-                                .padding(spacing.space16),
+                                .padding(spacing.space16)
+                                .padding(bottom = bottomClearance),
                             contentAlignment = Alignment.Center
                         ) {
                             CommonEmptyState(
@@ -638,10 +631,10 @@ fun MonitorScreen(
                                 .fillMaxWidth()
                                 .weight(1f),
                             contentPadding = PaddingValues(
-                                start = spacing.space8,
-                                end = spacing.space8,
+                                start = spacing.space10,
+                                end = spacing.space10,
                                 top = spacing.space6,
-                                bottom = spacing.space8
+                                bottom = bottomClearance
                             ),
                             horizontalArrangement = Arrangement.spacedBy(spacing.space8),
                             verticalArrangement = Arrangement.spacedBy(spacing.space8)
@@ -699,6 +692,12 @@ fun MonitorLiveCameraOverlay(
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val activePlaybackVideo = viewModel.activePlaybackVideo ?: uiState.selectedPlaybackVideo
+    val isPlaybackPlaying = if (viewModel.activePlaybackVideo != null) {
+        viewModel.activePlaybackPlaying
+    } else {
+        uiState.isPlaybackPlaying
+    }
     val activity = LocalContext.current as? Activity
 
     // fullscreenIndex != null: 1x1 single-camera landscape fullscreen
@@ -714,7 +713,7 @@ fun MonitorLiveCameraOverlay(
     }
 
     val canUseDetailFullscreen = uiState.cameraDetailTab == CameraDetailTab.LIVE ||
-        (uiState.cameraDetailTab == CameraDetailTab.PLAYBACK && uiState.selectedPlaybackVideo != null)
+        (uiState.cameraDetailTab == CameraDetailTab.PLAYBACK && activePlaybackVideo != null)
     val isSingleFullscreen =
         fullscreenIndex == 0 && isLiveScreenOpen && canUseDetailFullscreen
 
@@ -782,6 +781,8 @@ fun MonitorLiveCameraOverlay(
         if (currentCam != null) {
             MobileLiveCameraScreen(
                 uiState = uiState,
+                activePlaybackVideo = activePlaybackVideo,
+                isPlaybackPlaying = isPlaybackPlaying,
                 selectedCamera = currentCam,
                 isTabActive = isTabActive && isLiveScreenOpen,
                 isFullscreen = isSingleFullscreen,
@@ -805,6 +806,7 @@ fun MonitorLiveCameraOverlay(
                 onApplyPlaybackFilters = { filter, channel -> viewModel.applyPlaybackFilters(filter, channel) },
                 onResetPlaybackFilters = { viewModel.resetPlaybackFilters() },
                 onSelectPlaybackVideo = { video -> viewModel.selectPlaybackVideo(video) },
+                onSetPlaybackPlaying = { isPlaying -> viewModel.setPlaybackPlaying(isPlaying) },
                 onLoadMorePlaybackForDay = { dateKey -> viewModel.loadMorePlaybackForDay(dateKey) },
                 onLoadMorePlaybackDays = { viewModel.loadMorePlaybackDays() },
                 onApplyEventFilters = { filter, aiType -> viewModel.applyCameraEventFilters(filter, aiType) },
@@ -847,6 +849,8 @@ private const val DETAIL_SWIPE_HORIZONTAL_DOMINANCE = 1.25f
 @Composable
 private fun MobileLiveCameraScreen(
     uiState: MonitorUiState,
+    activePlaybackVideo: VideoModel?,
+    isPlaybackPlaying: Boolean,
     selectedCamera: SelectedCamera,
     isTabActive: Boolean,
     isFullscreen: Boolean,
@@ -863,6 +867,7 @@ private fun MobileLiveCameraScreen(
     onApplyPlaybackFilters: (TimeFilter, String) -> Unit,
     onResetPlaybackFilters: () -> Unit,
     onSelectPlaybackVideo: (VideoModel?) -> Unit,
+    onSetPlaybackPlaying: (Boolean) -> Unit,
     onLoadMorePlaybackForDay: (String) -> Unit,
     onLoadMorePlaybackDays: () -> Unit,
     onApplyEventFilters: (TimeFilter, String?) -> Unit,
@@ -1201,6 +1206,8 @@ private fun MobileLiveCameraScreen(
                                         (activeDetailTab == CameraDetailTab.PLAYBACK || outgoingDetailTab == CameraDetailTab.PLAYBACK)
                                     CameraPlaybackTabContent(
                                         uiState = uiState,
+                                        activePlaybackVideo = activePlaybackVideo,
+                                        isPlaybackPlaying = isPlaybackPlaying,
                                         selectedCamera = selectedCamera,
                                         isTabVisible = isPlaybackTabVisible,
                                         isFullscreen = isFullscreen && uiState.cameraDetailTab == CameraDetailTab.PLAYBACK,
@@ -1208,6 +1215,7 @@ private fun MobileLiveCameraScreen(
                                         bottomClearance = bottomClearance,
                                         onToggleFullscreen = onToggleFullscreen,
                                         onSelectVideo = onSelectPlaybackVideo,
+                                        onSetPlaybackPlaying = onSetPlaybackPlaying,
                                         onLoadMoreForDay = onLoadMorePlaybackForDay,
                                         onLoadMoreDays = onLoadMorePlaybackDays,
                                         modifier = Modifier.fillMaxSize()
@@ -1297,6 +1305,8 @@ private fun MobileLiveCameraScreen(
 @Composable
 private fun CameraPlaybackTabContent(
     uiState: MonitorUiState,
+    activePlaybackVideo: VideoModel?,
+    isPlaybackPlaying: Boolean,
     selectedCamera: SelectedCamera,
     isTabVisible: Boolean,
     isFullscreen: Boolean,
@@ -1304,6 +1314,7 @@ private fun CameraPlaybackTabContent(
     bottomClearance: androidx.compose.ui.unit.Dp,
     onToggleFullscreen: () -> Unit,
     onSelectVideo: (VideoModel?) -> Unit,
+    onSetPlaybackPlaying: (Boolean) -> Unit,
     onLoadMoreForDay: (String) -> Unit,
     onLoadMoreDays: () -> Unit,
     modifier: Modifier = Modifier
@@ -1331,52 +1342,15 @@ private fun CameraPlaybackTabContent(
         }
     }
 
-    val dayHeaderShape = remember(spacing.radiusRegular) {
-        RoundedCornerShape(topStart = spacing.radiusRegular, topEnd = spacing.radiusRegular)
-    }
-    val dayFooterShape = remember(spacing.radiusRegular) {
-        RoundedCornerShape(bottomStart = spacing.radiusRegular, bottomEnd = spacing.radiusRegular)
-    }
-
-    val shouldAutoLoadMore by remember(listState) {
-        derivedStateOf {
-            val layoutInfo = listState.layoutInfo
-            val totalItems = layoutInfo.totalItemsCount
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItems > 2 && lastVisibleIndex >= totalItems - 2
-        }
-    }
-
-    LaunchedEffect(
-        shouldAutoLoadMore,
-        uiState.playbackDayGroups,
-        uiState.hasMorePlaybackDays,
-        uiState.isLoadingPlaybacks,
-        uiState.isLoadingMorePlaybackDays
-    ) {
-        if (!shouldAutoLoadMore || uiState.isLoadingPlaybacks) return@LaunchedEffect
-        val groups = uiState.playbackDayGroups
-        if (groups.size == 1 && !uiState.hasMorePlaybackDays) {
-            val onlyGroup = groups[0]
-            if (onlyGroup.hasMore && !onlyGroup.isLoadingMore) {
-                onLoadMoreForDay(onlyGroup.dateKey)
-            }
-        } else if (uiState.hasMorePlaybackDays && !uiState.isLoadingMorePlaybackDays) {
-            val lastGroup = groups.lastOrNull()
-            if (lastGroup != null && !lastGroup.hasMore) {
-                onLoadMoreDays()
-            }
-        }
-    }
-
     Column(modifier = modifier) {
         // Trình phát video ghi hình VMS tràn viền ngang (hỗ trợ xoay ngang toàn màn hình giống Live Camera)
-        val activeVideo = uiState.selectedPlaybackVideo
+        val activeVideo = activePlaybackVideo
+        val activeVideoKey = if (activeVideo != null) "${activeVideo.videoLink}|${activeVideo.time}" else ""
         if (activeVideo != null) {
             val activeDateTimeText = activeVideo.displayDateTime.ifEmpty {
                 formatPlaybackDateTime(activeVideo.time)
             }
-            var isPlaybackPlaying by remember(activeVideo.videoLink) { mutableStateOf(false) }
+            var isPlaybackVideoReady by remember(activeVideo.videoLink) { mutableStateOf(false) }
             var isPlaybackError by remember(activeVideo.videoLink) { mutableStateOf(false) }
             var isControllerVisible by remember(activeVideo.videoLink) { mutableStateOf(true) }
 
@@ -1404,13 +1378,17 @@ private fun CameraPlaybackTabContent(
                     thumbnailUrl = null,
                     deviceKey = UserSession.accessToken,
                     isOriginalRatio = isOriginalRatio,
-                    onPlayingChange = { isPlaybackPlaying = it },
+                    isFullscreen = isFullscreen,
+                    playWhenReady = isPlaybackPlaying,
+                    onPlayingChange = { isPlaybackVideoReady = it },
+                    onPlayWhenReadyChange = onSetPlaybackPlaying,
                     onErrorChange = { isPlaybackError = it },
-                    onControllerVisibilityChange = { isControllerVisible = it }
+                    onControllerVisibilityChange = { isControllerVisible = it },
+                    onFullscreenToggle = onToggleFullscreen
                 )
 
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = !isPlaybackPlaying || isPlaybackError || isControllerVisible,
+                    visible = !isPlaybackVideoReady || !isPlaybackPlaying || isPlaybackError || isControllerVisible,
                     enter = fadeIn(animationSpec = tween(200)),
                     exit = fadeOut(animationSpec = tween(200)),
                     modifier = Modifier.fillMaxSize()
@@ -1453,7 +1431,7 @@ private fun CameraPlaybackTabContent(
                                 )
                             }
 
-                            // Top-Right: Tỷ lệ khung hình, Toàn màn hình & Đóng (.info-action style)
+                            // Top-Right: Tỷ lệ khung hình & Đóng (.info-action style)
                             Row(
                                 modifier = Modifier
                                     .height(pillHeight)
@@ -1486,21 +1464,6 @@ private fun CameraPlaybackTabContent(
                                             if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
                                         },
                                         tint = if (isOriginalRatio) BrandLight else colors.onMedia,
-                                        modifier = Modifier.size(actionIconSize)
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .clickable { onToggleFullscreen() },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
-                                        contentDescription = if (isEn) "Fullscreen" else "Toàn màn hình",
-                                        tint = colors.onMedia,
                                         modifier = Modifier.size(actionIconSize)
                                     )
                                 }
@@ -1616,13 +1579,11 @@ private fun CameraPlaybackTabContent(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(if (rowCount == 0) RoundedCornerShape(spacing.radiusRegular) else dayHeaderShape)
-                                    .background(colors.surface)
                                     .padding(
-                                        start = spacing.space12,
-                                        end = spacing.space10,
-                                        top = spacing.space10,
-                                        bottom = if (rowCount == 0) spacing.space10 else spacing.space8
+                                        start = spacing.space2,
+                                        end = spacing.space2,
+                                        top = spacing.space6,
+                                        bottom = spacing.space8
                                     ),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(spacing.space6)
@@ -1647,34 +1608,42 @@ private fun CameraPlaybackTabContent(
                         // 2. Các hàng video 2 cột được virtualize riêng lẻ
                         items(
                             count = rowCount,
-                            key = { rowIdx -> "pb_row_${group.dateKey}_$rowIdx" },
+                            key = { rowIdx ->
+                                val v0 = group.videos.getOrNull(rowIdx * 2)
+                                val v1 = group.videos.getOrNull(rowIdx * 2 + 1)
+                                val activeCol = when {
+                                    activeVideoKey.isNotEmpty() && v0 != null &&
+                                        v0.videoLink == activeVideo?.videoLink && v0.time == activeVideo.time -> 0
+                                    activeVideoKey.isNotEmpty() && v1 != null &&
+                                        v1.videoLink == activeVideo?.videoLink && v1.time == activeVideo.time -> 1
+                                    else -> -1
+                                }
+                                val playFlag = if (activeCol >= 0 && isPlaybackPlaying) 1 else 0
+                                "pb_row_${group.dateKey}_${rowIdx}_${activeCol}_$playFlag"
+                            },
                             contentType = { "pb_video_row" }
                         ) { rowIdx ->
                             val isLastRow = rowIdx == rowCount - 1
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .then(if (isLastRow) Modifier.clip(dayFooterShape) else Modifier)
-                                    .background(colors.surface)
-                                    .padding(
-                                        start = spacing.space10,
-                                        end = spacing.space10,
-                                        bottom = if (isLastRow) spacing.space10 else spacing.space8
-                                    ),
+                                    .padding(bottom = if (isLastRow) spacing.space4 else spacing.space8),
                                 horizontalArrangement = Arrangement.spacedBy(spacing.space8)
                             ) {
                                 for (colIdx in 0..1) {
                                     val cellIdx = rowIdx * 2 + colIdx
                                     if (cellIdx < group.videos.size) {
                                         val video = group.videos[cellIdx]
-                                        val isSelected = activeVideo != null &&
-                                            activeVideo.videoLink == video.videoLink &&
+                                        val isSelected = activeVideoKey.isNotEmpty() &&
+                                            activeVideo?.videoLink == video.videoLink &&
                                             activeVideo.time == video.time
+                                        val isItemPlaying = isSelected && isPlaybackPlaying
                                         PlaybackVideoGridCard(
                                             video = video,
                                             cameraId = camId,
                                             fallbackSnapshotUrl = fallbackSnapUrl,
                                             isSelected = isSelected,
+                                            isPlaying = isItemPlaying,
                                             onClick = { onSelectVideo(video) },
                                             modifier = Modifier.weight(1f)
                                         )
@@ -1724,6 +1693,7 @@ private fun PlaybackVideoGridCard(
     cameraId: Int,
     fallbackSnapshotUrl: String,
     isSelected: Boolean,
+    isPlaying: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1792,7 +1762,7 @@ private fun PlaybackVideoGridCard(
         modifier = modifier
             .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
             .clip(shape)
-            .background(colors.thumbnailBg)
+            .background(colors.surface)
             .then(
                 if (isSelected) {
                     Modifier.border(
@@ -1825,11 +1795,11 @@ private fun PlaybackVideoGridCard(
             )
         }
 
-        // Play icon overlay (.play-overlay)
+        // Play / Pause icon overlay (.play-overlay)
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
-                .size(spacing.iconButtonSmall)
+                .size(spacing.iconButton)
                 .clip(CircleShape)
                 .background(overlayPillBg)
                 .border(
@@ -1840,10 +1810,10 @@ private fun PlaybackVideoGridCard(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = LucideIcons.Play,
+                imageVector = if (isPlaying) LucideIcons.Pause else LucideIcons.Play,
                 contentDescription = null,
                 tint = colors.onMedia,
-                modifier = Modifier.size(spacing.iconXSmall)
+                modifier = Modifier.size(spacing.iconRegular)
             )
         }
 
@@ -1889,7 +1859,7 @@ private fun LoadMoreDayVideosCard(
         modifier = modifier
             .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
             .clip(shape)
-            .background(colors.controlBg)
+            .background(colors.surface)
             .clickable(enabled = !isLoading, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -2222,7 +2192,7 @@ private fun MobileCameraSnapshotCard(
     val targetCardBg = when {
         isActivePress && colors.isDark -> Color(0xFF28374E)
         isActivePress -> colors.closeButtonBg
-        else -> colors.inputBg
+        else -> colors.surface
     }
     val cardBg by animateColorAsState(
         targetValue = targetCardBg,
@@ -2234,7 +2204,6 @@ private fun MobileCameraSnapshotCard(
         animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
         label = "cameraCardScale"
     )
-    val thumbBg = colors.thumbnailBg
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
     val nameColor = colors.textTitle
 
@@ -2282,12 +2251,11 @@ private fun MobileCameraSnapshotCard(
                 onClick = handleCardClick
             )
     ) {
-        // .cam-card-thumb (16:9) - Dùng AsyncImage trực tiếp thay vì SubcomposeAsyncImage để cuộn lưới mượt 60/120fps
+        // .cam-card-thumb (16:9) - Dùng nền thẻ (colors.surface = trắng ở Light mode) vì danh sách camera đã nằm trực tiếp trên nền trang
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
-                .background(thumbBg),
+                .aspectRatio(LIVE_STAGE_ASPECT_RATIO),
             contentAlignment = Alignment.Center
         ) {
             if (imageRequest != null && !isImageError) {
