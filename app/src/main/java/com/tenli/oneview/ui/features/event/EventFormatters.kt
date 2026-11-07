@@ -1,5 +1,7 @@
 package com.tenli.oneview.ui.features.event
 
+import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
@@ -22,9 +24,11 @@ import java.util.Locale
 /** Khóa duy nhất của 1 sự kiện – dùng cho distinctBy và `key` của LazyColumn. */
 fun EventData.uniqueKey(): String = "${serviceId}_${id}_${time}"
 
-/** Giữ các sự kiện thuộc module AI đang bật và loại bỏ bản ghi trùng (theo [uniqueKey]). */
-fun List<EventData>.permittedDistinct(): List<EventData> =
-    filter { AiTypeHelper.isAiTypeEnabled(it.type) }.distinctBy { it.uniqueKey() }
+/** Giữ các sự kiện thuộc module AI và camera được phân quyền, đồng thời loại bỏ bản ghi trùng (theo [uniqueKey]). */
+fun List<EventData>.permittedDistinct(
+    allCameras: List<CameraModel> = EventCacheManager.getCamerasInMemory()
+): List<EventData> =
+    UserPermissionManager.filterEventsByPermissions(this, allCameras).distinctBy { it.uniqueKey() }
 
 /** Map loại AI (bộ lọc UI) sang `type` gửi lên API. */
 fun resolveApiEventType(aiType: String?): String? {

@@ -73,6 +73,8 @@ object MonitorCacheManager {
     private val snapshotMap = ConcurrentHashMap<Int, SnapshotCacheItem>()
     /** Đánh dấu thời điểm camera đã được cập nhật snapshot thực tế trong phiên mở app hiện tại */
     private val sessionRefreshedAtMap = ConcurrentHashMap<Int, Long>()
+    /** Lưu các URL thumbnail playback bị lỗi (404) trong phiên để khi cuộn lên xuống không gọi mạng lại */
+    val failedPlaybackThumbUrls: MutableSet<String> = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
     @Volatile
     private var snapshotsLoaded = false
 
@@ -210,6 +212,12 @@ object MonitorCacheManager {
 
     fun cardMemCacheKey(cameraId: Int, url: String): String =
         "cam_${cameraId}_${url}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+
+    fun playbackThumbMemCacheKey(cameraId: Int, url: String): String =
+        "pb_card_${cameraId}_${url}_${SNAPSHOT_CARD_WIDTH_PX}x${SNAPSHOT_CARD_HEIGHT_PX}"
+
+    fun playbackThumbDiskCacheKey(cameraId: Int, url: String): String =
+        "pb_card_${cameraId}_${url.substringBefore('?')}"
 
     fun liveStageMemCacheKey(cameraId: Int, url: String): String =
         "cam_${cameraId}_${url}_${LIVE_STAGE_SNAPSHOT_WIDTH_PX}x${LIVE_STAGE_SNAPSHOT_HEIGHT_PX}"
@@ -357,6 +365,7 @@ object MonitorCacheManager {
             getSnapshotImageDir(context).listFiles()?.forEach { it.delete() }
             snapshotMap.clear()
             sessionRefreshedAtMap.clear()
+            failedPlaybackThumbUrls.clear()
         } catch (e: Exception) {
             e.printStackTrace()
         }

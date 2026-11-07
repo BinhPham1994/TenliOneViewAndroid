@@ -114,6 +114,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraModel
@@ -1418,7 +1419,7 @@ fun MobileFilterBottomSheet(
     cameras: List<CameraModel> = emptyList(),
     selectedCameraUuid: String? = null,
     showEventType: Boolean = false,
-    activeModules: List<AiModuleOption> = AiTypeHelper.activeModules,
+    activeModules: List<AiModuleOption> = UserPermissionManager.permissionState.collectAsStateWithLifecycle().value.activeAiModules,
     selectedAiType: String? = null,
     onDismiss: () -> Unit,
     onApply: (serviceId: Int?, timeFilter: TimeFilter, cameraUuid: String?, aiType: String?) -> Unit = { _, _, _, _ -> },

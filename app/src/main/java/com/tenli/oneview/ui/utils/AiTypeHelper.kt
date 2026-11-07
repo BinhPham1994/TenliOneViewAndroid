@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.utils
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.UserPermissions
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
 import com.tenli.oneview.ui.theme.ErrorRed
 import com.tenli.oneview.ui.theme.ErrorRedDeep
@@ -44,7 +45,8 @@ data class AiModuleOption(
     val key: String,
     val sensorType: String,
     val labelVi: String,
-    val labelEn: String
+    val labelEn: String,
+    val eventTypes: List<String> = listOf(sensorType)
 )
 
 object AiTypeHelper {
@@ -55,67 +57,211 @@ object AiTypeHelper {
 
     private val hexColorCache = ConcurrentHashMap<String, Color>()
 
-    val activeModules: List<AiModuleOption> = listOf(
-        AiModuleOption("FaceID", "logic-face", "Nhận diện khuôn mặt", "Face recognition"),
-        AiModuleOption("Uniform", "sensor-uniform-camera", "Nhận diện trang phục", "Uniform detection"),
-        AiModuleOption("Crowd", "sensor-crowd-camera", "Phát hiện đông người", "Crowd detection"),
-        AiModuleOption("LPR", "sensor-license-plate", "Nhận diện biển số", "License plate recognition"),
-        AiModuleOption("FireSmoke", "sensor-fire-camera", "Phát hiện Cháy & Khói", "Fire & smoke detection"),
-        AiModuleOption("Helmet", "sensor-helmet-camera", "Không đội mũ bảo hiểm", "No helmet violation"),
-        AiModuleOption("Parking", "sensor-parking-camera", "Phát hiện dừng đỗ xe", "Illegal parking"),
-        AiModuleOption("Garbage", "sensor-littering-camera", "Phát hiện xả rác", "Littering detection"),
-        AiModuleOption("Intrusion", "sensor-person-camera", "Phát hiện xâm nhập", "Intrusion detection"),
-        AiModuleOption("VehicleRecognition", "sensor-vehicle-camera", "Nhận diện phương tiện", "Vehicle recognition"),
-        AiModuleOption("SidewalkEncroachment", "sensor-encroachment-camera", "Lấn chiếm vỉa hè", "Sidewalk encroachment"),
-        AiModuleOption("ConstructionDetection", "sensor-construction-camera", "Phát hiện thi công", "Construction detection"),
-        AiModuleOption("WrongWayDetection", "sensor-crossing-tracking", "Đi ngược chiều", "Wrong-way driving"),
-        AiModuleOption("Violence", "sensor-violence", "Phát hiện đánh nhau", "Violence detection"),
-        AiModuleOption("Smoking", "sensor-smoking", "Phát hiện hút thuốc", "Smoking detection"),
-        AiModuleOption("Phone", "sensor-phone-usage", "Sử dụng điện thoại", "Phone usage"),
-        AiModuleOption("FallDetection", "sensor-fall-person-camera", "Phát hiện người ngã", "Fall detection"),
-        AiModuleOption("ObjectTracking", "sensor-object-tracking", "Theo dõi đối tượng", "Object tracking"),
-        AiModuleOption("GlovesDetection", "sensor-gloves", "Không đeo găng tay", "No gloves violation"),
-        AiModuleOption("HairnetDetection", "sensor-hairnet", "Không đội mũ bảo hộ", "No hairnet violation"),
-        AiModuleOption("NoMaskDetection", "sensor-face-masked", "Không đeo khẩu trang", "No mask violation")
+    val defaultModules: List<AiModuleOption> = listOf(
+        AiModuleOption(
+            "FaceID",
+            "logic-face",
+            "Nhận diện khuôn mặt",
+            "Face recognition",
+            listOf("logic-face", "sensor-face-unknown-camera")
+        ),
+        AiModuleOption(
+            "Uniform",
+            "sensor-uniform-camera",
+            "Nhận diện trang phục",
+            "Uniform detection",
+            listOf("sensor-uniform-camera", "logic-uniform")
+        ),
+        AiModuleOption(
+            "Crowd",
+            "sensor-crowd-camera",
+            "Phát hiện đông người",
+            "Crowd detection",
+            listOf("sensor-crowd-camera")
+        ),
+        AiModuleOption(
+            "LPR",
+            "sensor-license-plate",
+            "Nhận diện biển số",
+            "License plate recognition",
+            listOf("sensor-license-plate")
+        ),
+        AiModuleOption(
+            "FireSmoke",
+            "sensor-fire-camera",
+            "Phát hiện Cháy & Khói",
+            "Fire & smoke detection",
+            listOf("sensor-fire-camera", "sensor-smoke-camera", "logic-fire")
+        ),
+        AiModuleOption(
+            "Helmet",
+            "sensor-helmet-camera",
+            "Không đội mũ bảo hiểm",
+            "No helmet violation",
+            listOf("sensor-helmet-camera", "sensor-helmet-violation-camera")
+        ),
+        AiModuleOption(
+            "Parking",
+            "sensor-parking-camera",
+            "Phát hiện dừng đỗ xe",
+            "Illegal parking",
+            listOf("sensor-parking-camera")
+        ),
+        AiModuleOption(
+            "Garbage",
+            "sensor-littering-camera",
+            "Phát hiện xả rác",
+            "Littering detection",
+            listOf("sensor-littering-camera")
+        ),
+        AiModuleOption(
+            "Intrusion",
+            "sensor-person-camera",
+            "Phát hiện xâm nhập",
+            "Intrusion detection",
+            listOf("sensor-person-camera", "logic-person")
+        ),
+        AiModuleOption(
+            "VehicleRecognition",
+            "sensor-vehicle-camera",
+            "Nhận diện phương tiện",
+            "Vehicle recognition",
+            listOf("sensor-vehicle-camera")
+        ),
+        AiModuleOption(
+            "SidewalkEncroachment",
+            "sensor-encroachment-camera",
+            "Lấn chiếm vỉa hè",
+            "Sidewalk encroachment",
+            listOf("sensor-encroachment-camera")
+        ),
+        AiModuleOption(
+            "ConstructionDetection",
+            "sensor-construction-camera",
+            "Phát hiện thi công",
+            "Construction detection",
+            listOf("sensor-construction-camera", "construction-sensor-camera")
+        ),
+        AiModuleOption(
+            "WrongWayDetection",
+            "sensor-crossing-tracking",
+            "Đi ngược chiều",
+            "Wrong-way driving",
+            listOf("sensor-crossing-tracking")
+        ),
+        AiModuleOption(
+            "Violence",
+            "sensor-violence",
+            "Phát hiện đánh nhau",
+            "Violence detection",
+            listOf("sensor-violence")
+        ),
+        AiModuleOption(
+            "Smoking",
+            "sensor-smoking",
+            "Phát hiện hút thuốc",
+            "Smoking detection",
+            listOf("sensor-smoking", "sensor-pose-camera")
+        ),
+        AiModuleOption(
+            "Phone",
+            "sensor-phone-usage",
+            "Sử dụng điện thoại",
+            "Phone usage",
+            listOf("sensor-phone-usage", "sensor-phone-camera")
+        ),
+        AiModuleOption(
+            "FallDetection",
+            "sensor-fall-person-camera",
+            "Phát hiện người ngã",
+            "Fall detection",
+            listOf("sensor-fall-person-camera", "logic-fall-person")
+        ),
+        AiModuleOption(
+            "ObjectTracking",
+            "sensor-object-tracking",
+            "Theo dõi đối tượng",
+            "Object tracking",
+            listOf("sensor-object-tracking", "sensor-object", "object-begin", "object-end")
+        ),
+        AiModuleOption(
+            "GlovesDetection",
+            "sensor-gloves",
+            "Không đeo găng tay",
+            "No gloves violation",
+            listOf("sensor-gloves")
+        ),
+        AiModuleOption(
+            "HairnetDetection",
+            "sensor-hairnet",
+            "Không đội mũ bảo hộ",
+            "No hairnet violation",
+            listOf("sensor-hairnet")
+        ),
+        AiModuleOption(
+            "NoMaskDetection",
+            "sensor-face-masked",
+            "Không đeo khẩu trang",
+            "No mask violation",
+            listOf("sensor-face-masked")
+        ),
+        AiModuleOption(
+            "FloodingDetection",
+            "flooding",
+            "Phát hiện ngập lụt",
+            "Flooding detection",
+            listOf("flooding")
+        )
     )
 
+    private val defaultEnabledAiTypes: Set<String> = defaultModules
+        .flatMap { it.eventTypes }
+        .toSet()
+
+    @Volatile
+    var activeModules: List<AiModuleOption> = defaultModules
+        private set
+
     // Matching TAB_CONFIG.business.modules enabled types in src/config/modules.ts
-    private val enabledAiTypes = setOf(
-        "logic-face",
-        "sensor-face-unknown-camera",
-        "sensor-uniform-camera",
-        "logic-uniform",
-        "sensor-crowd-camera",
-        "sensor-license-plate",
-        "sensor-fire-camera",
-        "sensor-smoke-camera",
-        "logic-fire",
-        "sensor-helmet-camera",
-        "sensor-helmet-violation-camera",
-        "sensor-parking-camera",
-        "sensor-littering-camera",
-        "sensor-person-camera",
-        "logic-person",
-        "sensor-vehicle-camera",
-        "sensor-encroachment-camera",
-        "sensor-construction-camera",
-        "construction-sensor-camera",
-        "sensor-crossing-tracking",
-        "sensor-violence",
-        "sensor-smoking",
-        "sensor-pose-camera",
-        "sensor-phone-usage",
-        "sensor-phone-camera",
-        "sensor-fall-person-camera",
-        "logic-fall-person",
-        "sensor-object-tracking",
-        "sensor-object",
-        "object-begin",
-        "object-end",
-        "sensor-gloves",
-        "sensor-hairnet",
-        "sensor-face-masked"
-    )
+    @Volatile
+    private var enabledAiTypes: Set<String> = defaultEnabledAiTypes
+
+    fun applyPermissions(isAdmin: Boolean, permissions: UserPermissions?) {
+        if (isAdmin || permissions == null) {
+            activeModules = defaultModules
+            enabledAiTypes = defaultEnabledAiTypes
+            return
+        }
+
+        val aiPerms = when {
+            permissions.aiEvents?.mode == "custom" -> permissions.aiEvents
+            permissions.events?.mode == "custom" -> permissions.events
+            else -> null
+        }
+
+        if (aiPerms != null && aiPerms.mode == "custom") {
+            val allowedRaw = (aiPerms.list ?: emptyList())
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            val allowedLower = allowedRaw.map { it.lowercase() }.toSet()
+
+            val filteredModules = defaultModules.filter { mod ->
+                mod.key.lowercase() in allowedLower ||
+                    mod.sensorType.lowercase() in allowedLower ||
+                    mod.eventTypes.any { et -> et.lowercase() in allowedLower }
+            }
+            activeModules = filteredModules
+            enabledAiTypes = filteredModules.flatMap { it.eventTypes }.toSet()
+        } else {
+            activeModules = defaultModules
+            enabledAiTypes = defaultEnabledAiTypes
+        }
+    }
+
+    fun resetPermissions() {
+        activeModules = defaultModules
+        enabledAiTypes = defaultEnabledAiTypes
+    }
 
     private val TYPE_NAME_EN_MAP = mapOf(
         "logic-person" to "Intrusion detection",
@@ -208,12 +354,18 @@ object AiTypeHelper {
     }
 
     fun getAiEventTypes(aiType: String): List<String> {
-        return when (aiType.trim()) {
+        val trimmed = aiType.trim()
+        val matched = defaultModules.find {
+            it.key.equals(trimmed, ignoreCase = true) ||
+                it.sensorType.equals(trimmed, ignoreCase = true)
+        }
+        if (matched != null) return matched.eventTypes
+        return when (trimmed) {
             "logic-face", "FaceID", "face" -> listOf("logic-face", "sensor-face-unknown-camera")
-            "sensor-fire-camera", "FireSmoke", "fire_smoke" -> listOf("sensor-fire-camera", "sensor-smoke-camera")
+            "sensor-fire-camera", "FireSmoke", "fire_smoke" -> listOf("sensor-fire-camera", "sensor-smoke-camera", "logic-fire")
             "sensor-helmet-camera", "Helmet", "helmet" -> listOf("sensor-helmet-violation-camera", "sensor-helmet-camera")
-            "sensor-person-camera", "Intrusion", "intrusion" -> listOf("sensor-person-camera")
-            else -> listOf(aiType.trim())
+            "sensor-person-camera", "Intrusion", "intrusion" -> listOf("sensor-person-camera", "logic-person")
+            else -> listOf(trimmed)
         }
     }
 

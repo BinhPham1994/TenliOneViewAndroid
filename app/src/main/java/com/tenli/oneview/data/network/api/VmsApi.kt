@@ -11,9 +11,11 @@ import com.tenli.oneview.model.network.ReportLinkModel
 import com.tenli.oneview.model.network.TokenModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoModel
+import com.tenli.oneview.model.network.VmsUserModel
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -69,6 +71,15 @@ interface VmsApi {
 
     @POST
     suspend fun logInExt(@Url url: String, @Body model: LogInModel): Response<TokenModel>
+
+    @GET("VMS/api/User/{userId}")
+    suspend fun getUserById(@Path("userId") userId: Int): Response<VmsUserModel>
+
+    @GET
+    suspend fun getUserByIdExt(
+        @Url url: String,
+        @Header("Authorization") authHeader: String
+    ): Response<VmsUserModel>
 
     @POST("VMS/api/ChangePassword")
     suspend fun changePassword(@Body model: ChangePasswordModel): Response<Unit>

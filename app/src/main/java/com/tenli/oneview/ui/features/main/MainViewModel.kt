@@ -15,6 +15,7 @@ import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
@@ -74,6 +75,7 @@ class MainViewModel(
     private fun localized(en: String, vi: String): String = if (isEnglish) en else vi
 
     init {
+        UserPermissionManager.syncFromUserSession()
         viewModelScope.launch {
             var wasOffline = false
             networkMonitor.isOnline.collect { isOnline ->
@@ -87,16 +89,30 @@ class MainViewModel(
                         wasOffline = false
                         EventBus.emitNetworkRestored()
                     }
-                    // Reconnect WebSockets & đồng bộ cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
+                    // Reconnect WebSockets & đồng bộ phân quyền + cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
                     if (UserSession.accessToken.isNotEmpty()) {
                         val baseUrl = UserSession.domain.trim()
                         if (baseUrl.isNotEmpty()) {
                             webSocketManager.connectNotify(baseUrl)
                             webSocketManager.connectAllReports()
                         }
-                        syncNotificationSettingsAndRegisterToken()
+                        refreshPermissionsAndSyncNotifications()
                     }
                 }
+            }
+        }
+    }
+
+    private fun refreshPermissionsAndSyncNotifications() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                UserPermissionManager.fetchAndApplyPermissions()
+            }
+            if (UserPermissionManager.canAccessEvents()) {
+                syncNotificationSettingsAndRegisterToken()
+            } else {
+                logInfo { "[SYNC CẤU HÌNH] Tài khoản không có quyền xem sự kiện AI -> hủy đăng ký FCM token nếu có" }
+                runCatching { FcmTokenManager.unregisterDevicePushToken() }
             }
         }
     }

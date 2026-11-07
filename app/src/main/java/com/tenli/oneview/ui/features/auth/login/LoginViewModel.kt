@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.GlobalData
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.model.network.LogInModel
@@ -188,6 +189,7 @@ class LoginViewModel(
             savedUsername = username
             savedPassword = password
         }
+        UserPermissionManager.syncFromUserSession()
         // Serialize JSON + ghi SharedPreferences ngoài Main thread.
         // Việc đồng bộ notification_settings & đăng ký FCM token được thực hiện tập trung tại MainViewModel.init
         // ngay khi chuyển sang MainScreen để đảm bảo lấy đúng trạng thái bật/tắt thông báo của tài khoản mới trước khi đăng ký token.

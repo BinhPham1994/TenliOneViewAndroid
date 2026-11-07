@@ -131,6 +131,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
@@ -144,7 +145,6 @@ import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
-import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
@@ -713,11 +713,13 @@ fun MonitorLiveCameraOverlay(
         displayedLiveCamera = activeLiveCamera
     }
 
+    val canUseDetailFullscreen = uiState.cameraDetailTab == CameraDetailTab.LIVE ||
+        (uiState.cameraDetailTab == CameraDetailTab.PLAYBACK && uiState.selectedPlaybackVideo != null)
     val isSingleFullscreen =
-        fullscreenIndex == 0 && isLiveScreenOpen && uiState.cameraDetailTab == CameraDetailTab.LIVE
+        fullscreenIndex == 0 && isLiveScreenOpen && canUseDetailFullscreen
 
-    LaunchedEffect(isTabActive, uiState.cameraDetailTab) {
-        if ((!isTabActive || uiState.cameraDetailTab != CameraDetailTab.LIVE) && fullscreenIndex != null) {
+    LaunchedEffect(isTabActive, canUseDetailFullscreen) {
+        if ((!isTabActive || !canUseDetailFullscreen) && fullscreenIndex != null) {
             restoreSystemOrientationAndBars(activity)
             fullscreenIndex = null
         }
@@ -874,6 +876,22 @@ private fun MobileLiveCameraScreen(
     val edgeBorderColor = colors.border
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
+    val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
+
+    val visibleDetailTabs = remember(permissionState.canAccessPlayback, permissionState.canAccessEvents) {
+        buildList {
+            add(CameraDetailTab.LIVE)
+            if (permissionState.canAccessPlayback) add(CameraDetailTab.PLAYBACK)
+            if (permissionState.canAccessEvents) add(CameraDetailTab.EVENTS)
+        }
+    }
+    val visibleDetailTabsState by rememberUpdatedState(visibleDetailTabs)
+
+    LaunchedEffect(visibleDetailTabs, uiState.cameraDetailTab) {
+        if (uiState.cameraDetailTab !in visibleDetailTabs) {
+            onSelectDetailTab(CameraDetailTab.LIVE)
+        }
+    }
 
     val playbackListState = rememberLazyListState()
     val eventListState = rememberLazyListState()
@@ -1018,12 +1036,13 @@ private fun MobileLiveCameraScreen(
                         val isLongDrag = absX >= longDragDistPx
 
                         if ((isFlick || isDrag || isLongDrag) && absX >= absY * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
-                            val currIdx = OrderedCameraDetailTabs.indexOf(currentDetailTabState)
+                            val currentVisibleTabs = visibleDetailTabsState
+                            val currIdx = currentVisibleTabs.indexOf(currentDetailTabState)
                             if (currIdx != -1) {
-                                if (diffX < 0f && currIdx < OrderedCameraDetailTabs.size - 1) {
-                                    switchDetailTabBySwipe(OrderedCameraDetailTabs[currIdx + 1])
+                                if (diffX < 0f && currIdx < currentVisibleTabs.size - 1) {
+                                    switchDetailTabBySwipe(currentVisibleTabs[currIdx + 1])
                                 } else if (diffX > 0f && currIdx > 0) {
-                                    switchDetailTabBySwipe(OrderedCameraDetailTabs[currIdx - 1])
+                                    switchDetailTabBySwipe(currentVisibleTabs[currIdx - 1])
                                 }
                             }
                         }
@@ -1184,8 +1203,10 @@ private fun MobileLiveCameraScreen(
                                         uiState = uiState,
                                         selectedCamera = selectedCamera,
                                         isTabVisible = isPlaybackTabVisible,
+                                        isFullscreen = isFullscreen && uiState.cameraDetailTab == CameraDetailTab.PLAYBACK,
                                         listState = playbackListState,
                                         bottomClearance = bottomClearance,
+                                        onToggleFullscreen = onToggleFullscreen,
                                         onSelectVideo = onSelectPlaybackVideo,
                                         onLoadMoreForDay = onLoadMorePlaybackForDay,
                                         onLoadMoreDays = onLoadMorePlaybackDays,
@@ -1216,7 +1237,7 @@ private fun MobileLiveCameraScreen(
         }
 
         // Menu bottom 3 tính năng của Camera: Trực tiếp | Xem lại | Sự kiện
-        if (!isFullscreen) {
+        if (!isFullscreen && visibleDetailTabs.size > 1) {
             Box(
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
@@ -1231,7 +1252,8 @@ private fun MobileLiveCameraScreen(
                                 CameraDetailTab.LIVE -> Unit
                             }
                         }
-                    }
+                    },
+                    visibleTabs = visibleDetailTabs
                 )
             }
         }
@@ -1277,255 +1299,417 @@ private fun CameraPlaybackTabContent(
     uiState: MonitorUiState,
     selectedCamera: SelectedCamera,
     isTabVisible: Boolean,
+    isFullscreen: Boolean,
     listState: LazyListState,
     bottomClearance: androidx.compose.ui.unit.Dp,
+    onToggleFullscreen: () -> Unit,
     onSelectVideo: (VideoModel?) -> Unit,
     onLoadMoreForDay: (String) -> Unit,
     onLoadMoreDays: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val isEn = rememberIsEnglish()
 
-    Column(modifier = modifier) {
-        // Trình phát video ghi hình VMS khi người dùng bấm vào 1 file ghi hình
-        val activeVideo = uiState.selectedPlaybackVideo
-        if (activeVideo != null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = spacing.space10)
-                    .padding(top = spacing.space4, bottom = spacing.space8)
-                    .clip(RoundedCornerShape(spacing.radiusCompact))
-                    .background(colors.surface)
-                    .border(
-                        width = spacing.borderThin,
-                        color = colors.border,
-                        shape = RoundedCornerShape(spacing.radiusCompact)
-                    )
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = spacing.space10, vertical = spacing.space6),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space6),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.Clock,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(spacing.iconSmall)
-                        )
-                        Text(
-                            text = formatPlaybackDateTime(activeVideo.time),
-                            color = colors.textStrong,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(spacing.iconButtonSmall)
-                            .clip(CircleShape)
-                            .background(colors.controlBg)
-                            .clickable { onSelectVideo(null) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.X,
-                            contentDescription = stringResource(id = R.string.dialog_btn_close),
-                            tint = colors.textMuted,
-                            modifier = Modifier.size(spacing.iconSmall)
-                        )
-                    }
-                }
+    val ratioPrefs = remember(context) {
+        context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
+    }
+    var isOriginalRatio by remember(selectedCamera.camera.id) {
+        mutableStateOf(
+            ratioPrefs.getString("camera_fit_ratio_${selectedCamera.camera.id}", "cover") == "contain"
+        )
+    }
+    val toggleAspectRatio: () -> Unit = remember(selectedCamera.camera.id, ratioPrefs) {
+        {
+            val next = !isOriginalRatio
+            isOriginalRatio = next
+            ratioPrefs.edit()
+                .putString("camera_fit_ratio_${selectedCamera.camera.id}", if (next) "contain" else "cover")
+                .apply()
+        }
+    }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
-                        .background(colors.mediaBg)
-                ) {
-                    val posterUrl = activeVideo.thumbnailLink.ifEmpty {
-                        activeVideo.imageLink.ifEmpty { selectedCamera.fallbackImageUrl }
-                    }
-                    VideoPlayer(
-                        videoUrl = activeVideo.videoLink,
-                        thumbnailUrl = posterUrl.ifEmpty { null },
-                        deviceKey = UserSession.accessToken
-                    )
-                }
+    val dayHeaderShape = remember(spacing.radiusRegular) {
+        RoundedCornerShape(topStart = spacing.radiusRegular, topEnd = spacing.radiusRegular)
+    }
+    val dayFooterShape = remember(spacing.radiusRegular) {
+        RoundedCornerShape(bottomStart = spacing.radiusRegular, bottomEnd = spacing.radiusRegular)
+    }
+
+    val shouldAutoLoadMore by remember(listState) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            totalItems > 2 && lastVisibleIndex >= totalItems - 2
+        }
+    }
+
+    LaunchedEffect(
+        shouldAutoLoadMore,
+        uiState.playbackDayGroups,
+        uiState.hasMorePlaybackDays,
+        uiState.isLoadingPlaybacks,
+        uiState.isLoadingMorePlaybackDays
+    ) {
+        if (!shouldAutoLoadMore || uiState.isLoadingPlaybacks) return@LaunchedEffect
+        val groups = uiState.playbackDayGroups
+        if (groups.size == 1 && !uiState.hasMorePlaybackDays) {
+            val onlyGroup = groups[0]
+            if (onlyGroup.hasMore && !onlyGroup.isLoadingMore) {
+                onLoadMoreForDay(onlyGroup.dateKey)
+            }
+        } else if (uiState.hasMorePlaybackDays && !uiState.isLoadingMorePlaybackDays) {
+            val lastGroup = groups.lastOrNull()
+            if (lastGroup != null && !lastGroup.hasMore) {
+                onLoadMoreDays()
             }
         }
+    }
 
-        // Danh sách file ghi hình từ VMS nhóm theo ngày (đồng bộ PlaybackPage.vue)
-        if (uiState.isLoadingPlaybacks && uiState.playbackDayGroups.isEmpty()) {
+    Column(modifier = modifier) {
+        // Trình phát video ghi hình VMS tràn viền ngang (hỗ trợ xoay ngang toàn màn hình giống Live Camera)
+        val activeVideo = uiState.selectedPlaybackVideo
+        if (activeVideo != null) {
+            val activeDateTimeText = activeVideo.displayDateTime.ifEmpty {
+                formatPlaybackDateTime(activeVideo.time)
+            }
+            var isPlaybackPlaying by remember(activeVideo.videoLink) { mutableStateOf(false) }
+            var isPlaybackError by remember(activeVideo.videoLink) { mutableStateOf(false) }
+            var isControllerVisible by remember(activeVideo.videoLink) { mutableStateOf(true) }
+
+            val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+            val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+            val pillHeight = spacing.iconButtonSmall
+            val actionBtnSize = spacing.iconMedium
+            val actionIconSize = spacing.iconSmall
+
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(bottom = bottomClearance),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isTabVisible) {
-                    WaveDotsLoading()
+                modifier = if (isFullscreen) {
+                    Modifier
+                        .fillMaxSize()
+                        .background(colors.mediaBg)
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = spacing.space6)
+                        .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
+                        .background(colors.surface)
                 }
-            }
-        } else if (uiState.playbackDayGroups.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = spacing.space16)
-                    .padding(bottom = bottomClearance),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
             ) {
-                CommonEmptyState(
-                    text = if (isEn) {
-                        "No recordings in this time range"
-                    } else {
-                        "Không có dữ liệu ghi hình trong khoảng thời gian này"
-                    }
+                VideoPlayer(
+                    videoUrl = activeVideo.videoLink,
+                    thumbnailUrl = null,
+                    deviceKey = UserSession.accessToken,
+                    isOriginalRatio = isOriginalRatio,
+                    onPlayingChange = { isPlaybackPlaying = it },
+                    onErrorChange = { isPlaybackError = it },
+                    onControllerVisibilityChange = { isControllerVisible = it }
                 )
-                if (uiState.hasMorePlaybackDays) {
-                    Spacer(modifier = Modifier.height(spacing.space12))
-                    LoadMoreDaysButton(
-                        isLoading = uiState.isLoadingMorePlaybackDays,
-                        isEn = isEn,
-                        onClick = onLoadMoreDays
-                    )
-                }
-            }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentPadding = PaddingValues(
-                    start = spacing.space10,
-                    end = spacing.space10,
-                    top = spacing.space4,
-                    bottom = bottomClearance
-                ),
-                verticalArrangement = Arrangement.spacedBy(spacing.space10)
-            ) {
-                uiState.playbackDayGroups.forEach { group ->
-                    item(key = "day_group_${group.dateKey}") {
-                        Column(
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = !isPlaybackPlaying || isPlaybackError || isControllerVisible,
+                    enter = fadeIn(animationSpec = tween(200)),
+                    exit = fadeOut(animationSpec = tween(200)),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Row(
                             modifier = Modifier
+                                .align(Alignment.TopCenter)
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(spacing.radiusRegular))
-                                .background(colors.surface)
-                                .padding(spacing.space10),
-                            verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                                .padding(spacing.space8),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Top
                         ) {
-                            // .day-header
+                            // Top-Left: Thời gian bản ghi (.info-name style)
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .padding(end = spacing.space8)
+                                    .height(pillHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(overlayPillBg)
+                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .padding(horizontal = spacing.space8),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space6)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
-                                ) {
-                                    Icon(
-                                        imageVector = LucideIcons.Calendar,
-                                        contentDescription = null,
-                                        tint = colors.accent,
-                                        modifier = Modifier.size(spacing.iconSmall)
-                                    )
-                                    Text(
-                                        text = formatPlaybackDayLabel(group.dateKey, isEn),
-                                        color = colors.textStrong,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                                        .background(colors.controlBg)
-                                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
-                                ) {
-                                    Text(
-                                        text = "${group.videos.size} video",
-                                        color = colors.textMuted,
-                                        style = MaterialTheme.typography.caption,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
+                                Icon(
+                                    imageVector = LucideIcons.Clock,
+                                    contentDescription = null,
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
+                                Text(
+                                    text = activeDateTimeText,
+                                    color = colors.onMedia,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
 
-                            // .video-grid-view (2 cột trên mobile)
-                            val totalCells = group.videos.size + if (group.hasMore) 1 else 0
-                            val rowCount = (totalCells + 1) / 2
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(spacing.space8)
+                            // Top-Right: Tỷ lệ khung hình, Toàn màn hình & Đóng (.info-action style)
+                            Row(
+                                modifier = Modifier
+                                    .height(pillHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(overlayPillBg)
+                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .padding(horizontal = spacing.space2),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
                             ) {
-                                for (rowIdx in 0 until rowCount) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(spacing.space8)
-                                    ) {
-                                        for (colIdx in 0..1) {
-                                            val cellIdx = rowIdx * 2 + colIdx
-                                            if (cellIdx < group.videos.size) {
-                                                val video = group.videos[cellIdx]
-                                                val isSelected = activeVideo != null &&
-                                                    activeVideo.videoLink == video.videoLink &&
-                                                    activeVideo.time == video.time
-                                                PlaybackVideoGridCard(
-                                                    video = video,
-                                                    cameraId = selectedCamera.camera.id,
-                                                    fallbackSnapshotUrl = selectedCamera.fallbackImageUrl,
-                                                    isSelected = isSelected,
-                                                    onClick = { onSelectVideo(video) },
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                            } else if (cellIdx == group.videos.size && group.hasMore) {
-                                                LoadMoreDayVideosCard(
-                                                    isLoading = group.isLoadingMore,
-                                                    isEn = isEn,
-                                                    onClick = { onLoadMoreForDay(group.dateKey) },
-                                                    modifier = Modifier.weight(1f)
-                                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .background(
+                                            if (isOriginalRatio) {
+                                                BrandActiveNavDark.copy(alpha = 0.35f)
                                             } else {
-                                                Spacer(modifier = Modifier.weight(1f))
+                                                Color.Transparent
                                             }
-                                        }
-                                    }
+                                        )
+                                        .clickable { toggleAspectRatio() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
+                                        contentDescription = if (isOriginalRatio) {
+                                            if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
+                                        } else {
+                                            if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
+                                        },
+                                        tint = if (isOriginalRatio) BrandLight else colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clickable { onToggleFullscreen() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
+                                        contentDescription = if (isEn) "Fullscreen" else "Toàn màn hình",
+                                        tint = colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clickable {
+                                            if (isFullscreen) {
+                                                onToggleFullscreen()
+                                            }
+                                            onSelectVideo(null)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.X,
+                                        contentDescription = stringResource(id = R.string.dialog_btn_close),
+                                        tint = colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
 
-                if (uiState.hasMorePlaybackDays) {
-                    item(key = "load_more_playback_days") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = spacing.space6),
-                            contentAlignment = Alignment.Center
+        if (!isFullscreen) {
+            // Danh sách file ghi hình từ VMS nhóm theo ngày (đồng bộ PlaybackPage.vue)
+            if (uiState.isLoadingPlaybacks && uiState.playbackDayGroups.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(bottom = bottomClearance),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isTabVisible) {
+                        WaveDotsLoading()
+                    }
+                }
+            } else if (uiState.playbackDayGroups.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = spacing.space16)
+                        .padding(bottom = bottomClearance),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CommonEmptyState(
+                        text = if (isEn) {
+                            "No recordings in this time range"
+                        } else {
+                            "Không có dữ liệu ghi hình trong khoảng thời gian này"
+                        }
+                    )
+                    if (uiState.hasMorePlaybackDays) {
+                        Spacer(modifier = Modifier.height(spacing.space12))
+                        LoadMoreDaysButton(
+                            isLoading = uiState.isLoadingMorePlaybackDays,
+                            isEn = isEn,
+                            onClick = onLoadMoreDays
+                        )
+                    }
+                }
+            } else {
+                val camId = selectedCamera.camera.id
+                val fallbackSnapUrl = selectedCamera.fallbackImageUrl
+
+                // Virtualize theo từng hàng (mỗi hàng 2 thẻ video) thay vì dồn cả ngày vào 1 item duy nhất,
+                // giúp LazyColumn tái sử dụng node (contentType = "pb_video_row") và cuộn mượt 60/120fps kể cả khi tải nhiều trang.
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentPadding = PaddingValues(
+                        start = spacing.space10,
+                        end = spacing.space10,
+                        top = spacing.space4,
+                        bottom = bottomClearance
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
+                    uiState.playbackDayGroups.forEachIndexed { groupIdx, group ->
+                        if (groupIdx > 0) {
+                            item(
+                                key = "pb_spacer_${group.dateKey}",
+                                contentType = "pb_day_spacer"
+                            ) {
+                                Spacer(modifier = Modifier.height(spacing.space10))
+                            }
+                        }
+
+                        val totalCells = group.videos.size + if (group.hasMore) 1 else 0
+                        val rowCount = (totalCells + 1) / 2
+
+                        // 1. Header của ngày (.day-header)
+                        item(
+                            key = "pb_header_${group.dateKey}",
+                            contentType = "pb_day_header"
                         ) {
-                            LoadMoreDaysButton(
-                                isLoading = uiState.isLoadingMorePlaybackDays,
-                                isEn = isEn,
-                                onClick = onLoadMoreDays
-                            )
+                            val dayLabel = if (isEn) {
+                                group.labelEn.ifEmpty { formatPlaybackDayLabel(group.dateKey, true) }
+                            } else {
+                                group.labelVi.ifEmpty { formatPlaybackDayLabel(group.dateKey, false) }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(if (rowCount == 0) RoundedCornerShape(spacing.radiusRegular) else dayHeaderShape)
+                                    .background(colors.surface)
+                                    .padding(
+                                        start = spacing.space12,
+                                        end = spacing.space10,
+                                        top = spacing.space10,
+                                        bottom = if (rowCount == 0) spacing.space10 else spacing.space8
+                                    ),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.Calendar,
+                                    contentDescription = null,
+                                    tint = colors.textMuted,
+                                    modifier = Modifier.size(spacing.iconSmall)
+                                )
+                                Text(
+                                    text = dayLabel,
+                                    color = colors.textMuted,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        // 2. Các hàng video 2 cột được virtualize riêng lẻ
+                        items(
+                            count = rowCount,
+                            key = { rowIdx -> "pb_row_${group.dateKey}_$rowIdx" },
+                            contentType = { "pb_video_row" }
+                        ) { rowIdx ->
+                            val isLastRow = rowIdx == rowCount - 1
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(if (isLastRow) Modifier.clip(dayFooterShape) else Modifier)
+                                    .background(colors.surface)
+                                    .padding(
+                                        start = spacing.space10,
+                                        end = spacing.space10,
+                                        bottom = if (isLastRow) spacing.space10 else spacing.space8
+                                    ),
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+                            ) {
+                                for (colIdx in 0..1) {
+                                    val cellIdx = rowIdx * 2 + colIdx
+                                    if (cellIdx < group.videos.size) {
+                                        val video = group.videos[cellIdx]
+                                        val isSelected = activeVideo != null &&
+                                            activeVideo.videoLink == video.videoLink &&
+                                            activeVideo.time == video.time
+                                        PlaybackVideoGridCard(
+                                            video = video,
+                                            cameraId = camId,
+                                            fallbackSnapshotUrl = fallbackSnapUrl,
+                                            isSelected = isSelected,
+                                            onClick = { onSelectVideo(video) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    } else if (cellIdx == group.videos.size && group.hasMore) {
+                                        LoadMoreDayVideosCard(
+                                            isLoading = group.isLoadingMore,
+                                            isEn = isEn,
+                                            onClick = { onLoadMoreForDay(group.dateKey) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (uiState.hasMorePlaybackDays) {
+                        item(
+                            key = "load_more_playback_days",
+                            contentType = "pb_load_more_days"
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = spacing.space12, bottom = spacing.space6),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                LoadMoreDaysButton(
+                                    isLoading = uiState.isLoadingMorePlaybackDays,
+                                    isEn = isEn,
+                                    onClick = onLoadMoreDays
+                                )
+                            }
                         }
                     }
                 }
@@ -1543,21 +1727,72 @@ private fun PlaybackVideoGridCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusSmall)
-    // Ưu tiên ảnh thumbnail/image của bản ghi, nếu không có thì dùng ảnh snapshot đã cache của camera
-    // (không dùng videoLink .mp4 làm ảnh đại diện để tránh tải & giải mã hàng chục file video bằng MediaMetadataRetriever gây nóng máy)
-    val thumbCandidate = video.thumbnailLink.ifEmpty {
-        video.imageLink.ifEmpty { fallbackSnapshotUrl }
+    val shape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
+    val timeBadgeShape = remember(spacing.radiusXSmall) { RoundedCornerShape(spacing.radiusXSmall) }
+
+    // Đồng bộ màu nền & viền với các nút điều khiển trong ô Live Camera (CameraGridItem)
+    val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+    val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+
+    // Ưu tiên ảnh thumbnail/image của bản ghi, nếu không có hoặc bị lỗi thì fallback sang ảnh snapshot đã cache của camera
+    val primaryThumbUrl = video.thumbnailLink.ifEmpty { video.imageLink }
+    var primaryThumbFailed by remember(cameraId, primaryThumbUrl) {
+        mutableStateOf(
+            primaryThumbUrl.isNotEmpty() && MonitorCacheManager.failedPlaybackThumbUrls.contains(primaryThumbUrl)
+        )
     }
-    val timeOnlyText = remember(video.time) { formatPlaybackTimeOnly(video.time) }
+    val effectiveThumbUrl = if (primaryThumbUrl.isNotEmpty() && !primaryThumbFailed) {
+        primaryThumbUrl
+    } else {
+        fallbackSnapshotUrl
+    }
+    val isUsingFallbackSnap = effectiveThumbUrl == fallbackSnapshotUrl && fallbackSnapshotUrl.isNotEmpty()
+
+    val fallbackCardMemKey = remember(cameraId, fallbackSnapshotUrl) {
+        if (fallbackSnapshotUrl.isEmpty()) null else MonitorCacheManager.cardMemCacheKey(cameraId, fallbackSnapshotUrl)
+    }
+    val targetMemKey = remember(cameraId, effectiveThumbUrl, isUsingFallbackSnap, fallbackCardMemKey) {
+        when {
+            effectiveThumbUrl.isEmpty() -> null
+            isUsingFallbackSnap -> fallbackCardMemKey
+            else -> MonitorCacheManager.playbackThumbMemCacheKey(cameraId, effectiveThumbUrl)
+        }
+    }
+    val imageRequest = remember(context, cameraId, effectiveThumbUrl, isUsingFallbackSnap, fallbackCardMemKey) {
+        if (effectiveThumbUrl.isEmpty()) {
+            null
+        } else {
+            val diskKey = if (isUsingFallbackSnap) {
+                MonitorCacheManager.diskCacheKey(cameraId, fallbackSnapshotUrl)
+            } else {
+                MonitorCacheManager.playbackThumbDiskCacheKey(cameraId, effectiveThumbUrl)
+            }
+            ImageRequest.Builder(context)
+                .data(MonitorCacheManager.coilDataModel(effectiveThumbUrl))
+                .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
+                .precision(Precision.INEXACT)
+                .allowHardware(true)
+                .allowRgb565(true)
+                .crossfade(false)
+                .memoryCacheKey(targetMemKey)
+                .diskCacheKey(diskKey)
+                .placeholderMemoryCacheKey(fallbackCardMemKey)
+                .build()
+        }
+    }
+
+    val timeOnlyText = remember(video.time, video.displayTime) {
+        video.displayTime.ifEmpty { formatPlaybackTimeOnly(video.time) }
+    }
 
     Box(
         modifier = modifier
             .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
             .clip(shape)
-            .background(colors.mediaBg)
+            .background(colors.thumbnailBg)
             .then(
                 if (isSelected) {
                     Modifier.border(
@@ -1575,12 +1810,18 @@ private fun PlaybackVideoGridCard(
             )
             .clickable(onClick = onClick)
     ) {
-        if (thumbCandidate.isNotEmpty()) {
-            VideoFrameImage(
-                url = thumbCandidate,
-                modifier = Modifier.fillMaxSize(),
+        if (imageRequest != null) {
+            AsyncImage(
+                model = imageRequest,
+                contentDescription = timeOnlyText,
                 contentScale = ContentScale.Crop,
-                cacheKey = "vms_pb_${cameraId}_${video.time}"
+                modifier = Modifier.fillMaxSize(),
+                onError = {
+                    if (!isUsingFallbackSnap && primaryThumbUrl.isNotEmpty()) {
+                        MonitorCacheManager.failedPlaybackThumbUrls.add(primaryThumbUrl)
+                        primaryThumbFailed = true
+                    }
+                }
             )
         }
 
@@ -1590,7 +1831,7 @@ private fun PlaybackVideoGridCard(
                 .align(Alignment.Center)
                 .size(spacing.iconButtonSmall)
                 .clip(CircleShape)
-                .background(colors.mediaBg.copy(alpha = 0.52f))
+                .background(overlayPillBg)
                 .border(
                     width = spacing.borderThin,
                     color = colors.onMedia.copy(alpha = 0.28f),
@@ -1606,14 +1847,19 @@ private fun PlaybackVideoGridCard(
             )
         }
 
-        // .video-time-overlay
+        // .video-time-overlay (đồng bộ màu nền & viền với các nút trong ô Live Camera)
         if (timeOnlyText.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .padding(spacing.space6)
-                    .clip(RoundedCornerShape(spacing.radiusXSmall))
-                    .background(colors.mediaBg.copy(alpha = 0.68f))
+                    .clip(timeBadgeShape)
+                    .background(overlayPillBg)
+                    .border(
+                        width = spacing.borderMedium,
+                        color = overlayPillBorder,
+                        shape = timeBadgeShape
+                    )
                     .padding(horizontal = spacing.space6, vertical = spacing.space2)
             ) {
                 Text(
@@ -1644,11 +1890,6 @@ private fun LoadMoreDayVideosCard(
             .aspectRatio(LIVE_STAGE_ASPECT_RATIO)
             .clip(shape)
             .background(colors.controlBg)
-            .border(
-                width = spacing.borderThin,
-                color = colors.border,
-                shape = shape
-            )
             .clickable(enabled = !isLoading, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -2436,6 +2677,7 @@ fun CameraGridItem(
     }
 
     val surfaceBg = if (isFullscreen || isOriginalRatio || !showCloseButton) colors.mediaBg else colors.surface
+    val stateOverlayBg = if (isFullscreen) colors.mediaBg else colors.surface
 
     // Chờ hoàn tất hiệu ứng trượt mở (isEntering = false, ~280ms) mới mount ExoPlayer/TextureView để trượt vào mượt 120fps;
     // Khi trượt đóng (isClosing = true), giữ PlayerView với trạng thái isPaused = true (ngắt ngay WS & giải mã) cho đến khi trượt xong mới tháo View.
@@ -2552,7 +2794,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(surfaceBg),
+                    .background(stateOverlayBg),
                 contentAlignment = Alignment.Center
             ) {
                 if (fallbackImageRequest != null && !snapshotFailed) {
@@ -2583,7 +2825,7 @@ fun CameraGridItem(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(surfaceBg)
+                    .background(stateOverlayBg)
                     .clickable {
                         onClick()
                         showInfo = true

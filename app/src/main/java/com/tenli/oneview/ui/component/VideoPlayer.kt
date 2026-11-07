@@ -35,6 +35,7 @@ import kotlinx.coroutines.isActive
 @Composable
 fun VideoPlayer(
     videoUrl: String,
+    @Suppress("UNUSED_PARAMETER")
     thumbnailUrl: String?,
     deviceKey: String,
     isOriginalRatio: Boolean = false,
@@ -42,14 +43,19 @@ fun VideoPlayer(
     errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
     onErrorChange: (Boolean) -> Unit = {},
+    onControllerVisibilityChange: (Boolean) -> Unit = {},
     onTimeUpdate: ((Long) -> Unit)? = null
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
-    val containerBg = MaterialTheme.appColors.surface
+    var playerViewRef by remember(videoUrl) { mutableStateOf<PlayerView?>(null) }
+    val colors = MaterialTheme.appColors
+    val containerBg = colors.surface
+    val stageBg = if (isVideoReady && !isError) colors.mediaBg else containerBg
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
+    val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
 
     val exoPlayer = remember(videoUrl) {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
@@ -134,10 +140,17 @@ fun VideoPlayer(
         }
     }
 
+    androidx.compose.runtime.LaunchedEffect(isVideoReady, isError) {
+        if (isVideoReady && !isError) {
+            playerViewRef?.showController()
+            currentOnControllerVisibilityChange(true)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(containerBg)
+            .background(stageBg)
     ) {
         val targetResizeMode = if (isOriginalRatio) {
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -147,20 +160,32 @@ fun VideoPlayer(
         AndroidView(factory = { ctx ->
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
+                    playerViewRef = this
                     player = exoPlayer
                     useController = true
+                    controllerShowTimeoutMs = 3000
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     resizeMode = targetResizeMode
+                    setControllerVisibilityListener(
+                        PlayerView.ControllerVisibilityListener { visibility ->
+                            currentOnControllerVisibilityChange(visibility == android.view.View.VISIBLE)
+                        }
+                    )
                 }
             }
         }, update = { view ->
             (view as PlayerView).let {
+                playerViewRef = it
                 it.player = exoPlayer
                 if (it.resizeMode != targetResizeMode) {
                     it.resizeMode = targetResizeMode
                 }
             }
         }, onRelease = { view ->
+            if (playerViewRef === view) {
+                playerViewRef = null
+            }
+            (view as? PlayerView)?.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
             (view as? PlayerView)?.player = null
         }, modifier = Modifier
             .fillMaxSize()
@@ -191,14 +216,7 @@ fun VideoPlayer(
                     .background(containerBg),
                 contentAlignment = Alignment.Center
             ) {
-                if (!thumbnailUrl.isNullOrBlank()) {
-                    SafeAsyncImage(
-                        url = thumbnailUrl,
-                        deviceKey = deviceKey,
-                        showLoading = false
-                    )
-                }
-                WaveDotsLoading()
+                WaveDotsLoading(dotColor = colors.accent)
             }
         }
     }

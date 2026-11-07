@@ -15,6 +15,7 @@ import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.model.network.AIServiceModel
@@ -98,7 +99,9 @@ data class PlaybackDayGroup(
     val dateKey: String, // "yyyy-MM-dd"
     val videos: List<VideoModel>,
     val hasMore: Boolean = false,
-    val isLoadingMore: Boolean = false
+    val isLoadingMore: Boolean = false,
+    val labelVi: String = "",
+    val labelEn: String = ""
 )
 
 @Immutable
@@ -372,6 +375,12 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     /** Chỉ được đọc/ghi trên Main thread (cùng luồng với _uiState.update) */
     private var treeIndex = CameraTreeIndex(emptyList())
 
+    /** Dữ liệu gốc chưa lọc phân quyền để dựng lại cây khi quyền tài khoản thay đổi */
+    private var rawVmsList: List<VMSServiceModel> = emptyList()
+    private var rawGroupList: List<CameraGroupModel> = emptyList()
+    private var rawCameraList: List<CameraModel> = emptyList()
+    private var rawCameraInGroups: List<CameraInGroupModel> = emptyList()
+
     /** AI services chỉ dùng để lưu kèm cache Monitor (các màn hình khác đọc lại), UI màn hình này không hiển thị */
     private var aiServices: List<AIServiceModel> = emptyList()
 
@@ -380,7 +389,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private var snapshotLookupJob: Job? = null
     private var playbackFetchJob: Job? = null
     private var playbackLoadMoreDaysJob: Job? = null
+    private var playbackThumbPrefetchJob: Job? = null
     private val playbackDayJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val playbackSessionCache = java.util.concurrent.ConcurrentHashMap<String, CachedPlaybackSession>()
     private var cameraEventFetchJob: Job? = null
     private var cameraEventPaginateJob: Job? = null
     private var lastCameraEventRawId: Int? = null
@@ -390,6 +401,16 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private var playbackMinSearchDayMs: Long? = null
     private var playbackRangeMinMs: Long = 0L
     private var playbackRangeMaxMs: Long = 0L
+
+    private data class CachedPlaybackSession(
+        val dayGroups: List<PlaybackDayGroup>,
+        val hasMoreDays: Boolean,
+        val nextSearchDayMs: Long?,
+        val minSearchDayMs: Long?,
+        val rangeMinMs: Long,
+        val rangeMaxMs: Long,
+        val updatedAt: Long
+    )
 
     private var isMonitorTabActive: Boolean = false
     private val cardSnapshotJobs = java.util.concurrent.ConcurrentHashMap<Int, Job>()
@@ -472,6 +493,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             cameraList: List<CameraModel>,
             cameraInGroups: List<CameraInGroupModel>
         ): List<CameraTreeNode> {
+            val permittedCameraList = UserPermissionManager.filterPermittedCameras(cameraList)
+            if (permittedCameraList.isEmpty()) return emptyList()
+
             val treeData = mutableListOf<CameraTreeNode>()
             val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
 
@@ -480,10 +504,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             )
             fullVmsList.addAll(vmsList)
 
-            val camerasByVms = cameraList.groupBy { it.vmsId }
+            val camerasByVms = permittedCameraList.groupBy { it.vmsId }
             val groupsByVms = groupList.groupBy { it.vmsId }
             val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
-            val cameraById = cameraList.associateBy { it.id }
+            val cameraById = permittedCameraList.associateBy { it.id }
 
             for (item in cameraInGroups) {
                 val cam = cameraById[item.cameraId] ?: continue
@@ -584,6 +608,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         // Nếu dữ liệu cây camera đã được preload sẵn trong RAM, áp dụng ngay tức thì (0ms)
         val memCached = MonitorCacheManager.getMonitorDataInMemory()
         if (memCached != null && (memCached.vmsList.isNotEmpty() || memCached.cameraList.isNotEmpty())) {
+            rawVmsList = memCached.vmsList
+            rawGroupList = memCached.groupList
+            rawCameraList = memCached.cameraList
+            rawCameraInGroups = memCached.cameraInGroups
             if (memCached.aiServices.isNotEmpty()) aiServices = memCached.aiServices
             applyTree(
                 CameraTreeIndex(
@@ -628,6 +656,32 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             EventBus.networkRestored.collect {
                 loadData()
+            }
+        }
+
+        viewModelScope.launch {
+            var lastVersion = UserPermissionManager.permissionState.value.version
+            UserPermissionManager.permissionState.collect { permState ->
+                if (permState.version != lastVersion) {
+                    lastVersion = permState.version
+                    if (rawCameraList.isNotEmpty() || rawVmsList.isNotEmpty()) {
+                        val rebuiltIndex = buildIndex(rawVmsList, rawGroupList, rawCameraList, rawCameraInGroups)
+                        applyTree(rebuiltIndex)
+                    }
+                    val openCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
+                    if (openCam != null &&
+                        (!permState.canAccessLiveStream || !UserPermissionManager.isCameraPermitted(openCam))
+                    ) {
+                        closeLiveCamera()
+                    } else if (openCam != null) {
+                        val currentDetailTab = _uiState.value.cameraDetailTab
+                        if (currentDetailTab == CameraDetailTab.PLAYBACK && !permState.canAccessPlayback) {
+                            selectCameraDetailTab(CameraDetailTab.LIVE)
+                        } else if (currentDetailTab == CameraDetailTab.EVENTS && !permState.canAccessEvents) {
+                            selectCameraDetailTab(CameraDetailTab.LIVE)
+                        }
+                    }
+                }
             }
         }
 
@@ -1269,6 +1323,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             if (treeIndex.tree.isEmpty()) {
                 val cachedData = MonitorCacheManager.getMonitorData(app)
                 if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
+                    rawVmsList = cachedData.vmsList
+                    rawGroupList = cachedData.groupList
+                    rawCameraList = cachedData.cameraList
+                    rawCameraInGroups = cachedData.cameraInGroups
                     if (cachedData.aiServices.isNotEmpty()) aiServices = cachedData.aiServices
                     applyTree(
                         buildIndex(cachedData.vmsList, cachedData.groupList, cachedData.cameraList, cachedData.cameraInGroups)
@@ -1308,6 +1366,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         val groupList = groupResponse.body() ?: emptyList()
                         val cameraList = cameraResponse.body() ?: emptyList()
                         val cameraInGroups = cameraInGroupResponse.body() ?: emptyList()
+                        rawVmsList = vmsList
+                        rawGroupList = groupList
+                        rawCameraList = cameraList
+                        rawCameraInGroups = cameraInGroups
                         if (aiServiceResponse?.isSuccessful == true) {
                             aiServices = aiServiceResponse.body() ?: emptyList()
                         }
@@ -1370,6 +1432,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         eventsLoadedForCameraId = null
         lastCameraEventRawId = null
         val preferredPlaybackChan = resolvePreferredPlaybackChannel(camera)
+        val cachedPlayback = getPlaybackSessionCache(camera.id, TimeFilter.TODAY, preferredPlaybackChan)
+        if (cachedPlayback != null) {
+            playbackCurrentSearchDayMs = cachedPlayback.nextSearchDayMs
+            playbackMinSearchDayMs = cachedPlayback.minSearchDayMs
+            playbackRangeMinMs = cachedPlayback.rangeMinMs
+            playbackRangeMaxMs = cachedPlayback.rangeMaxMs
+        }
         _uiState.update {
             it.copy(
                 gridSize = 1,
@@ -1378,10 +1447,10 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 defaultPlaybackChannel = preferredPlaybackChan,
                 playbackChannel = preferredPlaybackChan,
                 playbackTimeFilter = TimeFilter.TODAY,
-                playbackDayGroups = emptyList(),
+                playbackDayGroups = cachedPlayback?.dayGroups ?: emptyList(),
                 isLoadingPlaybacks = false,
                 isLoadingMorePlaybackDays = false,
-                hasMorePlaybackDays = false,
+                hasMorePlaybackDays = cachedPlayback?.hasMoreDays ?: false,
                 selectedPlaybackVideo = null,
                 cameraEvents = emptyList(),
                 isLoadingCameraEvents = false,
@@ -1393,6 +1462,17 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         addCamera(camera, 0, startPolling = true)
+        // Pre-warm danh sách playback ngầm sau khi hiệu ứng trượt mở Live hoàn tất (~350ms)
+        // để khi người dùng chuyển sang tab "Xem lại", danh sách hiển thị tức thì 0ms.
+        if (UserPermissionManager.canAccessPlayback()) {
+            playbackFetchJob = viewModelScope.launch(Dispatchers.IO) {
+                delay(350L)
+                val activeCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
+                if (activeCam?.id == camera.id && playbackLoadedForCameraId != camera.id) {
+                    fetchCameraPlaybacks(isBackgroundPrewarm = true)
+                }
+            }
+        }
     }
 
     private fun cancelCameraDetailSubJobs() {
@@ -1400,6 +1480,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         playbackFetchJob = null
         playbackLoadMoreDaysJob?.cancel()
         playbackLoadMoreDaysJob = null
+        playbackThumbPrefetchJob?.cancel()
+        playbackThumbPrefetchJob = null
         for (job in playbackDayJobs.values) job.cancel()
         playbackDayJobs.clear()
         cameraEventFetchJob?.cancel()
@@ -1431,6 +1513,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      */
     fun selectCameraDetailTab(tab: CameraDetailTab) {
         val currentCam = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
+        if (tab == CameraDetailTab.PLAYBACK && !UserPermissionManager.canAccessPlayback()) return
+        if (tab == CameraDetailTab.EVENTS && !UserPermissionManager.canAccessEvents()) return
         if (_uiState.value.cameraDetailTab == tab) return
 
         if (tab != CameraDetailTab.LIVE) {
@@ -1835,6 +1919,124 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     // Xem lại (VMS VideoList API - tuyệt đối không gọi NVR)
     // ---------------------------------------------------------------------------------------------
 
+    private val dateKeyFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue(): SimpleDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    }
+    private val dayDisplayFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue(): SimpleDateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+    }
+    private val timeOnlyFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+    }
+    private val dateTimeFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
+        override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+    }
+
+    private fun playbackCacheKey(cameraId: Int, filter: TimeFilter, channel: String): String =
+        "${cameraId}_${filter.name}_$channel"
+
+    private fun getPlaybackSessionCache(
+        cameraId: Int,
+        filter: TimeFilter,
+        channel: String
+    ): CachedPlaybackSession? = playbackSessionCache[playbackCacheKey(cameraId, filter, channel)]
+
+    private fun putPlaybackSessionCache(
+        cameraId: Int,
+        filter: TimeFilter,
+        channel: String,
+        dayGroups: List<PlaybackDayGroup>,
+        hasMoreDays: Boolean
+    ) {
+        if (cameraId <= 0) return
+        playbackSessionCache[playbackCacheKey(cameraId, filter, channel)] = CachedPlaybackSession(
+            dayGroups = dayGroups,
+            hasMoreDays = hasMoreDays,
+            nextSearchDayMs = playbackCurrentSearchDayMs,
+            minSearchDayMs = playbackMinSearchDayMs,
+            rangeMinMs = playbackRangeMinMs,
+            rangeMaxMs = playbackRangeMaxMs,
+            updatedAt = System.currentTimeMillis()
+        )
+    }
+
+    private fun resolveDayLabels(dateKey: String, dayStartMs: Long): Pair<String, String> {
+        val targetCal = Calendar.getInstance().apply { timeInMillis = dayStartMs }
+        val todayCal = Calendar.getInstance()
+        if (targetCal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) &&
+            targetCal.get(Calendar.DAY_OF_YEAR) == todayCal.get(Calendar.DAY_OF_YEAR)
+        ) {
+            return "Hôm nay" to "Today"
+        }
+        val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+        if (targetCal.get(Calendar.YEAR) == yesterdayCal.get(Calendar.YEAR) &&
+            targetCal.get(Calendar.DAY_OF_YEAR) == yesterdayCal.get(Calendar.DAY_OF_YEAR)
+        ) {
+            return "Hôm qua" to "Yesterday"
+        }
+        val formatted = dayDisplayFormatterThreadLocal.get()?.format(Date(dayStartMs)) ?: dateKey
+        return formatted to formatted
+    }
+
+    private fun normalizeVideoModel(v: VideoModel): VideoModel {
+        val millis = if (v.epochMillis > 0L) v.epochMillis else (parseVideoQueryTime(v.time) ?: 0L)
+        val dispTime = if (millis > 0L) {
+            timeOnlyFormatterThreadLocal.get()?.format(Date(millis)).orEmpty()
+        } else {
+            v.time
+        }
+        val dispDateTime = if (millis > 0L) {
+            dateTimeFormatterThreadLocal.get()?.format(Date(millis)).orEmpty()
+        } else {
+            v.time
+        }
+        return v.copy(
+            videoLink = resolveFullMediaUrl(v.videoLink),
+            thumbnailLink = resolveFullMediaUrl(v.thumbnailLink),
+            imageLink = resolveFullMediaUrl(v.imageLink),
+            sourceType = "vms",
+            displayTime = dispTime,
+            displayDateTime = dispDateTime,
+            epochMillis = millis
+        )
+    }
+
+    /**
+     * Prefetch ảnh thumbnail của các video playback vào RAM/Disk cache của Coil ở nền
+     * để khi người dùng cuộn xuống các hàng tiếp theo, ảnh đã giải mã sẵn trong RAM (hiển thị 0ms, 120fps).
+     */
+    private fun prefetchPlaybackThumbnails(cameraId: Int, videos: List<VideoModel>) {
+        if (videos.isEmpty()) return
+        playbackThumbPrefetchJob?.cancel()
+        playbackThumbPrefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            val loader = Coil.imageLoader(app)
+            val memCache = loader.memoryCache
+            val urlsToFetch = videos.asSequence()
+                .map { it.thumbnailLink.ifEmpty { it.imageLink } }
+                .filter { it.isNotEmpty() && !MonitorCacheManager.failedPlaybackThumbUrls.contains(it) }
+                .distinct()
+                .take(24)
+                .toList()
+
+            for (url in urlsToFetch) {
+                val memKey = MonitorCacheManager.playbackThumbMemCacheKey(cameraId, url)
+                if (memCache != null && memCache[coil.memory.MemoryCache.Key(memKey)] != null) {
+                    continue
+                }
+                val req = ImageRequest.Builder(app)
+                    .data(MonitorCacheManager.coilDataModel(url))
+                    .size(SNAPSHOT_CARD_WIDTH_PX, SNAPSHOT_CARD_HEIGHT_PX)
+                    .precision(Precision.INEXACT)
+                    .allowHardware(true)
+                    .allowRgb565(true)
+                    .memoryCacheKey(memKey)
+                    .diskCacheKey(MonitorCacheManager.playbackThumbDiskCacheKey(cameraId, url))
+                    .build()
+                loader.enqueue(req)
+            }
+        }
+    }
+
     private fun startOfDayMillis(timeMs: Long): Long {
         val cal = Calendar.getInstance().apply {
             timeInMillis = timeMs
@@ -1858,23 +2060,28 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun formatDateKey(dayMs: Long): String =
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(dayMs))
+        dateKeyFormatterThreadLocal.get()?.format(Date(dayMs))
+            ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(dayMs))
 
     private fun parseDateKeyStartMillis(dateKey: String): Long? =
         runCatching {
-            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).parse(dateKey)?.time
+            dateKeyFormatterThreadLocal.get()?.parse(dateKey)?.time
         }.getOrNull()?.let(::startOfDayMillis)
 
     fun applyPlaybackFilters(filter: TimeFilter, channel: String) {
         val normalizedChannel = if (channel == "sub") "sub" else "main"
+        val cameraId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id ?: 0
+        val cached = getPlaybackSessionCache(cameraId, filter, normalizedChannel)
         _uiState.update {
             it.copy(
                 playbackTimeFilter = filter,
                 playbackChannel = normalizedChannel,
-                selectedPlaybackVideo = null
+                selectedPlaybackVideo = null,
+                playbackDayGroups = cached?.dayGroups ?: emptyList(),
+                hasMorePlaybackDays = cached?.hasMoreDays ?: false
             )
         }
-        fetchCameraPlaybacks()
+        fetchCameraPlaybacks(isBackgroundPrewarm = cached != null && cached.dayGroups.isNotEmpty())
     }
 
     fun resetPlaybackFilters() {
@@ -1891,7 +2098,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * Chỉ gọi `GET /VMS/api/VideoList` theo `camera.id`, `count`, `from`, `to`, `channel` (`main` | `sub`).
      * Tuyệt đối không gọi bất kỳ API nào của NVR.
      */
-    fun fetchCameraPlaybacks() {
+    fun fetchCameraPlaybacks(isBackgroundPrewarm: Boolean = false) {
         val camera = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
         val channel = _uiState.value.playbackChannel
         val filter = _uiState.value.playbackTimeFilter
@@ -1907,12 +2114,15 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         playbackCurrentSearchDayMs = startOfDayMillis(maxMs)
         playbackMinSearchDayMs = startOfDayMillis(minMs)
 
+        val cached = getPlaybackSessionCache(camera.id, filter, channel)
+        val hasCachedGroups = cached != null && cached.dayGroups.isNotEmpty()
+
         _uiState.update {
             it.copy(
-                isLoadingPlaybacks = true,
+                isLoadingPlaybacks = !isBackgroundPrewarm && !hasCachedGroups,
                 isLoadingMorePlaybackDays = false,
-                hasMorePlaybackDays = false,
-                playbackDayGroups = emptyList()
+                hasMorePlaybackDays = if (hasCachedGroups) cached!!.hasMoreDays else false,
+                playbackDayGroups = if (hasCachedGroups) cached!!.dayGroups else emptyList()
             )
         }
 
@@ -1920,6 +2130,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             try {
                 fetchPlaybackDaysBatchInternal(
                     cameraId = camera.id,
+                    filter = filter,
                     channel = channel,
                     targetDaysCount = PLAYBACK_DAYS_BATCH,
                     isInitial = true
@@ -1950,6 +2161,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             try {
                 fetchPlaybackDaysBatchInternal(
                     cameraId = camera.id,
+                    filter = state.playbackTimeFilter,
                     channel = state.playbackChannel,
                     targetDaysCount = PLAYBACK_DAYS_BATCH,
                     isInitial = false
@@ -1964,116 +2176,140 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun fetchPlaybackDaysBatchInternal(
         cameraId: Int,
+        filter: TimeFilter,
         channel: String,
         targetDaysCount: Int,
         isInitial: Boolean
     ) {
-        val startCursor = playbackCurrentSearchDayMs
-        val minDay = playbackMinSearchDayMs
-        if (startCursor == null || minDay == null || startCursor < minDay) {
-            _uiState.update {
-                it.copy(
-                    isLoadingPlaybacks = false,
-                    isLoadingMorePlaybackDays = false,
-                    hasMorePlaybackDays = false
-                )
+        val accumulatedNewGroups = mutableListOf<PlaybackDayGroup>()
+        var anyBatchSucceeded = false
+        var firstBatchError: Throwable? = null
+        var hasMoreDays = false
+        var scanRound = 0
+        val maxScanRounds = 4 // Tối đa quét 4 lô (32 ngày) nếu các ngày gần nhất trống
+
+        while (scanRound < maxScanRounds) {
+            scanRound++
+            val startCursor = playbackCurrentSearchDayMs
+            val minDay = playbackMinSearchDayMs
+            if (startCursor == null || minDay == null || startCursor < minDay) {
+                hasMoreDays = false
+                break
             }
-            return
-        }
 
-        val dayMillisList = mutableListOf<Long>()
-        val cal = Calendar.getInstance().apply { timeInMillis = startCursor }
-        while (cal.timeInMillis >= minDay && dayMillisList.size < targetDaysCount) {
-            dayMillisList.add(cal.timeInMillis)
-            cal.add(Calendar.DAY_OF_YEAR, -1)
-        }
-
-        if (dayMillisList.isEmpty()) {
-            playbackCurrentSearchDayMs = null
-            _uiState.update {
-                it.copy(
-                    isLoadingPlaybacks = false,
-                    isLoadingMorePlaybackDays = false,
-                    hasMorePlaybackDays = false
-                )
+            val dayMillisList = mutableListOf<Long>()
+            val cal = Calendar.getInstance().apply { timeInMillis = startCursor }
+            while (cal.timeInMillis >= minDay && dayMillisList.size < targetDaysCount) {
+                dayMillisList.add(cal.timeInMillis)
+                cal.add(Calendar.DAY_OF_YEAR, -1)
             }
-            return
-        }
 
-        val nextSearchDay = cal.timeInMillis
-        val hasMoreDays = nextSearchDay >= minDay
-        playbackCurrentSearchDayMs = if (hasMoreDays) nextSearchDay else null
+            if (dayMillisList.isEmpty()) {
+                playbackCurrentSearchDayMs = null
+                hasMoreDays = false
+                break
+            }
 
-        val fetchedResults = coroutineScope {
-            dayMillisList.map { dayStartMs ->
-                async {
-                    val dateKey = formatDateKey(dayStartMs)
-                    val dayEndMs = endOfDayMillis(dayStartMs)
-                    val fromMs = maxOf(dayStartMs, playbackRangeMinMs)
-                    val toMs = minOf(dayEndMs, playbackRangeMaxMs)
-                    val fromStr = formatVideoQueryTime(fromMs)
-                    val toStr = formatVideoQueryTime(toMs)
+            val nextSearchDay = cal.timeInMillis
+            hasMoreDays = nextSearchDay >= minDay
+            playbackCurrentSearchDayMs = if (hasMoreDays) nextSearchDay else null
 
-                    val result = safeApiCall {
-                        vmsApi.getVideoList(
-                            camera = cameraId,
-                            count = PLAYBACK_PER_DAY_COUNT,
-                            from = fromStr,
-                            to = toStr,
-                            channel = channel
-                        )
+            val fetchedResults = coroutineScope {
+                dayMillisList.map { dayStartMs ->
+                    async {
+                        val dateKey = formatDateKey(dayStartMs)
+                        val (labelVi, labelEn) = resolveDayLabels(dateKey, dayStartMs)
+                        val dayEndMs = endOfDayMillis(dayStartMs)
+                        val fromMs = maxOf(dayStartMs, playbackRangeMinMs)
+                        val toMs = minOf(dayEndMs, playbackRangeMaxMs)
+                        val fromStr = formatVideoQueryTime(fromMs)
+                        val toStr = formatVideoQueryTime(toMs)
+
+                        val result = safeApiCall {
+                            vmsApi.getVideoList(
+                                camera = cameraId,
+                                count = PLAYBACK_PER_DAY_COUNT,
+                                from = fromStr,
+                                to = toStr,
+                                channel = channel
+                            )
+                        }
+                        val response = result.getOrNull()
+                        val rawVideos = if (response?.isSuccessful == true) {
+                            response.body().orEmpty()
+                        } else {
+                            emptyList()
+                        }
+
+                        val normalizedVideos = rawVideos.map(::normalizeVideoModel)
+
+                        PlaybackDayGroup(
+                            dateKey = dateKey,
+                            videos = normalizedVideos,
+                            hasMore = rawVideos.size >= PLAYBACK_PER_DAY_COUNT,
+                            isLoadingMore = false,
+                            labelVi = labelVi,
+                            labelEn = labelEn
+                        ) to result.exceptionOrNull()
                     }
-                    val response = result.getOrNull()
-                    val rawVideos = if (response?.isSuccessful == true) {
-                        response.body().orEmpty()
-                    } else {
-                        emptyList()
-                    }
+                }.awaitAll()
+            }
 
-                    val normalizedVideos = rawVideos.map { v ->
-                        v.copy(
-                            videoLink = resolveFullMediaUrl(v.videoLink),
-                            thumbnailLink = resolveFullMediaUrl(v.thumbnailLink),
-                            imageLink = resolveFullMediaUrl(v.imageLink),
-                            sourceType = "vms"
-                        )
-                    }
+            val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
+            if (activeCamId != cameraId) return
 
-                    PlaybackDayGroup(
-                        dateKey = dateKey,
-                        videos = normalizedVideos,
-                        hasMore = rawVideos.size >= PLAYBACK_PER_DAY_COUNT,
-                        isLoadingMore = false
-                    ) to result.exceptionOrNull()
-                }
-            }.awaitAll()
+            val fetchedGroups = fetchedResults.map { it.first }
+            val roundSucceeded = fetchedResults.any { it.second == null }
+            if (roundSucceeded) anyBatchSucceeded = true
+            if (firstBatchError == null) {
+                firstBatchError = fetchedResults.firstNotNullOfOrNull { it.second }
+            }
+
+            val nonEmpty = fetchedGroups.filter { it.videos.isNotEmpty() }
+            accumulatedNewGroups.addAll(nonEmpty)
+
+            // Nếu đã tìm thấy ít nhất 1 ngày có bản ghi, hoặc không còn ngày cũ hơn, hoặc mạng lỗi -> dừng vòng quét
+            if (accumulatedNewGroups.isNotEmpty() || !hasMoreDays || !roundSucceeded) {
+                break
+            }
         }
 
         val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
         if (activeCamId != cameraId) return
 
-        val fetchedGroups = fetchedResults.map { it.first }
-        val anyDaySucceeded = fetchedResults.any { it.second == null }
-        val firstDayError = if (!anyDaySucceeded) fetchedResults.firstNotNullOfOrNull { it.second } else null
+        var finalMergedGroups: List<PlaybackDayGroup> = emptyList()
+        val effectiveHasMoreDays = hasMoreDays && anyBatchSucceeded
 
-        val nonEmptyNewGroups = fetchedGroups.filter { it.videos.isNotEmpty() }
         _uiState.update { state ->
             val merged = if (isInitial) {
-                nonEmptyNewGroups
+                accumulatedNewGroups
             } else {
                 val existingByKey = state.playbackDayGroups.associateBy { it.dateKey }.toMutableMap()
-                for (grp in nonEmptyNewGroups) {
+                for (grp in accumulatedNewGroups) {
                     existingByKey[grp.dateKey] = grp
                 }
                 existingByKey.values.sortedByDescending { it.dateKey }
             }
+            finalMergedGroups = merged
             state.copy(
                 playbackDayGroups = merged,
                 isLoadingPlaybacks = false,
                 isLoadingMorePlaybackDays = false,
-                hasMorePlaybackDays = hasMoreDays && anyDaySucceeded,
-                error = firstDayError?.toUserFriendlyMessage() ?: state.error
+                hasMorePlaybackDays = effectiveHasMoreDays,
+                error = if (!anyBatchSucceeded) firstBatchError?.toUserFriendlyMessage() ?: state.error else state.error
             )
+        }
+
+        if (anyBatchSucceeded) {
+            putPlaybackSessionCache(
+                cameraId = cameraId,
+                filter = filter,
+                channel = channel,
+                dayGroups = finalMergedGroups,
+                hasMoreDays = effectiveHasMoreDays
+            )
+            val newVideosForPrefetch = accumulatedNewGroups.flatMap { it.videos }
+            prefetchPlaybackThumbnails(cameraId, newVideosForPrefetch)
         }
     }
 
@@ -2088,7 +2324,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         if (targetGroup.isLoadingMore || !targetGroup.hasMore || targetGroup.videos.isEmpty()) return
 
         val lastVideo = targetGroup.videos.last()
-        val lastTimeMs = parseVideoQueryTime(lastVideo.time) ?: return
+        val lastTimeMs = if (lastVideo.epochMillis > 0L) {
+            lastVideo.epochMillis
+        } else {
+            parseVideoQueryTime(lastVideo.time) ?: return
+        }
         val dayStartMs = parseDateKeyStartMillis(dateKey) ?: return
         val fromMs = maxOf(dayStartMs, playbackRangeMinMs)
         val nextToMs = (lastTimeMs - 1000L).coerceAtLeast(fromMs)
@@ -2096,6 +2336,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val fromStr = formatVideoQueryTime(fromMs)
         val nextToStr = formatVideoQueryTime(nextToMs)
         val channel = state.playbackChannel
+        val filter = state.playbackTimeFilter
 
         _uiState.update { cur ->
             cur.copy(
@@ -2124,36 +2365,41 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     emptyList()
                 }
 
-                val newVideos = rawVideos.map { v ->
-                    v.copy(
-                        videoLink = resolveFullMediaUrl(v.videoLink),
-                        thumbnailLink = resolveFullMediaUrl(v.thumbnailLink),
-                        imageLink = resolveFullMediaUrl(v.imageLink),
-                        sourceType = "vms"
-                    )
-                }
+                val newVideos = rawVideos.map(::normalizeVideoModel)
 
                 val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
                 if (activeCamId != camera.id) return@launch
 
+                var updatedGroups: List<PlaybackDayGroup> = emptyList()
+                var latestHasMoreDays = false
                 _uiState.update { cur ->
-                    cur.copy(
-                        playbackDayGroups = cur.playbackDayGroups.map { grp ->
-                            if (grp.dateKey != dateKey) {
-                                grp
-                            } else {
-                                val combined = (grp.videos + newVideos).distinctBy {
-                                    it.videoLink.ifEmpty { it.time }
-                                }
-                                grp.copy(
-                                    videos = combined,
-                                    hasMore = rawVideos.size >= PLAYBACK_PER_DAY_COUNT && combined.size > grp.videos.size,
-                                    isLoadingMore = false
-                                )
+                    val nextGroups = cur.playbackDayGroups.map { grp ->
+                        if (grp.dateKey != dateKey) {
+                            grp
+                        } else {
+                            val combined = (grp.videos + newVideos).distinctBy {
+                                it.videoLink.ifEmpty { it.time }
                             }
+                            grp.copy(
+                                videos = combined,
+                                hasMore = rawVideos.size >= PLAYBACK_PER_DAY_COUNT && combined.size > grp.videos.size,
+                                isLoadingMore = false
+                            )
                         }
-                    )
+                    }
+                    updatedGroups = nextGroups
+                    latestHasMoreDays = cur.hasMorePlaybackDays
+                    cur.copy(playbackDayGroups = nextGroups)
                 }
+
+                putPlaybackSessionCache(
+                    cameraId = camera.id,
+                    filter = filter,
+                    channel = channel,
+                    dayGroups = updatedGroups,
+                    hasMoreDays = latestHasMoreDays
+                )
+                prefetchPlaybackThumbnails(camera.id, newVideos)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -2366,6 +2612,14 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         cameraUuid: String,
         resolvedType: String?
     ): CameraEventBatchResult {
+        if (!UserPermissionManager.canAccessEvents()) {
+            return CameraEventBatchResult(
+                events = emptyList(),
+                lastRawId = startLastId,
+                hasMore = false,
+                apiSucceeded = true
+            )
+        }
         val validData = mutableListOf<EventData>()
         val seenKeys = mutableSetOf<String>()
         var currentLastId = startLastId
@@ -2374,6 +2628,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         var anySuccessful = false
         var firstError: Throwable? = null
 
+        val allCameras = rawCameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
         while (attempts < EVENT_MAX_BATCH_ATTEMPTS) {
             attempts++
             val result = safeApiCall {
@@ -2402,7 +2657,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             }
 
             for (ev in batchData) {
-                if (AiTypeHelper.isAiTypeEnabled(ev.type) && seenKeys.add(ev.uniqueKey())) {
+                if (UserPermissionManager.isEventPermitted(ev, allCameras) && seenKeys.add(ev.uniqueKey())) {
                     validData.add(ev)
                 }
             }

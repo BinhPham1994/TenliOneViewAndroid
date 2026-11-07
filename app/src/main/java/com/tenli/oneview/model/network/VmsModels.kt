@@ -58,23 +58,31 @@ data class UserPermissions(
 )
 
 data class CameraPermissions(
-    val mode: String, // 'all' | 'custom'
-    val list: List<CameraPermissionItem>
+    val mode: String? = "all", // 'all' | 'custom'
+    val list: List<CameraPermissionItem>? = emptyList()
 )
 
 data class CameraPermissionItem(
-    val vmsId: Int,
-    val cameraId: Int
+    val vmsId: Int = 0,
+    val cameraId: Int = 0
 )
 
 data class AiEventPermissions(
-    val mode: String, // 'all' | 'custom'
-    val list: List<String>
+    val mode: String? = "all", // 'all' | 'custom'
+    val list: List<String>? = emptyList()
 )
 
 data class UserExtra(
     val permissions: UserPermissions? = null,
     val extraData: Map<String, Any>? = null
+)
+
+data class VmsUserModel(
+    val id: Int = 0,
+    val username: String? = null,
+    val password: String? = null,
+    val name: String? = null,
+    val extra: UserExtra? = null
 )
 
 data class StorageStatusModel(
@@ -202,7 +210,10 @@ data class VideoModel(
     val thumbnailLink: String = "",
     val isLoaded: Boolean? = null,
     val sourceType: String? = null, // 'vms' | 'nvr'
-    val duration: Double? = null
+    val duration: Double? = null,
+    val displayTime: String = "",
+    val displayDateTime: String = "",
+    val epochMillis: Long = 0L
 )
 
 data class ReportLinkModel(

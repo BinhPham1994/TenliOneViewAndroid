@@ -17,9 +17,12 @@ import com.google.firebase.messaging.RemoteMessage
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.TenliApp
+import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.service.NotificationChannels
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import kotlinx.coroutines.launch
 
 class EventMessagingService : FirebaseMessagingService() {
@@ -36,7 +39,34 @@ class EventMessagingService : FirebaseMessagingService() {
         // Đảm bảo phiên đăng nhập (domain + accessToken) đã được nạp vào RAM kể cả khi app đang bị kill
         UserSession.ensureRestored()
 
+        if (!UserPermissionManager.canAccessEvents()) {
+            if (BuildConfig.DEBUG) {
+                Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Tài khoản không có quyền xem sự kiện AI")
+            }
+            return
+        }
+
         val data = remoteMessage.data
+        val eventType = (data["type"] ?: data["eventType"] ?: data["event_type"]).orEmpty().trim()
+        if (eventType.isNotEmpty() && !AiTypeHelper.isAiTypeEnabled(eventType)) {
+            if (BuildConfig.DEBUG) {
+                Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Loại sự kiện '$eventType' không nằm trong quyền của user")
+            }
+            return
+        }
+        val pushCameraUuid = (data["cameraUUID"] ?: data["cameraId"] ?: data["camera_uuid"]).orEmpty().trim()
+        if (pushCameraUuid.isNotEmpty() && UserPermissionManager.isCustomCameraPermission()) {
+            val cachedCameras = EventCacheManager.getCamerasInMemory()
+            if (cachedCameras.isNotEmpty()) {
+                val allowedUuids = UserPermissionManager.buildAllowedCameraUuids(cachedCameras)
+                if (allowedUuids != null && !allowedUuids.contains(pushCameraUuid.lowercase())) {
+                    if (BuildConfig.DEBUG) {
+                        Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Camera '$pushCameraUuid' không nằm trong quyền của user")
+                    }
+                    return
+                }
+            }
+        }
         val notif = remoteMessage.notification
         if (BuildConfig.DEBUG) {
             Log.i(

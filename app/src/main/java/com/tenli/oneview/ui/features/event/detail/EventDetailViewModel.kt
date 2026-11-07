@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.model.network.AIServiceModel
@@ -503,9 +504,12 @@ class EventDetailViewModel(
                         !typeLower.contains("uniform") &&
                         !cameraUUID.isNullOrBlank()
 
+                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
                     fetched
                         .asSequence()
-                        .filter { AiTypeHelper.isAiTypeEnabled(it.type) || it.type == targetEvent.type }
+                        .filter { item ->
+                            item.id == targetEvent.id || UserPermissionManager.isEventPermitted(item, camerasForPerm)
+                        }
                         .filter { item ->
                             if (!filterByCamera) return@filter true
                             val cId = item.cameraUuidOrNull
@@ -567,7 +571,11 @@ class EventDetailViewModel(
                     type = "sensor-license-plate"
                 )
                 if (response.isSuccessful) {
-                    val events = response.body() ?: emptyList()
+                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+                    val events = UserPermissionManager.filterEventsByPermissions(
+                        response.body() ?: emptyList(),
+                        camerasForPerm
+                    )
                     _uiState.update { it.copy(licensePlateEvents = events, relatedPlatesLoading = false) }
                 } else {
                     _uiState.update { it.copy(relatedPlatesLoading = false) }

@@ -112,6 +112,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LocalMobileOverlayHost
@@ -206,6 +207,17 @@ fun MainScreen(
     onNavigateToEventDetail: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
+
+    val visibleMainTabs = remember(permissionState.canAccessEvents, permissionState.canAccessLiveStream) {
+        buildList {
+            add(MainTab.Home)
+            if (permissionState.canAccessEvents) add(MainTab.Event)
+            if (permissionState.canAccessLiveStream) add(MainTab.Monitor)
+            add(MainTab.Setting)
+        }
+    }
+    val visibleMainTabsState by rememberUpdatedState(visibleMainTabs)
 
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
@@ -215,6 +227,12 @@ fun MainScreen(
     var showAboutPage by remember { mutableStateOf(false) }
     var isLiveCameraPageOpen by remember { mutableStateOf(false) }
     val overlayHostState = remember { MobileOverlayHostState() }
+
+    LaunchedEffect(visibleMainTabs, uiState.currentTab) {
+        if (uiState.currentTab !in visibleMainTabs) {
+            viewModel.onTabSelected(MainTab.Home)
+        }
+    }
 
     val homeListState = rememberLazyListState()
     val monitorGridState: LazyGridState = rememberLazyGridState()
@@ -478,14 +496,15 @@ fun MainScreen(
                                 val isLongDrag = absX >= longDragDistPx
 
                                 if ((isFlick || isDrag || isLongDrag) && absX >= absY * SWIPE_HORIZONTAL_DOMINANCE) {
-                                    val currIdx = OrderedMainTabs.indexOf(currentTabState)
+                                    val currentVisibleTabs = visibleMainTabsState
+                                    val currIdx = currentVisibleTabs.indexOf(currentTabState)
                                     if (currIdx != -1) {
-                                        if (diffX < 0f && currIdx < OrderedMainTabs.size - 1) {
+                                        if (diffX < 0f && currIdx < currentVisibleTabs.size - 1) {
                                             // Swipe right-to-left -> next tab
-                                            switchToTab(OrderedMainTabs[currIdx + 1], true)
+                                            switchToTab(currentVisibleTabs[currIdx + 1], true)
                                         } else if (diffX > 0f && currIdx > 0) {
                                             // Swipe left-to-right -> previous tab
-                                            switchToTab(OrderedMainTabs[currIdx - 1], true)
+                                            switchToTab(currentVisibleTabs[currIdx - 1], true)
                                         }
                                     }
                                 }
@@ -603,7 +622,8 @@ fun MainScreen(
                         MainBottomNavigation(
                             currentTab = uiState.currentTab,
                             onTabClick = onBottomTabClick,
-                            onScrollToTop = scrollTabToTop
+                            onScrollToTop = scrollTabToTop,
+                            visibleTabs = visibleMainTabs
                         )
                     }
                 }
@@ -692,6 +712,7 @@ fun SettingScreen(
     onOpenAbout: () -> Unit = {}
 ) {
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
+    val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
     var showLogoutSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     var showThemeSheet by remember { mutableStateOf(false) }
@@ -706,9 +727,11 @@ fun SettingScreen(
     val textColor = MaterialTheme.colorScheme.onBackground
 
     val defaultMyPage = stringResource(id = R.string.setting_my_page)
-    val userName: String = UserSession.userData?.name?.takeIf { it.isNotBlank() }
-        ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
-        ?: defaultMyPage
+    val userName: String = remember(permissionState.version) {
+        UserSession.userData?.name?.takeIf { it.isNotBlank() }
+            ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
+            ?: defaultMyPage
+    }
 
     val isEn = currentLanguage.startsWith("en")
     val groupModifier = Modifier

@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.CachedEventData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.model.network.AIServiceModel
@@ -73,24 +74,26 @@ class EventViewModel(
             val isList = readIsListViewPref()
             val memCached = EventCacheManager.getEventDataInMemory(TimeFilter.TODAY, null, null, null)
             if (memCached != null) {
-                val permitted = memCached.events.permittedDistinct()
-                val cameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+                val rawCameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+                val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
+                val permitted = memCached.events.permittedDistinct(rawCameras)
                 EventScreenUiState(
                     isListView = isList,
                     isLoading = false,
                     events = permitted,
-                    cameraList = cameras,
-                    cameraNameMap = buildCameraNameMap(cameras),
+                    cameraList = permittedCameras,
+                    cameraNameMap = buildCameraNameMap(rawCameras),
                     aiServices = memCached.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() },
                     hasMore = permitted.isNotEmpty()
                 )
             } else {
-                val cameras = EventCacheManager.getCamerasInMemory()
+                val rawCameras = EventCacheManager.getCamerasInMemory()
+                val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
                 EventScreenUiState(
                     isListView = isList,
                     isLoading = true,
-                    cameraList = cameras,
-                    cameraNameMap = buildCameraNameMap(cameras),
+                    cameraList = permittedCameras,
+                    cameraNameMap = buildCameraNameMap(rawCameras),
                     aiServices = EventCacheManager.getAiServicesInMemory()
                 )
             }
@@ -170,6 +173,38 @@ class EventViewModel(
                 fetchInitialData(reloadMetadata = true)
             }
         }
+
+        viewModelScope.launch {
+            var lastVersion = UserPermissionManager.permissionState.value.version
+            UserPermissionManager.permissionState.collect { permState ->
+                if (permState.version != lastVersion) {
+                    lastVersion = permState.version
+                    val allCameras = EventCacheManager.getCamerasInMemory()
+                    val permittedCameras = UserPermissionManager.filterPermittedCameras(
+                        allCameras.ifEmpty { _uiState.value.cameraList }
+                    )
+                    val permittedUuids = permittedCameras.mapNotNull { it.extra?.uuid }.toSet()
+                    val activeAiSensors = permState.activeAiModules.map { it.sensorType }.toSet()
+                    val activeAiKeys = permState.activeAiModules.map { it.key }.toSet()
+
+                    _uiState.update { cur ->
+                        val nextSelectedCam = cur.selectedCameraUuid?.takeIf {
+                            permittedUuids.isEmpty() || it in permittedUuids
+                        }
+                        val nextSelectedAi = cur.selectedAiType?.takeIf {
+                            it in activeAiSensors || it in activeAiKeys || AiTypeHelper.isAiTypeEnabled(it)
+                        }
+                        cur.copy(
+                            cameraList = permittedCameras,
+                            selectedCameraUuid = nextSelectedCam,
+                            selectedAiType = nextSelectedAi,
+                            events = cur.events.permittedDistinct(allCameras.ifEmpty { cur.cameraList })
+                        )
+                    }
+                    fetchInitialData(reloadMetadata = false)
+                }
+            }
+        }
     }
 
     private data class EventBatchResult(
@@ -182,7 +217,7 @@ class EventViewModel(
 
     /**
      * Khớp hoàn toàn với fetchEvents() trong MobileEventsPage.vue:
-     * Lặp tối đa 5 lượt (mỗi lượt 50 bản ghi thô) để lọc đủ tối thiểu 20 sự kiện hợp lệ (isAiTypeEnabled),
+     * Lặp tối đa 5 lượt (mỗi lượt 50 bản ghi thô) để lọc đủ tối thiểu 20 sự kiện hợp lệ (isEventPermitted),
      * tránh việc 1 batch 50 bản ghi chỉ có vài sự kiện hợp lệ làm danh sách quá ngắn không cuộn được.
      */
     private suspend fun fetchPermittedEventBatch(
@@ -192,8 +227,17 @@ class EventViewModel(
         serviceId: Int?,
         cameraUuid: String?,
         resolvedType: String?,
-        targetCount: Int = PAGE_TARGET_COUNT
+        targetCount: Int = PAGE_TARGET_COUNT,
+        allCameras: List<CameraModel> = EventCacheManager.getCamerasInMemory()
     ): EventBatchResult {
+        if (!UserPermissionManager.canAccessEvents()) {
+            return EventBatchResult(
+                events = emptyList(),
+                lastRawId = startLastId,
+                hasMore = false,
+                apiSucceeded = true
+            )
+        }
         val validData = mutableListOf<EventData>()
         val seenKeys = mutableSetOf<String>()
         var currentLastId = startLastId
@@ -229,8 +273,9 @@ class EventViewModel(
                 break
             }
 
+            val camerasForPerm = allCameras.ifEmpty { EventCacheManager.getCamerasInMemory() }
             for (ev in batchData) {
-                if (AiTypeHelper.isAiTypeEnabled(ev.type) && seenKeys.add(ev.uniqueKey())) {
+                if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) && seenKeys.add(ev.uniqueKey())) {
                     validData.add(ev)
                 }
             }
@@ -266,6 +311,7 @@ class EventViewModel(
         recentFetchJob?.cancel()
         recentFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
+                if (!UserPermissionManager.canAccessEvents()) return@launch
                 val state = _uiState.value
                 val (from, to) = getTimeRange(state.selectedFilter)
                 val response = eventApi.getDataList(
@@ -277,8 +323,11 @@ class EventViewModel(
                     type = resolveApiEventType(state.selectedAiType)
                 )
                 if (response.isSuccessful) {
-                    val permittedNew = (response.body() ?: emptyList())
-                        .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                    val allCameras = EventCacheManager.getCamerasInMemory().ifEmpty { state.cameraList }
+                    val permittedNew = UserPermissionManager.filterEventsByPermissions(
+                        events = response.body() ?: emptyList(),
+                        allCameras = allCameras
+                    )
                     if (permittedNew.isNotEmpty()) {
                         EventCacheManager.cacheInMemory(events = permittedNew)
                         var updatedList: List<EventData> = emptyList()
@@ -295,7 +344,7 @@ class EventViewModel(
                             aiType = latestState.selectedAiType,
                             data = CachedEventData(
                                 events = updatedList.take(RAW_BATCH_SIZE),
-                                cameraList = latestState.cameraList,
+                                cameraList = EventCacheManager.getCamerasInMemory().ifEmpty { latestState.cameraList },
                                 aiServices = latestState.aiServices,
                                 updatedAt = System.currentTimeMillis()
                             ),
@@ -384,20 +433,23 @@ class EventViewModel(
                 cameraUuid = cameraUuid
             )
             if (cachedData != null && !isUserRefresh) {
-                val permittedCached = withContext(Dispatchers.Default) { cachedData.events.permittedDistinct() }
+                val rawCachedCameras = cachedData.cameraList.ifEmpty {
+                    EventCacheManager.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
+                }
+                val permittedCached = withContext(Dispatchers.Default) {
+                    cachedData.events.permittedDistinct(rawCachedCameras)
+                }
                 lastFetchedRawId = permittedCached.lastOrNull()?.id
                 _uiState.update {
-                    val cameras = cachedData.cameraList.ifEmpty {
-                        it.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
-                    }
+                    val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCachedCameras)
                     val services = cachedData.aiServices.ifEmpty {
                         it.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() }
                     }
                     it.copy(
                         isLoading = false,
                         error = null,
-                        cameraList = cameras,
-                        cameraNameMap = if (cameras === it.cameraList) it.cameraNameMap else buildCameraNameMap(cameras),
+                        cameraList = permittedCameras,
+                        cameraNameMap = buildCameraNameMap(rawCachedCameras),
                         aiServices = services,
                         events = permittedCached,
                         hasMore = permittedCached.isNotEmpty()
@@ -410,7 +462,8 @@ class EventViewModel(
             try {
                 coroutineScope {
                     val hasFreshMetadata = !isUserRefresh && EventCacheManager.hasFreshSessionMetadata()
-                    val needCameras = (reloadMetadata && !hasFreshMetadata) || _uiState.value.cameraList.isEmpty()
+                    val needCameras = (reloadMetadata && !hasFreshMetadata) ||
+                        EventCacheManager.getCamerasInMemory().isEmpty()
                     val needAiServices = (reloadMetadata && !hasFreshMetadata) || _uiState.value.aiServices.isEmpty()
                     val cameraDeferred = async {
                         if (needCameras) safeApiCall { vmsApi.getCameraList() } else null
@@ -418,6 +471,21 @@ class EventViewModel(
                     val aiServiceDeferred = async {
                         if (needAiServices) safeApiCall { eventApi.getAIServiceList() } else null
                     }
+
+                    // Nếu tài khoản có phân quyền camera custom và RAM chưa có danh sách camera,
+                    // đợi cameraDeferred xong trước khi lọc sự kiện để có map UUID đầy đủ ngay lượt đầu.
+                    if (UserPermissionManager.isCustomCameraPermission() &&
+                        EventCacheManager.getCamerasInMemory().isEmpty()
+                    ) {
+                        val preCamResp = cameraDeferred.await()?.getOrNull()
+                        if (preCamResp?.isSuccessful == true) {
+                            val preCamList = preCamResp.body() ?: emptyList()
+                            if (preCamList.isNotEmpty()) {
+                                EventCacheManager.cacheInMemory(cameras = preCamList, fromNetwork = true)
+                            }
+                        }
+                    }
+
                     val (from, to) = getTimeRange(filter)
                     val eventsDeferred = async {
                         fetchPermittedEventBatch(
@@ -426,7 +494,8 @@ class EventViewModel(
                             toSec = to,
                             serviceId = serviceId,
                             cameraUuid = cameraUuid,
-                            resolvedType = resolveApiEventType(aiType)
+                            resolvedType = resolveApiEventType(aiType),
+                            allCameras = EventCacheManager.getCamerasInMemory()
                         )
                     }
 
@@ -440,11 +509,12 @@ class EventViewModel(
                     val hasMore = batchResult.hasMore
 
                     val currentState = _uiState.value
-                    val cameraList = when {
+                    val allCameraList = when {
                         cameraResponse?.isSuccessful == true -> cameraResponse.body() ?: emptyList()
-                        currentState.cameraList.isNotEmpty() -> currentState.cameraList
-                        else -> EventCacheManager.getCamerasInMemory()
+                        EventCacheManager.getCamerasInMemory().isNotEmpty() -> EventCacheManager.getCamerasInMemory()
+                        else -> currentState.cameraList
                     }
+                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
 
                     val aiServices = when {
                         aiServiceResponse?.isSuccessful == true -> aiServiceResponse.body() ?: emptyList()
@@ -452,12 +522,13 @@ class EventViewModel(
                         else -> EventCacheManager.getAiServicesInMemory()
                     }
 
-                    val finalEvents = if (batchResult.apiSucceeded || newEvents.isNotEmpty() || cachedData == null) {
+                    val rawFinalEvents = if (batchResult.apiSucceeded || newEvents.isNotEmpty() || cachedData == null) {
                         lastFetchedRawId = nextLastId
                         newEvents
                     } else {
                         currentState.events
                     }
+                    val finalEvents = rawFinalEvents.permittedDistinct(allCameraList)
 
                     val failure = batchResult.firstError
                         ?: cameraResult?.exceptionOrNull()
@@ -465,22 +536,18 @@ class EventViewModel(
 
                     EventCacheManager.cacheInMemory(
                         events = finalEvents,
-                        cameras = cameraList,
+                        cameras = allCameraList,
                         aiServices = aiServices,
                         fromNetwork = cameraResponse?.isSuccessful == true
                     )
 
-                    val cameraNameMap = if (cameraList === currentState.cameraList) {
-                        currentState.cameraNameMap
-                    } else {
-                        withContext(Dispatchers.Default) { buildCameraNameMap(cameraList) }
-                    }
+                    val cameraNameMap = withContext(Dispatchers.Default) { buildCameraNameMap(allCameraList) }
 
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             isRefreshing = false,
-                            cameraList = cameraList,
+                            cameraList = permittedCameraList,
                             cameraNameMap = cameraNameMap,
                             aiServices = aiServices,
                             events = finalEvents,
@@ -497,7 +564,7 @@ class EventViewModel(
                             aiType = aiType,
                             data = CachedEventData(
                                 events = finalEvents,
-                                cameraList = cameraList,
+                                cameraList = allCameraList,
                                 aiServices = aiServices,
                                 updatedAt = System.currentTimeMillis()
                             ),

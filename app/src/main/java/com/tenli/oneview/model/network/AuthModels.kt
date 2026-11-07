@@ -25,6 +25,9 @@ data class UserData(
     var language: String? = "vi",
 
     var avatar: Avatar?,
+    var username: String? = null,
+    var isAdmin: Boolean? = null,
+    var permissions: UserPermissions? = null
 )
 
 data class Avatar(

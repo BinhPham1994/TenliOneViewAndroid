@@ -15,6 +15,7 @@ import com.tenli.oneview.data.local.CachedHomeData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.model.network.AIServiceModel
@@ -247,27 +248,28 @@ class HomeViewModel(
         val isList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
         val memCached = HomeCacheManager.getHomeDataInMemory(TimeFilter.TODAY, null)
         return if (memCached != null) {
-            val cameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+            val rawCameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+            val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
             val services = memCached.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() }
             HomeUiState(
                 isLoading = false,
                 isListView = isList,
                 overviewStats = memCached.overviewStats,
                 eventsByType = memCached.eventsByType,
-                cameraList = cameras,
+                cameraList = permittedCameras,
                 aiServices = services,
-                recentEvents = memCached.recentEvents
-                    .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
+                recentEvents = UserPermissionManager.filterEventsByPermissions(memCached.recentEvents, rawCameras)
                     .take(MAX_RECENT_EVENTS),
                 runningAiTasks = memCached.runningAiTasks,
                 totalAiTasks = memCached.totalAiTasks
             ).withRecomputedMetrics()
         } else {
-            val cameras = EventCacheManager.getCamerasInMemory()
+            val rawCameras = EventCacheManager.getCamerasInMemory()
+            val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
             HomeUiState(
                 isLoading = true,
                 isListView = isList,
-                cameraList = cameras,
+                cameraList = permittedCameras,
                 aiServices = EventCacheManager.getAiServicesInMemory()
             ).withRecomputedMetrics()
         }
@@ -336,6 +338,24 @@ class HomeViewModel(
                 fetchDashboardData()
             }
         }
+        viewModelScope.launch {
+            var lastVersion = UserPermissionManager.permissionState.value.version
+            UserPermissionManager.permissionState.collect { permState ->
+                if (permState.version != lastVersion) {
+                    lastVersion = permState.version
+                    val allCameras = EventCacheManager.getCamerasInMemory()
+                    _uiState.update { cur ->
+                        val baseCameras = allCameras.ifEmpty { cur.cameraList }
+                        cur.copy(
+                            cameraList = UserPermissionManager.filterPermittedCameras(baseCameras),
+                            recentEvents = UserPermissionManager.filterEventsByPermissions(cur.recentEvents, baseCameras)
+                                .take(MAX_RECENT_EVENTS)
+                        ).withRecomputedMetrics()
+                    }
+                    fetchDashboardData()
+                }
+            }
+        }
     }
 
     private data class RecentEventsFetchResult(
@@ -346,14 +366,18 @@ class HomeViewModel(
 
     /**
      * Khớp hoàn toàn với MobileHomePage.vue:
-     * Fetch theo batch 50 sự kiện (tối đa 3 lần), lọc các loại AI được bật (AiTypeHelper.isAiTypeEnabled),
+     * Fetch theo batch 50 sự kiện (tối đa 3 lần), lọc các loại AI và camera được phân quyền,
      * loại trùng ID và chỉ giữ đúng 5 sự kiện mới nhất (permittedEvents.slice(0, 5)).
      */
     private suspend fun fetchPermittedRecentEvents(
         fromSec: Long,
         toSec: Long,
-        serviceId: Int?
+        serviceId: Int?,
+        allCameras: List<CameraModel> = EventCacheManager.getCamerasInMemory()
     ): RecentEventsFetchResult {
+        if (!UserPermissionManager.canAccessEvents()) {
+            return RecentEventsFetchResult(events = emptyList(), anySuccessful = true)
+        }
         val permitted = mutableListOf<EventData>()
         val seenIds = HashSet<Int>()
         var lastId: Int? = null
@@ -381,8 +405,9 @@ class HomeViewModel(
             val data = resp.body() ?: emptyList()
             if (data.isEmpty()) break
 
+            val camerasForPerm = allCameras.ifEmpty { EventCacheManager.getCamerasInMemory() }
             for (ev in data) {
-                if (AiTypeHelper.isAiTypeEnabled(ev.type) && seenIds.add(ev.id)) {
+                if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) && seenIds.add(ev.id)) {
                     permitted.add(ev)
                     if (permitted.size >= MAX_RECENT_EVENTS) break
                 }
@@ -443,13 +468,17 @@ class HomeViewModel(
                     }
                     val nextState = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
+                        val allCameras = EventCacheManager.getCamerasInMemory().ifEmpty { cur.cameraList }
                         val mergedEvents = if (newEvents.isNotEmpty()) {
-                            (newEvents + cur.recentEvents)
-                                .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                            UserPermissionManager.filterEventsByPermissions(
+                                events = newEvents + cur.recentEvents,
+                                allCameras = allCameras
+                            )
                                 .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
                         } else {
-                            cur.recentEvents
+                            UserPermissionManager.filterEventsByPermissions(cur.recentEvents, allCameras)
+                                .take(MAX_RECENT_EVENTS)
                         }
                         cur.copy(
                             overviewStats = if (overviewResp?.isSuccessful == true) overviewResp.body() ?: cur.overviewStats else cur.overviewStats,
@@ -465,7 +494,7 @@ class HomeViewModel(
                         CachedHomeData(
                             overviewStats = nextState.overviewStats,
                             eventsByType = nextState.eventsByType,
-                            cameraList = nextState.cameraList,
+                            cameraList = EventCacheManager.getCamerasInMemory().ifEmpty { nextState.cameraList },
                             aiServices = nextState.aiServices,
                             recentEvents = nextState.recentEvents,
                             runningAiTasks = nextState.runningAiTasks,
@@ -523,16 +552,21 @@ class HomeViewModel(
                 if (cachedData != null) {
                     val updatedFromCache = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
+                        val rawCachedCameras = cachedData.cameraList
+                            .ifEmpty { EventCacheManager.getCamerasInMemory() }
+                            .ifEmpty { cur.cameraList }
+                        val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCachedCameras)
                         cur.copy(
                             isLoading = false,
                             error = null,
                             overviewStats = cachedData.overviewStats,
                             eventsByType = cachedData.eventsByType,
-                            cameraList = cachedData.cameraList.ifEmpty { cur.cameraList },
+                            cameraList = permittedCameras,
                             aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
-                            recentEvents = cachedData.recentEvents
-                                .filter { ev -> AiTypeHelper.isAiTypeEnabled(ev.type) }
-                                .take(MAX_RECENT_EVENTS),
+                            recentEvents = UserPermissionManager.filterEventsByPermissions(
+                                cachedData.recentEvents,
+                                rawCachedCameras
+                            ).take(MAX_RECENT_EVENTS),
                             runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else cur.runningAiTasks,
                             totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
                         ).withRecomputedMetrics()
@@ -567,18 +601,34 @@ class HomeViewModel(
                             )
                         }
                     }
-                    val recentEventsDeferred = async {
-                        fetchPermittedRecentEvents(
-                            fromSec = fromTime / 1000,
-                            toSec = toTime / 1000,
-                            serviceId = serviceId
-                        )
-                    }
                     val cameraDeferred = async {
                         safeApiCall { vmsApi.getCameraList() }
                     }
                     val aiServiceDeferred = async {
                         safeApiCall { eventApi.getAIServiceList() }
+                    }
+
+                    // Nếu tài khoản đang áp dụng phân quyền camera custom và RAM chưa có danh sách camera để map UUID,
+                    // đợi cameraDeferred xong trước khi lọc sự kiện để đảm bảo ngay lần tải đầu tiên lọc đúng camera UUID.
+                    if (UserPermissionManager.isCustomCameraPermission() &&
+                        EventCacheManager.getCamerasInMemory().isEmpty()
+                    ) {
+                        val preCamResp = cameraDeferred.await().getOrNull()
+                        if (preCamResp?.isSuccessful == true) {
+                            val preCamList = preCamResp.body() ?: emptyList()
+                            if (preCamList.isNotEmpty()) {
+                                EventCacheManager.cacheInMemory(cameras = preCamList, fromNetwork = true)
+                            }
+                        }
+                    }
+
+                    val recentEventsDeferred = async {
+                        fetchPermittedRecentEvents(
+                            fromSec = fromTime / 1000,
+                            toSec = toTime / 1000,
+                            serviceId = serviceId,
+                            allCameras = EventCacheManager.getCamerasInMemory()
+                        )
                     }
 
                     // Pre-warm danh sách hồ sơ khuôn mặt trong nền nếu chưa có để màn Chi tiết sự kiện mở 0ms
@@ -613,9 +663,12 @@ class HomeViewModel(
                         byTypeResponse.body() ?: emptyList()
                     } else _uiState.value.eventsByType
 
-                    val cameraList = if (cameraResponse?.isSuccessful == true) {
+                    val allCameraList = if (cameraResponse?.isSuccessful == true) {
                         cameraResponse.body() ?: emptyList()
-                    } else _uiState.value.cameraList
+                    } else {
+                        EventCacheManager.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
+                    }
+                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
 
                     val aiServices = if (aiServiceResponse?.isSuccessful == true) {
                         aiServiceResponse.body() ?: emptyList()
@@ -627,7 +680,7 @@ class HomeViewModel(
                     var totalTasks = 0
                     val wave1Alive = NetworkMonitor.isNetworkAvailable() &&
                         (overviewResponse?.isSuccessful == true || aiServiceResponse?.isSuccessful == true)
-                    if (wave1Alive) {
+                    if (wave1Alive && UserPermissionManager.canAccessEvents()) {
                         try {
                             val targetServices = if (serviceId != null) {
                                 aiServices.filter { it.id == serviceId }
@@ -672,7 +725,7 @@ class HomeViewModel(
                             if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                         }
                     }
-                    if (totalTasks == 0) {
+                    if (totalTasks == 0 && UserPermissionManager.canAccessEvents() && !UserPermissionManager.isCustomAiEventPermission()) {
                         val overviewMonitorCount = overviewStats
                             .find { it.label == "monitor-count" && it.tag == "all" }
                             ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
@@ -696,15 +749,18 @@ class HomeViewModel(
                         ?: cameraResult.exceptionOrNull()
                     val errorMsg = primaryFailure?.toUserFriendlyMessage()
 
-                    val finalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
+                    val rawFinalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
                         recentEvents
                     } else {
                         _uiState.value.recentEvents
                     }
+                    val finalRecentEvents = UserPermissionManager
+                        .filterEventsByPermissions(rawFinalRecentEvents, allCameraList)
+                        .take(MAX_RECENT_EVENTS)
 
                     EventCacheManager.cacheInMemory(
                         events = finalRecentEvents,
-                        cameras = cameraList,
+                        cameras = allCameraList,
                         aiServices = aiServices,
                         fromNetwork = cameraResponse?.isSuccessful == true
                     )
@@ -715,7 +771,7 @@ class HomeViewModel(
                             isRefreshing = false,
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,
-                            cameraList = cameraList,
+                            cameraList = permittedCameraList,
                             aiServices = aiServices,
                             recentEvents = finalRecentEvents,
                             runningAiTasks = runningTasks,
@@ -729,7 +785,7 @@ class HomeViewModel(
                         val newCachedData = CachedHomeData(
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,
-                            cameraList = cameraList,
+                            cameraList = allCameraList,
                             aiServices = aiServices,
                             recentEvents = finalRecentEvents,
                             runningAiTasks = runningTasks,
@@ -759,24 +815,33 @@ class HomeViewModel(
     }
 
     private fun HomeUiState.withRecomputedMetrics(): HomeUiState {
+        if (!UserPermissionManager.canAccessEvents()) {
+            return copy(totalDetectionsCount = 0L).withRecomputedCameraMetrics()
+        }
         val sumByType = eventsByType
             .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
             .sumOf { it.count.toString().toDoubleOrNull()?.toLong() ?: 0L }
         val totalDetections = if (sumByType > 0L) {
             sumByType
+        } else if (UserPermissionManager.isCustomAiEventPermission()) {
+            recentEvents.size.toLong()
         } else {
             overviewStats
                 .find { it.label == "event-count" && it.tag == "all" }
-                ?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
+                ?.count?.toString()?.toDoubleOrNull()?.toLong() ?: recentEvents.size.toLong()
         }
         return copy(totalDetectionsCount = totalDetections).withRecomputedCameraMetrics()
     }
 
     private fun HomeUiState.withRecomputedCameraMetrics(): HomeUiState {
-        val totalFromOverview = overviewStats
-            .find { it.label == "camera-count" && it.tag == "all" }
-            ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-        val totalCams = if (cameraList.isNotEmpty()) cameraList.size else totalFromOverview
+        val totalCams = if (UserPermissionManager.isCustomCameraPermission()) {
+            cameraList.size
+        } else {
+            val totalFromOverview = overviewStats
+                .find { it.label == "camera-count" && it.tag == "all" }
+                ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
+            if (cameraList.isNotEmpty()) cameraList.size else totalFromOverview
+        }
 
         val onlineCams = if (cameraList.isEmpty()) {
             totalCams

@@ -93,7 +93,10 @@ fun VideoFrameImage(
     }
 
     if (!isVideoFallback) {
-        val imageRequest = remember(url, targetWidthPx, targetHeightPx) {
+        var isImageError by remember(effectiveKey, url) {
+            mutableStateOf(effectiveKey.isNotEmpty() && VideoFrameCache.failedUrls.contains(effectiveKey))
+        }
+        val imageRequest = remember(url, effectiveKey, targetWidthPx, targetHeightPx) {
             if (url.isNullOrBlank()) {
                 null
             } else {
@@ -104,8 +107,8 @@ fun VideoFrameImage(
                     .allowHardware(true)
                     .allowRgb565(true)
                     .crossfade(false)
-                    .memoryCacheKey("${url}_${targetWidthPx}x${targetHeightPx}")
-                    .diskCacheKey(url)
+                    .memoryCacheKey("${effectiveKey}_${targetWidthPx}x${targetHeightPx}")
+                    .diskCacheKey(url.substringBefore('?'))
                     .build()
             }
         }
@@ -113,7 +116,7 @@ fun VideoFrameImage(
         Box(
             modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
-            if (imageRequest != null) {
+            if (imageRequest != null && !isImageError) {
                 coil.compose.AsyncImage(
                     model = imageRequest,
                     contentDescription = "Event Image",
@@ -126,6 +129,7 @@ fun VideoFrameImage(
                             isVideoFallback = true
                         } else if (effectiveKey.isNotEmpty()) {
                             VideoFrameCache.failedUrls.add(effectiveKey)
+                            isImageError = true
                         }
                     }
                 )

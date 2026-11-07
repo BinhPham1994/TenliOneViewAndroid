@@ -567,10 +567,16 @@ private fun hoverIndexOf(leftPx: Float, tabWidthPx: Float, itemCount: Int): Int 
 fun MainBottomNavigation(
     currentTab: MainTab,
     onTabClick: (MainTab) -> Unit,
-    onScrollToTop: (MainTab) -> Unit
+    onScrollToTop: (MainTab) -> Unit,
+    visibleTabs: List<MainTab>? = null
 ) {
+    val filteredItems = remember(visibleTabs) {
+        if (visibleTabs == null) MainNavItems
+        else MainNavItems.filter { it.tab in visibleTabs }
+    }
+    if (filteredItems.isEmpty()) return
     LiquidGlassBottomNavigation(
-        items = MainNavItems,
+        items = filteredItems,
         currentTab = currentTab,
         onTabClick = onTabClick,
         onScrollToTop = onScrollToTop
@@ -581,10 +587,16 @@ fun MainBottomNavigation(
 fun CameraDetailBottomNavigation(
     currentTab: CameraDetailTab,
     onTabClick: (CameraDetailTab) -> Unit,
-    onScrollToTop: (CameraDetailTab) -> Unit = {}
+    onScrollToTop: (CameraDetailTab) -> Unit = {},
+    visibleTabs: List<CameraDetailTab>? = null
 ) {
+    val filteredItems = remember(visibleTabs) {
+        if (visibleTabs == null) CameraDetailNavItems
+        else CameraDetailNavItems.filter { it.tab in visibleTabs }
+    }
+    if (filteredItems.isEmpty()) return
     LiquidGlassBottomNavigation(
-        items = CameraDetailNavItems,
+        items = filteredItems,
         currentTab = currentTab,
         onTabClick = onTabClick,
         onScrollToTop = onScrollToTop
@@ -612,6 +624,7 @@ private fun <T> LiquidGlassBottomNavigation(
     val scope = rememberCoroutineScope()
 
     // Đọc giá trị mới nhất trong gesture detector mà không phải khởi động lại pointerInput
+    val itemsState by rememberUpdatedState(items)
     val currentTabState by rememberUpdatedState(currentTab)
     val onTabClickState by rememberUpdatedState(onTabClick)
     val onScrollToTopState by rememberUpdatedState(onScrollToTop)
@@ -718,8 +731,9 @@ private fun <T> LiquidGlassBottomNavigation(
                                 val targetIdx = dragHoverIndex
                                 isDraggingNav = false
                                 dragHoverIndex = null
-                                if (targetIdx != null && targetIdx in items.indices) {
-                                    val targetTab = items[targetIdx].tab
+                                val currentItems = itemsState
+                                if (targetIdx != null && targetIdx in currentItems.indices) {
+                                    val targetTab = currentItems[targetIdx].tab
                                     if (targetTab == currentTabState) {
                                         onScrollToTopState(targetTab)
                                     } else {

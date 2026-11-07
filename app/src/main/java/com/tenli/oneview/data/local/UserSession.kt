@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import com.google.gson.Gson
 import com.tenli.oneview.model.network.UserData
+import com.tenli.oneview.model.network.UserPermissions
 import com.tenli.oneview.ui.utils.AppKeys
 
 /**
@@ -45,6 +46,28 @@ object UserSession {
         if (!userDataJson.isNullOrEmpty() && userData == null) {
             userData = runCatching { gson.fromJson(userDataJson, UserData::class.java) }.getOrNull()
         }
+        UserPermissionManager.syncFromUserSession()
+    }
+
+    @Synchronized
+    fun updateUserPermissions(
+        username: String,
+        fullName: String?,
+        isAdmin: Boolean,
+        permissions: UserPermissions?
+    ) {
+        val current = userData ?: return
+        val resolvedUsername = username.ifBlank { current.username ?: current.email.ifBlank { current.name } }
+        val updated = current.copy(
+            name = fullName ?: current.name,
+            email = resolvedUsername.ifBlank { current.email },
+            username = resolvedUsername,
+            isAdmin = isAdmin,
+            permissions = permissions
+        )
+        userData = updated
+        val prefs = runCatching { GlobalData.preferences }.getOrNull()
+        saveSession(prefs)
     }
 
     fun clear() {
@@ -54,10 +77,12 @@ object UserSession {
         domain = ""
         savedUsername = ""
         savedPassword = ""
+        UserPermissionManager.reset()
     }
 
     fun saveSession(prefs: SharedPreferences?) {
         val userDataJson = gson.toJson(this.userData)
         prefs?.edit { putString(AppKeys.USER_DATA_KEY, userDataJson) }
+        UserPermissionManager.syncFromUserSession()
     }
 }
