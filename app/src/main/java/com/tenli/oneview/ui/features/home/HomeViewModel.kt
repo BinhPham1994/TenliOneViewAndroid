@@ -23,6 +23,8 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
+import com.tenli.oneview.ui.features.event.permittedDistinct
+import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.NetworkMonitor
@@ -258,7 +260,7 @@ class HomeViewModel(
                 eventsByType = memCached.eventsByType,
                 cameraList = permittedCameras,
                 aiServices = services,
-                recentEvents = UserPermissionManager.filterEventsByPermissions(memCached.recentEvents, rawCameras)
+                recentEvents = memCached.recentEvents.permittedDistinct(rawCameras)
                     .take(MAX_RECENT_EVENTS),
                 runningAiTasks = memCached.runningAiTasks,
                 totalAiTasks = memCached.totalAiTasks
@@ -348,7 +350,7 @@ class HomeViewModel(
                         val baseCameras = allCameras.ifEmpty { cur.cameraList }
                         cur.copy(
                             cameraList = UserPermissionManager.filterPermittedCameras(baseCameras),
-                            recentEvents = UserPermissionManager.filterEventsByPermissions(cur.recentEvents, baseCameras)
+                            recentEvents = cur.recentEvents.permittedDistinct(baseCameras)
                                 .take(MAX_RECENT_EVENTS)
                         ).withRecomputedMetrics()
                     }
@@ -380,6 +382,7 @@ class HomeViewModel(
         }
         val permitted = mutableListOf<EventData>()
         val seenIds = HashSet<Int>()
+        val seenKeys = HashSet<String>()
         var lastId: Int? = null
         var attempts = 0
         var anySuccessful = false
@@ -407,14 +410,17 @@ class HomeViewModel(
 
             val camerasForPerm = allCameras.ifEmpty { EventCacheManager.getCamerasInMemory() }
             for (ev in data) {
-                if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) && seenIds.add(ev.id)) {
+                if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) &&
+                    seenIds.add(ev.id) &&
+                    seenKeys.add(ev.uniqueKey())
+                ) {
                     permitted.add(ev)
                     if (permitted.size >= MAX_RECENT_EVENTS) break
                 }
             }
 
             if (data.size < RECENT_BATCH_SIZE) break
-            lastId = data.last().id
+            lastId = data.lastOrNull()?.id ?: break
         }
 
         return RecentEventsFetchResult(
@@ -470,14 +476,14 @@ class HomeViewModel(
                         val cur = _uiState.value
                         val allCameras = EventCacheManager.getCamerasInMemory().ifEmpty { cur.cameraList }
                         val mergedEvents = if (newEvents.isNotEmpty()) {
-                            UserPermissionManager.filterEventsByPermissions(
-                                events = newEvents + cur.recentEvents,
-                                allCameras = allCameras
-                            )
+                            (newEvents + cur.recentEvents)
+                                .permittedDistinct(allCameras)
                                 .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
                         } else {
-                            UserPermissionManager.filterEventsByPermissions(cur.recentEvents, allCameras)
+                            cur.recentEvents
+                                .permittedDistinct(allCameras)
+                                .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
                         }
                         cur.copy(
@@ -563,10 +569,9 @@ class HomeViewModel(
                             eventsByType = cachedData.eventsByType,
                             cameraList = permittedCameras,
                             aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
-                            recentEvents = UserPermissionManager.filterEventsByPermissions(
-                                cachedData.recentEvents,
-                                rawCachedCameras
-                            ).take(MAX_RECENT_EVENTS),
+                            recentEvents = cachedData.recentEvents
+                                .permittedDistinct(rawCachedCameras)
+                                .take(MAX_RECENT_EVENTS),
                             runningAiTasks = if (cachedData.totalAiTasks > 0) cachedData.runningAiTasks else cur.runningAiTasks,
                             totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
                         ).withRecomputedMetrics()
@@ -754,8 +759,9 @@ class HomeViewModel(
                     } else {
                         _uiState.value.recentEvents
                     }
-                    val finalRecentEvents = UserPermissionManager
-                        .filterEventsByPermissions(rawFinalRecentEvents, allCameraList)
+                    val finalRecentEvents = rawFinalRecentEvents
+                        .permittedDistinct(allCameraList)
+                        .distinctBy { it.id }
                         .take(MAX_RECENT_EVENTS)
 
                     EventCacheManager.cacheInMemory(

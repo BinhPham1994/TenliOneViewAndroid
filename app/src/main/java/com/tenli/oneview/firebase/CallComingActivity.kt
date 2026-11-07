@@ -96,6 +96,7 @@ private const val EXTRA_TITLE = "TITLE"
 private const val EXTRA_BODY = "BODY"
 private const val EXTRA_URL = "URL"
 private const val EXTRA_EID = "EID"
+private const val EXTRA_NOTIFICATION_ID = "NOTIFICATION_ID"
 private const val EXTRA_EVENT_ID = "EVENT_ID"
 private const val EXTRA_FROM_CALL = "FROM_CALL"
 
@@ -117,14 +118,16 @@ private data class IncomingCall(
     val title: String,
     val body: String,
     val imageUrl: String?,
-    val eventId: String
+    val eventId: String,
+    val notificationId: Int = 0
 )
 
 private fun Intent.toIncomingCall() = IncomingCall(
     title = getStringExtra(EXTRA_TITLE) ?: "Cảnh báo an ninh",
     body = getStringExtra(EXTRA_BODY) ?: "Phát hiện sự kiện lạ",
     imageUrl = getStringExtra(EXTRA_URL),
-    eventId = getStringExtra(EXTRA_EID).orEmpty()
+    eventId = getStringExtra(EXTRA_EID).orEmpty(),
+    notificationId = getIntExtra(EXTRA_NOTIFICATION_ID, 0)
 )
 
 class CallComingActivity : ComponentActivity() {
@@ -158,8 +161,13 @@ class CallComingActivity : ComponentActivity() {
     /** singleInstance: cảnh báo mới đến khi màn đang mở → cập nhật nội dung và đếm lại thời gian chờ */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        val previous = call
+        val next = intent.toIncomingCall()
+        if (previous.eventId != next.eventId || previous.notificationId != next.notificationId) {
+            cancelCallNotification(previous.eventId, previous.notificationId)
+        }
         setIntent(intent)
-        call = intent.toIncomingCall()
+        call = next
         if (ringtone?.isPlaying != true) startRinging()
         scheduleTimeout()
     }
@@ -202,50 +210,60 @@ class CallComingActivity : ComponentActivity() {
             delay(CALL_TIMEOUT_MS)
             val current = call
             showMissedCallNotification(this@CallComingActivity, current.title, current.eventId)
-            closeCall(current.eventId)
+            closeCall(current.eventId, current.notificationId)
         }
     }
 
-    private fun declineCall() = closeCall(call.eventId)
+    private fun declineCall() = closeCall(call.eventId, call.notificationId)
 
     private fun acceptCall() {
-        val eventId = call.eventId
+        val current = call
         timeoutJob?.cancel()
         stopRinging()
-        cancelCallNotification(eventId)
-        startActivity(
-            Intent(this, MainActivity::class.java).apply {
-                putExtra(EXTRA_EVENT_ID, eventId)
-                putExtra(EXTRA_FROM_CALL, true)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            }
-        )
+        cancelCallNotification(current.eventId, current.notificationId)
+        runCatching {
+            startActivity(
+                Intent(this, MainActivity::class.java).apply {
+                    putExtra(EXTRA_EVENT_ID, current.eventId)
+                    putExtra(EXTRA_FROM_CALL, true)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+            )
+        }
         finish()
     }
 
-    private fun closeCall(eventId: String) {
+    private fun closeCall(eventId: String, notificationId: Int) {
         timeoutJob?.cancel()
         stopRinging()
         // Thông báo "cuộc gọi" đang reo là ongoing → phải huỷ thủ công khi kết thúc cuộc gọi
-        cancelCallNotification(eventId)
+        cancelCallNotification(eventId, notificationId)
         finishAndRemoveTask()
     }
 
-    /** Huỷ thông báo cuộc gọi (EventMessagingService đăng với id = eventId.hashCode()) */
-    private fun cancelCallNotification(eventId: String) {
-        if (eventId.isEmpty()) return
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(eventId.hashCode())
+    /** Huỷ thông báo cuộc gọi (EventMessagingService đăng với id = notificationId hoặc eventId.hashCode()) */
+    private fun cancelCallNotification(eventId: String, notificationId: Int = 0) {
+        runCatching {
+            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            if (notificationId != 0) {
+                notificationManager.cancel(notificationId)
+            }
+            if (eventId.isNotEmpty()) {
+                notificationManager.cancel(eventId.hashCode())
+            }
+        }
     }
 
     private fun setupWindowFlags() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
-            val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            keyguardManager.requestDismissKeyguard(this, null)
+            runCatching {
+                val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                keyguardManager?.requestDismissKeyguard(this, null)
+            }
         } else {
             @Suppress("DEPRECATION")
             window.addFlags(
@@ -615,7 +633,9 @@ private fun showMissedCallNotification(context: Context, title: String, eId: Str
         .setContentIntent(pendingIntent)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
-    notificationManager.notify(eId.hashCode() + 1, missedCallBuilder.build())
+    runCatching {
+        notificationManager.notify(eId.hashCode() + 1, missedCallBuilder.build())
+    }
 }
 
 @Composable

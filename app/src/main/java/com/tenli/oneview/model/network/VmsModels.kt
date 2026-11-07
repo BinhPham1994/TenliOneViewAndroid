@@ -4,11 +4,11 @@ import androidx.compose.runtime.Immutable
 
 @Immutable
 data class VMSServiceModel(
-    val id: Int,
-    val name: String,
-    val privateHost: String,
-    val publicHost: String,
-    val apiKey: String,
+    val id: Int = 0,
+    val name: String = "",
+    val privateHost: String = "",
+    val publicHost: String = "",
+    val apiKey: String = "",
     val extra: Map<String, Any>? = null
 )
 
@@ -86,21 +86,21 @@ data class VmsUserModel(
 )
 
 data class StorageStatusModel(
-    val id: Int,
-    val total: Long,
-    val used: Long,
-    val available: Long
+    val id: Int = 0,
+    val total: Long = 0L,
+    val used: Long = 0L,
+    val available: Long = 0L
 )
 
 @Immutable
 data class TimeRange(
-    val from: Long,
-    val to: Long
+    val from: Long = 0L,
+    val to: Long = 0L
 )
 
 @Immutable
 data class RecordSchedule(
-    val repeat: List<List<TimeRange>>
+    val repeat: List<List<TimeRange>> = emptyList()
 )
 
 @Immutable
@@ -111,7 +111,7 @@ data class Location(
 
 @Immutable
 data class CameraOnvifModel(
-    val ip: String,
+    val ip: String = "",
     val port: Any? = null,
     val model: String = "",
     val name: String? = null,
@@ -165,36 +165,36 @@ data class CameraExtra(
 
 @Immutable
 data class CameraModel(
-    val id: Int,
-    val name: String,
-    val main: String,
-    val sub: String,
-    val enableRecord: Boolean,
+    val id: Int = 0,
+    val name: String = "",
+    val main: String = "",
+    val sub: String = "",
+    val enableRecord: Boolean = false,
     val recordSchedule: RecordSchedule? = null,
     val enableSubRecord: Boolean = false,
     val subRecordSchedule: RecordSchedule? = null,
     val extra: CameraExtra? = null,
-    val vmsId: Int,
-    val cameraId: Int
+    val vmsId: Int = 0,
+    val cameraId: Int = 0
 )
 
 data class CameraGroupModel(
-    val id: Int,
-    val parentGroupId: Int,
-    val name: String,
-    val vmsId: Int,
+    val id: Int = 0,
+    val parentGroupId: Int = 0,
+    val name: String = "",
+    val vmsId: Int = 0,
     val extra: Map<String, Any>? = null
 )
 
 data class CameraInGroupModel(
-    val id: Int,
-    val cameraId: Int,
-    val groupId: Int
+    val id: Int = 0,
+    val cameraId: Int = 0,
+    val groupId: Int = 0
 )
 
 data class LiveStreamModel(
-    val cameraId: Int,
-    val channel: Int,
+    val cameraId: Int = 0,
+    val channel: Int = 0,
     val link: String = "",
     val videoCodec: String = "",
     val audioCodec: String = "",
@@ -203,8 +203,8 @@ data class LiveStreamModel(
 
 @Immutable
 data class VideoModel(
-    val time: String,
-    val videoLink: String,
+    val time: String = "",
+    val videoLink: String = "",
     val fallbackLinks: List<String>? = null,
     val imageLink: String = "",
     val thumbnailLink: String = "",
@@ -217,28 +217,28 @@ data class VideoModel(
 )
 
 data class ReportLinkModel(
-    val link: String
+    val link: String = ""
 )
 
 data class CameraImageLinkModel(
-    val link: String
+    val link: String = ""
 )
 
 // ==================== Auth ====================
 
 data class LogInModel(
-    val username: String,
-    val password: String
+    val username: String = "",
+    val password: String = ""
 )
 
 data class TokenModel(
-    val userId: Int,
-    val isAdmin: Boolean,
-    val token: String
+    val userId: Int = 0,
+    val isAdmin: Boolean = false,
+    val token: String = ""
 )
 
 data class ChangePasswordModel(
-    val userId: Int,
-    val oldPassword: String,
-    val newPassword: String
+    val userId: Int = 0,
+    val oldPassword: String = "",
+    val newPassword: String = ""
 )

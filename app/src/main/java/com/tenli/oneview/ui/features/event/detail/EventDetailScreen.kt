@@ -1416,7 +1416,9 @@ private fun shareEvent(context: Context, display: EventDetailDisplay, isEn: Bool
         putExtra(Intent.EXTRA_SUBJECT, subjectText)
         putExtra(Intent.EXTRA_TEXT, shareText)
     }
-    context.startActivity(Intent.createChooser(sendIntent, if (isEn) "Share event" else "Chia sẻ sự kiện"))
+    runCatching {
+        context.startActivity(Intent.createChooser(sendIntent, if (isEn) "Share event" else "Chia sẻ sự kiện"))
+    }
 }
 
 /** Ảnh minh chứng 48dp, chạm để phóng to trong popup (giới hạn kích thước giải mã theo popup) */

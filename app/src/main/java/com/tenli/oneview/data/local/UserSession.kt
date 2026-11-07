@@ -65,10 +65,12 @@ object UserSession {
         permissions: UserPermissions?
     ) {
         val current = userData ?: return
-        val resolvedUsername = username.ifBlank { current.username ?: current.email.ifBlank { current.name } }
+        val currentEmail = (current.email as String?).orEmpty()
+        val currentName = (current.name as String?).orEmpty()
+        val resolvedUsername = username.ifBlank { current.username ?: currentEmail.ifBlank { currentName } }
         val updated = current.copy(
-            name = fullName ?: current.name,
-            email = resolvedUsername.ifBlank { current.email },
+            name = fullName ?: currentName,
+            email = resolvedUsername.ifBlank { currentEmail },
             username = resolvedUsername,
             isAdmin = isAdmin,
             permissions = permissions

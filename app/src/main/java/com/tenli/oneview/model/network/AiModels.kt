@@ -3,11 +3,11 @@ package com.tenli.oneview.model.network
 // ==================== Monitor ====================
 
 data class Monitor(
-    val id: Int,
-    val name: String,
-    val type: String,
-    val cameraId: Int,
-    val enabled: Boolean,
+    val id: Int = 0,
+    val name: String = "",
+    val type: String = "",
+    val cameraId: Int = 0,
+    val enabled: Boolean = false,
     val param: Any? = null
 )
 
@@ -21,8 +21,8 @@ data class CameraMonitorExtra(
 // ==================== Profile Group ====================
 
 data class ProfileGroup(
-    val id: Int,
-    val name: String,
+    val id: Int = 0,
+    val name: String = "",
     val uuid: String = "",
     val type: String = "",
     val info: String = "",
@@ -37,9 +37,9 @@ data class ProfileGroupData(
 // ==================== Profile ====================
 
 data class Profile(
-    val id: Int,
-    val name: String,
-    val uuid: String,
+    val id: Int = 0,
+    val name: String = "",
+    val uuid: String = "",
     val numFace: Int = 0,
     val lastFaceId: Int = 0,
     val idCode: String? = null,

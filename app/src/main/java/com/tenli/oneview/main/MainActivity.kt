@@ -286,11 +286,15 @@ private fun StartupPermissionDialogs() {
     }
 
     val dismiss = { activeDialog = StartupPermissionDialog.NONE }
-    val openAppDetails = {
+    val openAppDetails: () -> Unit = {
         dismiss()
-        context.startActivity(
-            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
-        )
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
+            )
+        }.onFailure {
+            runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+        }
     }
     val strongTextColor = MaterialTheme.appColors.textStrong
 
@@ -317,9 +321,13 @@ private fun StartupPermissionDialogs() {
                 if (isChinesePhone) {
                     PermissionUtils.openManufacturerPermissions(context)
                 } else {
-                    context.startActivity(
-                        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:${context.packageName}".toUri())
-                    )
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:${context.packageName}".toUri())
+                        )
+                    }.onFailure {
+                        openAppDetails()
+                    }
                 }
             },
             onDismiss = dismiss

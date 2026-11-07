@@ -7,14 +7,14 @@ import com.google.gson.annotations.SerializedName
 
 @Immutable
 data class AIServiceModel(
-    val id: Int,
-    val name: String,
-    val type: String,
-    val privateHost: String,
-    val publicHost: String,
-    val mediaSyncType: String,
-    val sharedMediaDirectory: String,
-    val apiKey: String,
+    val id: Int = 0,
+    val name: String = "",
+    val type: String = "",
+    val privateHost: String = "",
+    val publicHost: String = "",
+    val mediaSyncType: String = "",
+    val sharedMediaDirectory: String = "",
+    val apiKey: String = "",
     val extra: Map<String, Any>? = null
 )
 
@@ -182,12 +182,12 @@ data class EventDataDetail(
 
 @Immutable
 data class EventData(
-    val id: Int,
-    val serviceId: Int,
+    val id: Int = 0,
+    val serviceId: Int = 0,
     val originId: Int = 0,
     val cameraId: Any? = null,
-    val type: String,
-    val time: Double,
+    val type: String = "",
+    val time: Double = 0.0,
     val isConfirmed: Boolean = true,
     val name: String? = null,
     val cameraName: String? = null,
@@ -202,61 +202,61 @@ data class EventData(
 // ==================== Search ====================
 
 data class ParamPlateModel(
-    val value: String
+    val value: String = ""
 )
 
 data class DataSearchPlateModel(
-    val type: String,
-    val confidence: Double,
-    val param: ParamPlateModel
+    val type: String = "",
+    val confidence: Double = 0.0,
+    val param: ParamPlateModel = ParamPlateModel()
 )
 
 // ==================== Confirm ====================
 
 data class Confirm(
-    val isConfirmed: Boolean
+    val isConfirmed: Boolean = true
 )
 
 // ==================== Face ====================
 
 data class Face(
-    val id: Int,
-    val profileId: Int
+    val id: Int = 0,
+    val profileId: Int = 0
 )
 
 // ==================== Rule ====================
 
 data class TargetModel(
-    val type: String,
-    val value: String,
+    val type: String = "",
+    val value: String = "",
     val enabled: Boolean? = null
 )
 
 data class ParamActionModel(
-    val targets: List<TargetModel>,
-    val variables: ActionVariables,
+    val targets: List<TargetModel> = emptyList(),
+    val variables: ActionVariables = ActionVariables(),
     val imageBase64: String? = null
 )
 
 data class ActionVariables(
-    val publicDomain: String,
+    val publicDomain: String = "",
     val faceName: String? = null,
     val scenarioName: String? = null
 )
 
 data class ActionModel(
-    val action: String,
-    val param: ParamActionModel
+    val action: String = "",
+    val param: ParamActionModel = ParamActionModel()
 )
 
 data class ConditionModel(
-    val type: String,
-    val op: String,
-    val expected: Any,  // String hoặc List<Int> trong TS
-    val similarity: Double
+    val type: String = "",
+    val op: String = "",
+    val expected: Any = "",  // String hoặc List<Int> trong TS
+    val similarity: Double = 0.0
 )
 
 data class RuleObjectModel(
-    val conditions: List<ConditionModel>,
-    val actions: List<ActionModel>
+    val conditions: List<ConditionModel> = emptyList(),
+    val actions: List<ActionModel> = emptyList()
 )

@@ -290,8 +290,11 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
             is CameraTreeNode.GroupNode -> {
                 var targetGroup: CameraTreeNode.GroupNode = node
                 val targetCount = count(targetGroup)
+                val visited = HashSet<String>()
+                visited.add(targetGroup.key)
                 while (true) {
                     val parentKey = parentGroupKeyByNodeKey[targetGroup.key] ?: break
+                    if (!visited.add(parentKey)) break
                     val parentNode = nodeByKey[parentKey] as? CameraTreeNode.GroupNode ?: break
                     if (count(parentNode) == targetCount) {
                         targetGroup = parentNode
@@ -364,7 +367,7 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
             )
             if (hasSubGroups && isExpanded) walkGroups(subGroups, 1)
         }
-        return rows
+        return rows.distinctBy { it.key }
     }
 }
 
@@ -508,13 +511,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val treeData = mutableListOf<CameraTreeNode>()
             val groupMapData = mutableMapOf<String, CameraTreeNode.GroupNode>()
 
-            val fullVmsList = mutableListOf(
-                VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")
-            )
-            fullVmsList.addAll(vmsList)
+            val fullVmsList = (
+                listOf(VMSServiceModel(id = 0, name = "VMS Local", privateHost = "", publicHost = "", apiKey = "")) +
+                    vmsList
+                ).distinctBy { it.id }
 
-            val camerasByVms = permittedCameraList.groupBy { it.vmsId }
-            val groupsByVms = groupList.groupBy { it.vmsId }
+            val camerasByVms = permittedCameraList.distinctBy { it.id }.groupBy { it.vmsId }
+            val groupsByVms = groupList.distinctBy { "${it.vmsId}_${it.id}" }.groupBy { it.vmsId }
             val cameraInGroupByVms = mutableMapOf<Int, MutableList<CameraInGroupModel>>()
             val cameraById = permittedCameraList.associateBy { it.id }
 
@@ -2632,7 +2635,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         cameraEventPaginateJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isPaginatingCameraEvents = true) }
             try {
-                val startId = lastCameraEventRawId ?: state.cameraEvents.last().id
+                val startId = lastCameraEventRawId ?: state.cameraEvents.lastOrNull()?.id ?: return@launch
                 val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(state.cameraEventTimeFilter)
                 val batchResult = fetchPermittedCameraEventBatch(
                     startLastId = startId,

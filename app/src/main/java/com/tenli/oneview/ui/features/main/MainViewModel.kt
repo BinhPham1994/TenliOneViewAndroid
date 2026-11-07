@@ -79,6 +79,18 @@ class MainViewModel(
     init {
         UserPermissionManager.syncFromUserSession()
         viewModelScope.launch {
+            var lastPermVersion = UserPermissionManager.permissionState.value.version
+            UserPermissionManager.permissionState.collect { permState ->
+                if (permState.version != lastPermVersion) {
+                    lastPermVersion = permState.version
+                    val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                    _notificationConfigState.update { state ->
+                        state.copy(aiModules = buildAiModuleConfigs(snapshot))
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
             var wasOffline = false
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
@@ -286,6 +298,10 @@ class MainViewModel(
         notificationLoadJob?.cancel()
         notificationLoadJob = viewModelScope.launch {
             try {
+                // Đồng bộ lại quyền mới nhất của user từ server để danh sách bài AI luôn khớp phân quyền hiện tại
+                withContext(Dispatchers.IO) {
+                    runCatching { UserPermissionManager.fetchAndApplyPermissions() }
+                }
                 logInfo {
                     "[TẢI CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | hasCachedPref=$hasCachedPref, cachedEnabled=$cachedEnabled | ${currentAccountDebugInfo()}"
                 }

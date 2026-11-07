@@ -158,9 +158,11 @@ fun VideoFrameImage(
             }
         }
 
-        if (bitmap != null) {
+        val validBitmap = bitmap?.takeIf { !it.isRecycled }
+        if (validBitmap != null) {
+            val imageBitmap = remember(validBitmap) { validBitmap.asImageBitmap() }
             Image(
-                bitmap = bitmap!!.asImageBitmap(),
+                bitmap = imageBitmap,
                 contentDescription = "Video Frame",
                 contentScale = contentScale,
                 modifier = modifier

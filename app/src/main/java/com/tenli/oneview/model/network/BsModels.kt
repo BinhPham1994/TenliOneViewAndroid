@@ -41,7 +41,7 @@ data class BsProfileGroupConfig(
 data class BsProfileGroupModel(
     val id: Int? = null,
     val uuid: String? = null,
-    val name: String,
+    val name: String = "",
     val description: String? = null,
     val info: Any? = null,
     @SerializedName("created_at")
@@ -67,7 +67,7 @@ data class BsProfileConfig(
 data class BsProfileModel(
     val id: Int? = null,
     val uuid: String? = null,
-    val name: String,
+    val name: String = "",
     val idCode: String? = null,
     @SerializedName("id_code")
     val idCodeSnake: String? = null,
@@ -110,16 +110,16 @@ data class TaskConfigModel(
 // ==================== VMS Event Statistics ====================
 
 data class VmsCountOverviewModel(
-    val label: String,
-    val tag: String,
-    val count: Double,
+    val label: String = "",
+    val tag: String = "",
+    val count: Double = 0.0,
     @SerializedName("service_id", alternate = ["serviceId"])
     val serviceId: String? = null
 )
 
 data class VmsEventCountByTypeModel(
-    val type: String,
-    val count: Int,
+    val type: String = "",
+    val count: Int = 0,
     @SerializedName("min_time")
     val minTime: Double? = null,
     @SerializedName("max_time")

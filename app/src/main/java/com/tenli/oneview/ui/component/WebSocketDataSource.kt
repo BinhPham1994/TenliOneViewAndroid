@@ -46,14 +46,18 @@ class WebSocketDataSource(
         val port = uri?.port ?: -1
         val origin = if (host.isNotEmpty()) "$scheme://$host${if (port != -1) ":$port" else ""}" else ""
         
-        val requestBuilder = Request.Builder()
-            .url(urlStr)
-            .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36")
-        if (origin.isNotEmpty()) {
-            requestBuilder.addHeader("Origin", origin)
+        val request = try {
+            val requestBuilder = Request.Builder()
+                .url(urlStr)
+                .addHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36")
+            if (origin.isNotEmpty()) {
+                requestBuilder.addHeader("Origin", origin)
+            }
+            requestBuilder.build()
+        } catch (e: Exception) {
+            isOpen = false
+            throw IOException("Invalid WebSocket URL: $urlStr", e)
         }
-        
-        val request = requestBuilder.build()
         dataQueue.clear()
         currentBuffer = null
         currentBufferPosition = 0
@@ -62,36 +66,41 @@ class WebSocketDataSource(
         
         transferInitializing(dataSpec)
 
-        webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-            override fun onOpen(webSocket: WebSocket, response: Response) {
-                if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Opened")
-            }
-            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                if (isOpen) {
-                    val chunk = bytes.toByteArray()
-                    if (!dataQueue.offer(chunk)) {
-                        dataQueue.poll()
-                        dataQueue.offer(chunk)
-                    }
-                } else {
-                    // Nếu player đã đóng mà server vẫn đẩy dữ liệu video xuống, ngắt ngay socket để tránh tốn băng thông & nóng máy
-                    runCatching { webSocket.cancel() }
+        try {
+            webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Opened")
                 }
-            }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
-                isOpen = false
-                dataQueue.clear()
-                dataQueue.offer(ByteArray(0)) // Unblock read
-            }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
-                isOpen = false
-                error = IOException("WebSocket failure", t)
-                dataQueue.clear()
-                dataQueue.offer(ByteArray(0)) // Unblock read
-            }
-        })
+                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    if (isOpen) {
+                        val chunk = bytes.toByteArray()
+                        if (!dataQueue.offer(chunk)) {
+                            dataQueue.poll()
+                            dataQueue.offer(chunk)
+                        }
+                    } else {
+                        // Nếu player đã đóng mà server vẫn đẩy dữ liệu video xuống, ngắt ngay socket để tránh tốn băng thông & nóng máy
+                        runCatching { webSocket.cancel() }
+                    }
+                }
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
+                    isOpen = false
+                    dataQueue.clear()
+                    dataQueue.offer(ByteArray(0)) // Unblock read
+                }
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
+                    isOpen = false
+                    error = IOException("WebSocket failure", t)
+                    dataQueue.clear()
+                    dataQueue.offer(ByteArray(0)) // Unblock read
+                }
+            })
+        } catch (e: Exception) {
+            isOpen = false
+            throw IOException("Failed to initialize WebSocket", e)
+        }
         
         transferStarted(dataSpec)
         return C.LENGTH_UNSET.toLong()
@@ -100,12 +109,13 @@ class WebSocketDataSource(
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
         if (length == 0) return 0
         
-        if (error != null) throw error!!
+        error?.let { throw it }
 
-        while (currentBuffer == null || currentBufferPosition >= currentBuffer!!.size) {
+        var buf = currentBuffer
+        while (buf == null || currentBufferPosition >= buf.size) {
             try {
-                currentBuffer = dataQueue.poll(15, java.util.concurrent.TimeUnit.SECONDS)
-                if (currentBuffer == null) {
+                val nextBuffer = dataQueue.poll(15, java.util.concurrent.TimeUnit.SECONDS)
+                if (nextBuffer == null) {
                     if (!isOpen) {
                         return C.RESULT_END_OF_INPUT
                     } else {
@@ -113,18 +123,20 @@ class WebSocketDataSource(
                     }
                 }
                 currentBufferPosition = 0
-                if (error != null) throw error!!
-                if (currentBuffer!!.isEmpty() && !isOpen) {
+                error?.let { throw it }
+                if (nextBuffer.isEmpty() && !isOpen) {
                     return C.RESULT_END_OF_INPUT
                 }
+                buf = nextBuffer
+                currentBuffer = nextBuffer
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
-                return 0
+                return C.RESULT_END_OF_INPUT
             }
         }
         
-        val bytesToCopy = Math.min(length, currentBuffer!!.size - currentBufferPosition)
-        System.arraycopy(currentBuffer!!, currentBufferPosition, buffer, offset, bytesToCopy)
+        val bytesToCopy = Math.min(length, buf.size - currentBufferPosition)
+        System.arraycopy(buf, currentBufferPosition, buffer, offset, bytesToCopy)
         currentBufferPosition += bytesToCopy
         
         bytesTransferred(bytesToCopy)

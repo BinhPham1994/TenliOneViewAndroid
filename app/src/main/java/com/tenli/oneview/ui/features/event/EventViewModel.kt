@@ -597,7 +597,7 @@ class EventViewModel(
         paginateJob = viewModelScope.launch {
             _uiState.update { it.copy(isPaginating = true, error = null) }
             try {
-                val startId = lastFetchedRawId ?: currentState.events.last().id
+                val startId = lastFetchedRawId ?: currentState.events.lastOrNull()?.id ?: return@launch
                 val (from, to) = getTimeRange(currentState.selectedFilter)
                 val batchResult = fetchPermittedEventBatch(
                     startLastId = startId,

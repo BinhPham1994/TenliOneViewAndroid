@@ -48,8 +48,8 @@ object UserPermissionManager {
     private fun resolveUsername(userData: UserData?): String {
         if (userData == null) return ""
         return (userData.username?.takeIf { it.isNotBlank() }
-            ?: userData.email.takeIf { it.isNotBlank() }
-            ?: userData.name).trim()
+            ?: (userData.email as String?)?.takeIf { it.isNotBlank() }
+            ?: (userData.name as String?).orEmpty()).trim()
     }
 
     fun isAdmin(userData: UserData? = UserSession.userData): Boolean {

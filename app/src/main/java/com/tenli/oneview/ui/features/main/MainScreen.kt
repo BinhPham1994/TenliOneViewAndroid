@@ -887,11 +887,11 @@ fun SettingScreen(
                             icon = LucideIcons.Info,
                             iconBackground = colors.accent,
                             label = stringResource(id = R.string.setting_support),
-                            onClick = { uriHandler.openUri(SUPPORT_URL) },
+                            onClick = { runCatching { uriHandler.openUri(SUPPORT_URL) } },
                             modifier = Modifier.weight(1f)
                         )
                     }
-                    Spacer(modifier = Modifier.height(spacing.space8))
+                    Spacer(modifier = Modifier.height(spacing.space18))
                 }
             }
 
@@ -911,7 +911,7 @@ fun SettingScreen(
                         onClick = onOpenAbout
                     )
                 }
-                Spacer(modifier = Modifier.height(spacing.space8))
+                Spacer(modifier = Modifier.height(spacing.space18))
             }
 
             // Section: Giao diện
@@ -932,7 +932,7 @@ fun SettingScreen(
                         onClick = { showThemeSheet = true }
                     )
                 }
-                Spacer(modifier = Modifier.height(spacing.space8))
+                Spacer(modifier = Modifier.height(spacing.space18))
             }
 
             // Section: Tài khoản
@@ -1153,7 +1153,7 @@ private fun SettingsSection(
     Column(modifier = Modifier.widthIn(max = spacing.contentMaxWidth).fillMaxWidth()) {
         SettingsSectionHeader(
             text = title,
-            modifier = Modifier.padding(start = spacing.space14, end = spacing.space10, top = spacing.space2, bottom = spacing.space6)
+            modifier = Modifier.padding(start = spacing.space14, end = spacing.space10, bottom = spacing.space6)
         )
         SettingsGroupCard(modifier = groupModifier, content = content)
     }
@@ -1382,7 +1382,7 @@ private fun MobileNotificationConfigScreen(
                         .navigationBarsPadding()
                         .padding(spacing.space10)
                 ) {
-                    val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space10)
+                    val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space6)
 
                     // 1. Device Permission Status Card (Thông báo + Hiển thị cuộc gọi trên ứng dụng khác)
                     SettingsSectionHeader(
@@ -1394,7 +1394,7 @@ private fun MobileNotificationConfigScreen(
                             NotificationSettingRow(
                                 icon = LucideIcons.CheckCircle,
                                 iconColor = colors.success,
-                                title = if (isEn) "Notification permission granted" else "Đã cấp quyền thông báo",
+                                title = if (isEn) "Notification permission" else "Quyền thông báo",
                                 subtitle = if (isEn) "This device is ready to receive alerts." else "Thiết bị này đã sẵn sàng nhận cảnh báo."
                             ) {
                                 StatusChip(
@@ -1406,7 +1406,7 @@ private fun MobileNotificationConfigScreen(
                             NotificationSettingRow(
                                 icon = LucideIcons.Bell,
                                 iconColor = colors.warning,
-                                title = if (isEn) "Permission not granted on device" else "Chưa cấp quyền thông báo",
+                                title = if (isEn) "Notification permission" else "Quyền thông báo",
                                 subtitle = if (isEn) {
                                     "Notification permission is required to receive alerts for new events."
                                 } else {
@@ -1430,7 +1430,7 @@ private fun MobileNotificationConfigScreen(
                             NotificationSettingRow(
                                 icon = LucideIcons.PhoneCall,
                                 iconColor = colors.success,
-                                title = if (isEn) "Display over other apps" else "Quyền hiển thị cuộc gọi khẩn cấp",
+                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
                                 subtitle = if (isEn) {
                                     "Allows incoming call alerts to pop up over other apps."
                                 } else {
@@ -1446,7 +1446,7 @@ private fun MobileNotificationConfigScreen(
                             NotificationSettingRow(
                                 icon = LucideIcons.PhoneCall,
                                 iconColor = colors.warning,
-                                title = if (isEn) "Display over other apps" else "Quyền hiển thị cuộc gọi khẩn cấp",
+                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
                                 subtitle = if (isEn) {
                                     "Required to pop up the incoming call screen when the app is in background."
                                 } else {
@@ -1462,7 +1462,7 @@ private fun MobileNotificationConfigScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(spacing.space10))
+                    Spacer(modifier = Modifier.height(spacing.space18))
 
                     // 2. System General Setting matching MobileNotificationConfigModal.vue
                     SettingsSectionHeader(
@@ -1519,7 +1519,7 @@ private fun MobileNotificationConfigScreen(
                             label = "aiModulesChevron"
                         )
 
-                        Spacer(modifier = Modifier.height(spacing.space10))
+                        Spacer(modifier = Modifier.height(spacing.space18))
 
                         SettingsSectionHeader(
                             text = if (isEn) "AI Event Alert Configuration" else "Cấu hình thông báo theo bài AI",
@@ -1765,7 +1765,6 @@ private fun AiNotifySummaryBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.controlBg.copy(alpha = 0.55f))
             .padding(horizontal = spacing.space14, vertical = spacing.space10),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(spacing.space6)
@@ -1775,17 +1774,15 @@ private fun AiNotifySummaryBar(
             text = if (isEn) "$callCount Call" else "$callCount Cuộc gọi",
             tint = colors.error
         )
-        if (offCount > 0) {
-            AiSummaryBadge(
-                icon = null,
-                text = if (isEn) "$offCount Off" else "$offCount Tắt",
-                tint = colors.textMuted
-            )
-        }
         AiSummaryBadge(
             icon = LucideIcons.Bell,
             text = if (isEn) "$pushCount Push" else "$pushCount Thông báo",
             tint = colors.accent
+        )
+        AiSummaryBadge(
+            icon = LucideIcons.BellOff,
+            text = if (isEn) "$offCount Off" else "$offCount Tắt",
+            tint = if (colors.isDark) colors.textPlaceholder else colors.textMuted
         )
     }
 }
@@ -1797,10 +1794,11 @@ private fun AiSummaryBadge(
     tint: Color
 ) {
     val spacing = MaterialTheme.spacing
+    val contentColor = MaterialTheme.appColors.onAccent
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(spacing.radiusTiny))
-            .background(tint.copy(alpha = 0.12f))
+            .background(tint)
             .padding(horizontal = spacing.space8, vertical = spacing.space4),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1808,7 +1806,7 @@ private fun AiSummaryBadge(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = tint,
+                tint = contentColor,
                 modifier = Modifier.size(spacing.iconTiny)
             )
             Spacer(modifier = Modifier.width(spacing.space4))
@@ -1817,7 +1815,7 @@ private fun AiSummaryBadge(
             text = text,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
-            color = tint
+            color = contentColor
         )
     }
 }
@@ -1833,9 +1831,6 @@ private fun AiModuleNotifyRow(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val badgeColor = remember(config.sensorType) {
-        AiTypeHelper.getAiColor(config.sensorType)
-    }
     val isInteractive = masterEnabled
 
     val subtitleText = when {
@@ -1864,18 +1859,6 @@ private fun AiModuleNotifyRow(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconBadge(
-                icon = if (config.enabled && config.alarmMode == AiAlarmMode.Call) {
-                    LucideIcons.PhoneCall
-                } else {
-                    LucideIcons.Bell
-                },
-                backgroundColor = if (config.enabled) badgeColor else colors.textSubtle,
-                size = spacing.iconButton,
-                iconSize = spacing.iconSmallMedium,
-                cornerRadius = spacing.radiusSmall
-            )
-            Spacer(modifier = Modifier.width(spacing.space12))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (isEn) config.labelEn else config.labelVi,
@@ -2124,6 +2107,7 @@ private fun NotificationSettingRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground
             )
             if (subtitle != null) {

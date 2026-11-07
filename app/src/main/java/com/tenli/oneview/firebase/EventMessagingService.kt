@@ -307,6 +307,7 @@ class EventMessagingService : FirebaseMessagingService() {
             putExtra("BODY", body)
             putExtra("URL", url)
             putExtra("EID", eId)
+            putExtra("NOTIFICATION_ID", notificationId)
         }
         val pendingIntentOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ActivityOptions.makeBasic()

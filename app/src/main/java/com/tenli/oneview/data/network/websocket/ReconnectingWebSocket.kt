@@ -81,15 +81,20 @@ abstract class ReconnectingWebSocket(
             rawUrl = urlStr
             val finalUrl = appendTokenToUrl(protocolUrl, preserveExistingToken = preserveExistingUrlToken)
             if (BuildConfig.DEBUG) Log.d(logTag, "Connecting: $protocolUrl")
-            val request = Request.Builder().url(finalUrl).build()
-            webSocket = client.newWebSocket(request, Listener())
+            try {
+                val request = Request.Builder().url(finalUrl).build()
+                webSocket = client.newWebSocket(request, Listener())
+            } catch (e: Exception) {
+                isConnecting = false
+                if (BuildConfig.DEBUG) Log.w(logTag, "Failed to open WebSocket: ${e.message}")
+            }
         }
     }
 
     fun send(data: Map<String, Any>) {
         val ws = webSocket
         if (isConnected && ws != null) {
-            ws.send(gson.toJson(data))
+            runCatching { ws.send(gson.toJson(data)) }
         }
     }
 

@@ -575,7 +575,7 @@ class EventDetailViewModel(
                     val events = UserPermissionManager.filterEventsByPermissions(
                         response.body() ?: emptyList(),
                         camerasForPerm
-                    )
+                    ).distinctBy { it.uniqueKey() }
                     _uiState.update { it.copy(licensePlateEvents = events, relatedPlatesLoading = false) }
                 } else {
                     _uiState.update { it.copy(relatedPlatesLoading = false) }
