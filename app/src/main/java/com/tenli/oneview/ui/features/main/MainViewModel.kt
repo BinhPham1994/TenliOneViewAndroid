@@ -487,7 +487,7 @@ class MainViewModel(
             )
         }
 
-        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread (tự động sắp xếp lại theo thứ tự ưu tiên: Cuộc gọi -> Tắt -> Thông báo)
+        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread (giữ nguyên vị trí các bài AI)
         saveNotificationSettingsCache(optimisticModel)
         _notificationConfigState.update { state ->
             state.copy(
@@ -544,25 +544,13 @@ class MainViewModel(
         }.getOrNull()
     }
 
-    /**
-     * Thứ tự ưu tiên hiển thị bài AI:
-     * 1. Cuộc gọi (`enabled = true`, `alarmMode = Call`) -> 0
-     * 2. Tắt thông báo (`enabled = false`) -> 1
-     * 3. Thông báo đẩy (`enabled = true`, `alarmMode = Push`) -> 2
-     */
-    private fun aiModuleSortPriority(item: AiModuleNotifyConfig): Int = when {
-        item.enabled && item.alarmMode == AiAlarmMode.Call -> 0
-        !item.enabled -> 1
-        else -> 2
-    }
-
     private fun buildAiModuleConfigs(
         settings: UserNotificationSettingsModel?
     ): List<AiModuleNotifyConfig> {
         val overrides = settings?.overrides
-        return AiTypeHelper.activeModules.mapIndexed { index, mod ->
+        return AiTypeHelper.activeModules.map { mod ->
             val (enabled, modeStr) = AiTypeHelper.extractModuleNotifyConfig(mod, overrides)
-            index to AiModuleNotifyConfig(
+            AiModuleNotifyConfig(
                 moduleKey = mod.key,
                 sensorType = mod.sensorType,
                 labelVi = mod.labelVi,
@@ -571,10 +559,7 @@ class MainViewModel(
                 enabled = enabled,
                 alarmMode = AiAlarmMode.fromApiValue(modeStr)
             )
-        }.sortedWith(
-            compareBy<Pair<Int, AiModuleNotifyConfig>> { (_, item) -> aiModuleSortPriority(item) }
-                .thenBy { (originalIndex, _) -> originalIndex }
-        ).map { (_, item) -> item }
+        }
     }
 
     private fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {

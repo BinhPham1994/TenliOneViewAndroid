@@ -31,11 +31,13 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -95,6 +97,7 @@ import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
@@ -1489,12 +1492,56 @@ private fun MobileNotificationConfigScreen(
                     // 3. Cấu hình chi tiết theo từng bài AI (overrides.event_types) - Gom gọn trong 1 Card + Thu gọn/Mở rộng
                     if (state.aiModules.isNotEmpty()) {
                         var isAiModulesExpanded by remember { mutableStateOf(false) }
-                        val previewCount = 3
-                        val primaryModules = remember(state.aiModules) {
-                            state.aiModules.take(previewCount)
+                        var selectedFilter by remember { mutableStateOf<AiNotifyFilter?>(null) }
+                        var isSearchExpanded by remember { mutableStateOf(false) }
+                        var searchQuery by remember { mutableStateOf("") }
+                        val focusManager = LocalFocusManager.current
+                        val keyboardController = LocalSoftwareKeyboardController.current
+                        val searchFocusRequester = remember { FocusRequester() }
+
+                        LaunchedEffect(isSearchExpanded) {
+                            if (isSearchExpanded) {
+                                delay(32L)
+                                runCatching { searchFocusRequester.requestFocus() }
+                                keyboardController?.show()
+                            } else {
+                                focusManager.clearFocus()
+                                keyboardController?.hide()
+                            }
                         }
-                        val extraModules = remember(state.aiModules) {
-                            state.aiModules.drop(previewCount)
+
+                        BackHandler(enabled = isSearchExpanded) {
+                            searchQuery = ""
+                            isSearchExpanded = false
+                        }
+
+                        val previewCount = 3
+                        val normalizedQuery = remember(searchQuery) {
+                            MonitorViewModel.normalizeVietnameseText(searchQuery)
+                        }
+                        val filteredModules = remember(state.aiModules, selectedFilter, normalizedQuery) {
+                            val byStatus = when (selectedFilter) {
+                                null -> state.aiModules
+                                AiNotifyFilter.Call -> state.aiModules.filter { it.enabled && it.alarmMode == AiAlarmMode.Call }
+                                AiNotifyFilter.Push -> state.aiModules.filter { it.enabled && it.alarmMode == AiAlarmMode.Push }
+                                AiNotifyFilter.Off -> state.aiModules.filter { !it.enabled }
+                            }
+                            if (normalizedQuery.isEmpty()) {
+                                byStatus
+                            } else {
+                                byStatus.filter { mod ->
+                                    MonitorViewModel.normalizeVietnameseText(mod.labelVi).contains(normalizedQuery) ||
+                                        MonitorViewModel.normalizeVietnameseText(mod.labelEn).contains(normalizedQuery) ||
+                                        mod.moduleKey.lowercase().contains(normalizedQuery)
+                                }
+                            }
+                        }
+                        val isSearchingByText = normalizedQuery.isNotEmpty()
+                        val primaryModules = remember(filteredModules, isSearchingByText) {
+                            if (isSearchingByText) filteredModules else filteredModules.take(previewCount)
+                        }
+                        val extraModules = remember(filteredModules, isSearchingByText) {
+                            if (isSearchingByText) emptyList() else filteredModules.drop(previewCount)
                         }
                         val callCount = remember(state.aiModules) {
                             state.aiModules.count { it.enabled && it.alarmMode == AiAlarmMode.Call }
@@ -1524,12 +1571,42 @@ private fun MobileNotificationConfigScreen(
                                 .alpha(if (state.pushEnabled) 1f else 0.5f)
                         ) {
                             SettingsGroupCard {
-                                // Thanh tóm tắt trạng thái các bài AI ở đầu thẻ
+                                // Thanh tóm tắt trạng thái các bài AI ở đầu thẻ + nút tìm kiếm theo tên bài AI bên phải
                                 AiNotifySummaryBar(
                                     isEn = isEn,
                                     pushCount = pushCount,
                                     callCount = callCount,
-                                    offCount = offCount
+                                    offCount = offCount,
+                                    selectedFilter = selectedFilter,
+                                    onFilterClick = { clickedFilter ->
+                                        selectedFilter = if (selectedFilter == clickedFilter) null else clickedFilter
+                                    },
+                                    isSearchExpanded = isSearchExpanded,
+                                    onSearchExpandChange = { expanded ->
+                                        isSearchExpanded = expanded
+                                        if (!expanded) {
+                                            searchQuery = ""
+                                        }
+                                    },
+                                    searchQuery = searchQuery,
+                                    onSearchQueryChange = { searchQuery = it },
+                                    searchFocusRequester = searchFocusRequester,
+                                    onClearOrCloseSearch = {
+                                        if (searchQuery.isNotEmpty()) {
+                                            searchQuery = ""
+                                            runCatching { searchFocusRequester.requestFocus() }
+                                            keyboardController?.show()
+                                        } else {
+                                            isSearchExpanded = false
+                                        }
+                                    },
+                                    onImeSearch = {
+                                        focusManager.clearFocus()
+                                        keyboardController?.hide()
+                                        if (searchQuery.isEmpty()) {
+                                            isSearchExpanded = false
+                                        }
+                                    }
                                 )
 
                                 HorizontalDivider(
@@ -1537,7 +1614,45 @@ private fun MobileNotificationConfigScreen(
                                     thickness = spacing.borderThin
                                 )
 
-                                // 3 bài AI đầu tiên hiển thị mặc định (ưu tiên: Cuộc gọi -> Tắt thông báo -> Thông báo)
+                                if (filteredModules.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = spacing.space14, vertical = spacing.space20),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = when {
+                                                isSearchingByText -> if (isEn) {
+                                                    "No matching AI modules found"
+                                                } else {
+                                                    "Không tìm thấy bài AI phù hợp"
+                                                }
+                                                selectedFilter == AiNotifyFilter.Call -> if (isEn) {
+                                                    "No AI modules are set to Incoming Call"
+                                                } else {
+                                                    "Chưa có bài AI nào đặt chế độ Cuộc gọi"
+                                                }
+                                                selectedFilter == AiNotifyFilter.Push -> if (isEn) {
+                                                    "No AI modules are set to Notification"
+                                                } else {
+                                                    "Chưa có bài AI nào đặt chế độ Thông báo"
+                                                }
+                                                selectedFilter == AiNotifyFilter.Off -> if (isEn) {
+                                                    "No AI modules are turned off"
+                                                } else {
+                                                    "Chưa có bài AI nào đang tắt thông báo"
+                                                }
+                                                else -> ""
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = colors.textMuted,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+
+                                // Danh sách các bài AI hiển thị mặc định (giữ nguyên thứ tự gốc)
                                 primaryModules.forEachIndexed { index, moduleConfig ->
                                     androidx.compose.runtime.key(moduleConfig.moduleKey) {
                                         if (index > 0) {
@@ -1637,9 +1752,9 @@ private fun MobileNotificationConfigScreen(
                                                 if (isEn) "Show less" else "Thu gọn danh sách"
                                             } else {
                                                 if (isEn) {
-                                                    "View all ${state.aiModules.size} AI modules (+${extraModules.size})"
+                                                    "View all ${filteredModules.size} AI modules (+${extraModules.size})"
                                                 } else {
-                                                    "Xem tất cả ${state.aiModules.size} bài AI (+${extraModules.size} bài khác)"
+                                                    "Xem tất cả ${filteredModules.size} bài AI (+${extraModules.size} bài khác)"
                                                 }
                                             },
                                             style = MaterialTheme.typography.labelMedium,
@@ -1745,37 +1860,165 @@ private fun MobileNotificationConfigScreen(
     }
 }
 
+private enum class AiNotifyFilter {
+    Call,
+    Push,
+    Off
+}
+
 @Composable
 private fun AiNotifySummaryBar(
     isEn: Boolean,
     pushCount: Int,
     callCount: Int,
-    offCount: Int
+    offCount: Int,
+    selectedFilter: AiNotifyFilter?,
+    onFilterClick: (AiNotifyFilter) -> Unit,
+    isSearchExpanded: Boolean,
+    onSearchExpandChange: (Boolean) -> Unit,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    searchFocusRequester: FocusRequester,
+    onClearOrCloseSearch: () -> Unit,
+    onImeSearch: () -> Unit
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    Row(
+    val expandProgress by animateFloatAsState(
+        targetValue = if (isSearchExpanded) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 260,
+            easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+        ),
+        label = "aiNotifySearchExpand"
+    )
+
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = spacing.space14, vertical = spacing.space10),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+            .padding(horizontal = spacing.space14, vertical = spacing.space8)
+            .height(spacing.space32)
     ) {
-        AiSummaryBadge(
-            icon = LucideIcons.PhoneCall,
-            text = if (isEn) "$callCount Call" else "$callCount Cuộc gọi",
-            tint = colors.error
-        )
-        AiSummaryBadge(
-            icon = LucideIcons.Bell,
-            text = if (isEn) "$pushCount Push" else "$pushCount Thông báo",
-            tint = colors.accent
-        )
-        AiSummaryBadge(
-            icon = LucideIcons.BellOff,
-            text = if (isEn) "$offCount Off" else "$offCount Tắt",
-            tint = if (colors.isDark) colors.textPlaceholder else colors.textMuted
-        )
+        val collapsedWidth = spacing.space32
+        val currentSearchWidth = collapsedWidth + (maxWidth - collapsedWidth) * expandProgress
+        val cardsAlpha = (1f - expandProgress * 1.85f).coerceIn(0f, 1f)
+        val searchContentAlpha = ((expandProgress - 0.15f) / 0.85f).coerceIn(0f, 1f)
+        val searchHorizontalPad = (collapsedWidth - spacing.iconSmall) / 2
+
+        if (cardsAlpha > 0.01f) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .padding(end = collapsedWidth + spacing.space6)
+                    .graphicsLayer {
+                        alpha = cardsAlpha
+                        translationX = -expandProgress * spacing.space16.toPx()
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+            ) {
+                AiSummaryBadge(
+                    icon = LucideIcons.PhoneCall,
+                    text = if (isEn) "$callCount Call" else "$callCount Cuộc gọi",
+                    tint = colors.error,
+                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Call,
+                    onClick = { onFilterClick(AiNotifyFilter.Call) }
+                )
+                AiSummaryBadge(
+                    icon = LucideIcons.Bell,
+                    text = if (isEn) "$pushCount Push" else "$pushCount Thông báo",
+                    tint = colors.accent,
+                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Push,
+                    onClick = { onFilterClick(AiNotifyFilter.Push) }
+                )
+                AiSummaryBadge(
+                    icon = LucideIcons.BellOff,
+                    text = if (isEn) "$offCount Off" else "$offCount Tắt",
+                    tint = if (colors.isDark) colors.textPlaceholder else colors.textMuted,
+                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Off,
+                    onClick = { onFilterClick(AiNotifyFilter.Off) }
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(currentSearchWidth)
+                .fillMaxHeight()
+                .clip(RoundedCornerShape(spacing.radiusSmall))
+                .background(colors.controlBg)
+                .then(
+                    if (!isSearchExpanded) {
+                        Modifier.clickable { onSearchExpandChange(true) }
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(horizontal = searchHorizontalPad),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = LucideIcons.Search,
+                contentDescription = if (isEn) "Search AI module" else "Tìm bài AI",
+                tint = if (colors.isDark) colors.accent else colors.textMuted,
+                modifier = Modifier.size(spacing.iconSmall)
+            )
+            if (expandProgress > 0.08f) {
+                Spacer(modifier = Modifier.width(spacing.space6))
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .graphicsLayer { alpha = searchContentAlpha },
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (searchQuery.isEmpty()) {
+                        Text(
+                            text = if (isEn) "Search AI module..." else "Tìm theo tên bài AI...",
+                            color = colors.textPlaceholder,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = { onImeSearch() },
+                            onDone = { onImeSearch() }
+                        ),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            color = colors.textStrong
+                        ),
+                        cursorBrush = SolidColor(colors.accent),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(searchFocusRequester)
+                    )
+                }
+                Spacer(modifier = Modifier.width(spacing.space4))
+                Box(
+                    modifier = Modifier
+                        .size(spacing.badgeMinSize)
+                        .graphicsLayer { alpha = searchContentAlpha }
+                        .clip(CircleShape)
+                        .background(colors.textMuted.copy(alpha = 0.2f))
+                        .clickable(onClick = onClearOrCloseSearch),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = LucideIcons.X,
+                        contentDescription = if (isEn) "Clear or close search" else "Xóa hoặc đóng tìm kiếm",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(spacing.iconTiny)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1783,14 +2026,18 @@ private fun AiNotifySummaryBar(
 private fun AiSummaryBadge(
     icon: ImageVector?,
     text: String,
-    tint: Color
+    tint: Color,
+    isHighlighted: Boolean = true,
+    onClick: () -> Unit = {}
 ) {
     val spacing = MaterialTheme.spacing
-    val contentColor = MaterialTheme.appColors.onAccent
+    val bgColor = if (isHighlighted) tint else tint.copy(alpha = 0.14f)
+    val contentColor = if (isHighlighted) MaterialTheme.appColors.onAccent else tint
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(spacing.radiusTiny))
-            .background(tint)
+            .background(bgColor)
+            .clickable(onClick = onClick)
             .padding(horizontal = spacing.space8, vertical = spacing.space4),
         verticalAlignment = Alignment.CenterVertically
     ) {
