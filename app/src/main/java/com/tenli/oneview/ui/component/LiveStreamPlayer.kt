@@ -24,6 +24,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -99,13 +102,32 @@ fun LiveStreamPlayer(
     onErrorChange: (Boolean) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isLifecycleStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> isLifecycleStarted = true
+                Lifecycle.Event.ON_STOP -> isLifecycleStarted = false
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    val effectivePaused = isPaused || !isLifecycleStarted
     var isPlaying by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var isError by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var hasCapturedFrame by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var playerViewRef by remember(cameraId, wsUrl) { mutableStateOf<PlayerView?>(null) }
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
-    val currentIsPaused by rememberUpdatedState(isPaused)
+    val currentIsPaused by rememberUpdatedState(effectivePaused)
 
     fun captureCurrentFrameToCache(targetCameraId: Int, targetPlayerView: PlayerView?): Boolean {
         if (targetCameraId <= 0) return false
@@ -129,9 +151,9 @@ fun LiveStreamPlayer(
 
     // Đồng bộ LivePlayer.vue: chụp 1 frame sau 900ms khi luồng live bắt đầu phát (và cập nhật mỗi 20s nếu xem lâu)
     // Nhờ đã chụp sẵn ở nền, khi bấm Back sẽ KHÔNG cần gọi lại textureView.getBitmap() trên Main thread gây khựng hiệu ứng trượt
-    LaunchedEffect(isPlaying, isPaused, cameraId, wsUrl) {
+    LaunchedEffect(isPlaying, effectivePaused, cameraId, wsUrl) {
         val boundCameraId = cameraId
-        if (isPlaying && !isPaused && boundCameraId > 0) {
+        if (isPlaying && !effectivePaused && boundCameraId > 0) {
             delay(900L)
             if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
                 hasCapturedFrame = true
@@ -220,10 +242,10 @@ fun LiveStreamPlayer(
             }
     }
 
-    // Khi bắt đầu trượt đóng màn hình Live (isPaused = true): ngắt ngay WebSocket & giải mã video
+    // Khi bắt đầu trượt đóng màn hình Live hoặc khi app xuống nền (effectivePaused = true): ngắt ngay WebSocket & giải mã video
     // nhưng giữ nguyên frame hình cuối cùng trên TextureView cho đến khi hiệu ứng trượt 240ms kết thúc.
-    LaunchedEffect(isPaused, exoPlayer) {
-        if (isPaused) {
+    LaunchedEffect(effectivePaused, exoPlayer) {
+        if (effectivePaused) {
             if (isPlaying && !hasCapturedFrame && cameraId > 0) {
                 if (captureCurrentFrameToCache(cameraId, playerViewRef)) {
                     hasCapturedFrame = true
@@ -231,6 +253,9 @@ fun LiveStreamPlayer(
             }
             exoPlayer.playWhenReady = false
             exoPlayer.stop()
+        } else if (exoPlayer.playbackState == Player.STATE_IDLE) {
+            exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
         }
     }
 

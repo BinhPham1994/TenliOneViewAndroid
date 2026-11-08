@@ -687,6 +687,7 @@ fun MainScreen(
                                         MainTab.Home -> HomeScreen(
                                             viewModel = homeViewModel,
                                             listState = homeListState,
+                                            isTabActive = isHomeActive,
                                             onEventClick = onHomeEventClick
                                         )
 
@@ -701,6 +702,7 @@ fun MainScreen(
                                             EventScreen(
                                                 viewModel = eventViewModel,
                                                 listState = eventListState,
+                                                isTabActive = isEventActive,
                                                 onEventClick = onEventIdClick
                                             )
                                         }

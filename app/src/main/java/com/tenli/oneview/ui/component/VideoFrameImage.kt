@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.util.LruCache
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -205,11 +206,32 @@ private fun ErrorPlaceholder(modifier: Modifier = Modifier) {
     }
 }
 
+private fun decodeThumbnailFrame(
+    retriever: MediaMetadataRetriever,
+    timeUs: Long
+): Bitmap? {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        runCatching {
+            retriever.getScaledFrameAtTime(
+                timeUs,
+                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                480,
+                270
+            )
+        }.getOrNull()?.let { return it }
+    }
+    return runCatching {
+        retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+    }.getOrNull()
+}
+
 private suspend fun extractVideoFrameWithRange(
     context: Context,
     url: String,
     cacheKey: String
 ): Bitmap? = withContext(Dispatchers.IO) {
+    VideoFrameCache.cache.get(cacheKey)?.let { return@withContext it }
+
     // 1. Kiểm tra disk cache trước để không phải tải lại 2MB và chạy MediaMetadataRetriever
     val thumbDir = File(context.cacheDir, "video_thumbs").apply { if (!exists()) mkdirs() }
     val diskCacheFile = File(thumbDir, "vf_${cacheKey.hashCode().toUInt()}.jpg")
@@ -257,19 +279,24 @@ private suspend fun extractVideoFrameWithRange(
 
             val tryPoints = longArrayOf(100_000L, 1_000L, 500_000L)
             var bestFrame: Bitmap? = null
+            var fallbackFrame: Bitmap? = null
 
             for (timeUs in tryPoints) {
-                val frame = retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                if (frame != null) {
-                    if (getBrightness(frame) > 20f) {
-                        bestFrame = frame
-                        break
-                    }
+                val frame = decodeThumbnailFrame(retriever, timeUs) ?: continue
+                if (getBrightness(frame) > 20f) {
+                    bestFrame = frame
+                    break
+                } else if (fallbackFrame == null) {
+                    fallbackFrame = frame
+                } else {
+                    frame.recycle()
                 }
             }
 
-            if (bestFrame == null) {
-                bestFrame = retriever.getFrameAtTime()
+            if (bestFrame != null && fallbackFrame != null && fallbackFrame !== bestFrame) {
+                fallbackFrame.recycle()
+            } else if (bestFrame == null) {
+                bestFrame = fallbackFrame ?: retriever.getFrameAtTime()
             }
 
             if (bestFrame != null) {

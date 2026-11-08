@@ -285,17 +285,19 @@ fun MonitorScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentIsTabActive by rememberUpdatedState(isTabActive)
     DisposableEffect(lifecycleOwner) {
-        var isFirstResume = true
+        var wasStopped = false
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.setMonitorTabActive(currentIsTabActive)
-                if (isFirstResume) {
-                    isFirstResume = false
-                } else if (currentIsTabActive) {
-                    viewModel.refreshActiveStreams()
-                    viewModel.loadVisibleCameraSnapshots()
+                if (wasStopped) {
+                    wasStopped = false
+                    if (currentIsTabActive) {
+                        viewModel.refreshActiveStreams()
+                        viewModel.loadVisibleCameraSnapshots()
+                    }
                 }
             } else if (event == Lifecycle.Event.ON_STOP) {
+                wasStopped = true
                 viewModel.setMonitorTabActive(false)
             }
         }
@@ -1508,7 +1510,7 @@ private fun CameraPlaybackTabContent(
                     deviceKey = UserSession.accessToken,
                     isOriginalRatio = false,
                     isFullscreen = isFullscreen,
-                    playWhenReady = isPlaybackPlaying,
+                    playWhenReady = isPlaybackPlaying && isTabVisible,
                     onPlayingChange = { isPlaybackVideoReady = it },
                     onPlayWhenReadyChange = onSetPlaybackPlaying,
                     onErrorChange = { isPlaybackError = it },
@@ -1712,7 +1714,7 @@ private fun CameraPlaybackTabContent(
                                         v1.videoLink == activeVideo?.videoLink && v1.time == activeVideo.time -> 1
                                     else -> -1
                                 }
-                                val playFlag = if (activeCol >= 0 && isPlaybackPlaying) 1 else 0
+                                val playFlag = if (activeCol >= 0 && isPlaybackPlaying && isTabVisible) 1 else 0
                                 "pb_row_${group.dateKey}_${rowIdx}_${activeCol}_$playFlag"
                             },
                             contentType = { "pb_video_row" }
@@ -1731,7 +1733,7 @@ private fun CameraPlaybackTabContent(
                                         val isSelected = activeVideoKey.isNotEmpty() &&
                                             activeVideo?.videoLink == video.videoLink &&
                                             activeVideo.time == video.time
-                                        val isItemPlaying = isSelected && isPlaybackPlaying
+                                        val isItemPlaying = isSelected && isPlaybackPlaying && isTabVisible
                                         PlaybackVideoGridCard(
                                             video = video,
                                             cameraId = camId,
@@ -2124,8 +2126,9 @@ private fun CameraEventsTabContent(
         }
     }
 
-    LaunchedEffect(shouldLoadMore, uiState.cameraEvents.size, uiState.hasMoreCameraEvents) {
-        if ((shouldLoadMore || uiState.cameraEvents.size in 1..CAMERA_EVENT_AUTO_FILL_MAX) &&
+    LaunchedEffect(isTabVisible, shouldLoadMore, uiState.cameraEvents.size, uiState.hasMoreCameraEvents) {
+        if (isTabVisible &&
+            (shouldLoadMore || uiState.cameraEvents.size in 1..CAMERA_EVENT_AUTO_FILL_MAX) &&
             uiState.hasMoreCameraEvents &&
             !uiState.isLoadingCameraEvents &&
             !uiState.isPaginatingCameraEvents
@@ -2189,11 +2192,13 @@ private fun CameraEventsTabContent(
                                 .padding(spacing.space16),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(spacing.space28),
-                                strokeWidth = spacing.space3
-                            )
+                            if (isTabVisible) {
+                                CircularProgressIndicator(
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(spacing.space28),
+                                    strokeWidth = spacing.space3
+                                )
+                            }
                         }
                     }
                 }

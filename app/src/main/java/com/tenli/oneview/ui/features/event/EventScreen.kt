@@ -61,6 +61,7 @@ private const val CONTENT_TYPE_PAGING = "paging"
 fun EventScreen(
     viewModel: EventViewModel = viewModel(factory = EventViewModel.Factory),
     listState: LazyListState = rememberLazyListState(),
+    isTabActive: Boolean = true,
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -88,8 +89,9 @@ fun EventScreen(
     }
 
     // Không truyền isLoading/isPaginating làm key để tránh vòng lặp vô hạn khi loadMore kết thúc mà events.size không đổi
-    LaunchedEffect(shouldLoadMore, uiState.events.size, uiState.hasMore) {
-        if ((shouldLoadMore || uiState.events.size in 1..AUTO_FILL_MAX_ITEMS) &&
+    LaunchedEffect(isTabActive, shouldLoadMore, uiState.events.size, uiState.hasMore) {
+        if (isTabActive &&
+            (shouldLoadMore || uiState.events.size in 1..AUTO_FILL_MAX_ITEMS) &&
             uiState.hasMore &&
             !uiState.isLoading &&
             !uiState.isPaginating
@@ -142,7 +144,9 @@ fun EventScreen(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            WaveDotsLoading()
+                            if (isTabActive) {
+                                WaveDotsLoading()
+                            }
                         }
                     }
                 } else if (uiState.events.isEmpty()) {
@@ -186,11 +190,13 @@ fun EventScreen(
                                     .padding(spacing.space16),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(spacing.space28),
-                                    strokeWidth = spacing.space3
-                                )
+                                if (isTabActive) {
+                                    CircularProgressIndicator(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(spacing.space28),
+                                        strokeWidth = spacing.space3
+                                    )
+                                }
                             }
                         }
                     }

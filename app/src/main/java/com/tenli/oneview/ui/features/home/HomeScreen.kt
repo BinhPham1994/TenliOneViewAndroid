@@ -88,6 +88,7 @@ private val StatLabelLetterSpacing = 0.sp
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
     listState: LazyListState = rememberLazyListState(),
+    isTabActive: Boolean = true,
     onEventClick: (String) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -248,7 +249,9 @@ fun HomeScreen(
                                 .height(HomeEmptyStateHeight),
                             contentAlignment = Alignment.Center
                         ) {
-                            WaveDotsLoading()
+                            if (isTabActive) {
+                                WaveDotsLoading()
+                            }
                         }
                     }
                 } else if (recentFiveEvents.isEmpty()) {

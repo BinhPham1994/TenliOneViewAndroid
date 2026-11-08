@@ -1811,6 +1811,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun refreshActiveStreams() {
         val state = _uiState.value
+        if (state.cameraDetailTab != CameraDetailTab.LIVE) return
         val active = (0 until state.gridSize).mapNotNull { idx ->
             state.selectedCameras.getOrNull(idx)?.let { idx to it }
         }
@@ -1830,7 +1831,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         for ((idx, selected) in active) {
             refreshSlotSnapshotFromCache(idx, selected.camera)
             ensureCameraSnapshotUrl(selected.camera, idx, force = false)
-            startLiveStreamPolling(selected.camera, idx, channel = preferredChannel(selected.camera), isFallback = false)
+            startLiveStreamPolling(selected.camera, idx, channel = selected.channel, isFallback = false)
         }
     }
 
