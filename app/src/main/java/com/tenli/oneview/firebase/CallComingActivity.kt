@@ -93,11 +93,9 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
-import com.tenli.oneview.ui.component.isUuidString
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.detail.EventDetailDisplay
 import com.tenli.oneview.ui.features.event.detail.buildEventDetailDisplay
-import com.tenli.oneview.ui.features.event.formatEventTimeAndDate
 import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.theme.ErrorRed
 import com.tenli.oneview.ui.theme.LucideIcons
@@ -534,32 +532,6 @@ private fun CallScreenContent(
             ?: if (call.eventType.isNotBlank()) AiTypeHelper.getTypeName(call.eventType, isEn) else if (isEn) "Security Alert" else "Cảnh báo an ninh"
     }
 
-    val effectiveLocation = remember(display, enrichedCamera, call.cameraName) {
-        display?.locationText?.takeIf { it.isNotBlank() && it != "---" }
-            ?: enrichedCamera?.name?.takeIf { it.isNotBlank() && !isUuidString(it) }
-            ?: call.cameraName.takeIf { it.isNotBlank() && !isUuidString(it) }
-            ?: ""
-    }
-
-    val effectiveTimeText = remember(display, call.eventTime, isEn) {
-        when {
-            display != null && display.formattedTime.isNotBlank() && display.formattedTime != "--" -> {
-                if (display.formattedDate.isNotBlank()) {
-                    "${display.formattedTime} • ${display.formattedDate}"
-                } else {
-                    display.formattedTime
-                }
-            }
-            call.eventTime > 0.0 -> {
-                val (t, d) = formatEventTimeAndDate(call.eventTime, isEn)
-                if (t.isNotBlank() && t != "--") {
-                    if (d.isNotBlank()) "$t • $d" else t
-                } else ""
-            }
-            else -> ""
-        }
-    }
-
     val effectiveImageUrl = remember(display, call.imageUrl) {
         display?.imageUrl?.takeIf { it.isNotBlank() } ?: call.imageUrl?.takeIf { it.isNotBlank() }
     }
@@ -738,72 +710,18 @@ private fun CallScreenContent(
                     )
 
                     val showBodyLine = call.body.isNotBlank() &&
-                        !call.body.equals(effectiveLocation, ignoreCase = true) &&
                         !call.body.equals(effectiveTitle, ignoreCase = true)
 
                     if (showBodyLine) {
-                        Spacer(modifier = Modifier.height(spacing.space6))
+                        Spacer(modifier = Modifier.height(spacing.space8))
                         Text(
                             text = call.body,
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.textMuted,
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
-                    }
-
-                    // Hàng thông tin Camera & Thời gian sự kiện
-                    if (effectiveLocation.isNotBlank() || effectiveTimeText.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(spacing.space8))
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(spacing.space4)
-                        ) {
-                            if (effectiveLocation.isNotBlank()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = LucideIcons.Video,
-                                        contentDescription = null,
-                                        tint = colors.accent,
-                                        modifier = Modifier.size(spacing.iconXSmall)
-                                    )
-                                    Spacer(modifier = Modifier.width(spacing.space6))
-                                    Text(
-                                        text = effectiveLocation,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = colors.textBody,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                            if (effectiveTimeText.isNotBlank()) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        imageVector = LucideIcons.Clock,
-                                        contentDescription = null,
-                                        tint = colors.textMuted,
-                                        modifier = Modifier.size(spacing.iconTiny)
-                                    )
-                                    Spacer(modifier = Modifier.width(spacing.space4))
-                                    Text(
-                                        text = effectiveTimeText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = colors.textMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(spacing.space12))
@@ -879,8 +797,7 @@ private fun CallScreenContent(
                 }
             }
 
-            // Đẩy cụm nút hành động xuống đáy màn hình
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(spacing.space16))
 
             Text(
                 text = if (isEn) {
@@ -893,7 +810,9 @@ private fun CallScreenContent(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(spacing.space20))
+            // Đẩy cụm nút hành động xuống đáy màn hình
+            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(spacing.space16))
 
             // 3. Cụm nút Từ chối / Xem ngay chuẩn hệ thống
             Row(
