@@ -12,16 +12,32 @@ import com.tenli.oneview.R
  * Khai báo tập trung các Notification Channel của app.
  */
 object NotificationChannels {
-    const val EVENT = "ai_event_channel"
-    const val EMERGENCY_CALL = "emergency_call_channel"
-    private const val LEGACY_KEEP_ALIVE = "keep_alive_channel"
+    const val EVENT = "ai_event_channel_v2"
+    const val EMERGENCY_CALL = "emergency_call_channel_v2"
+    private val LEGACY_CHANNELS = listOf(
+        "keep_alive_channel",
+        "ai_event_channel",
+        "emergency_call_channel"
+    )
 
-    private val CALL_VIBRATION_PATTERN = longArrayOf(0, 1000, 500, 1000)
+    val EVENT_VIBRATION_PATTERN = longArrayOf(0L, 250L, 150L, 250L)
+    val CALL_VIBRATION_PATTERN = longArrayOf(0L, 1000L, 500L, 1000L)
 
     /** Tạo (hoặc cập nhật tên/mô tả theo ngôn ngữ) toàn bộ channel. An toàn khi gọi nhiều lần. */
     fun createAll(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        runCatching { manager.deleteNotificationChannel(LEGACY_KEEP_ALIVE) }
+        for (legacyId in LEGACY_CHANNELS) {
+            runCatching { manager.deleteNotificationChannel(legacyId) }
+        }
+        // Dọn dẹp bất kỳ channel cũ nào bị lưu pattern rung [0] không hợp lệ trong hệ thống từ các bản cài trước
+        runCatching {
+            for (ch in manager.notificationChannels) {
+                val pat = ch.vibrationPattern
+                if (pat != null && pat.none { it > 0L }) {
+                    manager.deleteNotificationChannel(ch.id)
+                }
+            }
+        }
 
         val eventChannel = NotificationChannel(
             EVENT,
@@ -30,6 +46,7 @@ object NotificationChannels {
         ).apply {
             description = context.getString(R.string.notif_channel_event_desc)
             enableVibration(true)
+            vibrationPattern = EVENT_VIBRATION_PATTERN
             setShowBadge(true)
         }
 
@@ -37,6 +54,9 @@ object NotificationChannels {
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .build()
+        val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
         val callChannel = NotificationChannel(
             EMERGENCY_CALL,
             context.getString(R.string.notif_channel_call_name),
@@ -48,7 +68,7 @@ object NotificationChannels {
             vibrationPattern = CALL_VIBRATION_PATTERN
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             setBypassDnd(true)
-            setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE), audioAttributes)
+            setSound(ringtoneUri, audioAttributes)
         }
 
         manager.createNotificationChannels(listOf(eventChannel, callChannel))

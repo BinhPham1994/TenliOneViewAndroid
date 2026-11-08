@@ -353,13 +353,18 @@ class EventMessagingService : FirebaseMessagingService() {
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        return PendingIntent.getActivity(
-            this,
-            requestCode,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            splashIconOptionsBundle()
-        )
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return runCatching {
+            PendingIntent.getActivity(
+                this,
+                requestCode,
+                intent,
+                flags,
+                splashIconOptionsBundle()
+            )
+        }.getOrElse {
+            PendingIntent.getActivity(this, requestCode, intent, flags)
+        }
     }
 
     private fun dismissCallPendingIntent(eId: String, notificationId: Int): PendingIntent {
@@ -406,6 +411,7 @@ class EventMessagingService : FirebaseMessagingService() {
             .setContentText(getString(R.string.notif_missed_call_text, body.take(MISSED_CALL_BODY_PREVIEW)))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
             .setAutoCancel(true)
             .setContentIntent(eventDetailPendingIntent(eId, notificationId, fromNotification = false))
 
@@ -492,21 +498,11 @@ class EventMessagingService : FirebaseMessagingService() {
             putExtra("CAMERA_NAME", cameraName)
             putExtra("EVENT_TIME", eventTime)
         }
-        val pendingIntentOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ActivityOptions.makeBasic()
-                .setPendingIntentBackgroundActivityStartMode(
-                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
-                )
-                .toBundle()
-        } else {
-            null
-        }
         val callPendingIntent = PendingIntent.getActivity(
             this,
             notificationId,
             callIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            pendingIntentOptions
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val acceptPendingIntent = eventDetailPendingIntent(
@@ -527,6 +523,7 @@ class EventMessagingService : FirebaseMessagingService() {
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVibrate(NotificationChannels.CALL_VIBRATION_PATTERN)
             .setFullScreenIntent(callPendingIntent, true)
             .setContentIntent(callPendingIntent)
             .addAction(0, declineLabel, dismissPendingIntent)
@@ -591,6 +588,7 @@ class EventMessagingService : FirebaseMessagingService() {
             .setContentTitle(title)
             .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
             .setAutoCancel(true)
             .setContentIntent(eventDetailPendingIntent(eId, notificationId, fromNotification = true))
 

@@ -79,7 +79,7 @@
             android:resource="@mipmap/app_icon_notify" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="ai_event_channel" />
+            android:value="ai_event_channel_v2" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

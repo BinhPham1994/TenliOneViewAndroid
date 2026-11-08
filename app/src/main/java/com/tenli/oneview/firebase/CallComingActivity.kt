@@ -119,7 +119,7 @@ private const val TAG = "CallComingActivity"
 
 /** Tự đóng màn cuộc gọi (và hiện thông báo cuộc gọi nhỡ) sau khoảng thời gian này */
 private const val CALL_TIMEOUT_MS = 30_000L
-private const val MISSED_CALL_CHANNEL_ID = "ai_event_channel"
+private const val MISSED_CALL_CHANNEL_ID = com.tenli.oneview.service.NotificationChannels.EVENT
 private const val EXTRA_TITLE = "TITLE"
 private const val EXTRA_BODY = "BODY"
 private const val EXTRA_URL = "URL"
@@ -1079,13 +1079,18 @@ private fun showMissedCallNotification(context: Context, title: String, eId: Str
         else -> null
     }
 
-    val pendingIntent = PendingIntent.getActivity(
-        context,
-        eId.hashCode() + 1, // ID khác với cuộc gọi đang reo
-        intent,
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        splashOptions
-    )
+    val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    val pendingIntent = runCatching {
+        PendingIntent.getActivity(
+            context,
+            eId.hashCode() + 1, // ID khác với cuộc gọi đang reo
+            intent,
+            piFlags,
+            splashOptions
+        )
+    }.getOrElse {
+        PendingIntent.getActivity(context, eId.hashCode() + 1, intent, piFlags)
+    }
 
     val missedCallBuilder = NotificationCompat.Builder(context, MISSED_CALL_CHANNEL_ID) // Dùng kênh cảnh báo thường
         .setSmallIcon(R.mipmap.app_icon_notify)
