@@ -2,7 +2,6 @@ package com.tenli.oneview.ui.features.main
 
 import android.app.Application
 import android.util.Log
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -12,15 +11,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.TenliApp
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
-import com.tenli.oneview.data.local.HomeCacheManager
-import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.data.network.websocket.WebSocketManager
+import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.model.network.ChangePasswordModel
 import com.tenli.oneview.model.network.UserNotificationGlobalSetting
@@ -47,6 +43,7 @@ import kotlinx.coroutines.withContext
 
 class MainViewModel(
     application: Application,
+    private val authRepository: AuthRepository,
     private val networkMonitor: NetworkMonitor,
     private val webSocketManager: WebSocketManager
 ) : AndroidViewModel(application) {
@@ -163,7 +160,7 @@ class MainViewModel(
         var shouldRegisterToken = true
         runCatching {
             logInfo { "[SYNC CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | ${currentAccountDebugInfo()}" }
-            val resp = ApiProvider.bsApi.getUserNotificationSettings()
+            val resp = authRepository.getUserNotificationSettings()
             if (UserSession.accessToken.isEmpty()) return
             if (resp.isSuccessful) {
                 val body = resp.body()
@@ -201,7 +198,7 @@ class MainViewModel(
                     logInfo {
                         "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
                     }
-                    val putResp = ApiProvider.bsApi.updateUserNotificationSettings(initModel)
+                    val putResp = authRepository.updateUserNotificationSettings(initModel)
                     if (UserSession.accessToken.isEmpty()) return
                     val effectiveModel = if (putResp.isSuccessful) {
                         logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
@@ -252,43 +249,9 @@ class MainViewModel(
         aiModuleSaveJob?.cancel()
         passwordChangeJob?.cancel()
         logoutJob = viewModelScope.launch {
-            val app = getApplication<Application>()
-            // Ngắt WebSocket và đóng thông báo hệ thống ngay lập tức
             webSocketManager.disconnectAll()
-            runCatching { NotificationManagerCompat.from(app).cancelAll() }
-
-            // Huỷ đăng ký FCM token trên server trước khi xoá UserSession.accessToken (giống tenli-oneview auth.ts)
-            FcmTokenManager.unregisterDevicePushToken()
-            UserSession.clear()
             cachedNotificationSettings = null
-
-            // Xóa token/prefs + cache cục bộ (đọc/ghi file) trên IO để không chặn Main thread
-            withContext(Dispatchers.IO) {
-                val prefs = GlobalData.preferences
-                val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-                prefs.edit {
-                    remove(AppKeys.ACCESS_TOKEN_KEY)
-                    remove(AppKeys.REFRESH_TOKEN_KEY)
-                    remove(AppKeys.USER_DATA_KEY)
-                    remove(AppKeys.GROUP_ID)
-                    remove(AppKeys.GROUP_ID_CAMERA)
-                    remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
-                    remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
-                    remove("saved_expanded_nodes")
-                    remove("saved_monitor_grid_size")
-                    remove("saved_monitor_grid_camera_ids")
-                    remove("saved_monitor_camera_id")
-                    if (!rememberMe) {
-                        remove(AppKeys.USERNAME_KEY)
-                        remove(AppKeys.PASSWORD_KEY)
-                    }
-                }
-
-                HomeCacheManager.clearCache(app)
-                EventCacheManager.clearCache(app)
-                MonitorCacheManager.clearCache(app)
-            }
-
+            authRepository.clearAuthenticatedSession()
             _event.emit(MainEvent.Logout)
         }
     }
@@ -323,7 +286,7 @@ class MainViewModel(
                 logInfo {
                     "[TẢI CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | hasCachedPref=$hasCachedPref, cachedEnabled=$cachedEnabled | ${currentAccountDebugInfo()}"
                 }
-                val resp = ApiProvider.bsApi.getUserNotificationSettings()
+                val resp = authRepository.getUserNotificationSettings()
                 if (resp.isSuccessful) {
                     val body = resp.body()
                     logInfo {
@@ -412,7 +375,7 @@ class MainViewModel(
                     "[LƯU CẤU HÌNH - GỬI PUT] PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson | ${currentAccountDebugInfo()}"
                 }
 
-                val resp = ApiProvider.bsApi.updateUserNotificationSettings(updatedModel)
+                val resp = authRepository.updateUserNotificationSettings(updatedModel)
                 if (resp.isSuccessful) {
                     val respBody = resp.body()
                     logInfo {
@@ -523,7 +486,7 @@ class MainViewModel(
                     "[LƯU CẤU HÌNH BÀI AI] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} | PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson"
                 }
 
-                val resp = ApiProvider.bsApi.updateUserNotificationSettings(modelToSave)
+                val resp = authRepository.updateUserNotificationSettings(modelToSave)
                 if (resp.isSuccessful) {
                     logInfo {
                         "✅ [LƯU CẤU HÌNH BÀI AI THÀNH CÔNG] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} -> HTTP ${resp.code()}"
@@ -553,7 +516,7 @@ class MainViewModel(
     private suspend fun fetchServerNotificationSettingsQuietly(): UserNotificationSettingsModel? {
         return runCatching {
             logInfo { "[LƯU CẤU HÌNH] cachedNotificationSettings=null -> gọi GET /ts/api/v1/user/settings/notification_settings trước khi PUT" }
-            val getResp = ApiProvider.bsApi.getUserNotificationSettings()
+            val getResp = authRepository.getUserNotificationSettings()
             if (getResp.isSuccessful) {
                 getResp.body()
             } else {
@@ -649,7 +612,7 @@ class MainViewModel(
         _passwordChangeState.update { it.copy(isSubmitting = true, error = null) }
         passwordChangeJob = viewModelScope.launch {
             try {
-                val resp = ApiProvider.vmsApi.changePassword(
+                val resp = authRepository.changePassword(
                     ChangePasswordModel(
                         userId = userId,
                         oldPassword = oldPassword,
@@ -687,9 +650,10 @@ class MainViewModel(
             initializer {
                 val application = this[APPLICATION_KEY] as TenliApp
                 MainViewModel(
-                    application,
-                    application.container.networkMonitor,
-                    application.container.webSocketManager
+                    application = application,
+                    authRepository = application.container.authRepository,
+                    networkMonitor = application.container.networkMonitor,
+                    webSocketManager = application.container.webSocketManager
                 )
             }
         }

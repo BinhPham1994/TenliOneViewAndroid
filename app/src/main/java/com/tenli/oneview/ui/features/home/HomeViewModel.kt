@@ -2,7 +2,6 @@ package com.tenli.oneview.ui.features.home
 
 import android.app.Application
 import android.util.Log
-import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -12,12 +11,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.CachedHomeData
-import com.tenli.oneview.data.local.EventCacheManager
-import com.tenli.oneview.data.local.GlobalData
-import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
-import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.websocket.WebSocketManager
+import com.tenli.oneview.data.repository.DashboardRepository
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
@@ -199,13 +195,9 @@ data class HomeUiState(
 @OptIn(FlowPreview::class)
 class HomeViewModel(
     application: Application,
+    private val dashboardRepository: DashboardRepository,
     private val webSocketManager: WebSocketManager
 ) : AndroidViewModel(application) {
-
-    private val bsApi get() = ApiProvider.bsApi
-    private val eventApi get() = ApiProvider.eventApi
-    private val vmsApi get() = ApiProvider.vmsApi
-    private val aiApi get() = ApiProvider.aiApi
 
     private val _uiState = MutableStateFlow(buildInitialState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -247,12 +239,12 @@ class HomeViewModel(
     }
 
     private fun buildInitialState(): HomeUiState {
-        val isList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
-        val memCached = HomeCacheManager.getHomeDataInMemory(TimeFilter.TODAY, null)
+        val isList = dashboardRepository.isListViewMode()
+        val memCached = dashboardRepository.getHomeDataInMemory(TimeFilter.TODAY, null)
         return if (memCached != null) {
-            val rawCameras = memCached.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+            val rawCameras = memCached.cameraList.ifEmpty { dashboardRepository.getCamerasInMemory() }
             val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
-            val services = memCached.aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() }
+            val services = memCached.aiServices.ifEmpty { dashboardRepository.getAiServicesInMemory() }
             HomeUiState(
                 isLoading = false,
                 isListView = isList,
@@ -266,30 +258,37 @@ class HomeViewModel(
                 totalAiTasks = memCached.totalAiTasks
             ).withRecomputedMetrics()
         } else {
-            val rawCameras = EventCacheManager.getCamerasInMemory()
+            val rawCameras = dashboardRepository.getCamerasInMemory()
             val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
             HomeUiState(
                 isLoading = true,
                 isListView = isList,
                 cameraList = permittedCameras,
-                aiServices = EventCacheManager.getAiServicesInMemory()
+                aiServices = dashboardRepository.getAiServicesInMemory()
             ).withRecomputedMetrics()
         }
     }
 
     fun toggleViewMode() {
         val nextIsList = !_uiState.value.isListView
-        GlobalData.preferences.edit {
-            putString(PREF_VIEW_MODE, if (nextIsList) "list" else "grid")
-        }
+        dashboardRepository.setListViewMode(nextIsList)
         _uiState.update { it.copy(isListView = nextIsList) }
     }
 
     fun syncViewModeFromPrefs() {
-        val savedIsList = GlobalData.preferences.getString(PREF_VIEW_MODE, "list") != "grid"
+        val savedIsList = dashboardRepository.isListViewMode()
         if (_uiState.value.isListView != savedIsList) {
             _uiState.update { it.copy(isListView = savedIsList) }
         }
+    }
+
+    fun onEventSelected(event: EventData) {
+        val cur = _uiState.value
+        dashboardRepository.cacheClickedEvent(
+            event = event,
+            cameras = cur.cameraList,
+            aiServices = cur.aiServices
+        )
     }
 
     private fun listenToWebSocket() {
@@ -345,7 +344,7 @@ class HomeViewModel(
             UserPermissionManager.permissionState.collect { permState ->
                 if (permState.version != lastVersion) {
                     lastVersion = permState.version
-                    val allCameras = EventCacheManager.getCamerasInMemory()
+                    val allCameras = dashboardRepository.getCamerasInMemory()
                     _uiState.update { cur ->
                         val baseCameras = allCameras.ifEmpty { cur.cameraList }
                         cur.copy(
@@ -375,7 +374,7 @@ class HomeViewModel(
         fromSec: Long,
         toSec: Long,
         serviceId: Int?,
-        allCameras: List<CameraModel> = EventCacheManager.getCamerasInMemory()
+        allCameras: List<CameraModel> = dashboardRepository.getCamerasInMemory()
     ): RecentEventsFetchResult {
         if (!UserPermissionManager.canAccessEvents()) {
             return RecentEventsFetchResult(events = emptyList(), anySuccessful = true)
@@ -391,7 +390,7 @@ class HomeViewModel(
         while (permitted.size < MAX_RECENT_EVENTS && attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
             val result = safeApiCall {
-                eventApi.getDataList(
+                dashboardRepository.getEventDataList(
                     count = RECENT_BATCH_SIZE,
                     lastId = lastId,
                     from = fromSec,
@@ -408,7 +407,7 @@ class HomeViewModel(
             val data = resp.body() ?: emptyList()
             if (data.isEmpty()) break
 
-            val camerasForPerm = allCameras.ifEmpty { EventCacheManager.getCamerasInMemory() }
+            val camerasForPerm = allCameras.ifEmpty { dashboardRepository.getCamerasInMemory() }
             for (ev in data) {
                 if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) &&
                     seenIds.add(ev.id) &&
@@ -441,7 +440,7 @@ class HomeViewModel(
                 coroutineScope {
                     val overviewDeferred = async {
                         safeApiCall {
-                            bsApi.getVmsCountOverview(
+                            dashboardRepository.getVmsCountOverview(
                                 serviceId = serviceIdStr ?: "-1",
                                 fromTime = fromTime,
                                 toTime = toTime
@@ -450,7 +449,7 @@ class HomeViewModel(
                     }
                     val byTypeDeferred = async {
                         safeApiCall {
-                            bsApi.getVmsEventCountByType(
+                            dashboardRepository.getVmsEventCountByType(
                                 fromTime = fromTime,
                                 toTime = toTime,
                                 serviceId = serviceIdStr
@@ -470,11 +469,11 @@ class HomeViewModel(
                     val newEvents = recentResult.events
 
                     if (newEvents.isNotEmpty()) {
-                        EventCacheManager.cacheInMemory(events = newEvents)
+                        dashboardRepository.cacheInMemory(events = newEvents)
                     }
                     val nextState = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
-                        val allCameras = EventCacheManager.getCamerasInMemory().ifEmpty { cur.cameraList }
+                        val allCameras = dashboardRepository.getCamerasInMemory().ifEmpty { cur.cameraList }
                         val mergedEvents = if (newEvents.isNotEmpty()) {
                             (newEvents + cur.recentEvents)
                                 .permittedDistinct(allCameras)
@@ -493,14 +492,13 @@ class HomeViewModel(
                         ).withRecomputedMetrics()
                     }
                     _uiState.value = nextState
-                    HomeCacheManager.saveHomeData(
-                        getApplication(),
-                        filter,
-                        serviceId,
-                        CachedHomeData(
+                    dashboardRepository.saveHomeData(
+                        filter = filter,
+                        serviceId = serviceId,
+                        data = CachedHomeData(
                             overviewStats = nextState.overviewStats,
                             eventsByType = nextState.eventsByType,
-                            cameraList = EventCacheManager.getCamerasInMemory().ifEmpty { nextState.cameraList },
+                            cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
                             aiServices = nextState.aiServices,
                             recentEvents = nextState.recentEvents,
                             runningAiTasks = nextState.runningAiTasks,
@@ -553,13 +551,13 @@ class HomeViewModel(
             val serviceId = _uiState.value.selectedServiceId
 
             // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate) khi chưa phải thao tác kéo refresh
-            val cachedData = HomeCacheManager.getHomeData(getApplication(), filter, serviceId)
+            val cachedData = dashboardRepository.getHomeData(filter, serviceId)
             if (!isUserRefresh) {
                 if (cachedData != null) {
                     val updatedFromCache = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
                         val rawCachedCameras = cachedData.cameraList
-                            .ifEmpty { EventCacheManager.getCamerasInMemory() }
+                            .ifEmpty { dashboardRepository.getCamerasInMemory() }
                             .ifEmpty { cur.cameraList }
                         val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCachedCameras)
                         cur.copy(
@@ -590,7 +588,7 @@ class HomeViewModel(
                     val serviceIdStr = serviceId?.toString()
                     val overviewDeferred = async {
                         safeApiCall {
-                            bsApi.getVmsCountOverview(
+                            dashboardRepository.getVmsCountOverview(
                                 serviceId = serviceIdStr ?: "-1",
                                 fromTime = fromTime,
                                 toTime = toTime
@@ -599,7 +597,7 @@ class HomeViewModel(
                     }
                     val byTypeDeferred = async {
                         safeApiCall {
-                            bsApi.getVmsEventCountByType(
+                            dashboardRepository.getVmsEventCountByType(
                                 fromTime = fromTime,
                                 toTime = toTime,
                                 serviceId = serviceIdStr
@@ -607,22 +605,22 @@ class HomeViewModel(
                         }
                     }
                     val cameraDeferred = async {
-                        safeApiCall { vmsApi.getCameraList() }
+                        safeApiCall { dashboardRepository.getCameraList() }
                     }
                     val aiServiceDeferred = async {
-                        safeApiCall { eventApi.getAIServiceList() }
+                        safeApiCall { dashboardRepository.getAIServiceList() }
                     }
 
                     // Nếu tài khoản đang áp dụng phân quyền camera custom và RAM chưa có danh sách camera để map UUID,
                     // đợi cameraDeferred xong trước khi lọc sự kiện để đảm bảo ngay lần tải đầu tiên lọc đúng camera UUID.
                     if (UserPermissionManager.isCustomCameraPermission() &&
-                        EventCacheManager.getCamerasInMemory().isEmpty()
+                        dashboardRepository.getCamerasInMemory().isEmpty()
                     ) {
                         val preCamResp = cameraDeferred.await().getOrNull()
                         if (preCamResp?.isSuccessful == true) {
                             val preCamList = preCamResp.body() ?: emptyList()
                             if (preCamList.isNotEmpty()) {
-                                EventCacheManager.cacheInMemory(cameras = preCamList, fromNetwork = true)
+                                dashboardRepository.cacheInMemory(cameras = preCamList, fromNetwork = true)
                             }
                         }
                     }
@@ -632,19 +630,13 @@ class HomeViewModel(
                             fromSec = fromTime / 1000,
                             toSec = toTime / 1000,
                             serviceId = serviceId,
-                            allCameras = EventCacheManager.getCamerasInMemory()
+                            allCameras = dashboardRepository.getCamerasInMemory()
                         )
                     }
 
                     // Pre-warm danh sách hồ sơ khuôn mặt trong nền nếu chưa có để màn Chi tiết sự kiện mở 0ms
                     launch {
-                        if (EventCacheManager.getProfilesInMemory().isEmpty()) {
-                            val profiles = safeApiCall { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
-                            val groups = safeApiCall { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
-                            if (profiles.isNotEmpty() || groups.isNotEmpty()) {
-                                EventCacheManager.saveProfilesCache(getApplication(), profiles, groups)
-                            }
-                        }
+                        dashboardRepository.prewarmProfilesIfNeeded()
                     }
 
                     val overviewResult = overviewDeferred.await()
@@ -671,7 +663,7 @@ class HomeViewModel(
                     val allCameraList = if (cameraResponse?.isSuccessful == true) {
                         cameraResponse.body() ?: emptyList()
                     } else {
-                        EventCacheManager.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
+                        dashboardRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
                     }
                     val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
 
@@ -693,7 +685,7 @@ class HomeViewModel(
                                 aiServices
                             }
                             if (targetServices.isEmpty()) {
-                                val monResp = aiApi.getMonitorList()
+                                val monResp = dashboardRepository.getMonitorList()
                                 if (monResp.isSuccessful) {
                                     val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
                                     totalTasks = monitors.size
@@ -705,12 +697,12 @@ class HomeViewModel(
                                         val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
                                         safeApiCall {
                                             if (host.isNotBlank() && srv.id != 0) {
-                                                aiApi.getMonitorListExt(
+                                                dashboardRepository.getMonitorListExt(
                                                     url = "$host/api/Monitor",
                                                     authHeader = "Bearer ${srv.apiKey}"
                                                 )
                                             } else {
-                                                aiApi.getMonitorList()
+                                                dashboardRepository.getMonitorList()
                                             }
                                         }.getOrNull()
                                     }
@@ -764,7 +756,7 @@ class HomeViewModel(
                         .distinctBy { it.id }
                         .take(MAX_RECENT_EVENTS)
 
-                    EventCacheManager.cacheInMemory(
+                    dashboardRepository.cacheInMemory(
                         events = finalRecentEvents,
                         cameras = allCameraList,
                         aiServices = aiServices,
@@ -798,7 +790,7 @@ class HomeViewModel(
                             totalAiTasks = totalTasks,
                             updatedAt = System.currentTimeMillis()
                         )
-                        HomeCacheManager.saveHomeData(getApplication(), filter, serviceId, newCachedData)
+                        dashboardRepository.saveHomeData(filter, serviceId, newCachedData)
                     }
                 }
             } catch (e: CancellationException) {
@@ -889,7 +881,6 @@ class HomeViewModel(
 
     companion object {
         private const val TAG = "HomeViewModel"
-        private const val PREF_VIEW_MODE = "mobile_event_view_mode"
         private const val MAX_RECENT_EVENTS = 5
         private const val RECENT_BATCH_SIZE = 50
         private const val MAX_BATCH_ATTEMPTS = 3
@@ -899,7 +890,11 @@ class HomeViewModel(
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[APPLICATION_KEY] as TenliApp
-                HomeViewModel(application, application.container.webSocketManager)
+                HomeViewModel(
+                    application = application,
+                    dashboardRepository = application.container.dashboardRepository,
+                    webSocketManager = application.container.webSocketManager
+                )
             }
         }
     }

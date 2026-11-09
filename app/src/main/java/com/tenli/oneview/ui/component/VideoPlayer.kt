@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -26,6 +27,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import coil.size.Precision
 import com.tenli.oneview.R
 import com.tenli.oneview.ui.theme.appColors
 import kotlinx.coroutines.delay
@@ -36,7 +40,6 @@ import kotlinx.coroutines.isActive
 @Composable
 fun VideoPlayer(
     videoUrl: String,
-    @Suppress("UNUSED_PARAMETER")
     thumbnailUrl: String?,
     deviceKey: String,
     isOriginalRatio: Boolean = false,
@@ -292,6 +295,23 @@ fun VideoPlayer(
                     .background(containerBg),
                 contentAlignment = Alignment.Center
             ) {
+                if (!thumbnailUrl.isNullOrEmpty()) {
+                    val thumbRequest = remember(thumbnailUrl) {
+                        ImageRequest.Builder(context)
+                            .data(thumbnailUrl)
+                            .size(1280, 720)
+                            .precision(Precision.INEXACT)
+                            .allowHardware(true)
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = thumbRequest,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = if (isOriginalRatio) ContentScale.Fit else ContentScale.FillBounds
+                    )
+                }
                 WaveDotsLoading(dotColor = colors.accent)
             }
         }

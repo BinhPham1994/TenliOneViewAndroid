@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.monitor
 
 import android.app.Application
+import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -11,13 +12,12 @@ import coil.Coil
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import coil.size.Precision
+import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.CachedMonitorData
-import com.tenli.oneview.data.local.EventCacheManager
-import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.data.network.ApiProvider
+import com.tenli.oneview.data.repository.MonitorRepository
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraGroupModel
 import com.tenli.oneview.model.network.CameraInGroupModel
@@ -373,10 +373,11 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     }
 }
 
-class MonitorViewModel(application: Application) : AndroidViewModel(application) {
+class MonitorViewModel(
+    application: Application,
+    private val monitorRepository: MonitorRepository
+) : AndroidViewModel(application) {
     private val app: Application get() = getApplication()
-    private val vmsApi get() = ApiProvider.vmsApi
-    private val eventApi get() = ApiProvider.eventApi
 
     private val _uiState = MutableStateFlow(MonitorUiState())
     val uiState: StateFlow<MonitorUiState> = _uiState.asStateFlow()
@@ -490,8 +491,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
-                MonitorViewModel(application)
+                val application = this[APPLICATION_KEY] as TenliApp
+                MonitorViewModel(
+                    application = application,
+                    monitorRepository = application.container.monitorRepository
+                )
             }
         }
 
@@ -628,12 +632,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        val prefs = GlobalData.preferences
-        val savedNodes = prefs.getStringSet(PREF_EXPANDED_NODES, emptySet()) ?: emptySet()
+        val savedNodes = monitorRepository.getExpandedNodesPref()
         _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = 1) }
 
         // Nếu dữ liệu cây camera đã được preload sẵn trong RAM, áp dụng ngay tức thì (0ms)
-        val memCached = MonitorCacheManager.getMonitorDataInMemory()
+        val memCached = monitorRepository.getMonitorDataInMemory()
         if (memCached != null && (memCached.vmsList.isNotEmpty() || memCached.cameraList.isNotEmpty())) {
             rawVmsList = memCached.vmsList
             rawGroupList = memCached.groupList
@@ -649,7 +652,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
         // Lắng nghe cập nhật snapshot (vd. frame vừa chụp từ luồng live) để đồng bộ ngay lên thẻ camera & ô live
         viewModelScope.launch {
-            MonitorCacheManager.snapshotUpdates.collect { (camId, rawLink) ->
+            monitorRepository.snapshotUpdates.collect { (camId, rawLink) ->
                 val resolved = resolveFullMediaUrl(rawLink)
                 if (resolved.isNotEmpty()) {
                     _uiState.update { cur ->
@@ -777,7 +780,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     /** Đọc link snapshot đã cache (có truy cập đĩa) trên IO. Trả về null nếu chưa có cache. */
     private suspend fun readCachedSnapshot(camera: CameraModel): String? = withContext(Dispatchers.IO) {
-        MonitorCacheManager.getCachedCameraImageLink(app, camera.id)?.let(::resolveFullMediaUrl)
+        monitorRepository.getCachedCameraImageLink(camera.id)?.let(::resolveFullMediaUrl)
+    }
+
+    fun saveCapturedCameraFrame(cameraId: Int, bitmap: Bitmap) {
+        monitorRepository.saveCapturedCameraFrame(cameraId, bitmap)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -812,7 +819,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             val cam = item.camera
             val camId = cam.id
             if (camId != 0 && updatedSnapshots[camId].isNullOrEmpty()) {
-                val memRaw = MonitorCacheManager.getCachedCameraImageLinkInMemory(camId)
+                val memRaw = monitorRepository.getCachedCameraImageLinkInMemory(camId)
                 if (!memRaw.isNullOrBlank()) {
                     val resolved = resolveFullMediaUrl(memRaw)
                     if (resolved.isNotEmpty()) {
@@ -902,7 +909,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun setGridSize(size: Int) {
         val normalized = if (size == 4) 4 else 1
         if (_uiState.value.gridSize == normalized) return
-        GlobalData.preferences.edit().putInt(PREF_GRID_SIZE, normalized).apply()
+        monitorRepository.saveGridSizePref(normalized)
 
         if (normalized == 1) {
             // Các ô 2..4 không còn hiển thị: dừng poll và bỏ link live cũ (link WS dùng 1 lần) để khi quay lại 2x2 lấy link mới
@@ -1011,7 +1018,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     fun toggleNodeExpansion(nodeId: String) {
         val current = _uiState.value.expandedNodes
         val next = if (current.contains(nodeId)) current - nodeId else current + nodeId
-        GlobalData.preferences.edit().putStringSet(PREF_EXPANDED_NODES, next).apply()
+        monitorRepository.saveExpandedNodesPref(next)
         _uiState.update { it.copy(expandedNodes = next).withDerivedData() }
     }
 
@@ -1019,14 +1026,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val idsCsv = (0 until SLOT_COUNT).joinToString(",") { idx ->
             (cameras.getOrNull(idx)?.camera?.id ?: -1).toString()
         }
-        val editor = GlobalData.preferences.edit().putString(PREF_GRID_CAMERA_IDS, idsCsv)
         val firstCamId = cameras.getOrNull(0)?.camera?.id
-        if (firstCamId != null) {
-            editor.putInt(PREF_CAMERA_ID, firstCamId)
-        } else {
-            editor.remove(PREF_CAMERA_ID)
-        }
-        editor.apply()
+        monitorRepository.saveSelectedCameraIdsPref(idsCsv, firstCamId)
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -1087,7 +1088,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         for (cam in allDisplayedCameras) {
             val camId = cam.id
             if (state.cameraSnapshots[camId].isNullOrEmpty()) {
-                val memRaw = MonitorCacheManager.getCachedCameraImageLinkInMemory(camId)
+                val memRaw = monitorRepository.getCachedCameraImageLinkInMemory(camId)
                 if (!memRaw.isNullOrBlank()) {
                     val resolved = resolveFullMediaUrl(memRaw)
                     if (resolved.isNotEmpty()) {
@@ -1104,7 +1105,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         // các lần cuộn tiếp theo bỏ qua hoàn toàn vòng lặp IO để cuộn mượt 120fps.
         snapshotLookupJob?.cancel()
         snapshotLookupJob = viewModelScope.launch {
-            if (!MonitorCacheManager.isSnapshotsLoadedInMemory()) {
+            if (!monitorRepository.isSnapshotsLoadedInMemory()) {
                 val diskUpdates = HashMap<Int, String?>()
                 val currentSnapshots = _uiState.value.cameraSnapshots
 
@@ -1112,7 +1113,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     for (cam in allDisplayedCameras) {
                         val camId = cam.id
                         if (currentSnapshots[camId].isNullOrEmpty()) {
-                            val cachedRaw = MonitorCacheManager.getCachedCameraImageLink(app, camId)
+                            val cachedRaw = monitorRepository.getCachedCameraImageLink(camId)
                             if (!cachedRaw.isNullOrBlank()) {
                                 val resolved = resolveFullMediaUrl(cachedRaw)
                                 if (resolved.isNotEmpty()) {
@@ -1153,7 +1154,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 activeVisible.filter { cam ->
                     val camId = cam.id
                     camId != 0 &&
-                        !MonitorCacheManager.isSnapshotCacheFresh(app, camId) &&
+                        !monitorRepository.isSnapshotCacheFresh(camId) &&
                         cardSnapshotJobs[camId]?.isActive != true
                 }
             }
@@ -1213,7 +1214,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     var resolvedLink = ""
                     var rawFetchedLink = ""
                     val res = try {
-                        vmsApi.getCameraImageLink(camId)
+                        monitorRepository.getCameraImageLink(camId)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (_: Exception) {
@@ -1233,7 +1234,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                             return@launch
                         }
                         val videoRes = try {
-                            vmsApi.getVideoList(camera = camId, count = 1, from = null, to = null)
+                            monitorRepository.getVideoList(camera = camId, count = 1, from = null, to = null)
                         } catch (e: CancellationException) {
                             throw e
                         } catch (_: Exception) {
@@ -1260,13 +1261,13 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         if (!existingDisplayedUrl.isNullOrEmpty() && existingDisplayedUrl != resolvedLink) {
                             val loadedOk = withContext(Dispatchers.IO) { preloadCardSnapshotIntoCoil(camId, resolvedLink) }
                             if (!loadedOk && !force) {
-                                MonitorCacheManager.markSnapshotCheckedInSession(camId)
+                                monitorRepository.markSnapshotCheckedInSession(camId)
                                 return@launch
                             }
                         }
                         val effectiveLink = withContext(Dispatchers.IO) {
-                            MonitorCacheManager.setCachedCameraImageLink(app, camId, rawFetchedLink)
-                            MonitorCacheManager.getCachedCameraImageLink(app, camId)
+                            monitorRepository.setCachedCameraImageLink(camId, rawFetchedLink)
+                            monitorRepository.getCachedCameraImageLink(camId)
                                 ?.let(::resolveFullMediaUrl)
                                 ?.takeIf { it.isNotEmpty() }
                                 ?: resolvedLink
@@ -1276,7 +1277,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                             else cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to effectiveLink))
                         }
                     } else {
-                        MonitorCacheManager.markSnapshotCheckedInSession(camId)
+                        monitorRepository.markSnapshotCheckedInSession(camId)
                         _uiState.update { cur ->
                             val currentVal = cur.cameraSnapshots[camId]
                             if (currentVal.isNullOrEmpty() || force) {
@@ -1317,7 +1318,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         // Khi thiết bị đang mất kết nối mạng, giữ nguyên link snapshot đã cache trên đĩa tránh xóa nhầm
         if (!NetworkMonitor.isNetworkAvailable()) return
         viewModelScope.launch(Dispatchers.IO) {
-            MonitorCacheManager.removeCachedCameraImageLink(app, camId)
+            monitorRepository.removeCachedCameraImageLink(camId)
         }
 
         if (retriedCardSnapshotIds.add(camId)) {
@@ -1360,7 +1361,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
     private fun loadData() {
         viewModelScope.launch {
             if (treeIndex.tree.isEmpty()) {
-                val cachedData = MonitorCacheManager.getMonitorData(app)
+                val cachedData = monitorRepository.getMonitorData()
                 if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
                     rawVmsList = cachedData.vmsList
                     rawGroupList = cachedData.groupList
@@ -1378,11 +1379,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
             try {
                 // Gọi song song cả 5 API cây camera & AI Services để giảm thời gian tải xuống 1 RTT duy nhất
                 coroutineScope {
-                    val vmsDeferred = async { safeApiCall { vmsApi.getVMSServiceList() } }
-                    val groupDeferred = async { safeApiCall { vmsApi.getCameraGroupList() } }
-                    val cameraDeferred = async { safeApiCall { vmsApi.getCameraList() } }
-                    val cameraInGroupDeferred = async { safeApiCall { vmsApi.getCameraInGroupList() } }
-                    val aiServiceDeferred = async { safeApiCall { eventApi.getAIServiceList() } }
+                    val vmsDeferred = async { safeApiCall { monitorRepository.getVMSServiceList() } }
+                    val groupDeferred = async { safeApiCall { monitorRepository.getCameraGroupList() } }
+                    val cameraDeferred = async { safeApiCall { monitorRepository.getCameraList() } }
+                    val cameraInGroupDeferred = async { safeApiCall { monitorRepository.getCameraInGroupList() } }
+                    val aiServiceDeferred = async { safeApiCall { monitorRepository.getAIServiceList() } }
 
                     val vmsResult = vmsDeferred.await()
                     val groupResult = groupDeferred.await()
@@ -1415,8 +1416,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
                         applyTree(buildIndex(vmsList, groupList, cameraList, cameraInGroups))
 
-                        MonitorCacheManager.saveMonitorData(
-                            app,
+                        monitorRepository.saveMonitorData(
                             CachedMonitorData(
                                 vmsList = vmsList,
                                 groupList = groupList,
@@ -1709,7 +1709,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         // Lấy ngay ảnh snapshot đang hiển thị trên thẻ hoặc đã cache trong RAM (0ms) để khung phát live có ảnh nền ngay từ frame đầu tiên
         val initialFallback = _uiState.value.cameraSnapshots[camera.id]
             ?.takeIf { it.isNotEmpty() }
-            ?: MonitorCacheManager.getCachedCameraImageLinkInMemory(camera.id)
+            ?: monitorRepository.getCachedCameraImageLinkInMemory(camera.id)
                 ?.let(::resolveFullMediaUrl)
                 .orEmpty()
         var updatedCameras: List<SelectedCamera?> = emptyList()
@@ -1754,8 +1754,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val currentSlot = _uiState.value.selectedCameras.getOrNull(slotIndex)
                 if (currentSlot?.camera?.id == camera.id && currentSlot.fallbackImageUrl.isNotEmpty()) {
                     val hasFreshCache = withContext(Dispatchers.IO) {
-                        MonitorCacheManager.isSnapshotCacheFresh(app, camera.id) &&
-                            !MonitorCacheManager.getCachedCameraImageLink(app, camera.id).isNullOrBlank()
+                        monitorRepository.isSnapshotCacheFresh(camera.id) &&
+                            !monitorRepository.getCachedCameraImageLink(camera.id).isNullOrBlank()
                     }
                     if (hasFreshCache) return@launch
                 }
@@ -1763,7 +1763,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
             try {
                 var rawLink = ""
-                val response = runCatching { vmsApi.getCameraImageLink(camera.id) }.getOrNull()
+                val response = runCatching { monitorRepository.getCameraImageLink(camera.id) }.getOrNull()
                 if (response?.isSuccessful == true) {
                     val fetched = response.body()?.link?.trim().orEmpty()
                     if (fetched.isNotEmpty() && fetched != NO_IMAGE) {
@@ -1772,7 +1772,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 }
                 if (rawLink.isEmpty()) {
                     val videoRes = runCatching {
-                        vmsApi.getVideoList(camera = camera.id, count = 1, from = null, to = null)
+                        monitorRepository.getVideoList(camera = camera.id, count = 1, from = null, to = null)
                     }.getOrNull()
                     if (videoRes?.isSuccessful == true) {
                         val firstVideo = videoRes.body()?.firstOrNull()
@@ -1785,8 +1785,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
                 if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
                     val finalSnap = withContext(Dispatchers.IO) {
-                        MonitorCacheManager.setCachedCameraImageLink(app, camera.id, rawLink)
-                        val latestCached = MonitorCacheManager.getCachedCameraImageLink(app, camera.id)
+                        monitorRepository.setCachedCameraImageLink(camera.id, rawLink)
+                        val latestCached = monitorRepository.getCachedCameraImageLink(camera.id)
                         if (latestCached != null && latestCached.startsWith("file://")) latestCached else resolveFullMediaUrl(rawLink)
                     }
                     updateSlot(slotIndex, camera.id) { slot ->
@@ -1828,7 +1828,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
         val camera = current.camera
         viewModelScope.launch(Dispatchers.IO) {
-            MonitorCacheManager.removeCachedCameraImageLink(app, camera.id)
+            monitorRepository.removeCachedCameraImageLink(camera.id)
         }
 
         if (!current.snapshotRetried) {
@@ -1887,7 +1887,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 if (activeCam == null || activeCam.camera.id != camera.id) return@launch
 
                 try {
-                    val response = vmsApi.createLiveStream(
+                    val response = monitorRepository.createLiveStream(
                         LiveStreamModel(
                             cameraId = camera.id,
                             channel = channel,
@@ -2385,7 +2385,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                         val toStr = formatVideoQueryTime(toMs)
 
                         val result = safeApiCall {
-                            vmsApi.getVideoList(
+                            monitorRepository.getVideoList(
                                 camera = cameraId,
                                 count = PLAYBACK_PER_DAY_COUNT,
                                 from = fromStr,
@@ -2528,7 +2528,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         playbackDayJobs[dateKey] = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val response = runCatching {
-                    vmsApi.getVideoList(
+                    monitorRepository.getVideoList(
                         camera = camera.id,
                         count = PLAYBACK_PER_DAY_COUNT,
                         from = fromStr,
@@ -2618,8 +2618,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun cacheClickedCameraEvent(event: EventData) {
         val cameras = treeIndex.allCameras.map { it.camera }
-        val services = aiServices.ifEmpty { EventCacheManager.getAiServicesInMemory() }
-        EventCacheManager.cacheClickedEvent(
+        val services = aiServices.ifEmpty { monitorRepository.getAiServicesInMemory() }
+        monitorRepository.cacheClickedCameraEvent(
             event = event,
             cameras = cameras,
             aiServices = services
@@ -2688,7 +2688,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 eventsLoadedForCameraId = camera.id
 
                 if (events.isNotEmpty()) {
-                    EventCacheManager.cacheInMemory(
+                    monitorRepository.cacheInMemory(
                         events = events,
                         cameras = treeIndex.allCameras.map { it.camera },
                         aiServices = aiServices
@@ -2753,7 +2753,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     lastCameraEventRawId = nextLastId
                 }
                 if (newEvents.isNotEmpty()) {
-                    EventCacheManager.cacheInMemory(events = newEvents)
+                    monitorRepository.cacheInMemory(events = newEvents)
                 }
 
                 _uiState.update { cur ->
@@ -2813,11 +2813,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         var anySuccessful = false
         var firstError: Throwable? = null
 
-        val allCameras = rawCameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+        val allCameras = rawCameraList.ifEmpty { monitorRepository.getCamerasInMemory() }
         while (attempts < EVENT_MAX_BATCH_ATTEMPTS) {
             attempts++
             val result = safeApiCall {
-                eventApi.getDataList(
+                monitorRepository.getEventDataList(
                     lastId = currentLastId,
                     count = EVENT_RAW_BATCH_SIZE,
                     from = fromSec,

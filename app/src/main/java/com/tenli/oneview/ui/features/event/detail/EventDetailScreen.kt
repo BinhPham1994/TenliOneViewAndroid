@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -17,6 +18,8 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -61,6 +64,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -117,6 +121,7 @@ import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.CustomDatePickerDialogModal
 import com.tenli.oneview.ui.component.CustomRangePickerDialogModal
+import com.tenli.oneview.ui.component.LiveStreamPlayer
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.SheetCloseButton
@@ -148,6 +153,7 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 enum class EventMediaTab(val titleVi: String, val titleEn: String) {
+    LIVE_CAMERA("Live Camera", "Live Camera"),
     ORIGINAL_VIDEO("Video gốc", "Original video"),
     EVENT_IMAGE("Ảnh sự kiện", "Event photo"),
     EVENT_VIDEO("Video sự kiện", "Event video")
@@ -377,8 +383,10 @@ fun EventDetailScreen(
 
                                 val isInsidePinnedTop =
                                     pinnedBottomY > 0f && downRootY <= pinnedBottomY
+                                val hasVideoSeekbar =
+                                    selectedTab == EventMediaTab.ORIGINAL_VIDEO || selectedTab == EventMediaTab.EVENT_VIDEO
                                 val isInsideVideoSeekbarZone =
-                                    selectedTab != EventMediaTab.EVENT_IMAGE &&
+                                    hasVideoSeekbar &&
                                         pinnedBottomY > 0f &&
                                         downRootY in (pinnedBottomY - videoControllerZoneHeightPx)..pinnedBottomY
                                 val isDataBoardVisible =
@@ -530,16 +538,25 @@ fun EventDetailScreen(
                         )
 
                         // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
-                        // Supports horizontal swipe to switch between Video gốc / Ảnh sự kiện / Video sự kiện
+                        // Supports horizontal swipe to switch between Live Camera / Video gốc / Ảnh sự kiện / Video sự kiện
                         MediaViewport(
                             selectedTab = selectedTab,
                             eventId = event.id,
+                            cameraId = camera?.id ?: 0,
                             display = display,
+                            liveStreamLoading = uiState.liveStreamLoading,
+                            liveStreamError = uiState.liveStreamError,
+                            liveStreamUrl = uiState.liveStreamUrl,
+                            liveCameraSnapshotUrl = uiState.liveCameraSnapshotUrl,
                             originalVideoLoading = uiState.originalVideoLoading,
                             originalVideoError = uiState.originalVideoError,
                             originalVideoUrl = uiState.originalVideoUrl,
                             originalVideoSeekTimeMs = uiState.originalVideoSeekTimeMs,
                             isEn = isEn,
+                            onLoadLiveStream = viewModel::loadLiveStream,
+                            onLiveStreamFirstFrame = viewModel::onLiveStreamFirstFrame,
+                            onRetryLiveStream = viewModel::retryLiveStream,
+                            onStopLiveStream = viewModel::stopLiveStream,
                             onLoadOriginalVideo = viewModel::loadOriginalVideo
                         )
 
@@ -910,13 +927,13 @@ private fun MediaTabSelector(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) { onSelect(tab) }
-                        .padding(horizontal = spacing.space4),
+                        .padding(horizontal = spacing.space2),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = if (isEn) tab.titleEn else tab.titleVi,
                         color = tabTextColor,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.5.sp),
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -931,12 +948,21 @@ private fun MediaTabSelector(
 private fun MediaViewport(
     selectedTab: EventMediaTab,
     eventId: Int,
+    cameraId: Int,
     display: EventDetailDisplay,
+    liveStreamLoading: Boolean,
+    liveStreamError: String?,
+    liveStreamUrl: String?,
+    liveCameraSnapshotUrl: String?,
     originalVideoLoading: Boolean,
     originalVideoError: String?,
     originalVideoUrl: String?,
     originalVideoSeekTimeMs: Long?,
     isEn: Boolean,
+    onLoadLiveStream: (Boolean) -> Unit,
+    onLiveStreamFirstFrame: () -> Unit,
+    onRetryLiveStream: () -> Unit,
+    onStopLiveStream: () -> Unit,
     onLoadOriginalVideo: () -> Unit
 ) {
     val viewportBg = MaterialTheme.appColors.surface
@@ -965,6 +991,19 @@ private fun MediaViewport(
             label = "mediaViewportTransition"
         ) { activeMediaTab ->
             when (activeMediaTab) {
+                EventMediaTab.LIVE_CAMERA -> LiveCameraPane(
+                    eventId = eventId,
+                    cameraId = cameraId,
+                    snapshotUrl = display.imageUrl ?: liveCameraSnapshotUrl,
+                    isLoading = liveStreamLoading,
+                    error = liveStreamError,
+                    streamUrl = liveStreamUrl,
+                    onLoad = onLoadLiveStream,
+                    onFirstFrame = onLiveStreamFirstFrame,
+                    onRetry = onRetryLiveStream,
+                    onStop = onStopLiveStream
+                )
+
                 EventMediaTab.EVENT_IMAGE -> EventImageWithBoxes(
                     imageUrl = display.imageUrl,
                     boxes = display.boxes,
@@ -996,6 +1035,103 @@ private fun MediaViewport(
                         CommonEmptyState(text = noVideoText, modifier = Modifier.fillMaxSize())
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LiveCameraPane(
+    eventId: Int,
+    cameraId: Int,
+    snapshotUrl: String?,
+    isLoading: Boolean,
+    error: String?,
+    streamUrl: String?,
+    onLoad: (Boolean) -> Unit,
+    onFirstFrame: () -> Unit,
+    onRetry: () -> Unit,
+    onStop: () -> Unit
+) {
+    val context = LocalContext.current
+    var isPlaying by remember(cameraId, streamUrl) { mutableStateOf(false) }
+
+    LaunchedEffect(eventId, cameraId) {
+        onLoad(false)
+    }
+    DisposableEffect(Unit) {
+        onDispose { onStop() }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.appColors.surface),
+        contentAlignment = Alignment.Center
+    ) {
+        if (!streamUrl.isNullOrEmpty() && error == null) {
+            LiveStreamPlayer(
+                wsUrl = streamUrl,
+                cameraId = cameraId,
+                isOriginalRatio = false,
+                onPlayingChange = { playing ->
+                    isPlaying = playing
+                    if (playing) {
+                        onFirstFrame()
+                    }
+                },
+                onErrorChange = { isErr ->
+                    if (isErr) {
+                        isPlaying = false
+                        onRetry()
+                    }
+                }
+            )
+        }
+
+        val showPreviewOverlay = (isLoading || !isPlaying) && error == null
+        AnimatedVisibility(
+            visible = showPreviewOverlay,
+            enter = fadeIn(animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(300)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.appColors.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                if (!snapshotUrl.isNullOrEmpty()) {
+                    val previewRequest = remember(snapshotUrl) {
+                        ImageRequest.Builder(context)
+                            .data(snapshotUrl)
+                            .size(1280, 720)
+                            .precision(Precision.INEXACT)
+                            .allowHardware(true)
+                            .crossfade(false)
+                            .build()
+                    }
+                    AsyncImage(
+                        model = previewRequest,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.FillBounds
+                    )
+                }
+                WaveDotsLoading()
+            }
+        }
+
+        if (error != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.appColors.surface)
+                    .clickable { onLoad(true) },
+                contentAlignment = Alignment.Center
+            ) {
+                CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
             }
         }
     }
@@ -1080,7 +1216,7 @@ private fun OriginalVideoPane(
         label = "zoom_effect"
     )
 
-    if (isLoading) {
+    if (isLoading || (videoUrl == null && error == null)) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1102,7 +1238,7 @@ private fun OriginalVideoPane(
                     model = previewRequest,
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+                    contentScale = ContentScale.FillBounds
                 )
             }
             WaveDotsLoading()
@@ -1126,7 +1262,7 @@ private fun OriginalVideoPane(
             ) {
                 VideoPlayer(
                     videoUrl = videoUrl,
-                    thumbnailUrl = null,
+                    thumbnailUrl = display.imageUrl,
                     deviceKey = UserSession.accessToken,
                     initialSeekPositionMs = seekTimeMs,
                     errorText = if (isEn) "Original video unavailable" else "Video gốc không khả dụng",

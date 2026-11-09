@@ -2499,7 +2499,9 @@ private fun MobileCameraSnapshotCard(
             }
         }
 
-        // .cam-card-footer
+        // .cam-card-footer: ẩn tên camera trong lúc đang loading ảnh snapshot, chỉ hiển thị sau khi tải xong
+        val isSnapshotLoading = !hasLoadedAnyImage &&
+            (!hasSnapKey || (imageRequest != null && isImageLoading && !isImageError))
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2513,7 +2515,10 @@ private fun MobileCameraSnapshotCard(
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.graphicsLayer {
+                    alpha = if (isSnapshotLoading) 0f else 1f
+                }
             )
         }
     }

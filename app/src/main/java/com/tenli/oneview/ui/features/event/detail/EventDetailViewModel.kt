@@ -8,18 +8,17 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tenli.oneview.data.local.EventCacheManager
-import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.data.network.ApiProvider
+import com.tenli.oneview.data.repository.EventRepository
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.BsProfileGroupModel
 import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
-import com.tenli.oneview.model.network.Confirm
 import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.ParamPlateModel
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.features.event.directProfileId
@@ -35,7 +34,6 @@ import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
-import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.safeApiCall
 import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
@@ -43,6 +41,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,6 +90,11 @@ data class EventDetailUiState(
     val licensePlateEvents: List<EventData> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
+    val liveStreamUrl: String? = null,
+    val liveStreamLoading: Boolean = false,
+    val liveStreamError: String? = null,
+    val liveStreamChannel: Int = 1,
+    val liveCameraSnapshotUrl: String? = null,
     val originalVideoUrl: String? = null,
     val originalVideoSeekTimeMs: Long? = null,
     val originalVideoEventPositionMs: Long? = null,
@@ -103,27 +107,37 @@ data class EventDetailUiState(
 
 class EventDetailViewModel(
     application: Application,
-    private val eventId: Int
+    private val eventId: Int,
+    private val eventRepository: EventRepository
 ) : AndroidViewModel(application) {
 
-    private val eventApi get() = ApiProvider.eventApi
-    private val vmsApi get() = ApiProvider.vmsApi
-    private val bsApi get() = ApiProvider.bsApi
-
     private val _uiState: MutableStateFlow<EventDetailUiState> = run {
-        val initialEvent = EventCacheManager.getEventInMemory(eventId)
-        val initialCameras = EventCacheManager.getCamerasInMemory()
-        val initialRelated = EventCacheManager.getRelatedEventsInMemory(eventId, JourneyPeriod.TODAY.code)
+        val initialEvent = eventRepository.getEventInMemory(eventId)
+        val initialCameras = eventRepository.getCamerasInMemory()
+        val initialCamera = initialEvent?.let { resolveCameraForEvent(it, initialCameras) }
+        val initialSnap = initialCamera?.id?.let { camId ->
+            eventRepository.getCachedCameraImageLinkInMemory(camId)
+        }
+        val initialRelated = eventRepository.getRelatedEventsInMemory(eventId, JourneyPeriod.TODAY.code)
 
         MutableStateFlow(
             EventDetailUiState(
                 baseEvent = initialEvent,
                 event = initialEvent,
-                camera = initialEvent?.let { resolveCameraForEvent(it, initialCameras) },
+                camera = initialCamera,
                 cameraList = initialCameras,
-                aiServices = EventCacheManager.getAiServicesInMemory(),
-                profileList = EventCacheManager.getProfilesInMemory(),
-                profileGroupList = EventCacheManager.getProfileGroupsInMemory(),
+                liveCameraSnapshotUrl = initialSnap?.let { raw ->
+                    val trimmed = raw.trim()
+                    if (trimmed.isEmpty() || trimmed == "NO_IMAGE") null
+                    else if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("file://") || trimmed.startsWith("data:")) trimmed
+                    else {
+                        val base = UserSession.domain.trim().trimEnd('/').removeSuffix("/api/v1")
+                        if (trimmed.startsWith("/")) "$base$trimmed" else "$base/$trimmed"
+                    }
+                },
+                aiServices = eventRepository.getAiServicesInMemory(),
+                profileList = eventRepository.getProfilesInMemory(),
+                profileGroupList = eventRepository.getProfileGroupsInMemory(),
                 relatedEvents = initialRelated ?: emptyList(),
                 isLoading = initialEvent == null,
                 isJourneyLoading = initialRelated == null
@@ -135,6 +149,10 @@ class EventDetailViewModel(
     private var relatedEventsJob: Job? = null
     private var licensePlateJob: Job? = null
     private var originalVideoJob: Job? = null
+    private var liveStreamJob: Job? = null
+    private var liveRetryCount: Int = 0
+    private var liveFallbackTried: Boolean = false
+    private var pendingLiveStreamOnCameraResolved: Boolean = false
 
     private val isEnglishLocale: Boolean
         get() = LocaleManager.getLocale(getApplication()).startsWith("en")
@@ -156,7 +174,7 @@ class EventDetailViewModel(
                 if (foundEvent == null) {
                     _uiState.update { it.copy(isLoading = true, error = null) }
 
-                    val cacheResult = EventCacheManager.findEventById(getApplication(), eventId)
+                    val cacheResult = eventRepository.findEventById(eventId)
                     if (cacheResult != null) {
                         foundEvent = cacheResult.first
                         if (cacheResult.second.isNotEmpty()) {
@@ -165,7 +183,7 @@ class EventDetailViewModel(
                     }
 
                     if (foundEvent == null) {
-                        val response = eventApi.getDataList(lastId = eventId + 1, count = 1)
+                        val response = eventRepository.getDataList(lastId = eventId + 1, count = 1)
                         if (response.isSuccessful) {
                             val first = response.body()?.firstOrNull()
                             if (first != null && first.id == eventId) {
@@ -220,22 +238,22 @@ class EventDetailViewModel(
                     coroutineScope {
                         val camDeferred = async {
                             if (fetchCameras) {
-                                runCatching { vmsApi.getCameraList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getCameraList() }.getOrNull()?.body() ?: emptyList()
                             } else cameraList
                         }
                         val aiSvcDeferred = async {
                             if (fetchAiServices) {
-                                runCatching { eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
                             } else current.aiServices
                         }
                         val profilesDeferred = async {
                             if (fetchProfiles) {
-                                runCatching { bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getProfileList() }.getOrNull()?.body() ?: emptyList()
                             } else current.profileList
                         }
                         val groupsDeferred = async {
                             if (fetchGroups) {
-                                runCatching { bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
                             } else current.profileGroupList
                         }
 
@@ -244,15 +262,14 @@ class EventDetailViewModel(
                         val finalProfiles = profilesDeferred.await()
                         val finalGroups = groupsDeferred.await()
 
-                        EventCacheManager.cacheInMemory(
+                        eventRepository.cacheInMemory(
                             events = listOf(foundEvent),
                             cameras = finalCameras,
                             aiServices = finalAiServices
                         )
                         // Chỉ ghi cache profile xuống đĩa khi vừa tải mới (tránh serialize JSON lớn mỗi lần mở chi tiết)
                         if ((fetchProfiles && finalProfiles.isNotEmpty()) || (fetchGroups && finalGroups.isNotEmpty())) {
-                            EventCacheManager.saveProfilesCache(
-                                context = getApplication(),
+                            eventRepository.saveProfilesCache(
                                 profiles = finalProfiles,
                                 groups = finalGroups
                             )
@@ -260,20 +277,28 @@ class EventDetailViewModel(
 
                         val currentEv = _uiState.value.event ?: foundEvent
                         val camera = resolveCameraForEvent(currentEv, finalCameras)
+                        val resolvedSnap = camera?.id?.let { camId ->
+                            eventRepository.getCachedCameraImageLinkInMemory(camId)
+                        }?.let(::resolveFullMediaUrl)?.takeIf { it.isNotEmpty() }
 
                         _uiState.update {
                             it.copy(
                                 camera = camera ?: it.camera,
                                 cameraList = finalCameras,
+                                liveCameraSnapshotUrl = resolvedSnap ?: it.liveCameraSnapshotUrl,
                                 aiServices = finalAiServices,
                                 profileList = finalProfiles,
                                 profileGroupList = finalGroups,
                                 isLoading = false
                             )
                         }
+                        if (pendingLiveStreamOnCameraResolved && camera != null) {
+                            pendingLiveStreamOnCameraResolved = false
+                            loadLiveStream(forceReload = true)
+                        }
                     }
                 } else {
-                    EventCacheManager.cacheInMemory(
+                    eventRepository.cacheInMemory(
                         events = listOf(foundEvent),
                         cameras = cameraList,
                         aiServices = current.aiServices
@@ -299,13 +324,25 @@ class EventDetailViewModel(
         }
     }
 
-    /** Đổi sự kiện đang xem (ảnh/video/thông tin), hủy tải video gốc của sự kiện trước. */
+    /** Đổi sự kiện đang xem (ảnh/video/thông tin), hủy tải video gốc & luồng live của sự kiện trước. */
     private fun showEvent(event: EventData) {
         originalVideoJob?.cancel()
+        liveStreamJob?.cancel()
+        liveRetryCount = 0
+        liveFallbackTried = false
+        pendingLiveStreamOnCameraResolved = false
         _uiState.update {
+            val resolvedCam = resolveCameraForEvent(event, it.cameraList) ?: it.camera
+            val resolvedSnap = resolvedCam?.id?.let { camId ->
+                eventRepository.getCachedCameraImageLinkInMemory(camId)
+            }?.let(::resolveFullMediaUrl)?.takeIf { it.isNotEmpty() }
             it.copy(
                 event = event,
-                camera = resolveCameraForEvent(event, it.cameraList) ?: it.camera,
+                camera = resolvedCam,
+                liveStreamUrl = null,
+                liveStreamLoading = false,
+                liveStreamError = null,
+                liveCameraSnapshotUrl = resolvedSnap,
                 originalVideoUrl = null,
                 originalVideoLoading = false,
                 originalVideoError = null
@@ -392,7 +429,7 @@ class EventDetailViewModel(
                     )
                 )
                 safeApiCall {
-                    eventApi.searchAIData(
+                    eventRepository.searchAIData(
                         from = fromTime,
                         to = toTime,
                         serviceId = serviceId,
@@ -416,7 +453,7 @@ class EventDetailViewModel(
 
                 if (profileUuid.isNotEmpty()) {
                     safeApiCall {
-                        eventApi.getFaceDataByProfileUUID(
+                        eventRepository.getFaceDataByProfileUUID(
                             profileUUID = profileUuid,
                             count = 50,
                             from = fromTime,
@@ -426,7 +463,7 @@ class EventDetailViewModel(
                     }
                 } else {
                     safeApiCall {
-                        eventApi.getDataList(
+                        eventRepository.getDataList(
                             count = 50,
                             serviceId = serviceId,
                             type = targetEvent.type.ifBlank { "sensor-face-unknown-camera" },
@@ -454,11 +491,11 @@ class EventDetailViewModel(
                 } else {
                     params["onlyProfileUnknown"] = "1"
                 }
-                safeApiCall { bsApi.getUniformData(params) }
+                safeApiCall { eventRepository.getUniformData(params) }
             }
 
             else -> safeApiCall {
-                eventApi.getDataList(
+                eventRepository.getDataList(
                     count = 50,
                     serviceId = serviceId,
                     type = targetEvent.type,
@@ -477,7 +514,7 @@ class EventDetailViewModel(
         val targetEvent = state.event ?: state.baseEvent ?: return
         val period = state.selectedJourneyPeriod
         val cacheCode = period.cacheCode()
-        val cachedRelated = EventCacheManager.getRelatedEventsInMemory(targetEvent.id, cacheCode)
+        val cachedRelated = eventRepository.getRelatedEventsInMemory(targetEvent.id, cacheCode)
 
         relatedEventsJob?.cancel()
         relatedEventsJob = viewModelScope.launch {
@@ -505,7 +542,7 @@ class EventDetailViewModel(
                         !typeLower.contains("uniform") &&
                         !cameraUUID.isNullOrBlank()
 
-                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { eventRepository.getCamerasInMemory() }
                     fetched
                         .asSequence()
                         .filter { item ->
@@ -521,7 +558,7 @@ class EventDetailViewModel(
                         .sortedByDescending { it.time }
                         .toList()
                 }
-                EventCacheManager.cacheRelatedEventsInMemory(targetEvent.id, cacheCode, sorted)
+                eventRepository.cacheRelatedEventsInMemory(targetEvent.id, cacheCode, sorted)
                 _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
             } catch (e: CancellationException) {
                 throw e
@@ -564,7 +601,7 @@ class EventDetailViewModel(
         licensePlateJob = viewModelScope.launch {
             try {
                 val timeSec = eventTimeToSeconds(eventTime)
-                val response = eventApi.getDataList(
+                val response = eventRepository.getDataList(
                     count = 20,
                     from = timeSec - PLATE_WINDOW_SEC,
                     to = timeSec + PLATE_WINDOW_SEC,
@@ -572,7 +609,7 @@ class EventDetailViewModel(
                     type = "sensor-license-plate"
                 )
                 if (response.isSuccessful) {
-                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { EventCacheManager.getCamerasInMemory() }
+                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { eventRepository.getCamerasInMemory() }
                     val events = UserPermissionManager.filterEventsByPermissions(
                         response.body() ?: emptyList(),
                         camerasForPerm
@@ -607,6 +644,215 @@ class EventDetailViewModel(
         return if (trimmed.startsWith("/")) "$base$trimmed" else "$base/$trimmed"
     }
 
+    private fun resolveWebSocketUrl(rawLink: String): String {
+        val trimmed = rawLink.trim()
+        if (trimmed.isEmpty()) return ""
+        val base = UserSession.domain
+            .trim()
+            .trimEnd('/')
+            .removeSuffix("/api/v1")
+        var resolved = when {
+            trimmed.startsWith("/") -> "$base$trimmed"
+            !trimmed.startsWith("ws://") &&
+                !trimmed.startsWith("wss://") &&
+                !trimmed.startsWith("http://") &&
+                !trimmed.startsWith("https://") -> "$base/$trimmed"
+            else -> trimmed
+        }
+        if (resolved.startsWith("http://")) resolved = resolved.replaceFirst("http://", "ws://")
+        if (resolved.startsWith("https://")) resolved = resolved.replaceFirst("https://", "wss://")
+        return resolved
+    }
+
+    fun loadLiveStream(forceReload: Boolean = false) {
+        val state = _uiState.value
+        val event = state.event ?: return
+        val isEn = isEnglishLocale
+        val camera = state.camera ?: resolveCameraForEvent(event, state.cameraList)
+
+        if (camera == null) {
+            if (state.cameraList.isEmpty()) {
+                pendingLiveStreamOnCameraResolved = true
+                _uiState.update { it.copy(liveStreamLoading = true, liveStreamError = null) }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        liveStreamLoading = false,
+                        liveStreamError = if (isEn) "Camera unavailable" else "Camera không khả dụng"
+                    )
+                }
+            }
+            return
+        }
+
+        if (!UserPermissionManager.canAccessLiveStream() || !UserPermissionManager.isCameraPermitted(camera)) {
+            _uiState.update {
+                it.copy(
+                    liveStreamLoading = false,
+                    liveStreamError = if (isEn) "No live view permission" else "Không có quyền xem trực tiếp"
+                )
+            }
+            return
+        }
+
+        if (!forceReload && (state.liveStreamUrl != null || state.liveStreamLoading)) {
+            return
+        }
+
+        val initialChannel = if (forceReload && liveFallbackTried) {
+            state.liveStreamChannel
+        } else if (camera.sub.isNotBlank()) {
+            1
+        } else {
+            0
+        }
+        if (forceReload) {
+            liveRetryCount = 0
+            liveFallbackTried = false
+        }
+        startLiveStreamPolling(camera, initialChannel, isFallback = false)
+    }
+
+    private fun startLiveStreamPolling(camera: CameraModel, channel: Int, isFallback: Boolean) {
+        liveStreamJob?.cancel()
+        liveFallbackTried = isFallback
+        val memSnap = eventRepository.getCachedCameraImageLinkInMemory(camera.id)
+            ?.let(::resolveFullMediaUrl)
+            ?.takeIf { it.isNotEmpty() }
+        _uiState.update {
+            it.copy(
+                liveStreamUrl = null,
+                liveStreamLoading = true,
+                liveStreamError = null,
+                liveStreamChannel = channel,
+                liveCameraSnapshotUrl = memSnap ?: it.liveCameraSnapshotUrl
+            )
+        }
+
+        liveStreamJob = viewModelScope.launch {
+            if (_uiState.value.liveCameraSnapshotUrl.isNullOrEmpty()) {
+                val diskSnap = withContext(Dispatchers.IO) {
+                    eventRepository.getCachedCameraImageLink(camera.id)
+                        ?.let(::resolveFullMediaUrl)
+                        ?.takeIf { it.isNotEmpty() }
+                }
+                if (diskSnap != null) {
+                    _uiState.update {
+                        if (it.liveCameraSnapshotUrl.isNullOrEmpty()) it.copy(liveCameraSnapshotUrl = diskSnap) else it
+                    }
+                }
+            }
+
+            for (attempt in 1..LIVE_POLL_MAX_ATTEMPTS) {
+                val activeCamId = _uiState.value.camera?.id ?: camera.id
+                if (activeCamId != camera.id) return@launch
+
+                try {
+                    val response = eventRepository.createLiveStream(
+                        LiveStreamModel(
+                            cameraId = camera.id,
+                            channel = channel,
+                            link = "",
+                            videoCodec = "",
+                            audioCodec = "",
+                            videoCodecTag = ""
+                        )
+                    )
+                    if (response.isSuccessful) {
+                        val body = response.body()
+                        val rawLink = body?.link?.trim().orEmpty()
+                        val videoCodec = body?.videoCodec?.trim().orEmpty()
+                        if (rawLink.isNotEmpty() && videoCodec.isNotEmpty()) {
+                            val wsUrl = resolveWebSocketUrl(rawLink)
+                            _uiState.update {
+                                it.copy(
+                                    liveStreamUrl = wsUrl,
+                                    liveStreamLoading = false,
+                                    liveStreamError = null,
+                                    liveStreamChannel = channel
+                                )
+                            }
+                            return@launch
+                        }
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Chờ lượt poll tiếp theo
+                }
+
+                if (attempt < LIVE_POLL_MAX_ATTEMPTS) {
+                    delay(LIVE_POLL_INTERVAL_MS)
+                }
+            }
+
+            if (!isFallback && camera.sub.isNotBlank()) {
+                val fallbackChannel = if (channel == 1) 0 else 1
+                startLiveStreamPolling(camera, fallbackChannel, isFallback = true)
+            } else {
+                val isEn = isEnglishLocale
+                _uiState.update {
+                    it.copy(
+                        liveStreamUrl = null,
+                        liveStreamLoading = false,
+                        liveStreamError = if (isEn) "No signal" else "Không có tín hiệu"
+                    )
+                }
+            }
+        }
+    }
+
+    fun onLiveStreamFirstFrame() {
+        liveRetryCount = 0
+        val camId = _uiState.value.camera?.id ?: return
+        val latestSnap = eventRepository.getCachedCameraImageLinkInMemory(camId)
+            ?.let(::resolveFullMediaUrl)
+            ?.takeIf { it.isNotEmpty() }
+        if (latestSnap != null) {
+            _uiState.update { it.copy(liveCameraSnapshotUrl = latestSnap) }
+        }
+    }
+
+    fun retryLiveStream() {
+        val state = _uiState.value
+        val event = state.event ?: return
+        val camera = state.camera ?: resolveCameraForEvent(event, state.cameraList) ?: return
+        val isEn = isEnglishLocale
+
+        if (liveRetryCount >= 2 && !liveFallbackTried && camera.sub.isNotBlank()) {
+            val nextChannel = if (state.liveStreamChannel == 1) 0 else 1
+            liveRetryCount = 0
+            startLiveStreamPolling(camera, nextChannel, isFallback = true)
+            return
+        }
+
+        if (liveRetryCount >= 5) {
+            _uiState.update {
+                it.copy(
+                    liveStreamUrl = null,
+                    liveStreamLoading = false,
+                    liveStreamError = if (isEn) "Camera connection error" else "Lỗi kết nối camera"
+                )
+            }
+            return
+        }
+
+        val nextRetry = liveRetryCount + 1
+        liveRetryCount = nextRetry
+        liveStreamJob?.cancel()
+        _uiState.update { it.copy(liveStreamUrl = null, liveStreamLoading = true, liveStreamError = null) }
+        liveStreamJob = viewModelScope.launch {
+            delay((1000L shl (nextRetry - 1)).coerceAtMost(8000L))
+            startLiveStreamPolling(camera, state.liveStreamChannel, isFallback = liveFallbackTried)
+        }
+    }
+
+    fun stopLiveStream() {
+        liveStreamJob?.cancel()
+        pendingLiveStreamOnCameraResolved = false
+        _uiState.update { it.copy(liveStreamLoading = false) }
+    }
+
     fun loadOriginalVideo() {
         val state = _uiState.value
         val event = state.event ?: return
@@ -634,7 +880,7 @@ class EventDetailViewModel(
                 val eventTimeMs = eventTimeToMillis(event.time)
                 val fromMs = eventTimeMs - ORIGINAL_VIDEO_LOOKBACK_MS
 
-                val response = vmsApi.getVideoList(
+                val response = eventRepository.getVideoList(
                     camera = camera.id,
                     count = 1,
                     from = formatVideoQueryTime(fromMs),
@@ -689,12 +935,8 @@ class EventDetailViewModel(
         val isEn = isEnglishLocale
         viewModelScope.launch {
             try {
-                val response = eventApi.verifyEvent(eventId, Confirm(false))
+                val response = eventRepository.reportEventAsFalse(eventId)
                 if (response.isSuccessful) {
-                    val app = getApplication<Application>()
-                    EventCacheManager.removeEvent(app, eventId)
-                    HomeCacheManager.removeEvent(app, eventId)
-                    EventBus.emitEventReportedFalse(eventId)
                     onSuccess()
                 } else {
                     onError(if (isEn) "Error reporting event: ${response.code()}" else "Lỗi khi báo cáo: ${response.code()}")
@@ -714,11 +956,15 @@ class EventDetailViewModel(
         private const val PLATE_WINDOW_SEC = 15L
         /** Video gốc lấy từ 61 giây trước thời điểm sự kiện */
         private const val ORIGINAL_VIDEO_LOOKBACK_MS = 61_000L
+        private const val LIVE_POLL_MAX_ATTEMPTS = 10
+        private const val LIVE_POLL_INTERVAL_MS = 2000L
 
         fun provideFactory(eventId: Int, fallbackApplication: Application? = null): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = (this[APPLICATION_KEY] ?: fallbackApplication) as Application
-                EventDetailViewModel(application, eventId)
+                val eventRepository = (application as? TenliApp)?.container?.eventRepository
+                    ?: EventRepository(application)
+                EventDetailViewModel(application, eventId, eventRepository)
             }
         }
     }

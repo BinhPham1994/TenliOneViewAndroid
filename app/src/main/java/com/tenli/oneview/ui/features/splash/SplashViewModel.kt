@@ -1,8 +1,6 @@
 package com.tenli.oneview.ui.features.splash
 
 import android.app.Application
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -10,21 +8,21 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.TenliApp
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
-import com.tenli.oneview.data.local.HomeCacheManager
-import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.firebase.FcmTokenManager
-import com.tenli.oneview.ui.utils.AiTypeHelper
-import com.tenli.oneview.ui.utils.AppKeys
+import com.tenli.oneview.data.network.websocket.WebSocketManager
+import com.tenli.oneview.data.repository.AuthRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-class SplashViewModel(application: Application) : AndroidViewModel(application) {
+class SplashViewModel(
+    application: Application,
+    private val authRepository: AuthRepository,
+    private val webSocketManager: WebSocketManager
+) : AndroidViewModel(application) {
 
     private val _uiState = MutableStateFlow(SplashUiState(destination = resolveInitialDestination()))
     val uiState = _uiState.asStateFlow()
@@ -50,45 +48,21 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
         if (!needsCleanup) return
 
         // Dự phòng trường hợp gọi trực tiếp SplashViewModel.logout() (vd. hết hạn phiên 401) mà chưa chạy MainViewModel.logout()
-        val app = getApplication<Application>()
-        (app as? TenliApp)?.container?.webSocketManager?.disconnectAll()
-        runCatching { NotificationManagerCompat.from(app).cancelAll() }
-
+        webSocketManager.disconnectAll()
         viewModelScope.launch(Dispatchers.IO) {
-            FcmTokenManager.unregisterDevicePushToken()
-            UserSession.clear()
-
-            val prefs = GlobalData.preferences
-            val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-            prefs.edit {
-                remove(AppKeys.ACCESS_TOKEN_KEY)
-                remove(AppKeys.REFRESH_TOKEN_KEY)
-                remove(AppKeys.USER_DATA_KEY)
-                remove(AppKeys.GROUP_ID)
-                remove(AppKeys.GROUP_ID_CAMERA)
-                remove("push_notifications_enabled")
-                remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
-                remove("saved_expanded_nodes")
-                remove("saved_monitor_grid_size")
-                remove("saved_monitor_grid_camera_ids")
-                remove("saved_monitor_camera_id")
-                if (!rememberMe) {
-                    remove(AppKeys.USERNAME_KEY)
-                    remove(AppKeys.PASSWORD_KEY)
-                }
-            }
-
-            HomeCacheManager.clearCache(app)
-            EventCacheManager.clearCache(app)
-            MonitorCacheManager.clearCache(app)
+            authRepository.clearAuthenticatedSession()
         }
     }
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
-                SplashViewModel(application)
+                val application = this[APPLICATION_KEY] as TenliApp
+                SplashViewModel(
+                    application = application,
+                    authRepository = application.container.authRepository,
+                    webSocketManager = application.container.webSocketManager
+                )
             }
         }
     }

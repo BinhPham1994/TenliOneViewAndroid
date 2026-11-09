@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
@@ -171,11 +170,7 @@ fun EventScreen(
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
                                 onClick = {
-                                    EventCacheManager.cacheClickedEvent(
-                                        event = event,
-                                        cameras = uiState.cameraList,
-                                        aiServices = uiState.aiServices
-                                    )
+                                    viewModel.onEventSelected(event)
                                     onEventClick(event.id)
                                 }
                             )

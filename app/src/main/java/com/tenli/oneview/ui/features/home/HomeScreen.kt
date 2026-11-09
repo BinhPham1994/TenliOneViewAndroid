@@ -45,7 +45,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.CommonEmptyState
@@ -286,11 +285,7 @@ fun HomeScreen(
                                 isListView = uiState.isListView,
                                 enableSharedElement = false,
                                 onClick = {
-                                    EventCacheManager.cacheClickedEvent(
-                                        event = event,
-                                        cameras = uiState.cameraList,
-                                        aiServices = uiState.aiServices
-                                    )
+                                    viewModel.onEventSelected(event)
                                     onEventClick(event.id.toString())
                                 }
                             )

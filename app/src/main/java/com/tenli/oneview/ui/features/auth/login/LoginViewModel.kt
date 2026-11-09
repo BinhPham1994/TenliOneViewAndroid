@@ -8,17 +8,11 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
-import com.tenli.oneview.data.local.HomeCacheManager
-import com.tenli.oneview.data.local.MonitorCacheManager
-import com.tenli.oneview.data.local.UserPermissionManager
-import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.model.network.LoginResponseData
 import com.tenli.oneview.ui.component.MobileTopPopupManager
-import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.DispatcherProvider
@@ -32,7 +26,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
@@ -208,49 +201,14 @@ class LoginViewModel(
                 domain.trim().trimEnd('/')
             }
         }
-        // Xoá sạch cache của phiên trước (nếu có) trước khi thiết lập phiên mới để đảm bảo cô lập dữ liệu giữa các tài khoản/domain
-        val app = getApplication<Application>()
-        withContext(dispatcherProvider.io) {
-            HomeCacheManager.clearCache(app)
-            EventCacheManager.clearCache(app)
-            MonitorCacheManager.clearCache(app)
-        }
-        UserSession.apply {
-            userData = loginData.target
-            accessToken = loginData.credential.accessToken
-            refreshToken = loginData.credential.refreshToken
-            this.domain = formattedDomain
-            savedUsername = username
-            savedPassword = password
-        }
-        UserPermissionManager.syncFromUserSession()
-        // Serialize JSON + ghi SharedPreferences ngoài Main thread.
-        // Việc đồng bộ notification_settings & đăng ký FCM token được thực hiện tập trung tại MainViewModel.init
-        // ngay khi chuyển sang MainScreen để đảm bảo lấy đúng trạng thái bật/tắt thông báo của tài khoản mới trước khi đăng ký token.
-        withContext(dispatcherProvider.io) {
-            val userDataJson = GlobalData.gson.toJson(loginData.target)
-            GlobalData.preferences.edit {
-                putString(AppKeys.USER_DATA_KEY, userDataJson)
-                putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
-                putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
-                putString(DOMAIN_KEY, formattedDomain)
-                putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
-                putBoolean(AppKeys.TERMS_ACCEPTED_KEY, true)
-                if (rememberMe) {
-                    putString(AppKeys.USERNAME_KEY, username)
-                    putString(AppKeys.PASSWORD_KEY, password)
-                } else {
-                    remove(AppKeys.USERNAME_KEY)
-                    remove(AppKeys.PASSWORD_KEY)
-                }
-                remove("push_notifications_enabled")
-                remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
-                remove("saved_expanded_nodes")
-                remove("saved_monitor_grid_size")
-                remove("saved_monitor_grid_camera_ids")
-                remove("saved_monitor_camera_id")
-            }
-        }
+        // Ủy quyền toàn bộ việc xoá cache phiên cũ, thiết lập UserSession, đồng bộ quyền và ghi SharedPreferences cho AuthRepository
+        authRepository.establishAuthenticatedSession(
+            loginData = loginData,
+            formattedDomain = formattedDomain,
+            username = username,
+            password = password,
+            rememberMe = rememberMe
+        )
     }
 
     companion object {

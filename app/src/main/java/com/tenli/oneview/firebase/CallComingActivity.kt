@@ -19,6 +19,7 @@ import android.view.WindowManager
 import android.window.SplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -88,12 +89,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import coil.compose.SubcomposeAsyncImage
 import com.tenli.oneview.R
-import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.UserSession
-import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.main.MainActivity
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.BsProfileGroupModel
@@ -106,7 +106,6 @@ import com.tenli.oneview.ui.component.enableAppEdgeToEdge
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.detail.EventDetailDisplay
 import com.tenli.oneview.ui.features.event.detail.buildEventDetailDisplay
-import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.theme.ErrorRed
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.OrangeDeep
@@ -115,13 +114,9 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppState
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val TAG = "CallComingActivity"
 
@@ -161,20 +156,6 @@ private enum class CallMediaTab {
     EVENT_VIDEO
 }
 
-/** Dữ liệu cuộc gọi cảnh báo nhận từ EventMessagingService */
-@Immutable
-private data class IncomingCall(
-    val title: String,
-    val body: String,
-    val imageUrl: String?,
-    val eventId: String,
-    val notificationId: Int = 0,
-    val eventType: String = "",
-    val cameraUuid: String = "",
-    val cameraName: String = "",
-    val eventTime: Double = 0.0
-)
-
 private fun Intent.toIncomingCall() = IncomingCall(
     title = getStringExtra(EXTRA_TITLE) ?: "Cảnh báo an ninh",
     body = getStringExtra(EXTRA_BODY) ?: "",
@@ -189,16 +170,10 @@ private fun Intent.toIncomingCall() = IncomingCall(
 
 class CallComingActivity : ComponentActivity() {
 
-    private var call by mutableStateOf(IncomingCall("", "", null, ""))
-    private var enrichedEvent by mutableStateOf<EventData?>(null)
-    private var enrichedCamera by mutableStateOf<CameraModel?>(null)
-    private var enrichedAiService by mutableStateOf<AIServiceModel?>(null)
-    private var enrichedProfiles by mutableStateOf<List<BsProfileModel>>(emptyList())
-    private var enrichedGroups by mutableStateOf<List<BsProfileGroupModel>>(emptyList())
+    private val viewModel: CallComingViewModel by viewModels { CallComingViewModel.Factory }
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private var timeoutJob: Job? = null
-    private var eventFetchJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableAppEdgeToEdge()
@@ -208,20 +183,20 @@ class CallComingActivity : ComponentActivity() {
         UserSession.ensureRestored()
         AppState.isShowCallActivity = true
         val initialCall = intent.toIncomingCall()
-        call = initialCall
-        loadEventDetailsForCall(initialCall)
+        viewModel.onIncomingCall(initialCall)
         startRinging()
         scheduleTimeout()
 
         setContent {
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             TenliAIoTTheme {
                 CallScreenContent(
-                    call = call,
-                    enrichedEvent = enrichedEvent,
-                    enrichedCamera = enrichedCamera,
-                    enrichedAiService = enrichedAiService,
-                    enrichedProfiles = enrichedProfiles,
-                    enrichedGroups = enrichedGroups,
+                    call = uiState.call,
+                    enrichedEvent = uiState.enrichedEvent,
+                    enrichedCamera = uiState.enrichedCamera,
+                    enrichedAiService = uiState.enrichedAiService,
+                    enrichedProfiles = uiState.enrichedProfiles,
+                    enrichedGroups = uiState.enrichedGroups,
                     onUserInteract = ::scheduleTimeout,
                     onDecline = ::declineCall,
                     onAccept = ::acceptCall
@@ -233,175 +208,30 @@ class CallComingActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppState.isShowCallActivity = true
+        val current = viewModel.uiState.value.call
         // Khi màn hình Call đã hiển thị trực tiếp trước mặt người dùng, gỡ thông báo Heads-Up trên thanh trạng thái
         // để không bị đè banner lên giao diện Call và không phát 2 tiếng nhạc chuông chồng nhau.
-        cancelCallNotification(call.eventId, call.notificationId)
+        cancelCallNotification(current.eventId, current.notificationId)
     }
 
     /** singleInstance: cảnh báo mới đến khi màn đang mở → cập nhật nội dung và đếm lại thời gian chờ */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        val previous = call
+        val previous = viewModel.uiState.value.call
         val next = intent.toIncomingCall()
         cancelCallNotification(previous.eventId, previous.notificationId)
         cancelCallNotification(next.eventId, next.notificationId)
         setIntent(intent)
-        call = next
-        loadEventDetailsForCall(next)
+        viewModel.onIncomingCall(next)
         if (ringtone?.isPlaying != true) startRinging()
         scheduleTimeout()
     }
 
     override fun onDestroy() {
         timeoutJob?.cancel()
-        eventFetchJob?.cancel()
         stopRinging()
         AppState.isShowCallActivity = false
         super.onDestroy()
-    }
-
-    /**
-     * Tải đầy đủ chi tiết sự kiện (`EventData`, camera, hệ thống AI, hồ sơ khuôn mặt/đồng phục)
-     * từ cache hoặc API theo `eventId` để màn hình cuộc gọi luôn hiển thị trọn vẹn thông tin
-     * (tên bài AI, đối tượng/biển số, tên camera, thời gian, ảnh sự kiện + khung bounding box + ảnh crop).
-     */
-    private fun loadEventDetailsForCall(incoming: IncomingCall) {
-        eventFetchJob?.cancel()
-        val memCameras = EventCacheManager.getCamerasInMemory()
-        val memServices = EventCacheManager.getAiServicesInMemory()
-        val memProfiles = EventCacheManager.getProfilesInMemory()
-        val memGroups = EventCacheManager.getProfileGroupsInMemory()
-
-        enrichedEvent = null
-        enrichedCamera = if (incoming.cameraUuid.isNotBlank()) {
-            memCameras.find { it.extra?.uuid.equals(incoming.cameraUuid, ignoreCase = true) }
-        } else {
-            null
-        }
-        enrichedAiService = null
-        enrichedProfiles = memProfiles
-        enrichedGroups = memGroups
-
-        val eventIdInt = incoming.eventId.trim().toIntOrNull() ?: return
-        EventCacheManager.getEventInMemory(eventIdInt)?.let { cachedEv ->
-            enrichedEvent = cachedEv
-            enrichedCamera = resolveCameraForEvent(cachedEv, memCameras) ?: enrichedCamera
-            enrichedAiService = memServices.find { it.id == cachedEv.serviceId }
-        }
-
-        eventFetchJob = lifecycleScope.launch {
-            runCatching {
-                var foundEvent = enrichedEvent
-                var cameraList = memCameras
-
-                if (foundEvent == null) {
-                    val diskPair = withContext(Dispatchers.IO) {
-                        EventCacheManager.findEventById(applicationContext, eventIdInt)
-                    }
-                    if (diskPair != null) {
-                        foundEvent = diskPair.first
-                        if (diskPair.second.isNotEmpty()) {
-                            cameraList = diskPair.second
-                        }
-                    }
-                }
-
-                if (foundEvent == null || foundEvent.data?.video.isNullOrBlank()) {
-                    val resp = withContext(Dispatchers.IO) {
-                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
-                    }
-                    val fetched = resp?.body()?.firstOrNull { it.id == eventIdInt }
-                    if (fetched != null) {
-                        foundEvent = fetched
-                    }
-                }
-
-                val targetEvent = foundEvent ?: return@runCatching
-                val needProfiles = AiTypeHelper.isFaceEvent(targetEvent) ||
-                    targetEvent.type.lowercase().contains("uniform")
-
-                val resolvedCamInitial = resolveCameraForEvent(targetEvent, cameraList) ?: enrichedCamera
-                val resolvedSvcInitial = memServices.find { it.id == targetEvent.serviceId }
-                enrichedEvent = targetEvent
-                enrichedCamera = resolvedCamInitial
-                enrichedAiService = resolvedSvcInitial
-
-                val fetchCameras = cameraList.isEmpty()
-                val fetchServices = memServices.isEmpty()
-                val fetchProfiles = needProfiles && memProfiles.isEmpty()
-                val fetchGroups = needProfiles && memGroups.isEmpty()
-
-                var latestCameras = cameraList
-                var latestServices = memServices
-
-                if (fetchCameras || fetchServices || fetchProfiles || fetchGroups) {
-                    coroutineScope {
-                        val camDef = async(Dispatchers.IO) {
-                            if (fetchCameras) {
-                                runCatching { ApiProvider.vmsApi.getCameraList() }.getOrNull()?.body() ?: emptyList()
-                            } else cameraList
-                        }
-                        val svcDef = async(Dispatchers.IO) {
-                            if (fetchServices) {
-                                runCatching { ApiProvider.eventApi.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
-                            } else memServices
-                        }
-                        val profDef = async(Dispatchers.IO) {
-                            if (fetchProfiles) {
-                                runCatching { ApiProvider.bsApi.getProfileList() }.getOrNull()?.body() ?: emptyList()
-                            } else memProfiles
-                        }
-                        val grpDef = async(Dispatchers.IO) {
-                            if (fetchGroups) {
-                                runCatching { ApiProvider.bsApi.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
-                            } else memGroups
-                        }
-
-                        val finalCameras = camDef.await()
-                        val finalServices = svcDef.await()
-                        val finalProfiles = profDef.await()
-                        val finalGroups = grpDef.await()
-
-                        latestCameras = finalCameras
-                        latestServices = finalServices
-
-                        EventCacheManager.cacheInMemory(
-                            events = listOf(targetEvent),
-                            cameras = finalCameras,
-                            aiServices = finalServices
-                        )
-                        enrichedCamera = resolveCameraForEvent(targetEvent, finalCameras) ?: enrichedCamera
-                        enrichedAiService = finalServices.find { it.id == targetEvent.serviceId }
-                        enrichedProfiles = finalProfiles
-                        enrichedGroups = finalGroups
-                    }
-                } else {
-                    EventCacheManager.cacheInMemory(
-                        events = listOf(targetEvent),
-                        cameras = cameraList,
-                        aiServices = memServices
-                    )
-                }
-
-                // Nếu ngay lúc nhận thông báo FCM, server AI đang hoàn tất ghi file .mp4 của sự kiện,
-                // kiểm tra lại 1 lần sau 1.8s để tự động hiển thị tab "Video sự kiện" ngay khi có.
-                if (targetEvent.data?.video.isNullOrBlank()) {
-                    delay(1800L)
-                    val retryResp = withContext(Dispatchers.IO) {
-                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
-                    }
-                    val refreshed = retryResp?.body()?.firstOrNull { it.id == eventIdInt }
-                    if (refreshed != null && !refreshed.data?.video.isNullOrBlank()) {
-                        enrichedEvent = refreshed
-                        EventCacheManager.cacheInMemory(
-                            events = listOf(refreshed),
-                            cameras = latestCameras,
-                            aiServices = latestServices
-                        )
-                    }
-                }
-            }
-        }
     }
 
     private fun startRinging() {
@@ -463,16 +293,19 @@ class CallComingActivity : ComponentActivity() {
         // lifecycleScope tự huỷ khi Activity bị destroy → không rò rỉ Timer/Handler
         timeoutJob = lifecycleScope.launch {
             delay(CALL_TIMEOUT_MS)
-            val current = call
+            val current = viewModel.uiState.value.call
             showMissedCallNotification(this@CallComingActivity, current.title, current.eventId)
             closeCall(current.eventId, current.notificationId)
         }
     }
 
-    private fun declineCall() = closeCall(call.eventId, call.notificationId)
+    private fun declineCall() {
+        val current = viewModel.uiState.value.call
+        closeCall(current.eventId, current.notificationId)
+    }
 
     private fun acceptCall() {
-        val current = call
+        val current = viewModel.uiState.value.call
         timeoutJob?.cancel()
         stopRinging()
         cancelCallNotification(current.eventId, current.notificationId)
