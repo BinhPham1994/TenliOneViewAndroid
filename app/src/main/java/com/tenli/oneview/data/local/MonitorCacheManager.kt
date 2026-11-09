@@ -251,7 +251,7 @@ object MonitorCacheManager {
     }
 
     fun setCachedCameraImageLink(context: Context, cameraId: Int, link: String) {
-        if (cameraId <= 0 || link.isBlank() || link == "NO_IMAGE") return
+        if (UserSession.accessToken.isEmpty() || cameraId <= 0 || link.isBlank() || link == "NO_IMAGE") return
         ensureSnapshotsLoaded(context)
         val now = System.currentTimeMillis()
         sessionRefreshedAtMap[cameraId] = now
@@ -288,10 +288,11 @@ object MonitorCacheManager {
      * và lưu xuống đĩa giống `captureImmediateFrame()` trong `LivePlayer.vue`.
      */
     fun saveCapturedCameraFrame(context: Context, cameraId: Int, bitmap: Bitmap) {
-        if (cameraId <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return
+        if (UserSession.accessToken.isEmpty() || cameraId <= 0 || bitmap.width <= 0 || bitmap.height <= 0) return
         val appContext = context.applicationContext
         ioScope.launch {
             try {
+                if (UserSession.accessToken.isEmpty()) return@launch
                 val maxDim = SNAPSHOT_MAX_DIMENSION_PX
                 val scale = minOf(1f, maxDim.toFloat() / bitmap.width.toFloat())
                 val targetW = (bitmap.width * scale).toInt().coerceAtLeast(1)
@@ -300,6 +301,10 @@ object MonitorCacheManager {
                     Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
                 } else {
                     bitmap
+                }
+                if (UserSession.accessToken.isEmpty()) {
+                    if (scaled !== bitmap) scaled.recycle()
+                    return@launch
                 }
                 val outFile = File(getSnapshotImageDir(appContext), "cam_${cameraId}.jpg")
                 FileOutputStream(outFile).use { fos ->
@@ -328,10 +333,12 @@ object MonitorCacheManager {
     }
 
     suspend fun saveMonitorData(context: Context, data: CachedMonitorData) {
+        if (UserSession.accessToken.isEmpty()) return
         val stamped = if (data.updatedAt > 0L) data else data.copy(updatedAt = System.currentTimeMillis())
         inMemoryMonitorData = stamped
         EventCacheManager.cacheInMemory(cameras = stamped.cameraList, aiServices = stamped.aiServices)
         withContext(Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) return@withContext
             JsonFileStore.write(gson, getCacheFile(context), stamped)
         }
     }
@@ -366,6 +373,12 @@ object MonitorCacheManager {
             snapshotMap.clear()
             sessionRefreshedAtMap.clear()
             failedPlaybackThumbUrls.clear()
+            runCatching {
+                context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+            }
+            runCatching {
+                Coil.imageLoader(context.applicationContext).memoryCache?.clear()
+            }
         } catch (e: Exception) {
             e.printStackTrace()
         }

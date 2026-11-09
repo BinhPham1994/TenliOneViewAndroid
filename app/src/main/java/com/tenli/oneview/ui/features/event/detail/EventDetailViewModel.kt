@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.data.local.EventCacheManager
+import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
@@ -690,6 +691,9 @@ class EventDetailViewModel(
             try {
                 val response = eventApi.verifyEvent(eventId, Confirm(false))
                 if (response.isSuccessful) {
+                    val app = getApplication<Application>()
+                    EventCacheManager.removeEvent(app, eventId)
+                    HomeCacheManager.removeEvent(app, eventId)
                     EventBus.emitEventReportedFalse(eventId)
                     onSuccess()
                 } else {
@@ -711,9 +715,9 @@ class EventDetailViewModel(
         /** Video gốc lấy từ 61 giây trước thời điểm sự kiện */
         private const val ORIGINAL_VIDEO_LOOKBACK_MS = 61_000L
 
-        fun provideFactory(eventId: Int): ViewModelProvider.Factory = viewModelFactory {
+        fun provideFactory(eventId: Int, fallbackApplication: Application? = null): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val application = this[APPLICATION_KEY] as Application
+                val application = (this[APPLICATION_KEY] ?: fallbackApplication) as Application
                 EventDetailViewModel(application, eventId)
             }
         }

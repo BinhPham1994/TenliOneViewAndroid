@@ -1,5 +1,6 @@
 package com.tenli.oneview.ui.navigation
 
+import android.app.Application
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
@@ -24,8 +26,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.HasDefaultViewModelProviderFactory
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.viewmodel.CreationExtras
+import androidx.lifecycle.viewmodel.MutableCreationExtras
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -134,10 +144,33 @@ fun AppNavigation(
                 ) {
                     val displayEventId = activeEventDetailId ?: lastEventDetailId
                     if (displayEventId != null) {
+                        val parentStoreOwner = LocalViewModelStoreOwner.current
+                        val application = LocalContext.current.applicationContext as Application
+                        val eventDetailStoreOwner = remember(displayEventId) {
+                            object : ViewModelStoreOwner, HasDefaultViewModelProviderFactory {
+                                override val viewModelStore: ViewModelStore = ViewModelStore()
+                                override val defaultViewModelProviderFactory: ViewModelProvider.Factory
+                                    get() = (parentStoreOwner as? HasDefaultViewModelProviderFactory)
+                                        ?.defaultViewModelProviderFactory
+                                        ?: ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+                                override val defaultViewModelCreationExtras: CreationExtras
+                                    get() = (parentStoreOwner as? HasDefaultViewModelProviderFactory)
+                                        ?.defaultViewModelCreationExtras
+                                        ?: MutableCreationExtras().apply {
+                                            set(ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY, application)
+                                        }
+                            }
+                        }
+                        DisposableEffect(eventDetailStoreOwner) {
+                            onDispose {
+                                eventDetailStoreOwner.viewModelStore.clear()
+                            }
+                        }
                         val eventDetailOverlayHostState = remember(displayEventId) {
                             com.tenli.oneview.ui.component.MobileOverlayHostState()
                         }
                         CompositionLocalProvider(
+                            LocalViewModelStoreOwner provides eventDetailStoreOwner,
                             LocalAnimatedVisibilityScope provides this@AnimatedVisibility,
                             com.tenli.oneview.ui.component.LocalMobileOverlayHost provides eventDetailOverlayHostState
                         ) {

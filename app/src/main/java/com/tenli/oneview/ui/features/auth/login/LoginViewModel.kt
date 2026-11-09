@@ -8,13 +8,17 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
+import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.model.network.LoginResponseData
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.DispatcherProvider
@@ -204,6 +208,13 @@ class LoginViewModel(
                 domain.trim().trimEnd('/')
             }
         }
+        // Xoá sạch cache của phiên trước (nếu có) trước khi thiết lập phiên mới để đảm bảo cô lập dữ liệu giữa các tài khoản/domain
+        val app = getApplication<Application>()
+        withContext(dispatcherProvider.io) {
+            HomeCacheManager.clearCache(app)
+            EventCacheManager.clearCache(app)
+            MonitorCacheManager.clearCache(app)
+        }
         UserSession.apply {
             userData = loginData.target
             accessToken = loginData.credential.accessToken
@@ -233,6 +244,11 @@ class LoginViewModel(
                     remove(AppKeys.PASSWORD_KEY)
                 }
                 remove("push_notifications_enabled")
+                remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                remove("saved_expanded_nodes")
+                remove("saved_monitor_grid_size")
+                remove("saved_monitor_grid_camera_ids")
+                remove("saved_monitor_camera_id")
             }
         }
     }

@@ -84,6 +84,7 @@ object EventCacheManager {
         aiServices: List<AIServiceModel> = emptyList(),
         fromNetwork: Boolean = false
     ) {
+        if (UserSession.accessToken.isEmpty()) return
         events.forEach { ev ->
             if (ev.id > 0) {
                 inMemoryEvents.put(ev.id, ev)
@@ -140,8 +141,10 @@ object EventCacheManager {
         profiles: List<BsProfileModel>,
         groups: List<BsProfileGroupModel>
     ) {
+        if (UserSession.accessToken.isEmpty()) return
         cacheProfilesInMemory(profiles, groups)
         withContext(Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) return@withContext
             val data = CachedProfilesData(
                 profiles = inMemoryProfiles,
                 groups = inMemoryProfileGroups,
@@ -216,11 +219,50 @@ object EventCacheManager {
         data: CachedEventData,
         cameraUuid: String? = null
     ) {
+        if (UserSession.accessToken.isEmpty()) return
         val stamped = if (data.updatedAt > 0L) data else data.copy(updatedAt = System.currentTimeMillis())
         inMemoryDatasetCache.put(datasetCacheKey(filter, serviceId, aiType, cameraUuid), stamped)
         cacheInMemory(stamped.events, stamped.cameraList, stamped.aiServices)
         withContext(Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) return@withContext
             JsonFileStore.write(gson, getCacheFile(context, filter, serviceId, aiType, cameraUuid), stamped)
+        }
+    }
+
+    /**
+     * Xoá một sự kiện đã bị báo sai khỏi toàn bộ RAM cache và Disk cache của màn Sự kiện.
+     */
+    suspend fun removeEvent(context: Context, eventId: Int) {
+        if (lastClickedEvent?.id == eventId) {
+            lastClickedEvent = null
+        }
+        inMemoryEvents.remove(eventId)
+
+        val relatedSnapshot = inMemoryRelatedEvents.snapshot()
+        for ((key, list) in relatedSnapshot) {
+            if (key.startsWith("${eventId}_")) {
+                inMemoryRelatedEvents.remove(key)
+            } else if (list.any { it.id == eventId }) {
+                inMemoryRelatedEvents.put(key, list.filter { it.id != eventId })
+            }
+        }
+
+        val updatedDatasets = mutableListOf<Pair<String, CachedEventData>>()
+        val datasetSnapshot = inMemoryDatasetCache.snapshot()
+        for ((key, cached) in datasetSnapshot) {
+            if (cached.events.any { it.id == eventId }) {
+                val updated = cached.copy(events = cached.events.filter { it.id != eventId })
+                inMemoryDatasetCache.put(key, updated)
+                updatedDatasets.add(key to updated)
+            }
+        }
+        if (updatedDatasets.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                for ((key, updated) in updatedDatasets) {
+                    val file = File(context.cacheDir, "$EVENT_CACHE_PREFIX$key.json")
+                    JsonFileStore.write(gson, file, updated)
+                }
+            }
         }
     }
 

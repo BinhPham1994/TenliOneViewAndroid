@@ -608,9 +608,9 @@ class EventViewModel(
                     resolvedType = resolveApiEventType(currentState.selectedAiType)
                 )
                 val newEvents = batchResult.events
-                val nextLastId = batchResult.lastRawId
-                val hasMore = batchResult.hasMore
-                lastFetchedRawId = nextLastId
+                if (batchResult.apiSucceeded) {
+                    lastFetchedRawId = batchResult.lastRawId
+                }
                 if (newEvents.isNotEmpty()) {
                     EventCacheManager.cacheInMemory(events = newEvents)
                 }
@@ -620,7 +620,11 @@ class EventViewModel(
                     it.copy(
                         isPaginating = false,
                         events = merged,
-                        hasMore = hasMore && merged.size > it.events.size,
+                        hasMore = if (batchResult.apiSucceeded) {
+                            batchResult.hasMore && merged.size > it.events.size
+                        } else {
+                            it.hasMore
+                        },
                         error = batchResult.firstError?.toUserFriendlyMessage()
                     )
                 }
@@ -628,7 +632,7 @@ class EventViewModel(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading more events", e)
-                _uiState.update { it.copy(isPaginating = false, hasMore = false, error = e.toUserFriendlyMessage()) }
+                _uiState.update { it.copy(isPaginating = false, error = e.toUserFriendlyMessage()) }
             }
         }
     }

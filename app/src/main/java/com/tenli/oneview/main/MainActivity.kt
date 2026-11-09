@@ -140,6 +140,12 @@ class MainActivity : ComponentActivity() {
                 ProvideAppLanguage {
                     val uiState by splashViewModel.uiState.collectAsStateWithLifecycle()
 
+                    LaunchedEffect(Unit) {
+                        com.tenli.oneview.util.EventBus.unauthorized.collect {
+                            splashViewModel.logout()
+                        }
+                    }
+
                     when (uiState.destination) {
                         is SplashDestination.Login -> {
                             Surface(

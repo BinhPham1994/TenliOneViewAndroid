@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.splash
 
 import android.app.Application
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -8,12 +9,14 @@ import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.AP
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.firebase.FcmTokenManager
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,8 +49,11 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
 
         if (!needsCleanup) return
 
-        // Dự phòng trường hợp gọi trực tiếp SplashViewModel.logout() mà chưa chạy MainViewModel.logout()
+        // Dự phòng trường hợp gọi trực tiếp SplashViewModel.logout() (vd. hết hạn phiên 401) mà chưa chạy MainViewModel.logout()
         val app = getApplication<Application>()
+        (app as? TenliApp)?.container?.webSocketManager?.disconnectAll()
+        runCatching { NotificationManagerCompat.from(app).cancelAll() }
+
         viewModelScope.launch(Dispatchers.IO) {
             FcmTokenManager.unregisterDevicePushToken()
             UserSession.clear()
@@ -61,6 +67,11 @@ class SplashViewModel(application: Application) : AndroidViewModel(application) 
                 remove(AppKeys.GROUP_ID)
                 remove(AppKeys.GROUP_ID_CAMERA)
                 remove("push_notifications_enabled")
+                remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                remove("saved_expanded_nodes")
+                remove("saved_monitor_grid_size")
+                remove("saved_monitor_grid_camera_ids")
+                remove("saved_monitor_camera_id")
                 if (!rememberMe) {
                     remove(AppKeys.USERNAME_KEY)
                     remove(AppKeys.PASSWORD_KEY)

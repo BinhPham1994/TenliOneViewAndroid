@@ -6,6 +6,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.LogInModel
 import com.tenli.oneview.ui.utils.AppKeys
+import com.tenli.oneview.util.EventBus
 import okhttp3.Authenticator
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -67,9 +68,12 @@ class TokenAuthenticator : Authenticator {
             return null
         }
 
-        // Không có credentials đã lưu → không thể re-login
+        // Không có credentials đã lưu → không thể re-login; nếu đang có phiên đăng nhập thì báo hết hạn phiên để đưa về màn Login
         if (!UserSession.hasSavedCredentials()) {
             Log.w(TAG, "Không có credentials đã lưu → không thể tự re-login")
+            if (UserSession.accessToken.isNotEmpty()) {
+                EventBus.emitUnauthorized()
+            }
             return null
         }
 
@@ -136,6 +140,9 @@ class TokenAuthenticator : Authenticator {
         return loginClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 Log.w(TAG, "Re-login HTTP ${response.code}")
+                if (response.code == 400 || response.code == 401 || response.code == 403) {
+                    EventBus.emitUnauthorized()
+                }
                 return null
             }
 

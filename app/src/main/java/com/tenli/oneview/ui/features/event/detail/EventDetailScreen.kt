@@ -242,7 +242,10 @@ fun EventDetailScreen(
     onSwipeDismissed: () -> Unit = onBack,
     viewModel: EventDetailViewModel = viewModel(
         key = "event_detail_$eventId",
-        factory = EventDetailViewModel.provideFactory(eventId)
+        factory = EventDetailViewModel.provideFactory(
+            eventId = eventId,
+            fallbackApplication = LocalContext.current.applicationContext as android.app.Application
+        )
     )
 ) {
     BackHandler { onBack() }

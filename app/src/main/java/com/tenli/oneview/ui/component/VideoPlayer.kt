@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -41,6 +42,8 @@ fun VideoPlayer(
     isOriginalRatio: Boolean = false,
     isFullscreen: Boolean = false,
     playWhenReady: Boolean = true,
+    showLoadingOverlay: Boolean = true,
+    showControllerInitially: Boolean = false,
     initialSeekPositionMs: Long? = null,
     errorText: String = "Không có video sự kiện",
     onPlayingChange: (Boolean) -> Unit = {},
@@ -56,7 +59,11 @@ fun VideoPlayer(
     var playerViewRef by remember(videoUrl) { mutableStateOf<PlayerView?>(null) }
     val colors = MaterialTheme.appColors
     val containerBg = colors.surface
-    val stageBg = if (isVideoReady && !isError) colors.mediaBg else containerBg
+    val stageBg = when {
+        isVideoReady && !isError -> colors.mediaBg
+        showLoadingOverlay -> containerBg
+        else -> Color.Transparent
+    }
     val currentPlayWhenReady by rememberUpdatedState(playWhenReady)
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnPlayWhenReadyChange by rememberUpdatedState(onPlayWhenReadyChange)
@@ -178,10 +185,15 @@ fun VideoPlayer(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(isVideoReady, isError) {
+    androidx.compose.runtime.LaunchedEffect(isVideoReady, isError, showControllerInitially) {
         if (isVideoReady && !isError) {
-            playerViewRef?.showController()
-            currentOnControllerVisibilityChange(true)
+            if (showControllerInitially) {
+                playerViewRef?.showController()
+                currentOnControllerVisibilityChange(true)
+            } else {
+                playerViewRef?.hideController()
+                currentOnControllerVisibilityChange(false)
+            }
         }
     }
 
@@ -199,8 +211,9 @@ fun VideoPlayer(
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
                     playerViewRef = this
-                    player = exoPlayer
                     useController = true
+                    controllerAutoShow = showControllerInitially
+                    controllerHideOnTouch = true
                     controllerShowTimeoutMs = 3000
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     resizeMode = targetResizeMode
@@ -209,6 +222,10 @@ fun VideoPlayer(
                             currentOnControllerVisibilityChange(visibility == android.view.View.VISIBLE)
                         }
                     )
+                    player = exoPlayer
+                    if (!showControllerInitially) {
+                        hideController()
+                    }
                     if (currentOnFullscreenToggle != null) {
                         setFullscreenButtonClickListener(
                             PlayerView.FullscreenButtonClickListener {
@@ -224,7 +241,14 @@ fun VideoPlayer(
         }, update = { view ->
             (view as PlayerView).let {
                 playerViewRef = it
-                it.player = exoPlayer
+                it.controllerAutoShow = showControllerInitially
+                if (it.player !== exoPlayer) {
+                    it.player = exoPlayer
+                    if (!showControllerInitially) {
+                        it.hideController()
+                        currentOnControllerVisibilityChange(false)
+                    }
+                }
                 if (it.resizeMode != targetResizeMode) {
                     it.resizeMode = targetResizeMode
                 }
@@ -261,7 +285,7 @@ fun VideoPlayer(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-        } else if (!isVideoReady) {
+        } else if (!isVideoReady && showLoadingOverlay) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

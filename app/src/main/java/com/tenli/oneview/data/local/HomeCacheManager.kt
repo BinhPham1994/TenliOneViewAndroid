@@ -54,11 +54,37 @@ object HomeCacheManager {
     }
 
     suspend fun saveHomeData(context: Context, filter: TimeFilter, serviceId: Int?, data: CachedHomeData) {
+        if (UserSession.accessToken.isEmpty()) return
         val stamped = if (data.updatedAt > 0L) data else data.copy(updatedAt = System.currentTimeMillis())
         inMemoryHomeCache[cacheKey(filter, serviceId)] = stamped
         EventCacheManager.cacheInMemory(stamped.recentEvents, stamped.cameraList, stamped.aiServices)
         withContext(Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) return@withContext
             JsonFileStore.write(gson, getCacheFile(context, filter, serviceId), stamped)
+        }
+    }
+
+    /**
+     * Xoá một sự kiện đã bị báo sai khỏi toàn bộ RAM cache và Disk cache của màn Trang chủ.
+     */
+    suspend fun removeEvent(context: Context, eventId: Int) {
+        val updatedEntries = mutableListOf<Pair<String, CachedHomeData>>()
+        for ((key, cached) in inMemoryHomeCache.entries) {
+            if (cached.recentEvents.any { it.id == eventId }) {
+                val updated = cached.copy(
+                    recentEvents = cached.recentEvents.filter { it.id != eventId }
+                )
+                inMemoryHomeCache[key] = updated
+                updatedEntries.add(key to updated)
+            }
+        }
+        if (updatedEntries.isNotEmpty()) {
+            withContext(Dispatchers.IO) {
+                for ((key, updated) in updatedEntries) {
+                    val file = File(context.cacheDir, "$HOME_CACHE_PREFIX$key.json")
+                    JsonFileStore.write(gson, file, updated)
+                }
+            }
         }
     }
 

@@ -80,15 +80,20 @@ class TenliApp : Application(), ImageLoaderFactory {
 
         GlobalData.apply {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
-            gson = GsonBuilder().serializeNulls().create()
+            gson = GsonBuilder()
+                .serializeNulls()
+                .registerTypeAdapterFactory(LoginAuthClient.KotlinDefaultValueAdapterFactory)
+                .create()
         }
         // Khôi phục ngay phiên đăng nhập vào RAM (< 0.2ms) để SplashViewModel mở thẳng vào Main ở Frame 1
         runCatching { UserSession.ensureRestored(GlobalData.preferences) }
 
-        // Pre-warm song song các cache từ ổ đĩa lên RAM ngay lập tức để Home / Event / Monitor có dữ liệu ở Frame 1
-        appScope.launch { runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) } }
-        appScope.launch { runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) } }
-        appScope.launch { runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) } }
+        // Chỉ pre-warm các cache từ ổ đĩa lên RAM khi đã có phiên đăng nhập hợp lệ
+        if (UserSession.accessToken.isNotEmpty() && UserSession.userData != null) {
+            appScope.launch { runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) } }
+            appScope.launch { runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) } }
+            appScope.launch { runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) } }
+        }
 
         FcmTokenManager.init(this)
 

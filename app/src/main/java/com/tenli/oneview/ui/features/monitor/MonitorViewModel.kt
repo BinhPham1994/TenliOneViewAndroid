@@ -134,6 +134,8 @@ data class MonitorUiState(
 
     // ---- Màn hình chi tiết Camera: 3 tính năng (Trực tiếp / Xem lại VMS / Sự kiện) ----
     val cameraDetailTab: CameraDetailTab = CameraDetailTab.LIVE,
+    /** Chế độ trình phát 16:9 cố định ở đầu màn hình ([CameraDetailTab.LIVE] hoặc [CameraDetailTab.PLAYBACK]) */
+    val cameraStageMode: CameraDetailTab = CameraDetailTab.LIVE,
 
     // Xem lại (chỉ lấy danh sách file ghi hình từ VMS API, không gọi NVR)
     val defaultPlaybackChannel: String = "main", // "main" | "sub"
@@ -681,6 +683,18 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             EventBus.networkRestored.collect {
                 loadData()
+            }
+        }
+
+        viewModelScope.launch {
+            EventBus.eventReportedFalse.collect { eventId ->
+                _uiState.update { state ->
+                    if (state.cameraEvents.any { it.id == eventId }) {
+                        state.copy(cameraEvents = state.cameraEvents.filter { it.id != eventId })
+                    } else {
+                        state
+                    }
+                }
             }
         }
 
@@ -1471,6 +1485,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 gridSize = 1,
                 activeSlotIndex = 0,
                 cameraDetailTab = CameraDetailTab.LIVE,
+                cameraStageMode = CameraDetailTab.LIVE,
                 defaultPlaybackChannel = preferredPlaybackChan,
                 playbackChannel = preferredPlaybackChan,
                 playbackTimeFilter = TimeFilter.TODAY,
@@ -1549,17 +1564,27 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
      * - [CameraDetailTab.EVENTS]: Sự kiện (gọi API sự kiện theo UUID của camera đang chọn)
      */
     fun selectCameraDetailTab(tab: CameraDetailTab) {
-        val currentCam = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
+        val currentSlot = _uiState.value.selectedCameras.getOrNull(0) ?: return
+        val currentCam = currentSlot.camera
         if (tab == CameraDetailTab.PLAYBACK && !UserPermissionManager.canAccessPlayback()) return
         if (tab == CameraDetailTab.EVENTS && !UserPermissionManager.canAccessEvents()) return
         if (_uiState.value.cameraDetailTab == tab) return
 
-        if (tab != CameraDetailTab.LIVE) {
-            // Dừng ngay vòng poll LiveStream và xóa link WS одноразовый khi rời tab Trực tiếp
+        val prevStageMode = _uiState.value.cameraStageMode
+        val nextStageMode = when (tab) {
+            CameraDetailTab.LIVE -> CameraDetailTab.LIVE
+            CameraDetailTab.PLAYBACK -> CameraDetailTab.PLAYBACK
+            CameraDetailTab.EVENTS -> prevStageMode
+        }
+
+        if (nextStageMode != CameraDetailTab.LIVE && prevStageMode == CameraDetailTab.LIVE) {
+            // Dừng vòng poll LiveStream khi chuyển khung trình phát từ Trực tiếp sang Xem lại,
+            // đồng thời cập nhật lại snapshot mới nhất vừa chụp từ luồng Live làm ảnh nền chờ Playback.
             cancelStreamJob(0)
             updateSlot(0, currentCam.id) {
                 it.copy(streamUrl = "", retryCount = 0, hasFallbackTried = false)
             }
+            refreshSlotSnapshotFromCache(0, currentCam)
         }
 
         var resolvedVideo: VideoModel? = null
@@ -1569,18 +1594,21 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 .firstOrNull { it.videos.isNotEmpty() }
                 ?.videos
                 ?.firstOrNull()
-            val nextVideo = if (tab == CameraDetailTab.PLAYBACK) {
+            val nextVideo = if (nextStageMode == CameraDetailTab.PLAYBACK) {
                 state.selectedPlaybackVideo ?: firstAvailableVideo
             } else {
                 null
             }
-            val nextPlaying = nextVideo != null
+            val nextPlaying = when {
+                nextStageMode != CameraDetailTab.PLAYBACK || nextVideo == null -> false
+                prevStageMode == CameraDetailTab.PLAYBACK && state.selectedPlaybackVideo != null -> state.isPlaybackPlaying
+                else -> true
+            }
             resolvedVideo = nextVideo
             resolvedPlaying = nextPlaying
             state.copy(
                 cameraDetailTab = tab,
-                // Khi vào tab Xem lại: nếu đã có danh sách playback thì tự động phát ngay video đầu tiên;
-                // khi rời tab Xem lại thì đóng trình phát video ghi hình đang mở (nếu có).
+                cameraStageMode = nextStageMode,
                 selectedPlaybackVideo = nextVideo,
                 isPlaybackPlaying = nextPlaying
             )
@@ -1590,7 +1618,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
         when (tab) {
             CameraDetailTab.LIVE -> {
-                reloadLiveCamera()
+                if (prevStageMode != CameraDetailTab.LIVE || currentSlot.streamUrl.isEmpty()) {
+                    reloadLiveCamera()
+                }
             }
             CameraDetailTab.PLAYBACK -> {
                 if (playbackLoadedForCameraId != currentCam.id) {
@@ -1811,7 +1841,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
     fun refreshActiveStreams() {
         val state = _uiState.value
-        if (state.cameraDetailTab != CameraDetailTab.LIVE) return
+        if (state.cameraStageMode != CameraDetailTab.LIVE) return
         val active = (0 until state.gridSize).mapNotNull { idx ->
             state.selectedCameras.getOrNull(idx)?.let { idx to it }
         }
@@ -2130,8 +2160,8 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         val normalizedChannel = if (channel == "sub") "sub" else "main"
         val cameraId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id ?: 0
         val cached = getPlaybackSessionCache(cameraId, filter, normalizedChannel)
-        val isPlaybackTab = _uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK
-        val firstCachedVideo = if (isPlaybackTab) {
+        val isPlaybackStage = _uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK
+        val firstCachedVideo = if (isPlaybackStage) {
             cached?.dayGroups?.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
         } else {
             null
@@ -2230,7 +2260,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
         var resolvedAutoPlaying = false
         _uiState.update { state ->
             val cachedGroups = if (hasCachedGroups) cached!!.dayGroups else emptyList()
-            val shouldAutoSelectFirst = state.cameraDetailTab == CameraDetailTab.PLAYBACK &&
+            val shouldAutoSelectFirst = state.cameraStageMode == CameraDetailTab.PLAYBACK &&
                 state.selectedPlaybackVideo == null &&
                 cachedGroups.isNotEmpty()
             val firstVideo = if (shouldAutoSelectFirst) {
@@ -2250,7 +2280,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 isPlaybackPlaying = nextPlaying
             )
         }
-        if (_uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && resolvedAutoVideo != null) {
+        if (_uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && resolvedAutoVideo != null) {
             activePlaybackVideo = resolvedAutoVideo
             activePlaybackPlaying = resolvedAutoPlaying
         }
@@ -2413,7 +2443,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
 
         _uiState.update { state ->
             val merged = if (isInitial) {
-                accumulatedNewGroups
+                accumulatedNewGroups.distinctBy { it.dateKey }
             } else {
                 val existingByKey = state.playbackDayGroups.associateBy { it.dateKey }.toMutableMap()
                 for (grp in accumulatedNewGroups) {
@@ -2422,7 +2452,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 existingByKey.values.sortedByDescending { it.dateKey }
             }
             finalMergedGroups = merged
-            val shouldAutoSelectFirst = state.cameraDetailTab == CameraDetailTab.PLAYBACK &&
+            val shouldAutoSelectFirst = state.cameraStageMode == CameraDetailTab.PLAYBACK &&
                 state.selectedPlaybackVideo == null &&
                 merged.isNotEmpty()
             val firstVideo = if (shouldAutoSelectFirst) {
@@ -2443,7 +2473,7 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 error = if (!anyBatchSucceeded) firstBatchError?.toUserFriendlyMessage() ?: state.error else state.error
             )
         }
-        if (_uiState.value.cameraDetailTab == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && autoSelectedVideo != null) {
+        if (_uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && autoSelectedVideo != null) {
             activePlaybackVideo = autoSelectedVideo
             activePlaybackPlaying = autoSelectedPlaying
         }
@@ -2719,7 +2749,9 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
                 if (activeCamId != camera.id) return@launch
 
-                lastCameraEventRawId = nextLastId
+                if (batchResult.apiSucceeded) {
+                    lastCameraEventRawId = nextLastId
+                }
                 if (newEvents.isNotEmpty()) {
                     EventCacheManager.cacheInMemory(events = newEvents)
                 }
@@ -2729,7 +2761,11 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                     cur.copy(
                         isPaginatingCameraEvents = false,
                         cameraEvents = merged,
-                        hasMoreCameraEvents = hasMore && merged.size > cur.cameraEvents.size,
+                        hasMoreCameraEvents = if (batchResult.apiSucceeded) {
+                            hasMore && merged.size > cur.cameraEvents.size
+                        } else {
+                            cur.hasMoreCameraEvents
+                        },
                         error = batchResult.firstError?.toUserFriendlyMessage() ?: cur.error
                     )
                 }
@@ -2739,7 +2775,6 @@ class MonitorViewModel(application: Application) : AndroidViewModel(application)
                 _uiState.update {
                     it.copy(
                         isPaginatingCameraEvents = false,
-                        hasMoreCameraEvents = false,
                         error = e.toUserFriendlyMessage()
                     )
                 }

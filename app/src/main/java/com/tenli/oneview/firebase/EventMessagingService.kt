@@ -93,6 +93,12 @@ class EventMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         // Đảm bảo phiên đăng nhập (domain + accessToken) và kênh thông báo đã sẵn sàng kể cả khi app đang bị kill
         UserSession.ensureRestored()
+        if (UserSession.accessToken.isEmpty() || UserSession.userData == null) {
+            if (BuildConfig.DEBUG) {
+                Log.i(FcmTokenManager.LOG_TAG, "[BỎ QUA NOTIFY] Chưa đăng nhập (accessToken hoặc userData rỗng)")
+            }
+            return
+        }
         runCatching { NotificationChannels.createAll(this) }
 
         if (!UserPermissionManager.canAccessEvents()) {

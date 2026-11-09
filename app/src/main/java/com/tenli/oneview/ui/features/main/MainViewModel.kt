@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.features.main
 
 import android.app.Application
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -63,6 +64,7 @@ class MainViewModel(
     val passwordChangeState = _passwordChangeState.asStateFlow()
 
     private var logoutJob: Job? = null
+    private var permissionSyncJob: Job? = null
     private var notificationLoadJob: Job? = null
     private var aiModuleSaveJob: Job? = null
     private var passwordChangeJob: Job? = null
@@ -118,10 +120,13 @@ class MainViewModel(
     }
 
     private fun refreshPermissionsAndSyncNotifications() {
-        viewModelScope.launch(Dispatchers.IO) {
+        permissionSyncJob?.cancel()
+        permissionSyncJob = viewModelScope.launch(Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) return@launch
             runCatching {
                 UserPermissionManager.fetchAndApplyPermissions()
             }
+            if (UserSession.accessToken.isEmpty()) return@launch
             if (UserPermissionManager.canAccessEvents()) {
                 syncNotificationSettingsAndRegisterToken()
             } else {
@@ -153,83 +158,86 @@ class MainViewModel(
         }
     }
 
-    private fun syncNotificationSettingsAndRegisterToken() {
-        viewModelScope.launch(Dispatchers.IO) {
-            var shouldRegisterToken = true
-            runCatching {
-                logInfo { "[SYNC CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | ${currentAccountDebugInfo()}" }
-                val resp = ApiProvider.bsApi.getUserNotificationSettings()
-                if (resp.isSuccessful) {
-                    val body = resp.body()
-                    logInfo {
-                        val rawJson = runCatching { LoginAuthClient.gson.toJson(body) }.getOrNull()
-                        "✅ [SYNC CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
-                    }
-                    val explicitEnabled = body?.global?.enabled
-                    if (body != null && explicitEnabled != null) {
-                        val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
-                        val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
-                            localOverrides = localSnapshot?.overrides,
-                            serverOverrides = body.overrides
+    private suspend fun syncNotificationSettingsAndRegisterToken() {
+        if (UserSession.accessToken.isEmpty()) return
+        var shouldRegisterToken = true
+        runCatching {
+            logInfo { "[SYNC CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | ${currentAccountDebugInfo()}" }
+            val resp = ApiProvider.bsApi.getUserNotificationSettings()
+            if (UserSession.accessToken.isEmpty()) return
+            if (resp.isSuccessful) {
+                val body = resp.body()
+                logInfo {
+                    val rawJson = runCatching { LoginAuthClient.gson.toJson(body) }.getOrNull()
+                    "✅ [SYNC CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
+                }
+                val explicitEnabled = body?.global?.enabled
+                if (body != null && explicitEnabled != null) {
+                    val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                    val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
+                        localOverrides = localSnapshot?.overrides,
+                        serverOverrides = body.overrides
+                    )
+                    val mergedModel = body.copy(overrides = mergedOverrides)
+                    saveNotificationSettingsCache(mergedModel)
+                    shouldRegisterToken = explicitEnabled
+                    savePushEnabledPref(explicitEnabled)
+                    _notificationConfigState.update {
+                        it.copy(
+                            pushEnabled = explicitEnabled,
+                            aiModules = buildAiModuleConfigs(mergedModel)
                         )
-                        val mergedModel = body.copy(overrides = mergedOverrides)
-                        saveNotificationSettingsCache(mergedModel)
-                        shouldRegisterToken = explicitEnabled
-                        savePushEnabledPref(explicitEnabled)
-                        _notificationConfigState.update {
-                            it.copy(
-                                pushEnabled = explicitEnabled,
-                                aiModules = buildAiModuleConfigs(mergedModel)
-                            )
-                        }
-                    } else {
-                        // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
-                        val initModel = UserNotificationSettingsModel(
-                            global = UserNotificationGlobalSetting(
-                                enabled = true,
-                                pauseUntil = body?.global?.pauseUntil
-                            ),
-                            overrides = body?.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson(),
-                            globalScripts = body?.globalScripts
-                        )
-                        logInfo {
-                            "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
-                        }
-                        val putResp = ApiProvider.bsApi.updateUserNotificationSettings(initModel)
-                        val effectiveModel = if (putResp.isSuccessful) {
-                            logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
-                            putResp.body() ?: initModel
-                        } else {
-                            logWarn {
-                                val putErr = runCatching { putResp.errorBody()?.string() }.getOrNull()
-                                "⚠️ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THẤT BẠI] HTTP ${putResp.code()} | errorBody=$putErr"
-                            }
-                            initModel
-                        }
-                        saveNotificationSettingsCache(effectiveModel)
-                        shouldRegisterToken = true
-                        savePushEnabledPref(true)
-                        _notificationConfigState.update {
-                            it.copy(
-                                pushEnabled = true,
-                                aiModules = buildAiModuleConfigs(effectiveModel)
-                            )
-                        }
                     }
                 } else {
-                    logError {
-                        val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
-                        "❌ [SYNC CẤU HÌNH THẤT BẠI] HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
+                    // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
+                    val initModel = UserNotificationSettingsModel(
+                        global = UserNotificationGlobalSetting(
+                            enabled = true,
+                            pauseUntil = body?.global?.pauseUntil
+                        ),
+                        overrides = body?.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson(),
+                        globalScripts = body?.globalScripts
+                    )
+                    logInfo {
+                        "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
+                    }
+                    val putResp = ApiProvider.bsApi.updateUserNotificationSettings(initModel)
+                    if (UserSession.accessToken.isEmpty()) return
+                    val effectiveModel = if (putResp.isSuccessful) {
+                        logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
+                        putResp.body() ?: initModel
+                    } else {
+                        logWarn {
+                            val putErr = runCatching { putResp.errorBody()?.string() }.getOrNull()
+                            "⚠️ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THẤT BẠI] HTTP ${putResp.code()} | errorBody=$putErr"
+                        }
+                        initModel
+                    }
+                    saveNotificationSettingsCache(effectiveModel)
+                    shouldRegisterToken = true
+                    savePushEnabledPref(true)
+                    _notificationConfigState.update {
+                        it.copy(
+                            pushEnabled = true,
+                            aiModules = buildAiModuleConfigs(effectiveModel)
+                        )
                     }
                 }
-            }.onFailure { e ->
-                logError(e) { "❌ [EXCEPTION KHI SYNC CẤU HÌNH] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}" }
-            }
-            if (shouldRegisterToken) {
-                FcmTokenManager.registerDevicePushToken(force = false)
             } else {
-                logInfo { "[SYNC CẤU HÌNH] Tài khoản đang tắt thông báo trên server (enabled=false) -> không đăng ký FCM token" }
+                logError {
+                    val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
+                    "❌ [SYNC CẤU HÌNH THẤT BẠI] HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
+                }
             }
+        }.onFailure { e ->
+            if (e is CancellationException) throw e
+            logError(e) { "❌ [EXCEPTION KHI SYNC CẤU HÌNH] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}" }
+        }
+        if (UserSession.accessToken.isEmpty()) return
+        if (shouldRegisterToken) {
+            FcmTokenManager.registerDevicePushToken(force = false)
+        } else {
+            logInfo { "[SYNC CẤU HÌNH] Tài khoản đang tắt thông báo trên server (enabled=false) -> không đăng ký FCM token" }
         }
     }
 
@@ -239,7 +247,16 @@ class MainViewModel(
 
     fun logout() {
         if (logoutJob?.isActive == true) return
+        permissionSyncJob?.cancel()
+        notificationLoadJob?.cancel()
+        aiModuleSaveJob?.cancel()
+        passwordChangeJob?.cancel()
         logoutJob = viewModelScope.launch {
+            val app = getApplication<Application>()
+            // Ngắt WebSocket và đóng thông báo hệ thống ngay lập tức
+            webSocketManager.disconnectAll()
+            runCatching { NotificationManagerCompat.from(app).cancelAll() }
+
             // Huỷ đăng ký FCM token trên server trước khi xoá UserSession.accessToken (giống tenli-oneview auth.ts)
             FcmTokenManager.unregisterDevicePushToken()
             UserSession.clear()
@@ -257,19 +274,20 @@ class MainViewModel(
                     remove(AppKeys.GROUP_ID_CAMERA)
                     remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
                     remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                    remove("saved_expanded_nodes")
+                    remove("saved_monitor_grid_size")
+                    remove("saved_monitor_grid_camera_ids")
+                    remove("saved_monitor_camera_id")
                     if (!rememberMe) {
                         remove(AppKeys.USERNAME_KEY)
                         remove(AppKeys.PASSWORD_KEY)
                     }
                 }
 
-                val app = getApplication<Application>()
                 HomeCacheManager.clearCache(app)
                 EventCacheManager.clearCache(app)
                 MonitorCacheManager.clearCache(app)
             }
-
-            webSocketManager.disconnectAll()
 
             _event.emit(MainEvent.Logout)
         }
@@ -563,6 +581,7 @@ class MainViewModel(
     }
 
     private fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {
+        if (model != null && UserSession.accessToken.isEmpty()) return
         cachedNotificationSettings = model
         runCatching {
             val json = if (model != null) LoginAuthClient.gson.toJson(model) else null
@@ -587,6 +606,7 @@ class MainViewModel(
     }
 
     private fun savePushEnabledPref(enabled: Boolean) {
+        if (UserSession.accessToken.isEmpty()) return
         // apply() ghi đĩa bất đồng bộ – an toàn trên Main thread
         GlobalData.preferences.edit { putBoolean(PREF_PUSH_NOTIFICATIONS_ENABLED, enabled) }
     }
@@ -640,7 +660,6 @@ class MainViewModel(
                     GlobalData.preferences.edit {
                         remove(AppKeys.PASSWORD_KEY)
                     }
-                    FcmTokenManager.unregisterDevicePushToken()
                     MobileTopPopupManager.success(
                         localized("Password changed successfully!", "Đổi mật khẩu thành công!")
                     )

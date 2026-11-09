@@ -5,6 +5,11 @@ import com.google.gson.GsonBuilder
 import com.google.gson.JsonDeserializationContext
 import com.google.gson.JsonDeserializer
 import com.google.gson.JsonElement
+import com.google.gson.TypeAdapter
+import com.google.gson.TypeAdapterFactory
+import com.google.gson.reflect.TypeToken
+import com.google.gson.stream.JsonReader
+import com.google.gson.stream.JsonWriter
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.model.network.BsProfileConfig
 import com.tenli.oneview.model.network.BsProfileGroupConfig
@@ -24,7 +29,10 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.lang.reflect.Field
+import java.lang.reflect.Modifier
 import java.lang.reflect.Type
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 object LoginAuthClient {
@@ -40,8 +48,90 @@ object LoginAuthClient {
     private const val MAX_IDLE_CONNECTIONS = 10
     private const val KEEP_ALIVE_MINUTES = 5L
 
+    /**
+     * Bảo vệ chống NullPointerException cho Kotlin data class khi Gson parse JSON có giá trị `null`
+     * (vd: `{"name": null, "publicHost": null, "events": null}`):
+     * Gson mặc định ghi đè `null` bằng reflection lên cả các trường non-null của Kotlin (`val name: String = ""`).
+     * Factory này đối chiếu với instance mặc định từ constructor rỗng: nếu trường String / Collection / Map có giá trị
+     * mặc định khác `null` nhưng sau khi Gson đọc JSON lại bị gán `null`, tự động khôi phục về giá trị mặc định đó.
+     */
+    internal object KotlinDefaultValueAdapterFactory : TypeAdapterFactory {
+        private data class DefaultField(val field: Field, val defaultValue: Any)
+        private val fieldCache = ConcurrentHashMap<Class<*>, List<DefaultField>>()
+
+        private fun resolveDefaultFields(rawClass: Class<*>): List<DefaultField> {
+            fieldCache[rawClass]?.let { return it }
+            val pkg = rawClass.name
+            if (!pkg.startsWith("com.tenli.oneview.") ||
+                rawClass.isEnum ||
+                rawClass.isInterface ||
+                rawClass.isPrimitive ||
+                Modifier.isAbstract(rawClass.modifiers)
+            ) {
+                fieldCache[rawClass] = emptyList()
+                return emptyList()
+            }
+            val computed = try {
+                val ctor = rawClass.getDeclaredConstructor()
+                ctor.isAccessible = true
+                val defaultInstance = ctor.newInstance()
+                val list = mutableListOf<DefaultField>()
+                var current: Class<*>? = rawClass
+                while (current != null && current != Any::class.java) {
+                    for (field in current.declaredFields) {
+                        if (Modifier.isStatic(field.modifiers) || Modifier.isTransient(field.modifiers)) continue
+                        field.isAccessible = true
+                        val defVal = field.get(defaultInstance)
+                        if (defVal is String ||
+                            (defVal is Collection<*> && defVal.isEmpty()) ||
+                            (defVal is Map<*, *> && defVal.isEmpty())
+                        ) {
+                            list.add(DefaultField(field, defVal))
+                        }
+                    }
+                    current = current.superclass
+                }
+                list
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            fieldCache[rawClass] = computed
+            return computed
+        }
+
+        override fun <T : Any?> create(gson: Gson, type: TypeToken<T>): TypeAdapter<T>? {
+            val rawClass = type.rawType
+            val defaultFields = resolveDefaultFields(rawClass)
+            if (defaultFields.isEmpty()) return null
+            val delegate = gson.getDelegateAdapter(this, type)
+            return object : TypeAdapter<T>() {
+                override fun write(out: JsonWriter, value: T) {
+                    delegate.write(out, value)
+                }
+
+                override fun read(reader: JsonReader): T? {
+                    val instance = delegate.read(reader) ?: return null
+                    for (df in defaultFields) {
+                        try {
+                            if (df.field.get(instance) == null) {
+                                df.field.set(instance, df.defaultValue)
+                            }
+                        } catch (_: Throwable) {
+                        }
+                    }
+                    return instance
+                }
+            }
+        }
+    }
+
     /** Gson lenient dùng chung cho mọi [StringOrObjectDeserializer] (tránh tạo 1 instance Gson cho mỗi type) */
-    private val lenientGson: Gson by lazy { GsonBuilder().setLenient().create() }
+    private val lenientGson: Gson by lazy {
+        GsonBuilder()
+            .setLenient()
+            .registerTypeAdapterFactory(KotlinDefaultValueAdapterFactory)
+            .create()
+    }
 
     /**
      * Deserializer linh hoạt hỗ trợ cả JSON Object và JSON String được stringify từ backend
@@ -125,6 +215,7 @@ object LoginAuthClient {
 
     val gson: Gson = GsonBuilder()
         .setLenient()
+        .registerTypeAdapterFactory(KotlinDefaultValueAdapterFactory)
         .registerTypeAdapter(EventDataDetail::class.java, StringOrObjectDeserializer(EventDataDetail::class.java))
         .registerTypeAdapter(CameraExtra::class.java, StringOrObjectDeserializer(CameraExtra::class.java))
         .registerTypeAdapter(UserExtra::class.java, StringOrObjectDeserializer(UserExtra::class.java))
