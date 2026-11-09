@@ -149,20 +149,35 @@ fun LiveStreamPlayer(
         return false
     }
 
-    // Đồng bộ LivePlayer.vue: chụp 1 frame sau 900ms khi luồng live bắt đầu phát (và cập nhật mỗi 20s nếu xem lâu)
-    // Nhờ đã chụp sẵn ở nền, khi bấm Back sẽ KHÔNG cần gọi lại textureView.getBitmap() trên Main thread gây khựng hiệu ứng trượt
+    // Đồng bộ LivePlayer.vue: chụp 1 frame sau 900ms khi luồng live bắt đầu phát.
+    // Nhờ đã chụp sẵn ở nền (1 lần duy nhất cho mỗi phiên phát), tránh gọi lặp lại textureView.getBitmap()
+    // định kỳ trên Main thread gây hao CPU/GPU và tránh khựng hiệu ứng trượt khi bấm Back.
     LaunchedEffect(isPlaying, effectivePaused, cameraId, wsUrl) {
         val boundCameraId = cameraId
-        if (isPlaying && !effectivePaused && boundCameraId > 0) {
+        if (isPlaying && !effectivePaused && !hasCapturedFrame && boundCameraId > 0) {
             delay(900L)
             if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
                 hasCapturedFrame = true
             }
-            while (true) {
-                delay(20_000L)
-                if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
-                    hasCapturedFrame = true
-                }
+        }
+    }
+
+    val playerListener = remember(cameraId, wsUrl) {
+        object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                isPlaying = true
+                isError = false
+                currentOnPlayingChange(true)
+                currentOnErrorChange(false)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (currentIsPaused) return
+                Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
+                isError = true
+                isPlaying = false
+                currentOnPlayingChange(false)
+                currentOnErrorChange(true)
             }
         }
     }
@@ -218,27 +233,15 @@ fun LiveStreamPlayer(
             .setLoadControl(loadControl)
             .build()
             .apply {
-                setMediaSource(mediaSource)
-                prepare()
-                playWhenReady = true
                 volume = 0f // Muted – same as web player
-                addListener(object : Player.Listener {
-                    override fun onRenderedFirstFrame() {
-                        isPlaying = true
-                        isError = false
-                        currentOnPlayingChange(true)
-                        currentOnErrorChange(false)
-                    }
-
-                    override fun onPlayerError(error: PlaybackException) {
-                        if (currentIsPaused) return
-                        Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
-                        isError = true
-                        isPlaying = false
-                        currentOnPlayingChange(false)
-                        currentOnErrorChange(true)
-                    }
-                })
+                addListener(playerListener)
+                setMediaSource(mediaSource)
+                if (!effectivePaused) {
+                    prepare()
+                    playWhenReady = true
+                } else {
+                    playWhenReady = false
+                }
             }
     }
 
@@ -252,9 +255,13 @@ fun LiveStreamPlayer(
                 }
             }
             exoPlayer.playWhenReady = false
-            exoPlayer.stop()
+            if (exoPlayer.playbackState != Player.STATE_IDLE) {
+                exoPlayer.stop()
+            }
         } else if (exoPlayer.playbackState == Player.STATE_IDLE) {
             exoPlayer.prepare()
+            exoPlayer.playWhenReady = true
+        } else {
             exoPlayer.playWhenReady = true
         }
     }
@@ -262,9 +269,13 @@ fun LiveStreamPlayer(
     DisposableEffect(exoPlayer, cameraId) {
         val boundCameraId = cameraId
         onDispose {
-            if (isPlaying && !hasCapturedFrame) {
+            if (isPlaying && !hasCapturedFrame && boundCameraId > 0) {
                 captureCurrentFrameToCache(boundCameraId, playerViewRef)
             }
+            exoPlayer.removeListener(playerListener)
+            playerViewRef?.player = null
+            playerViewRef = null
+            exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()
         }

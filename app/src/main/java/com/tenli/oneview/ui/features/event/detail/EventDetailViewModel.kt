@@ -860,8 +860,26 @@ class EventDetailViewModel(
 
     fun stopLiveStream() {
         liveStreamJob?.cancel()
+        liveStreamJob = null
         pendingLiveStreamOnCameraResolved = false
-        _uiState.update { it.copy(liveStreamLoading = false) }
+        liveRetryCount = 0
+        liveFallbackTried = false
+        val camId = _uiState.value.camera?.id
+        val latestSnap = if (camId != null && camId > 0) {
+            eventRepository.getCachedCameraImageLinkInMemory(camId)
+                ?.let(::resolveFullMediaUrl)
+                ?.takeIf { it.isNotEmpty() }
+        } else {
+            null
+        }
+        _uiState.update {
+            it.copy(
+                liveStreamUrl = null,
+                liveStreamLoading = false,
+                liveStreamError = null,
+                liveCameraSnapshotUrl = latestSnap ?: it.liveCameraSnapshotUrl
+            )
+        }
     }
 
     fun loadOriginalVideo() {

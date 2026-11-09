@@ -250,6 +250,7 @@ private class GestureBounds {
 fun EventDetailScreen(
     eventId: Int,
     onBack: () -> Unit,
+    isClosing: Boolean = false,
     onSwipeDismissed: () -> Unit = onBack,
     viewModel: EventDetailViewModel = viewModel(
         key = "event_detail_$eventId",
@@ -259,7 +260,15 @@ fun EventDetailScreen(
         )
     )
 ) {
-    BackHandler { onBack() }
+    var isDismissing by remember(eventId) { mutableStateOf(false) }
+    val handleBack: () -> Unit = {
+        if (!isDismissing) {
+            isDismissing = true
+            viewModel.stopLiveStream()
+            onBack()
+        }
+    }
+    BackHandler(onBack = handleBack)
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isEn = rememberIsEnglish()
@@ -288,6 +297,9 @@ fun EventDetailScreen(
     val bounds = remember(eventId) { GestureBounds() }
 
     fun triggerSmoothDismiss() {
+        if (isDismissing) return
+        isDismissing = true
+        viewModel.stopLiveStream()
         scope.launch {
             sheetOffsetY.animateTo(
                 targetValue = screenHeightPx,
@@ -532,7 +544,7 @@ fun EventDetailScreen(
                                     resetMediaState()
                                 }
                             },
-                            onClose = onBack
+                            onClose = handleBack
                         )
 
                         // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list) with Smooth Sliding Pill Indicator
@@ -546,6 +558,7 @@ fun EventDetailScreen(
                         // Supports horizontal swipe to switch between Live Camera / Video gốc / Ảnh sự kiện / Video sự kiện
                         MediaViewport(
                             selectedTab = selectedTab,
+                            isScreenActive = !isClosing && !isDismissing,
                             eventId = event.id,
                             cameraId = camera?.id ?: 0,
                             hasSubStream = camera?.sub?.isNotBlank() == true,
@@ -965,6 +978,7 @@ private fun MediaTabSelector(
 @Composable
 private fun MediaViewport(
     selectedTab: EventMediaTab,
+    isScreenActive: Boolean,
     eventId: Int,
     cameraId: Int,
     hasSubStream: Boolean,
@@ -1011,6 +1025,7 @@ private fun MediaViewport(
             },
             label = "mediaViewportTransition"
         ) { activeMediaTab ->
+            val isTabActive = isScreenActive && activeMediaTab == selectedTab
             when (activeMediaTab) {
                 EventMediaTab.LIVE_CAMERA -> LiveCameraPane(
                     eventId = eventId,
@@ -1022,6 +1037,7 @@ private fun MediaViewport(
                     isLoading = liveStreamLoading,
                     error = liveStreamError,
                     streamUrl = liveStreamUrl,
+                    isActive = isTabActive,
                     isEn = isEn,
                     onLoad = onLoadLiveStream,
                     onSwitchChannel = onSwitchLiveChannel,
@@ -1043,6 +1059,7 @@ private fun MediaViewport(
                     error = originalVideoError,
                     videoUrl = originalVideoUrl,
                     seekTimeMs = originalVideoSeekTimeMs,
+                    isActive = isTabActive,
                     isEn = isEn,
                     onLoad = onLoadOriginalVideo
                 )
@@ -1055,6 +1072,7 @@ private fun MediaViewport(
                             videoUrl = videoUrl,
                             thumbnailUrl = display.imageUrl,
                             deviceKey = UserSession.accessToken,
+                            playWhenReady = isTabActive,
                             errorText = noVideoText
                         )
                     } else {
@@ -1077,6 +1095,7 @@ private fun LiveCameraPane(
     isLoading: Boolean,
     error: String?,
     streamUrl: String?,
+    isActive: Boolean,
     isEn: Boolean,
     onLoad: (Boolean) -> Unit,
     onSwitchChannel: (Int) -> Unit,
@@ -1085,6 +1104,7 @@ private fun LiveCameraPane(
     onStop: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     var isPlaying by remember(cameraId, streamUrl) { mutableStateOf(false) }
@@ -1092,12 +1112,41 @@ private fun LiveCameraPane(
     var showInfo by remember(cameraId) { mutableStateOf(false) }
     var showChannelDropdown by remember(cameraId) { mutableStateOf(false) }
     var autoHideToken by remember(cameraId) { mutableIntStateOf(0) }
+    val currentIsActive by androidx.compose.runtime.rememberUpdatedState(isActive)
+    val currentOnLoad by androidx.compose.runtime.rememberUpdatedState(onLoad)
+    val currentOnStop by androidx.compose.runtime.rememberUpdatedState(onStop)
 
-    LaunchedEffect(eventId, cameraId) {
-        onLoad(false)
+    LaunchedEffect(eventId, cameraId, isActive) {
+        if (isActive) {
+            onLoad(false)
+        } else {
+            onStop()
+        }
     }
-    DisposableEffect(Unit) {
-        onDispose { onStop() }
+    DisposableEffect(lifecycleOwner) {
+        var stoppedInBackground = false
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    stoppedInBackground = true
+                    currentOnStop()
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                    if (stoppedInBackground) {
+                        stoppedInBackground = false
+                        if (currentIsActive) {
+                            currentOnLoad(true)
+                        }
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            currentOnStop()
+        }
     }
     LaunchedEffect(showInfo, autoHideToken, isPlaying) {
         if (showInfo && isPlaying) {
@@ -1134,6 +1183,7 @@ private fun LiveCameraPane(
                 wsUrl = streamUrl,
                 cameraId = cameraId,
                 isOriginalRatio = isOriginalRatio,
+                isPaused = !isActive,
                 onPlayingChange = { playing ->
                     isPlaying = playing
                     if (playing) {
@@ -1141,7 +1191,7 @@ private fun LiveCameraPane(
                     }
                 },
                 onErrorChange = { isErr ->
-                    if (isErr) {
+                    if (isErr && isActive) {
                         isPlaying = false
                         onRetry()
                     }
@@ -1179,7 +1229,9 @@ private fun LiveCameraPane(
                         contentScale = ContentScale.FillBounds
                     )
                 }
-                WaveDotsLoading()
+                if (isActive) {
+                    WaveDotsLoading()
+                }
             }
         }
 
@@ -1462,11 +1514,16 @@ private fun OriginalVideoPane(
     error: String?,
     videoUrl: String?,
     seekTimeMs: Long?,
+    isActive: Boolean,
     isEn: Boolean,
     onLoad: () -> Unit
 ) {
     val context = LocalContext.current
-    LaunchedEffect(eventId) { onLoad() }
+    LaunchedEffect(eventId, isActive) {
+        if (isActive) {
+            onLoad()
+        }
+    }
 
     val mainBox = display.mainBox
     val pivotX = mainBox?.let { (it[0] + it[2]) / 2 } ?: 0.5f
@@ -1474,7 +1531,7 @@ private fun OriginalVideoPane(
 
     var showEventEffect by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
-        targetValue = if (showEventEffect) EVENT_ZOOM_SCALE else 1f,
+        targetValue = if (showEventEffect && isActive) EVENT_ZOOM_SCALE else 1f,
         animationSpec = tween(
             durationMillis = if (showEventEffect) 2000 else 1200,
             easing = StandardEasing
@@ -1507,7 +1564,9 @@ private fun OriginalVideoPane(
                     contentScale = ContentScale.FillBounds
                 )
             }
-            WaveDotsLoading()
+            if (isActive) {
+                WaveDotsLoading()
+            }
         }
     } else if (error != null) {
         CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
@@ -1530,6 +1589,7 @@ private fun OriginalVideoPane(
                     videoUrl = videoUrl,
                     thumbnailUrl = display.imageUrl,
                     deviceKey = UserSession.accessToken,
+                    playWhenReady = isActive,
                     initialSeekPositionMs = seekTimeMs,
                     errorText = if (isEn) "Original video unavailable" else "Video gốc không khả dụng",
                     onTimeUpdate = { currentMs ->

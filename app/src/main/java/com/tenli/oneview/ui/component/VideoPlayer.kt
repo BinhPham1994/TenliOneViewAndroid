@@ -59,7 +59,9 @@ fun VideoPlayer(
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
+    var isActuallyPlaying by remember(videoUrl) { mutableStateOf(false) }
     var playerViewRef by remember(videoUrl) { mutableStateOf<PlayerView?>(null) }
+    val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
     val colors = MaterialTheme.appColors
     val containerBg = colors.surface
     val stageBg = when {
@@ -73,6 +75,47 @@ fun VideoPlayer(
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
     val currentOnFullscreenToggle by rememberUpdatedState(onFullscreenToggle)
+
+    val playerListener = remember(videoUrl) {
+        object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                isVideoReady = true
+                isError = false
+                currentOnPlayingChange(true)
+                if (!suppressPlayWhenReadyCallback[0]) {
+                    currentOnPlayWhenReadyChange(currentPlayWhenReady)
+                }
+                currentOnErrorChange(false)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                isActuallyPlaying = isPlaying
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!suppressPlayWhenReadyCallback[0]) {
+                    currentOnPlayWhenReadyChange(playWhenReady)
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    isActuallyPlaying = false
+                    currentOnPlayWhenReadyChange(false)
+                }
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
+                isError = true
+                isVideoReady = false
+                isActuallyPlaying = false
+                currentOnPlayingChange(false)
+                currentOnPlayWhenReadyChange(false)
+                currentOnErrorChange(true)
+            }
+        }
+    }
 
     val exoPlayer = remember(videoUrl) {
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
@@ -104,56 +147,48 @@ fun VideoPlayer(
                 if (initialSeekPositionMs != null) {
                     seekTo(initialSeekPositionMs)
                 }
-                this.playWhenReady = currentPlayWhenReady
-                prepare()
-                addListener(object : Player.Listener {
-                    override fun onRenderedFirstFrame() {
-                        isVideoReady = true; isError = false
-                        currentOnPlayingChange(true)
-                        currentOnPlayWhenReadyChange(this@apply.playWhenReady && playbackState != Player.STATE_ENDED)
-                        currentOnErrorChange(false)
-                    }
-
-                    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                        currentOnPlayWhenReadyChange(playWhenReady && playbackState != Player.STATE_ENDED)
-                    }
-
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == Player.STATE_ENDED) {
-                            currentOnPlayWhenReadyChange(false)
-                        } else if (playbackState == Player.STATE_READY) {
-                            currentOnPlayWhenReadyChange(this@apply.playWhenReady)
-                        }
-                    }
-
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
-                        isError = true; isVideoReady = false
-                        currentOnPlayingChange(false)
-                        currentOnPlayWhenReadyChange(false)
-                        currentOnErrorChange(true)
-                    }
-                })
+                addListener(playerListener)
+                suppressPlayWhenReadyCallback[0] = true
+                try {
+                    this.playWhenReady = currentPlayWhenReady
+                } finally {
+                    suppressPlayWhenReadyCallback[0] = false
+                }
+                if (currentPlayWhenReady) {
+                    prepare()
+                }
             }
     }
 
     androidx.compose.runtime.LaunchedEffect(exoPlayer, playWhenReady) {
-        if (playWhenReady) {
-            if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                exoPlayer.seekTo(0)
+        suppressPlayWhenReadyCallback[0] = true
+        try {
+            if (playWhenReady) {
+                if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                    exoPlayer.prepare()
+                } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                    exoPlayer.seekTo(0)
+                }
+                if (!exoPlayer.playWhenReady) {
+                    exoPlayer.play()
+                }
+            } else {
+                if (exoPlayer.playWhenReady) {
+                    exoPlayer.pause()
+                }
             }
-            if (!exoPlayer.playWhenReady) {
-                exoPlayer.play()
-            }
-        } else {
-            if (exoPlayer.playWhenReady) {
-                exoPlayer.pause()
-            }
+        } finally {
+            suppressPlayWhenReadyCallback[0] = false
         }
     }
 
     DisposableEffect(exoPlayer) {
         onDispose {
+            isActuallyPlaying = false
+            exoPlayer.removeListener(playerListener)
+            playerViewRef?.player = null
+            playerViewRef = null
+            exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()
         }
@@ -163,10 +198,23 @@ fun VideoPlayer(
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                exoPlayer.pause()
+                suppressPlayWhenReadyCallback[0] = true
+                try {
+                    exoPlayer.pause()
+                } finally {
+                    suppressPlayWhenReadyCallback[0] = false
+                }
             } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 if (currentPlayWhenReady && exoPlayer.playbackState != Player.STATE_ENDED) {
-                    exoPlayer.play()
+                    suppressPlayWhenReadyCallback[0] = true
+                    try {
+                        if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                            exoPlayer.prepare()
+                        }
+                        exoPlayer.play()
+                    } finally {
+                        suppressPlayWhenReadyCallback[0] = false
+                    }
                 }
             }
         }
@@ -178,11 +226,10 @@ fun VideoPlayer(
 
     val currentOnTimeUpdate by rememberUpdatedState(onTimeUpdate)
     if (onTimeUpdate != null) {
-        androidx.compose.runtime.LaunchedEffect(exoPlayer, isVideoReady) {
-            while (isActive && isVideoReady) {
-                if (exoPlayer.isPlaying) {
-                    currentOnTimeUpdate?.invoke(exoPlayer.currentPosition)
-                }
+        androidx.compose.runtime.LaunchedEffect(exoPlayer, isActuallyPlaying) {
+            if (!isActuallyPlaying) return@LaunchedEffect
+            while (isActive && isActuallyPlaying) {
+                currentOnTimeUpdate?.invoke(exoPlayer.currentPosition.coerceAtLeast(0L))
                 delay(250L)
             }
         }
@@ -312,7 +359,9 @@ fun VideoPlayer(
                         contentScale = if (isOriginalRatio) ContentScale.Fit else ContentScale.FillBounds
                     )
                 }
-                WaveDotsLoading(dotColor = colors.accent)
+                if (playWhenReady) {
+                    WaveDotsLoading(dotColor = colors.accent)
+                }
             }
         }
     }

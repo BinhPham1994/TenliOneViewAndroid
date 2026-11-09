@@ -421,7 +421,7 @@ fun MonitorScreen(
                         .padding(bottom = bottomClearance),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isTabActive) {
+                    if (isTabActive && !isLiveScreenOpen) {
                         WaveDotsLoading()
                     }
                 }
@@ -2905,6 +2905,7 @@ fun CameraGridItem(
                     thumbnailUrl = null,
                     deviceKey = deviceKey,
                     isOriginalRatio = isOriginalRatio,
+                    playWhenReady = !isStreamPaused,
                     onPlayingChange = {
                         isLiveViewPlaying = it
                         if (it) {

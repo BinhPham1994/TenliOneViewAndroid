@@ -177,6 +177,7 @@ fun AppNavigation(
                             Box(modifier = Modifier.fillMaxSize()) {
                                 EventDetailScreen(
                                     eventId = displayEventId,
+                                    isClosing = activeEventDetailId == null,
                                     onBack = {
                                         skipExitAnimation = false
                                         activeEventDetailId = null
