@@ -1031,7 +1031,7 @@ fun MobileEventCard(
     val isActivePress = isPressed || isTapFlashing
     val targetBgColor = when {
         isActivePress && colors.isDark -> Color(0xFF28374E)
-        isActivePress -> colors.closeButtonBg
+        isActivePress -> colors.thumbnailBg
         !isSelected -> colors.surface
         colors.isDark -> SelectedCardBgDark
         else -> BrandContainer

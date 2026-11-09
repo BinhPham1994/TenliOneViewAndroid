@@ -100,7 +100,7 @@ data class AppColors(
     val controlBg: Color,
     /** Nền nút phụ / nút Hủy (White | #263449) */
     val buttonSecondaryBg: Color,
-    /** Nền nút đóng tròn trên sheet (Slate200 | #263449) */
+    /** Nền nút đóng tròn trên sheet / header (Black 7% | #263449) */
     val closeButtonBg: Color,
     /** Nền ô nhập liệu (#F3F4F7 | White 4%) */
     val inputBg: Color,
@@ -166,7 +166,7 @@ val LightAppColors = AppColors(
     surfaceMenu = SurfaceLight,
     controlBg = Slate100,
     buttonSecondaryBg = SurfaceLight,
-    closeButtonBg = Slate200,
+    closeButtonBg = Color.Black.copy(alpha = 0.07f),
     inputBg = InputFieldLight,
     thumbnailBg = Slate200,
     scrim = Slate900.copy(alpha = 0.45f),

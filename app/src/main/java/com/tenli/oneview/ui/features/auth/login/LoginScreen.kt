@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.features.auth.login
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
@@ -12,6 +13,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -56,6 +59,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
@@ -157,6 +161,7 @@ fun LoginScreen(
         onEmailChange = viewModel::onEmailChanged,
         onPasswordChange = viewModel::onPasswordChanged,
         onRememberMeChange = viewModel::onRememberMeChanged,
+        onToggleTerms = viewModel::toggleTermsAccepted,
         onTogglePassword = viewModel::toggleShowPassword,
         onLoginClick = viewModel::login,
         onSetLanguage = onSetLanguage
@@ -170,6 +175,7 @@ private fun LoginContent(
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onRememberMeChange: (Boolean) -> Unit,
+    onToggleTerms: () -> Unit,
     onTogglePassword: () -> Unit,
     onLoginClick: () -> Unit,
     onSetLanguage: (String) -> Unit
@@ -182,7 +188,6 @@ private fun LoginContent(
     val domainFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
     var currentStep by remember { mutableIntStateOf(STEP_DOMAIN) }
-    var isTermsAccepted by remember { mutableStateOf(false) }
     var showQrScanner by remember { mutableStateOf(false) }
     var isDomainFromQr by remember { mutableStateOf(false) }
     var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
@@ -194,7 +199,7 @@ private fun LoginContent(
         }
     }
 
-    BackHandler(enabled = currentStep == STEP_CREDENTIALS) {
+    val onBackToDomainStep: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
         if (isDomainFromQr) {
@@ -202,6 +207,10 @@ private fun LoginContent(
             isDomainFromQr = false
         }
         currentStep = STEP_DOMAIN
+    }
+
+    BackHandler(enabled = currentStep == STEP_CREDENTIALS) {
+        onBackToDomainStep()
     }
 
     LaunchedEffect(currentStep) {
@@ -219,21 +228,30 @@ private fun LoginContent(
         }
     }
 
+    val isDomainValid = remember(uiState.domain) {
+        LoginViewModel.isValidProjectDomain(uiState.domain)
+    }
+
     val onNextStep: () -> Unit = {
         if (uiState.domain.isBlank()) {
             MobileTopPopupManager.error(
                 if (isVietnamese) "Vui lòng nhập domain dự án" else "Please enter project domain"
             )
+        } else if (!LoginViewModel.isValidProjectDomain(uiState.domain)) {
+            MobileTopPopupManager.error(
+                if (isVietnamese) "Domain dự án không hợp lệ" else "Invalid project domain"
+            )
         } else if (!NetworkMonitor.isNetworkAvailable()) {
             MobileTopPopupManager.error(noNetworkMessage(!isVietnamese))
         } else {
+            onDomainChange(LoginViewModel.normalizeDomainInput(uiState.domain))
             isDomainFromQr = false
             focusManager.clearFocus()
             keyboardController?.hide()
             currentStep = STEP_CREDENTIALS
         }
     }
-    val canSubmit = !uiState.isLoading && isTermsAccepted
+    val canSubmit = !uiState.isLoading && uiState.termsAccepted
     val onSubmit: () -> Unit = {
         focusManager.clearFocus()
         if (canSubmit) onLoginClick()
@@ -273,7 +291,16 @@ private fun LoginContent(
                         .widthIn(max = spacing.dialogMaxWidth)
                         .onGloballyPositioned { coords ->
                             cardTopInRootPx = coords.positionInRoot().y
+                        },
+                    topStartAction = {
+                        AnimatedVisibility(
+                            visible = currentStep == STEP_CREDENTIALS,
+                            enter = fadeIn(animationSpec = tween(FADE_IN_DURATION_MS)),
+                            exit = fadeOut(animationSpec = tween(FADE_OUT_DURATION_MS))
+                        ) {
+                            com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackToDomainStep)
                         }
+                    }
                 ) {
                     LoginHeader(isVietnamese = isVietnamese)
                     Spacer(modifier = Modifier.height(spacing.space32))
@@ -309,7 +336,7 @@ private fun LoginContent(
                                 LoginGradientButton(
                                     text = if (isVietnamese) "Tiếp tục" else "Continue",
                                     onClick = onNextStep,
-                                    active = uiState.domain.isNotBlank()
+                                    active = isDomainValid
                                 )
                                 Spacer(modifier = Modifier.height(spacing.space12))
                                 LoginSecondaryButton(
@@ -326,14 +353,14 @@ private fun LoginContent(
                                 CredentialsStep(
                                     uiState = uiState,
                                     isVietnamese = isVietnamese,
-                                    isTermsAccepted = isTermsAccepted,
+                                    isTermsAccepted = uiState.termsAccepted,
                                     canSubmit = canSubmit,
                                     emailFocusRequester = emailFocusRequester,
                                     onEmailChange = onEmailChange,
                                     onPasswordChange = onPasswordChange,
                                     onTogglePassword = onTogglePassword,
                                     onRememberMeChange = onRememberMeChange,
-                                    onToggleTerms = { isTermsAccepted = !isTermsAccepted },
+                                    onToggleTerms = onToggleTerms,
                                     onMoveFocusDown = { focusManager.moveFocus(FocusDirection.Down) },
                                     onSubmit = onSubmit
                                 )
@@ -525,6 +552,7 @@ private fun themeLabel(mode: Int, isVietnamese: Boolean) = when (mode) {
 @Composable
 private fun LoginCard(
     modifier: Modifier = Modifier,
+    topStartAction: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val colors = MaterialTheme.appColors
@@ -543,13 +571,25 @@ private fun LoginCard(
         shape = shape,
         color = colors.surface
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = spacing.space24, vertical = spacing.space32),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            content()
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = spacing.space24, vertical = spacing.space32),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                content()
+            }
+
+            if (topStartAction != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(top = spacing.space16, start = spacing.space16)
+                ) {
+                    topStartAction()
+                }
+            }
         }
     }
 }

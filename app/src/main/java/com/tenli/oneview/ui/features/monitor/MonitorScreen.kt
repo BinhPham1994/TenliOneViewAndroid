@@ -149,6 +149,7 @@ import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.component.SheetCloseButton
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
@@ -1234,20 +1235,7 @@ private fun MobileLiveCameraScreen(
                 MobileTopBar(
                     title = selectedCamera.camera.name,
                     leftAction = {
-                        Box(
-                            modifier = Modifier
-                                .size(spacing.iconButton)
-                                .clip(CircleShape)
-                                .clickable(onClick = onBackClick),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.ChevronLeft,
-                                contentDescription = stringResource(id = R.string.common_back),
-                                tint = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.size(spacing.iconMedium)
-                            )
-                        }
+                        com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackClick)
                     },
                     rightAction = when (activeDetailTab) {
                         CameraDetailTab.LIVE -> null
@@ -2348,7 +2336,7 @@ private fun MobileCameraSnapshotCard(
     val isActivePress = isPressed || isTapFlashing
     val targetCardBg = when {
         isActivePress && colors.isDark -> Color(0xFF28374E)
-        isActivePress -> colors.closeButtonBg
+        isActivePress -> colors.thumbnailBg
         else -> colors.surface
     }
     val cardBg by animateColorAsState(
@@ -2545,22 +2533,10 @@ private fun MobileGroupFilterBottomSheet(
                             .padding(top = spacing.space4)
                     )
 
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(spacing.avatarSmall)
-                            .clip(CircleShape)
-                            .background(colors.closeButtonBg)
-                            .clickable(onClick = onDismiss),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = LucideIcons.X,
-                            contentDescription = if (isEn) "Close" else "Đóng",
-                            tint = colors.textSubtle,
-                            modifier = Modifier.size(spacing.iconSmall)
-                        )
-                    }
+                    SheetCloseButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.align(Alignment.TopEnd)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(spacing.space14))

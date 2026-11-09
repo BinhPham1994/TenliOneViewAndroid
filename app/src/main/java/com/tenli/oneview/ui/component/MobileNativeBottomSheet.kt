@@ -169,3 +169,25 @@ fun SheetCloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/** Nút quay lại tròn (mũi tên trái) đồng bộ nền & kích thước với [SheetCloseButton]. */
+@Composable
+fun SheetBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val spacing = MaterialTheme.spacing
+    val colors = MaterialTheme.appColors
+    Box(
+        modifier = modifier
+            .size(spacing.avatarSmall)
+            .clip(CircleShape)
+            .background(colors.closeButtonBg)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = LucideIcons.ChevronLeft,
+            contentDescription = stringResource(id = R.string.common_back),
+            tint = colors.textSubtle,
+            modifier = Modifier.size(spacing.iconSmall)
+        )
+    }
+}

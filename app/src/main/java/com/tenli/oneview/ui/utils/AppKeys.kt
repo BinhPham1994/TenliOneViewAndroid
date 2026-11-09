@@ -11,4 +11,5 @@ object AppKeys {
     const val USERNAME_KEY = "tenli_62341_key"
     const val PASSWORD_KEY = "tenli_95173_key"
     const val REMEMBER_ME_KEY = "tenli_remember_me_key"
+    const val TERMS_ACCEPTED_KEY = "tenli_terms_accepted_key"
 }

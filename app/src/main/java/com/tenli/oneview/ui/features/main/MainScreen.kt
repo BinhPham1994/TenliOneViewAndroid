@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -96,6 +97,8 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -1335,6 +1338,21 @@ private fun MobileNotificationConfigScreen(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val backgroundColor = MaterialTheme.colorScheme.background
+    var isSearchExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val searchFocusRequester = remember { FocusRequester() }
+    val currentSearchQuery by rememberUpdatedState(searchQuery)
+    val dismissKeyboard: () -> Unit = remember(focusManager, keyboardController) {
+        {
+            focusManager.clearFocus()
+            keyboardController?.hide()
+            if (currentSearchQuery.isEmpty()) {
+                isSearchExpanded = false
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1343,12 +1361,15 @@ private fun MobileNotificationConfigScreen(
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = {}
+                onClick = { dismissKeyboard() }
             )
     ) {
         SettingSubPageHeader(
             title = stringResource(id = R.string.setting_notifications),
-            onBackClick = onBackClick
+            onBackClick = {
+                dismissKeyboard()
+                onBackClick()
+            }
         )
 
         if (state.isLoading) {
@@ -1365,18 +1386,21 @@ private fun MobileNotificationConfigScreen(
                 )
             }
         } else {
+            val scrollState = rememberScrollState()
+            var aiSectionTopPx by remember { mutableIntStateOf(0) }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .navigationBarsPadding()
+                    .imePadding(),
                 contentAlignment = Alignment.TopCenter
             ) {
                 Column(
                     modifier = Modifier
                         .widthIn(max = spacing.contentMaxWidth)
                         .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .navigationBarsPadding()
+                        .verticalScroll(scrollState)
                         .padding(spacing.space10)
                 ) {
                     val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space6)
@@ -1482,7 +1506,10 @@ private fun MobileNotificationConfigScreen(
                             Switch(
                                 checked = state.pushEnabled,
                                 enabled = !state.isSaving,
-                                onCheckedChange = { nextVal -> pendingPushState = nextVal },
+                                onCheckedChange = { nextVal ->
+                                    dismissKeyboard()
+                                    pendingPushState = nextVal
+                                },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = colors.onAccent,
                                     checkedTrackColor = colors.accent
@@ -1495,17 +1522,17 @@ private fun MobileNotificationConfigScreen(
                     if (state.aiModules.isNotEmpty()) {
                         var isAiModulesExpanded by remember { mutableStateOf(false) }
                         var selectedFilter by remember { mutableStateOf<AiNotifyFilter?>(null) }
-                        var isSearchExpanded by remember { mutableStateOf(false) }
-                        var searchQuery by remember { mutableStateOf("") }
-                        val focusManager = LocalFocusManager.current
-                        val keyboardController = LocalSoftwareKeyboardController.current
-                        val searchFocusRequester = remember { FocusRequester() }
 
                         LaunchedEffect(isSearchExpanded) {
                             if (isSearchExpanded) {
                                 delay(32L)
                                 runCatching { searchFocusRequester.requestFocus() }
                                 keyboardController?.show()
+                                delay(180L)
+                                val targetScroll = aiSectionTopPx.coerceAtMost(scrollState.maxValue)
+                                if (targetScroll > scrollState.value) {
+                                    scrollState.animateScrollTo(targetScroll)
+                                }
                             } else {
                                 focusManager.clearFocus()
                                 keyboardController?.hide()
@@ -1564,7 +1591,9 @@ private fun MobileNotificationConfigScreen(
 
                         SettingsSectionHeader(
                             text = if (isEn) "AI Event Alert Configuration" else "Cấu hình thông báo theo bài AI",
-                            modifier = sectionHeaderModifier
+                            modifier = sectionHeaderModifier.onGloballyPositioned { coords ->
+                                aiSectionTopPx = coords.positionInParent().y.toInt()
+                            }
                         )
 
                         Box(
@@ -1581,6 +1610,7 @@ private fun MobileNotificationConfigScreen(
                                     offCount = offCount,
                                     selectedFilter = selectedFilter,
                                     onFilterClick = { clickedFilter ->
+                                        dismissKeyboard()
                                         selectedFilter = if (selectedFilter == clickedFilter) null else clickedFilter
                                     },
                                     isSearchExpanded = isSearchExpanded,
@@ -1602,13 +1632,7 @@ private fun MobileNotificationConfigScreen(
                                             isSearchExpanded = false
                                         }
                                     },
-                                    onImeSearch = {
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                        if (searchQuery.isEmpty()) {
-                                            isSearchExpanded = false
-                                        }
-                                    }
+                                    onImeSearch = dismissKeyboard
                                 )
 
                                 HorizontalDivider(
@@ -1669,6 +1693,7 @@ private fun MobileNotificationConfigScreen(
                                             masterEnabled = state.pushEnabled,
                                             hasOverlayPermission = hasOverlayPerm,
                                             onToggleEnabled = { nextEnabled ->
+                                                dismissKeyboard()
                                                 viewModel.updateAiModuleNotifyConfig(
                                                     moduleKey = moduleConfig.moduleKey,
                                                     enabled = nextEnabled,
@@ -1676,6 +1701,7 @@ private fun MobileNotificationConfigScreen(
                                                 )
                                             },
                                             onSelectAlarmMode = { nextMode ->
+                                                dismissKeyboard()
                                                 if (nextMode != moduleConfig.alarmMode) {
                                                     viewModel.updateAiModuleNotifyConfig(
                                                         moduleKey = moduleConfig.moduleKey,
@@ -1711,6 +1737,7 @@ private fun MobileNotificationConfigScreen(
                                                         masterEnabled = state.pushEnabled,
                                                         hasOverlayPermission = hasOverlayPerm,
                                                         onToggleEnabled = { nextEnabled ->
+                                                            dismissKeyboard()
                                                             viewModel.updateAiModuleNotifyConfig(
                                                                 moduleKey = moduleConfig.moduleKey,
                                                                 enabled = nextEnabled,
@@ -1718,6 +1745,7 @@ private fun MobileNotificationConfigScreen(
                                                             )
                                                         },
                                                         onSelectAlarmMode = { nextMode ->
+                                                            dismissKeyboard()
                                                             if (nextMode != moduleConfig.alarmMode) {
                                                                 viewModel.updateAiModuleNotifyConfig(
                                                                     moduleKey = moduleConfig.moduleKey,
@@ -1744,7 +1772,10 @@ private fun MobileNotificationConfigScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { isAiModulesExpanded = !isAiModulesExpanded }
+                                            .clickable {
+                                                dismissKeyboard()
+                                                isAiModulesExpanded = !isAiModulesExpanded
+                                            }
                                             .padding(horizontal = spacing.space14, vertical = spacing.space12),
                                         horizontalArrangement = Arrangement.Center,
                                         verticalAlignment = Alignment.CenterVertically
@@ -2231,20 +2262,7 @@ private fun SettingSubPageHeader(
             .padding(horizontal = spacing.space10),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(spacing.iconButton)
-                .clip(CircleShape)
-                .clickable(onClick = onBackClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = LucideIcons.ChevronLeft,
-                contentDescription = stringResource(id = R.string.common_back),
-                tint = titleColor,
-                modifier = Modifier.size(spacing.iconMedium)
-            )
-        }
+        com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackClick)
         Text(
             text = title,
             style = MaterialTheme.typography.titleMedium,
@@ -2254,7 +2272,7 @@ private fun SettingSubPageHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        Spacer(modifier = Modifier.width(spacing.iconButton))
+        Spacer(modifier = Modifier.width(spacing.avatarSmall))
     }
 }
 

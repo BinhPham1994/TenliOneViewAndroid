@@ -119,6 +119,7 @@ import com.tenli.oneview.ui.component.CustomDatePickerDialogModal
 import com.tenli.oneview.ui.component.CustomRangePickerDialogModal
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.component.SheetCloseButton
 import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
@@ -324,7 +325,7 @@ fun EventDetailScreen(
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CommonEmptyState(text = uiState.error ?: if (isEn) "Event not found" else "Không tìm thấy sự kiện")
                     // Close button even on error state
-                    CircleCloseButton(
+                    SheetCloseButton(
                         onClick = onBack,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
@@ -788,8 +789,8 @@ private fun DetailHeader(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // Chừa đều 2 bên theo kích thước nút đóng 32dp bên phải để tiêu đề luôn căn chính giữa màn hình
-                .padding(horizontal = spacing.space32 + spacing.space6)
+                // Chừa đều 2 bên theo kích thước nút đóng (avatarSmall) bên phải để tiêu đề luôn căn chính giữa màn hình
+                .padding(horizontal = spacing.avatarSmall + spacing.space6)
                 .align(Alignment.Center),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(spacing.space4)
@@ -836,29 +837,8 @@ private fun DetailHeader(
             }
         }
 
-        // Circular Close Button (.ant-modal-close)
-        CircleCloseButton(onClick = onClose, modifier = Modifier.align(Alignment.CenterEnd))
-    }
-}
-
-@Composable
-private fun CircleCloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val spacing = MaterialTheme.spacing
-    val colors = MaterialTheme.appColors
-    Box(
-        modifier = modifier
-            .size(spacing.space32)
-            .clip(CircleShape)
-            .background(colors.closeButtonBg)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = LucideIcons.X,
-            contentDescription = "Close",
-            tint = colors.textSubtle,
-            modifier = Modifier.size(spacing.iconSmallMedium)
-        )
+        // Circular Close Button chuẩn hóa giống nút đóng trong bottom sheet
+        SheetCloseButton(onClick = onClose, modifier = Modifier.align(Alignment.CenterEnd))
     }
 }
 

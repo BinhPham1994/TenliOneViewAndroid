@@ -55,6 +55,7 @@ class LoginViewModel(
         val prefs = GlobalData.preferences
         val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
         val savedDomain = stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
+        val termsAccepted = prefs.getBoolean(AppKeys.TERMS_ACCEPTED_KEY, false) || savedDomain.isNotEmpty()
         val savedUser = if (rememberMe) prefs.getString(AppKeys.USERNAME_KEY, "").orEmpty() else ""
         val savedPass = if (rememberMe) prefs.getString(AppKeys.PASSWORD_KEY, "").orEmpty() else ""
         _uiState.update {
@@ -63,16 +64,13 @@ class LoginViewModel(
                 email = savedUser,
                 password = savedPass,
                 rememberMe = rememberMe,
+                termsAccepted = termsAccepted,
                 showPassword = false
             )
         }
     }
 
-    private fun stripDomainScheme(raw: String): String =
-        raw.trim()
-            .replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("/m/?$", RegexOption.IGNORE_CASE), "")
-            .trimEnd('/')
+    private fun stripDomainScheme(raw: String): String = normalizeDomainInput(raw)
 
     fun onRememberMeChanged(rememberMe: Boolean) {
         _uiState.update { it.copy(rememberMe = rememberMe) }
@@ -106,6 +104,10 @@ class LoginViewModel(
         _uiState.update { it.copy(showPassword = !it.showPassword) }
     }
 
+    fun toggleTermsAccepted() {
+        _uiState.update { it.copy(termsAccepted = !it.termsAccepted) }
+    }
+
     fun login() {
         // Chặn bấm liên tiếp khi request trước chưa xong
         if (loginJob?.isActive == true) return
@@ -118,6 +120,7 @@ class LoginViewModel(
 
         val validationError = when {
             domain.isEmpty() -> if (isEn) "Please enter project domain" else "Vui lòng nhập domain dự án"
+            !isValidProjectDomain(domain) -> if (isEn) "Invalid project domain" else "Domain dự án không hợp lệ"
             email.isEmpty() -> if (isEn) "Please enter username" else "Vui lòng nhập tên đăng nhập"
             password.isEmpty() -> if (isEn) "Please enter password" else "Vui lòng nhập mật khẩu"
             else -> null
@@ -221,6 +224,7 @@ class LoginViewModel(
                 putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
                 putString(DOMAIN_KEY, formattedDomain)
                 putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
+                putBoolean(AppKeys.TERMS_ACCEPTED_KEY, true)
                 if (rememberMe) {
                     putString(AppKeys.USERNAME_KEY, username)
                     putString(AppKeys.PASSWORD_KEY, password)
@@ -234,6 +238,57 @@ class LoginViewModel(
     }
 
     companion object {
+        private val DOMAIN_LABEL_REGEX = Regex("^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+        private val DOMAIN_TLD_REGEX = Regex("^[a-zA-Z]{2,63}$")
+
+        fun normalizeDomainInput(raw: String): String =
+            raw.trim()
+                .replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("/m/?$", RegexOption.IGNORE_CASE), "")
+                .trimEnd('/')
+
+        /**
+         * Kiểm tra định dạng domain dự án hợp lệ:
+         * - Chấp nhận tên miền chuẩn (vd: `app.tenli.ai`, `vms.tenli.vn:8080`)
+         * - Hoặc địa chỉ IPv4 kèm/không kèm port (vd: `192.168.1.10`, `192.168.1.10:8000`)
+         */
+        fun isValidProjectDomain(raw: String): Boolean {
+            val cleaned = normalizeDomainInput(raw)
+            if (cleaned.isEmpty() || cleaned.any { it.isWhitespace() } || cleaned.contains('/')) {
+                return false
+            }
+
+            val colonCount = cleaned.count { it == ':' }
+            if (colonCount > 1) return false
+
+            val host = if (colonCount == 1) {
+                val parts = cleaned.split(':')
+                val port = parts[1].toIntOrNull() ?: return false
+                if (port !in 1..65535) return false
+                parts[0]
+            } else {
+                cleaned
+            }
+
+            if (host.isEmpty() || host.length > 253) return false
+
+            val labels = host.split('.')
+            if (labels.size < 2) return false
+
+            // Nếu tất cả các phần đều là chữ số -> bắt buộc là IPv4 hợp lệ (4 octet từ 0..255)
+            if (labels.all { it.isNotEmpty() && it.all(Char::isDigit) }) {
+                if (labels.size != 4) return false
+                return labels.all { octet ->
+                    (octet.length == 1 || !octet.startsWith('0')) &&
+                        (octet.toIntOrNull() ?: -1) in 0..255
+                }
+            }
+
+            // Tên miền chuẩn: mỗi label hợp lệ và TLD cuối phải là chữ cái (>= 2 ký tự)
+            return labels.all { DOMAIN_LABEL_REGEX.matches(it) } &&
+                DOMAIN_TLD_REGEX.matches(labels.last())
+        }
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val application = this[APPLICATION_KEY] as com.tenli.oneview.TenliApp

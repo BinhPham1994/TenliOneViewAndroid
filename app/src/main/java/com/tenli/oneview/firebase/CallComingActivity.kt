@@ -19,6 +19,8 @@ import android.view.WindowManager
 import android.window.SplashScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -26,10 +28,16 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -68,6 +76,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -92,6 +101,7 @@ import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.VideoFrameImage
+import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.detail.EventDetailDisplay
@@ -137,12 +147,19 @@ private const val PULSE_INNER_MAX_SCALE = 1.32f
 private const val PULSE_INNER_START_ALPHA = 0.25f
 
 private val CallLogoSize = 72.dp
+private val CallAcceptGreen = Color(0xFF16A34A)
 private val CallCardShadowAmbientDark = 0.42f
 private val CallCardShadowAmbientLight = 0.14f
 private val CallCardShadowSpotDark = 0.52f
 private val CallCardShadowSpotLight = 0.18f
 private const val CALL_BOUNDING_BOX_STROKE_PX = 3.5f
 private const val CALL_CROP_ASPECT_RATIO = 72f / 90f
+private const val CALL_SWIPE_THRESHOLD_PX = 70f
+
+private enum class CallMediaTab {
+    EVENT_IMAGE,
+    EVENT_VIDEO
+}
 
 /** Dữ liệu cuộc gọi cảnh báo nhận từ EventMessagingService */
 @Immutable
@@ -205,6 +222,7 @@ class CallComingActivity : ComponentActivity() {
                     enrichedAiService = enrichedAiService,
                     enrichedProfiles = enrichedProfiles,
                     enrichedGroups = enrichedGroups,
+                    onUserInteract = ::scheduleTimeout,
                     onDecline = ::declineCall,
                     onAccept = ::acceptCall
                 )
@@ -288,9 +306,9 @@ class CallComingActivity : ComponentActivity() {
                     }
                 }
 
-                if (foundEvent == null) {
+                if (foundEvent == null || foundEvent.data?.video.isNullOrBlank()) {
                     val resp = withContext(Dispatchers.IO) {
-                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 1) }.getOrNull()
+                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
                     }
                     val fetched = resp?.body()?.firstOrNull { it.id == eventIdInt }
                     if (fetched != null) {
@@ -312,6 +330,9 @@ class CallComingActivity : ComponentActivity() {
                 val fetchServices = memServices.isEmpty()
                 val fetchProfiles = needProfiles && memProfiles.isEmpty()
                 val fetchGroups = needProfiles && memGroups.isEmpty()
+
+                var latestCameras = cameraList
+                var latestServices = memServices
 
                 if (fetchCameras || fetchServices || fetchProfiles || fetchGroups) {
                     coroutineScope {
@@ -341,6 +362,9 @@ class CallComingActivity : ComponentActivity() {
                         val finalProfiles = profDef.await()
                         val finalGroups = grpDef.await()
 
+                        latestCameras = finalCameras
+                        latestServices = finalServices
+
                         EventCacheManager.cacheInMemory(
                             events = listOf(targetEvent),
                             cameras = finalCameras,
@@ -357,6 +381,24 @@ class CallComingActivity : ComponentActivity() {
                         cameras = cameraList,
                         aiServices = memServices
                     )
+                }
+
+                // Nếu ngay lúc nhận thông báo FCM, server AI đang hoàn tất ghi file .mp4 của sự kiện,
+                // kiểm tra lại 1 lần sau 1.8s để tự động hiển thị tab "Video sự kiện" ngay khi có.
+                if (targetEvent.data?.video.isNullOrBlank()) {
+                    delay(1800L)
+                    val retryResp = withContext(Dispatchers.IO) {
+                        runCatching { ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
+                    }
+                    val refreshed = retryResp?.body()?.firstOrNull { it.id == eventIdInt }
+                    if (refreshed != null && !refreshed.data?.video.isNullOrBlank()) {
+                        enrichedEvent = refreshed
+                        EventCacheManager.cacheInMemory(
+                            events = listOf(refreshed),
+                            cameras = latestCameras,
+                            aiServices = latestServices
+                        )
+                    }
                 }
             }
         }
@@ -498,6 +540,7 @@ private fun CallScreenContent(
     enrichedAiService: AIServiceModel?,
     enrichedProfiles: List<BsProfileModel>,
     enrichedGroups: List<BsProfileGroupModel>,
+    onUserInteract: () -> Unit,
     onDecline: () -> Unit,
     onAccept: () -> Unit
 ) {
@@ -536,6 +579,17 @@ private fun CallScreenContent(
         display?.imageUrl?.takeIf { it.isNotBlank() } ?: call.imageUrl?.takeIf { it.isNotBlank() }
     }
 
+    val effectiveVideoUrl = remember(display, call.imageUrl) {
+        display?.videoUrl?.takeIf { it.isNotBlank() }
+            ?: call.imageUrl?.takeIf {
+                it.isNotBlank() && it.substringBefore('?').endsWith(".mp4", ignoreCase = true)
+            }
+    }
+
+    val hasEventVideo = !effectiveVideoUrl.isNullOrBlank()
+    var selectedMediaTab by remember(call.eventId) { mutableStateOf(CallMediaTab.EVENT_IMAGE) }
+    val activeMediaTab = if (hasEventVideo) selectedMediaTab else CallMediaTab.EVENT_IMAGE
+
     val primaryCropUrl = remember(display) {
         display?.cropUrls?.firstOrNull()?.takeIf { it.isNotBlank() }
     }
@@ -570,7 +624,6 @@ private fun CallScreenContent(
     )
 
     val cardShape = RoundedCornerShape(spacing.radiusExtraLarge)
-    val snapshotShape = RoundedCornerShape(spacing.radiusCompact)
     val cropShape = RoundedCornerShape(spacing.radiusSmall)
 
     Box(
@@ -600,8 +653,8 @@ private fun CallScreenContent(
                 .padding(
                     top = spacing.space20,
                     bottom = spacing.space28,
-                    start = spacing.paddingScreen,
-                    end = spacing.paddingScreen
+                    start = spacing.space10,
+                    end = spacing.space10
                 ),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -663,7 +716,7 @@ private fun CallScreenContent(
 
             Spacer(modifier = Modifier.height(spacing.space16))
 
-            // 2. Thẻ thông tin sự kiện & Ảnh chụp camera (đồng bộ style Card với LoginCard / SettingsGroupCard)
+            // 2. Thẻ thông tin sự kiện & Media 16:9 tràn viền thẻ (hỗ trợ cả Ảnh sự kiện và Video sự kiện)
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -687,111 +740,234 @@ private fun CallScreenContent(
                 color = colors.surface
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(spacing.space16),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = effectiveTitle,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = colors.textStrong,
-                        textAlign = TextAlign.Center,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    // Hàng Badge đối tượng phát hiện (Tên khuôn mặt / Người lạ / Biển số / Đồng phục / Cháy khói / Đám đông)
-                    CallEventSubjectBadges(
-                        display = display,
-                        enrichedEvent = enrichedEvent,
-                        isEn = isEn
-                    )
-
-                    val showBodyLine = call.body.isNotBlank() &&
-                        !call.body.equals(effectiveTitle, ignoreCase = true)
-
-                    if (showBodyLine) {
-                        Spacer(modifier = Modifier.height(spacing.space8))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = spacing.space16,
+                                end = spacing.space16,
+                                top = spacing.space16,
+                                bottom = spacing.space12
+                            ),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            text = call.body,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textMuted,
+                            text = effectiveTitle,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.textStrong,
                             textAlign = TextAlign.Center,
-                            maxLines = 3,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
+
+                        // Hàng Badge đối tượng phát hiện (Tên khuôn mặt / Người lạ / Biển số / Đồng phục / Cháy khói / Đám đông)
+                        CallEventSubjectBadges(
+                            display = display,
+                            enrichedEvent = enrichedEvent,
+                            isEn = isEn
+                        )
+
+                        val showBodyLine = call.body.isNotBlank() &&
+                            !call.body.equals(effectiveTitle, ignoreCase = true)
+
+                        if (showBodyLine) {
+                            Spacer(modifier = Modifier.height(spacing.space8))
+                            Text(
+                                text = call.body,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.textMuted,
+                                textAlign = TextAlign.Center,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(spacing.space12))
-
-                    // Khung ảnh sự kiện tỉ lệ 16:9 chuẩn camera (hỗ trợ cả ảnh tĩnh và .mp4 + vẽ bounding box + ảnh crop)
+                    // Khung media sự kiện 16:9 tràn sát mép thẻ trắng (hỗ trợ cả Ảnh sự kiện và Video sự kiện nếu có)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(16f / 9f)
-                            .clip(snapshotShape)
                             .background(colors.thumbnailBg)
-                            .border(
-                                width = spacing.borderThin,
-                                color = colors.border,
-                                shape = snapshotShape
+                            .then(
+                                if (hasEventVideo) {
+                                    Modifier.pointerInput(call.eventId, hasEventVideo) {
+                                        var totalDragX = 0f
+                                        detectHorizontalDragGestures(
+                                            onDragStart = { totalDragX = 0f },
+                                            onHorizontalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                totalDragX += dragAmount
+                                            },
+                                            onDragEnd = {
+                                                if (totalDragX <= -CALL_SWIPE_THRESHOLD_PX &&
+                                                    selectedMediaTab != CallMediaTab.EVENT_VIDEO
+                                                ) {
+                                                    onUserInteract()
+                                                    selectedMediaTab = CallMediaTab.EVENT_VIDEO
+                                                } else if (totalDragX >= CALL_SWIPE_THRESHOLD_PX &&
+                                                    selectedMediaTab != CallMediaTab.EVENT_IMAGE
+                                                ) {
+                                                    onUserInteract()
+                                                    selectedMediaTab = CallMediaTab.EVENT_IMAGE
+                                                }
+                                            }
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                }
                             ),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!effectiveImageUrl.isNullOrBlank()) {
-                            VideoFrameImage(
-                                url = effectiveImageUrl,
+                        AnimatedContent(
+                            targetState = activeMediaTab,
+                            modifier = Modifier.fillMaxSize(),
+                            transitionSpec = {
+                                val isForward = targetState == CallMediaTab.EVENT_VIDEO
+                                val enterSlide = slideInHorizontally(
+                                    animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                                    initialOffsetX = { fullWidth -> if (isForward) fullWidth else -fullWidth }
+                                ) + fadeIn(animationSpec = tween(180))
+                                val exitSlide = slideOutHorizontally(
+                                    animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                                    targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
+                                ) + fadeOut(animationSpec = tween(180))
+                                (enterSlide togetherWith exitSlide).using(SizeTransform(clip = true))
+                            },
+                            label = "callMediaTabTransition"
+                        ) { tab ->
+                            when (tab) {
+                                CallMediaTab.EVENT_IMAGE -> {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (!effectiveImageUrl.isNullOrBlank()) {
+                                            VideoFrameImage(
+                                                url = effectiveImageUrl,
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .then(if (boxes.isEmpty()) Modifier else Modifier.callBoundingBoxes(boxes)),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            CallSnapshotPlaceholder(isEn = isEn)
+                                        }
+
+                                        // Ảnh crop cận cảnh (khuôn mặt / biển số / đối tượng) ở góc phải trên
+                                        if (!primaryCropUrl.isNullOrBlank() && primaryCropUrl != effectiveImageUrl) {
+                                            SubcomposeAsyncImage(
+                                                model = primaryCropUrl,
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(spacing.space8)
+                                                    .width(spacing.avatarLarge)
+                                                    .aspectRatio(CALL_CROP_ASPECT_RATIO)
+                                                    .clip(cropShape)
+                                                    .background(colors.mediaOverlay)
+                                                    .border(spacing.borderMedium, colors.onMedia.copy(alpha = 0.3f), cropShape)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                CallMediaTab.EVENT_VIDEO -> {
+                                    if (!effectiveVideoUrl.isNullOrBlank()) {
+                                        VideoPlayer(
+                                            videoUrl = effectiveVideoUrl,
+                                            thumbnailUrl = effectiveImageUrl,
+                                            deviceKey = UserSession.accessToken,
+                                            errorText = if (isEn) "No event video" else "Không có video sự kiện"
+                                        )
+                                    } else {
+                                        CallSnapshotPlaceholder(isEn = isEn)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Đồng bộ màu nền & viền với tên camera (.info-name) và cụm nút (.info-action) trong ô Live Camera
+                        val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+                        val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+                        val pillHeight = spacing.iconButtonSmall
+                        val pillShape = RoundedCornerShape(spacing.radiusSmall)
+
+                        // Góc trên trái: nếu có cả video sự kiện thì hiển thị thanh chuyển đổi "Ảnh sự kiện | Video sự kiện",
+                        // nếu chỉ có ảnh thì hiển thị nhãn "Ảnh sự kiện".
+                        if (hasEventVideo) {
+                            Row(
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .then(if (boxes.isEmpty()) Modifier else Modifier.callBoundingBoxes(boxes)),
-                                contentScale = ContentScale.Crop
-                            )
+                                    .align(Alignment.TopStart)
+                                    .padding(spacing.space8)
+                                    .height(pillHeight)
+                                    .clip(pillShape)
+                                    .background(overlayPillBg)
+                                    .border(
+                                        width = spacing.borderMedium,
+                                        color = overlayPillBorder,
+                                        shape = pillShape
+                                    )
+                                    .padding(horizontal = spacing.space2),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                            ) {
+                                CallMediaSwitchPill(
+                                    icon = LucideIcons.Eye,
+                                    label = if (isEn) "Event photo" else "Ảnh sự kiện",
+                                    selected = activeMediaTab == CallMediaTab.EVENT_IMAGE,
+                                    onClick = {
+                                        onUserInteract()
+                                        selectedMediaTab = CallMediaTab.EVENT_IMAGE
+                                    }
+                                )
+                                CallMediaSwitchPill(
+                                    icon = LucideIcons.Video,
+                                    label = if (isEn) "Event video" else "Video sự kiện",
+                                    selected = activeMediaTab == CallMediaTab.EVENT_VIDEO,
+                                    onClick = {
+                                        onUserInteract()
+                                        selectedMediaTab = CallMediaTab.EVENT_VIDEO
+                                    }
+                                )
+                            }
                         } else {
-                            CallSnapshotPlaceholder(isEn = isEn)
-                        }
-
-                        // Ảnh crop cận cảnh (khuôn mặt / biển số / đối tượng) ở góc phải trên
-                        if (!primaryCropUrl.isNullOrBlank() && primaryCropUrl != effectiveImageUrl) {
-                            SubcomposeAsyncImage(
-                                model = primaryCropUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
+                            Row(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .padding(spacing.space6)
-                                    .width(spacing.avatarLarge)
-                                    .aspectRatio(CALL_CROP_ASPECT_RATIO)
-                                    .clip(cropShape)
-                                    .background(colors.mediaOverlay)
-                                    .border(spacing.borderMedium, colors.onMedia.copy(alpha = 0.3f), cropShape)
-                            )
-                        }
-
-                        // Badge góc trên trái của ảnh
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .padding(spacing.space8)
-                                .clip(RoundedCornerShape(spacing.radiusTiny))
-                                .background(colors.mediaOverlay)
-                                .padding(horizontal = spacing.space8, vertical = spacing.space4),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.Video,
-                                contentDescription = null,
-                                tint = colors.onMedia,
-                                modifier = Modifier.size(spacing.iconTiny)
-                            )
-                            Spacer(modifier = Modifier.width(spacing.space4))
-                            Text(
-                                text = if (isEn) "AI Snapshot" else "Ảnh sự kiện",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = colors.onMedia
-                            )
+                                    .align(Alignment.TopStart)
+                                    .padding(spacing.space8)
+                                    .height(pillHeight)
+                                    .clip(pillShape)
+                                    .background(overlayPillBg)
+                                    .border(
+                                        width = spacing.borderMedium,
+                                        color = overlayPillBorder,
+                                        shape = pillShape
+                                    )
+                                    .padding(horizontal = spacing.space8),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.Video,
+                                    contentDescription = null,
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(spacing.iconSmall)
+                                )
+                                Text(
+                                    text = if (isEn) "AI Snapshot" else "Ảnh sự kiện",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = colors.onMedia,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -833,8 +1009,8 @@ private fun CallScreenContent(
                 CallActionControl(
                     icon = LucideIcons.PhoneCall,
                     label = if (isEn) "View now" else "Xem ngay",
-                    color = colors.success,
-                    labelColor = colors.success,
+                    color = CallAcceptGreen,
+                    labelColor = CallAcceptGreen,
                     isPulse = true,
                     onClick = onAccept
                 )
@@ -842,6 +1018,42 @@ private fun CallScreenContent(
 
             Spacer(modifier = Modifier.height(spacing.space16))
         }
+    }
+}
+
+@Composable
+private fun CallMediaSwitchPill(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val contentAlpha = if (selected) 1f else 0.72f
+    Row(
+        modifier = Modifier
+            .height(spacing.iconMedium)
+            .clip(RoundedCornerShape(spacing.radiusTiny))
+            .background(if (selected) colors.onMedia.copy(alpha = 0.2f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space8),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(spacing.space4)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = colors.onMedia.copy(alpha = contentAlpha),
+            modifier = Modifier.size(spacing.iconSmall)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            color = colors.onMedia.copy(alpha = contentAlpha),
+            maxLines = 1
+        )
     }
 }
 
