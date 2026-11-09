@@ -699,8 +699,8 @@ class EventDetailViewModel(
             return
         }
 
-        val initialChannel = if (forceReload && liveFallbackTried) {
-            state.liveStreamChannel
+        val initialChannel = if (forceReload) {
+            if (state.liveStreamChannel == 1 && camera.sub.isBlank()) 0 else state.liveStreamChannel
         } else if (camera.sub.isNotBlank()) {
             1
         } else {
@@ -711,6 +711,17 @@ class EventDetailViewModel(
             liveFallbackTried = false
         }
         startLiveStreamPolling(camera, initialChannel, isFallback = false)
+    }
+
+    fun switchLiveChannel(channel: Int) {
+        val state = _uiState.value
+        val event = state.event ?: return
+        val camera = state.camera ?: resolveCameraForEvent(event, state.cameraList) ?: return
+        if (channel == 1 && camera.sub.isBlank()) return
+        if (state.liveStreamChannel == channel && (state.liveStreamUrl != null || state.liveStreamLoading)) return
+        liveRetryCount = 0
+        liveFallbackTried = true
+        startLiveStreamPolling(camera, channel, isFallback = true)
     }
 
     private fun startLiveStreamPolling(camera: CameraModel, channel: Int, isFallback: Boolean) {

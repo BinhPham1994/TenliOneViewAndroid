@@ -136,6 +136,7 @@ import com.tenli.oneview.ui.component.MobileNativeBottomSheet
 import com.tenli.oneview.ui.component.MobileOverlayHostState
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.SheetActionButtons
+import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.EventScreen
 import com.tenli.oneview.ui.features.event.EventViewModel
@@ -863,7 +864,7 @@ fun SettingScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(colors.pageBg)
     ) {
         // Sticky Mobile Top Bar matching MobileSettingsPage.vue (.mobile-top-bar)
         MobileTopBar(
@@ -1081,7 +1082,7 @@ private fun SettingTopCard(
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(spacing.radiusMedium))
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.appColors.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = spacing.space16, horizontal = spacing.space14),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1124,7 +1125,7 @@ private fun SettingsSectionHeader(text: String, modifier: Modifier = Modifier) {
 @Composable
 private fun SettingsGroupCard(
     modifier: Modifier = Modifier,
-    background: Color = MaterialTheme.colorScheme.surface,
+    background: Color = MaterialTheme.appColors.surface,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -1337,7 +1338,7 @@ private fun MobileNotificationConfigScreen(
 
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val backgroundColor = MaterialTheme.colorScheme.background
+    val backgroundColor = colors.pageBg
     var isSearchExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
@@ -1379,11 +1380,7 @@ private fun MobileNotificationConfigScreen(
                     .weight(1f),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(
-                    color = colors.accent,
-                    modifier = Modifier.size(spacing.space28),
-                    strokeWidth = spacing.progressStroke
-                )
+                WaveDotsLoading(dotColor = colors.accent)
             }
         } else {
             val scrollState = rememberScrollState()

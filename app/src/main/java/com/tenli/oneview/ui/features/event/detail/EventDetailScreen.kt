@@ -64,6 +64,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -75,6 +76,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -101,6 +103,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -135,6 +138,8 @@ import com.tenli.oneview.ui.features.event.formatEventTimeOnly
 import com.tenli.oneview.ui.features.event.isPlateBlacklisted
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.theme.BrandActiveNavDark
+import com.tenli.oneview.ui.theme.BrandLight
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.OrangeDeep
@@ -543,10 +548,12 @@ fun EventDetailScreen(
                             selectedTab = selectedTab,
                             eventId = event.id,
                             cameraId = camera?.id ?: 0,
+                            hasSubStream = camera?.sub?.isNotBlank() == true,
                             display = display,
                             liveStreamLoading = uiState.liveStreamLoading,
                             liveStreamError = uiState.liveStreamError,
                             liveStreamUrl = uiState.liveStreamUrl,
+                            liveStreamChannel = uiState.liveStreamChannel,
                             liveCameraSnapshotUrl = uiState.liveCameraSnapshotUrl,
                             originalVideoLoading = uiState.originalVideoLoading,
                             originalVideoError = uiState.originalVideoError,
@@ -554,6 +561,7 @@ fun EventDetailScreen(
                             originalVideoSeekTimeMs = uiState.originalVideoSeekTimeMs,
                             isEn = isEn,
                             onLoadLiveStream = viewModel::loadLiveStream,
+                            onSwitchLiveChannel = viewModel::switchLiveChannel,
                             onLiveStreamFirstFrame = viewModel::onLiveStreamFirstFrame,
                             onRetryLiveStream = viewModel::retryLiveStream,
                             onStopLiveStream = viewModel::stopLiveStream,
@@ -907,37 +915,47 @@ private fun MediaTabSelector(
                 .background(activePillBg)
         )
 
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MediaTabs.forEach { tab ->
-                val isSelected = selectedTab == tab
-                val tabTextColor by animateColorAsState(
-                    targetValue = if (isSelected) colors.accent else Slate500,
-                    animationSpec = tween(durationMillis = 180),
-                    label = "mediaTabTextColor"
-                )
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(pillShape)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { onSelect(tab) }
-                        .padding(horizontal = spacing.space2),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (isEn) tab.titleEn else tab.titleVi,
-                        color = tabTextColor,
-                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.5.sp),
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+        val currentDensity = LocalDensity.current
+        val clampedDensity = remember(currentDensity) {
+            Density(
+                density = currentDensity.density,
+                fontScale = currentDensity.fontScale.coerceAtMost(1.05f)
+            )
+        }
+
+        CompositionLocalProvider(LocalDensity provides clampedDensity) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MediaTabs.forEach { tab ->
+                    val isSelected = selectedTab == tab
+                    val tabTextColor by animateColorAsState(
+                        targetValue = if (isSelected) colors.accent else Slate500,
+                        animationSpec = tween(durationMillis = 180),
+                        label = "mediaTabTextColor"
                     )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(pillShape)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { onSelect(tab) }
+                            .padding(horizontal = spacing.space2),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isEn) tab.titleEn else tab.titleVi,
+                            color = tabTextColor,
+                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.5.sp),
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -949,10 +967,12 @@ private fun MediaViewport(
     selectedTab: EventMediaTab,
     eventId: Int,
     cameraId: Int,
+    hasSubStream: Boolean,
     display: EventDetailDisplay,
     liveStreamLoading: Boolean,
     liveStreamError: String?,
     liveStreamUrl: String?,
+    liveStreamChannel: Int,
     liveCameraSnapshotUrl: String?,
     originalVideoLoading: Boolean,
     originalVideoError: String?,
@@ -960,6 +980,7 @@ private fun MediaViewport(
     originalVideoSeekTimeMs: Long?,
     isEn: Boolean,
     onLoadLiveStream: (Boolean) -> Unit,
+    onSwitchLiveChannel: (Int) -> Unit,
     onLiveStreamFirstFrame: () -> Unit,
     onRetryLiveStream: () -> Unit,
     onStopLiveStream: () -> Unit,
@@ -994,11 +1015,16 @@ private fun MediaViewport(
                 EventMediaTab.LIVE_CAMERA -> LiveCameraPane(
                     eventId = eventId,
                     cameraId = cameraId,
+                    cameraName = display.locationText,
+                    hasSubStream = hasSubStream,
+                    channel = liveStreamChannel,
                     snapshotUrl = display.imageUrl ?: liveCameraSnapshotUrl,
                     isLoading = liveStreamLoading,
                     error = liveStreamError,
                     streamUrl = liveStreamUrl,
+                    isEn = isEn,
                     onLoad = onLoadLiveStream,
+                    onSwitchChannel = onSwitchLiveChannel,
                     onFirstFrame = onLiveStreamFirstFrame,
                     onRetry = onRetryLiveStream,
                     onStop = onStopLiveStream
@@ -1044,17 +1070,28 @@ private fun MediaViewport(
 private fun LiveCameraPane(
     eventId: Int,
     cameraId: Int,
+    cameraName: String,
+    hasSubStream: Boolean,
+    channel: Int,
     snapshotUrl: String?,
     isLoading: Boolean,
     error: String?,
     streamUrl: String?,
+    isEn: Boolean,
     onLoad: (Boolean) -> Unit,
+    onSwitchChannel: (Int) -> Unit,
     onFirstFrame: () -> Unit,
     onRetry: () -> Unit,
     onStop: () -> Unit
 ) {
     val context = LocalContext.current
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
     var isPlaying by remember(cameraId, streamUrl) { mutableStateOf(false) }
+    var isOriginalRatio by remember(cameraId) { mutableStateOf(false) }
+    var showInfo by remember(cameraId) { mutableStateOf(false) }
+    var showChannelDropdown by remember(cameraId) { mutableStateOf(false) }
+    var autoHideToken by remember(cameraId) { mutableIntStateOf(0) }
 
     LaunchedEffect(eventId, cameraId) {
         onLoad(false)
@@ -1062,18 +1099,41 @@ private fun LiveCameraPane(
     DisposableEffect(Unit) {
         onDispose { onStop() }
     }
+    LaunchedEffect(showInfo, autoHideToken, isPlaying) {
+        if (showInfo && isPlaying) {
+            delay(3000L)
+            showChannelDropdown = false
+            showInfo = false
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.appColors.surface),
+            .background(colors.surface)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                if (error != null) {
+                    onLoad(true)
+                } else if (isPlaying) {
+                    val nextShow = !showInfo
+                    showInfo = nextShow
+                    if (!nextShow) {
+                        showChannelDropdown = false
+                    } else {
+                        autoHideToken++
+                    }
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
         if (!streamUrl.isNullOrEmpty() && error == null) {
             LiveStreamPlayer(
                 wsUrl = streamUrl,
                 cameraId = cameraId,
-                isOriginalRatio = false,
+                isOriginalRatio = isOriginalRatio,
                 onPlayingChange = { playing ->
                     isPlaying = playing
                     if (playing) {
@@ -1099,7 +1159,7 @@ private fun LiveCameraPane(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.appColors.surface),
+                    .background(colors.surface),
                 contentAlignment = Alignment.Center
             ) {
                 if (!snapshotUrl.isNullOrEmpty()) {
@@ -1127,11 +1187,217 @@ private fun LiveCameraPane(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.appColors.surface)
+                    .background(colors.surface)
                     .clickable { onLoad(true) },
                 contentAlignment = Alignment.Center
             ) {
                 CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
+            }
+        }
+
+        // Top-Left Camera Name Pill & Top-Right Stream Controls (đồng bộ với LiveCameraView ở màn Giám sát)
+        AnimatedVisibility(
+            visible = showInfo && isPlaying && error == null,
+            enter = fadeIn(animationSpec = tween(200)),
+            exit = fadeOut(animationSpec = tween(200)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+            val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+            val pillHeight = spacing.iconButtonSmall
+            val actionBtnSize = spacing.iconMedium
+            val actionIconSize = spacing.iconSmall
+            val textStyle = MaterialTheme.typography.labelMedium
+
+            val currentStreamLabel = if (channel == 1) {
+                if (isEn) "Sub Stream" else "Luồng phụ"
+            } else {
+                if (isEn) "Main Stream" else "Luồng chính"
+            }
+            val alternateStreamLabel = if (channel == 0) {
+                if (isEn) "Sub Stream" else "Luồng phụ"
+            } else {
+                if (isEn) "Main Stream" else "Luồng chính"
+            }
+            val alternateChannel = if (channel == 0) 1 else 0
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(spacing.space8),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    // Camera Name Pill (Top-Left)
+                    if (cameraName.isNotBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .padding(end = spacing.space8)
+                                .height(pillHeight)
+                                .clip(RoundedCornerShape(spacing.radiusSmall))
+                                .background(overlayPillBg)
+                                .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                .padding(horizontal = spacing.space8),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = cameraName,
+                                color = colors.onMedia,
+                                style = textStyle,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.width(spacing.space1))
+                    }
+
+                    // Action Controls Pill + Channel Dropdown (Top-Right)
+                    Column(horizontalAlignment = Alignment.Start) {
+                        Row(
+                            modifier = Modifier
+                                .height(pillHeight)
+                                .clip(RoundedCornerShape(spacing.radiusSmall))
+                                .background(overlayPillBg)
+                                .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                .padding(horizontal = spacing.space2),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                        ) {
+                            // 1. Channel selector (Luồng chính / Luồng phụ)
+                            Row(
+                                modifier = Modifier
+                                    .height(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(
+                                        if (showChannelDropdown && hasSubStream) {
+                                            colors.onMedia.copy(alpha = 0.2f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
+                                    .alpha(if (hasSubStream) 1f else 0.65f)
+                                    .then(
+                                        if (hasSubStream) {
+                                            Modifier.clickable {
+                                                showChannelDropdown = !showChannelDropdown
+                                                autoHideToken++
+                                            }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .padding(horizontal = spacing.space8),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space4)
+                            ) {
+                                Text(
+                                    text = currentStreamLabel,
+                                    color = colors.onMedia,
+                                    style = textStyle,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                if (hasSubStream) {
+                                    Icon(
+                                        imageVector = LucideIcons.CaretDown,
+                                        contentDescription = null,
+                                        tint = colors.onMedia.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(spacing.iconTiny)
+                                    )
+                                }
+                            }
+
+                            // 2. Aspect ratio toggle button (Tỷ lệ khung hình gốc / Lấp đầy khung 16:9)
+                            Box(
+                                modifier = Modifier
+                                    .size(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(
+                                        if (isOriginalRatio) {
+                                            BrandActiveNavDark.copy(alpha = 0.35f)
+                                        } else {
+                                            Color.Transparent
+                                        }
+                                    )
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        isOriginalRatio = !isOriginalRatio
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
+                                    contentDescription = if (isOriginalRatio) {
+                                        if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
+                                    } else {
+                                        if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
+                                    },
+                                    tint = if (isOriginalRatio) BrandLight else colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
+                            }
+
+                            // 3. Reload stream button (Tải lại luồng trực tiếp)
+                            Box(
+                                modifier = Modifier
+                                    .size(actionBtnSize)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        onLoad(true)
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.RotateCw,
+                                    contentDescription = if (isEn) "Reload live stream" else "Tải lại luồng trực tiếp",
+                                    tint = colors.onMedia,
+                                    modifier = Modifier.size(actionIconSize)
+                                )
+                            }
+                        }
+
+                        if (showChannelDropdown && hasSubStream) {
+                            Spacer(modifier = Modifier.height(spacing.space4))
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = spacing.space3)
+                                    .clip(RoundedCornerShape(spacing.radiusTiny))
+                                    .background(colors.mediaOverlay.copy(alpha = 0.95f))
+                                    .border(
+                                        spacing.borderMedium,
+                                        colors.onMedia.copy(alpha = 0.15f),
+                                        RoundedCornerShape(spacing.radiusTiny)
+                                    )
+                                    .clickable {
+                                        showChannelDropdown = false
+                                        autoHideToken++
+                                        onSwitchChannel(alternateChannel)
+                                    }
+                                    .padding(
+                                        horizontal = spacing.space10,
+                                        vertical = spacing.space5
+                                    ),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = alternateStreamLabel,
+                                    color = colors.onMedia.copy(alpha = 0.9f),
+                                    style = textStyle,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }

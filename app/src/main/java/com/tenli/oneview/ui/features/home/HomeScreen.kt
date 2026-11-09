@@ -221,20 +221,10 @@ fun HomeScreen(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onBackground
                         )
-                        Box(
-                            modifier = Modifier
-                                .size(spacing.iconButtonSmall)
-                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                .clickable(onClick = viewModel::toggleViewMode),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (uiState.isListView) LucideIcons.LayoutGrid else LucideIcons.List,
-                                contentDescription = if (uiState.isListView) "Grid View" else "List View",
-                                tint = colors.iconDefault,
-                                modifier = Modifier.size(spacing.iconSmallMedium)
-                            )
-                        }
+                        MobileViewToggleButton(
+                            isListView = uiState.isListView,
+                            onToggle = viewModel::toggleViewMode
+                        )
                     }
                 }
 

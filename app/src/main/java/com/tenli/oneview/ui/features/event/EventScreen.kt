@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -40,6 +39,7 @@ import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.theme.LucideIcons
+import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 
 /** Khoảng trống cuối danh sách để item cuối không bị bottom navigation (nổi) che khuất */
@@ -102,7 +102,7 @@ fun EventScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
+            .background(MaterialTheme.appColors.pageBg)
     ) {
         // Sticky Mobile Top Bar matching .mobile-top-bar (position: sticky; top: 0; z-index: 50):
         // Left: View Mode Toggle Button, Center: "Sự kiện", Right: Filter Action Button
@@ -186,10 +186,10 @@ fun EventScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (isTabActive) {
-                                    CircularProgressIndicator(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(spacing.space28),
-                                        strokeWidth = spacing.space3
+                                    WaveDotsLoading(
+                                        dotSize = spacing.space6,
+                                        dotColor = MaterialTheme.appColors.accent,
+                                        maxOffset = spacing.space6
                                     )
                                 }
                             }
