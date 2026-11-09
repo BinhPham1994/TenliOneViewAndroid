@@ -23,6 +23,8 @@ import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import retrofit2.Response
 
@@ -46,11 +48,20 @@ class AuthRepository(
                 if (response.isSuccessful) {
                     val tokenModel = response.body() ?: throw Exception("Token response is null")
 
-                    val vmsUser = UserPermissionManager.fetchVmsUserWithRetry(
-                        domain = formattedDomain,
-                        token = tokenModel.token,
-                        userId = tokenModel.userId
-                    )
+                    val vmsUser = coroutineScope {
+                        val modulesDeferred = async {
+                            UserPermissionManager.fetchAndCacheModulesConfig(formattedDomain)
+                        }
+                        val userDeferred = async {
+                            UserPermissionManager.fetchVmsUserWithRetry(
+                                domain = formattedDomain,
+                                token = tokenModel.token,
+                                userId = tokenModel.userId
+                            )
+                        }
+                        modulesDeferred.await()
+                        userDeferred.await()
+                    }
                     val resolvedUsername = vmsUser?.username?.trim()?.takeIf { it.isNotEmpty() }
                         ?: request.username.trim()
                     val effectiveIsAdmin = tokenModel.isAdmin && resolvedUsername == "admin"
@@ -173,6 +184,8 @@ class AuthRepository(
                 remove(AppKeys.GROUP_ID_CAMERA)
                 remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
                 remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                remove(AiTypeHelper.PREF_MODULES_CONFIG_JSON)
+                remove(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN)
                 remove(PREF_EXPANDED_NODES)
                 remove(PREF_MONITOR_GRID_SIZE)
                 remove(PREF_MONITOR_GRID_CAMERA_IDS)

@@ -18,6 +18,7 @@ import com.tenli.oneview.model.network.Monitor
 import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.safeApiCall
 import retrofit2.Response
 
@@ -86,6 +87,9 @@ class DashboardRepository(
     }
 
     suspend fun prewarmProfilesIfNeeded() {
+        val needProfiles = AiTypeHelper.isAiTypeEnabled("logic-face") ||
+            AiTypeHelper.isAiTypeEnabled("sensor-uniform-camera")
+        if (!needProfiles) return
         if (EventCacheManager.getProfilesInMemory().isEmpty()) {
             val profiles = safeApiCall { bsApi.getProfileList() }.getOrNull()?.body().orEmpty()
             val groups = safeApiCall { bsApi.getProfileGroupList() }.getOrNull()?.body().orEmpty()

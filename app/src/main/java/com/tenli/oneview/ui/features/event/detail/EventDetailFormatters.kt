@@ -150,7 +150,8 @@ internal fun buildEventDetailDisplay(
         boxes = findAllBoxes(event),
         plateNumber = plateNumber,
         isPlateBlacklist = event.isPlateBlacklisted,
-        canShowRelatedPlates = isVehicleRelatedEvent(event, plateNumber),
+        canShowRelatedPlates = isVehicleRelatedEvent(event, plateNumber) &&
+            AiTypeHelper.isAiTypeEnabled("sensor-license-plate"),
         face = face,
         uniform = uniform,
         fireAlertLabel = fireAlertLabel,

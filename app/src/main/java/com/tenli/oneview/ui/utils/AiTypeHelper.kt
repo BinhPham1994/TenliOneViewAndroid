@@ -4,7 +4,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.tenli.oneview.model.network.AiModuleConfigItem
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.ModulesConfigModel
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.model.network.UserPermissions
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
@@ -217,9 +219,53 @@ object AiTypeHelper {
         )
     )
 
+    private val heatmapModule = AiModuleOption(
+        "Heatmap",
+        "sensor-heatmap-camera",
+        "Phân tích mật độ",
+        "Heatmap analysis",
+        listOf("sensor-heatmap-camera")
+    )
+
+    private val catalogModules: List<AiModuleOption> = defaultModules + heatmapModule
+
+    private val DEFAULT_MODULE_NAME_MAP: Map<String, String> = mapOf(
+        "face" to "FaceID",
+        "lpr" to "LPR",
+        "heatmap" to "Heatmap",
+        "garbage" to "Garbage",
+        "vehicle" to "VehicleRecognition",
+        "sidewalk" to "SidewalkEncroachment",
+        "intrusion" to "Intrusion",
+        "helmet" to "Helmet",
+        "parking" to "Parking",
+        "fire_smoke" to "FireSmoke",
+        "crowd" to "Crowd",
+        "uniform" to "Uniform",
+        "construction" to "ConstructionDetection",
+        "wrong_way" to "WrongWayDetection",
+        "violence" to "Violence",
+        "smoking" to "Smoking",
+        "phone" to "Phone",
+        "fall" to "FallDetection",
+        "object_tracking" to "ObjectTracking",
+        "gloves" to "GlovesDetection",
+        "hairnet" to "HairnetDetection",
+        "no_mask" to "NoMaskDetection",
+        "flooding" to "FloodingDetection"
+    )
+
     private val defaultEnabledAiTypes: Set<String> = defaultModules
         .flatMap { it.eventTypes }
         .toSet()
+
+    @Volatile
+    var currentModulesConfig: ModulesConfigModel? = null
+        private set
+
+    @Volatile
+    var isProjectModuleRestricted: Boolean = false
+        private set
 
     @Volatile
     var activeModules: List<AiModuleOption> = defaultModules
@@ -229,10 +275,141 @@ object AiTypeHelper {
     @Volatile
     private var enabledAiTypes: Set<String> = defaultEnabledAiTypes
 
-    fun applyPermissions(isAdmin: Boolean, permissions: UserPermissions?) {
+    private fun buildAliasLookup(config: ModulesConfigModel?): Map<String, String> {
+        val map = HashMap<String, String>(DEFAULT_MODULE_NAME_MAP.size * 2)
+        for ((k, v) in DEFAULT_MODULE_NAME_MAP) {
+            map[k.lowercase()] = v.lowercase()
+        }
+        config?.moduleNameMap?.forEach { (k, v) ->
+            val cleanK = k.trim().lowercase()
+            val cleanV = v.trim().lowercase()
+            if (cleanK.isNotEmpty() && cleanV.isNotEmpty()) {
+                map[cleanK] = cleanV
+            }
+        }
+        return map
+    }
+
+    /**
+     * Xác định danh sách bài AI cấp dự án ("Full bài AI"):
+     * - Nếu backend có `modules-config.json` hợp lệ: chỉ lấy các bài AI được bật trong file JSON.
+     * - Nếu backend chưa hỗ trợ `modules-config.json` (`config == null`): giữ nguyên toàn bộ `defaultModules` như hiện tại.
+     */
+    private fun resolveProjectModules(config: ModulesConfigModel?): List<AiModuleOption> {
+        val validConfig = config?.takeIf { it.isValidConfig() } ?: return defaultModules
+
+        val rawModulesMap = LinkedHashMap<String, AiModuleConfigItem>()
+        validConfig.tabs?.business?.modules?.forEach { (k, v) ->
+            rawModulesMap[k.trim().lowercase()] = v
+        }
+        validConfig.aiModules?.forEach { (k, v) ->
+            rawModulesMap[k.trim().lowercase()] = v
+        }
+
+        val aliasLookup = buildAliasLookup(validConfig)
+
+        val enabledSetLower: Set<String>? = validConfig.enabledAiModules?.let { list ->
+            val set = HashSet<String>(list.size * 2)
+            for (raw in list) {
+                val lower = raw.trim().lowercase()
+                if (lower.isNotEmpty()) {
+                    set.add(lower)
+                    aliasLookup[lower]?.let { set.add(it) }
+                }
+            }
+            set
+        }
+
+        val disabledSetLower: Set<String> = validConfig.disabledAiModules?.let { list ->
+            val set = HashSet<String>(list.size * 2)
+            for (raw in list) {
+                val lower = raw.trim().lowercase()
+                if (lower.isNotEmpty()) {
+                    set.add(lower)
+                    aliasLookup[lower]?.let { set.add(it) }
+                }
+            }
+            set
+        } ?: emptySet()
+
+        return catalogModules.mapNotNull { mod ->
+            val keyLower = mod.key.lowercase()
+            val sensorLower = mod.sensorType.lowercase()
+            val item = rawModulesMap[keyLower]
+                ?: rawModulesMap.values.firstOrNull { it.sensorType?.trim()?.equals(mod.sensorType, ignoreCase = true) == true }
+
+            val isExplicitlyDisabled = keyLower in disabledSetLower ||
+                sensorLower in disabledSetLower ||
+                item?.enabled == false
+
+            val isEnabled = when {
+                isExplicitlyDisabled -> false
+                enabledSetLower != null -> {
+                    keyLower in enabledSetLower ||
+                        sensorLower in enabledSetLower ||
+                        item?.enabled == true
+                }
+                rawModulesMap.isNotEmpty() -> item?.enabled == true
+                else -> mod in defaultModules
+            }
+
+            if (!isEnabled) return@mapNotNull null
+
+            val mergedEventTypes = LinkedHashSet<String>()
+            mergedEventTypes.addAll(mod.eventTypes)
+            item?.sensorType?.trim()?.takeIf { it.isNotEmpty() }?.let { mergedEventTypes.add(it) }
+            item?.eventTypes?.forEach { et ->
+                val clean = et.trim()
+                if (clean.isNotEmpty()) mergedEventTypes.add(clean)
+            }
+
+            if (mod.key.equals("FaceID", ignoreCase = true) && item?.enableStranger == false) {
+                mergedEventTypes.removeAll { it.equals("sensor-face-unknown-camera", ignoreCase = true) }
+            }
+
+            mod.copy(eventTypes = mergedEventTypes.toList())
+        }
+    }
+
+    fun updateModulesConfig(config: ModulesConfigModel?) {
+        currentModulesConfig = config?.takeIf { it.isValidConfig() }
+    }
+
+    fun applyPermissions(
+        isAdmin: Boolean,
+        permissions: UserPermissions?,
+        modulesConfig: ModulesConfigModel? = currentModulesConfig
+    ) {
+        val validConfig = modulesConfig?.takeIf { it.isValidConfig() }
+        currentModulesConfig = validConfig
+
+        val projectModules = resolveProjectModules(validConfig)
+        isProjectModuleRestricted = validConfig != null && projectModules.size < defaultModules.size
+
+        val projectEnabledTypes: Set<String> = if (validConfig == null) {
+            defaultEnabledAiTypes
+        } else {
+            val set = LinkedHashSet<String>()
+            projectModules.forEach { set.addAll(it.eventTypes) }
+            val faceConfig = validConfig.aiModules?.entries
+                ?.firstOrNull { it.key.equals("FaceID", ignoreCase = true) }
+                ?.value
+                ?: validConfig.tabs?.business?.modules?.entries
+                    ?.firstOrNull { it.key.equals("FaceID", ignoreCase = true) }
+                    ?.value
+            val disableStranger = faceConfig?.enableStranger == false
+            validConfig.enabledSensorTypes?.forEach { st ->
+                val clean = st.trim()
+                if (clean.isNotEmpty() && (!disableStranger || !clean.equals("sensor-face-unknown-camera", ignoreCase = true))) {
+                    set.add(clean)
+                }
+            }
+            set
+        }
+
         if (isAdmin || permissions == null) {
-            activeModules = defaultModules
-            enabledAiTypes = defaultEnabledAiTypes
+            activeModules = projectModules
+            enabledAiTypes = projectEnabledTypes
             return
         }
 
@@ -243,12 +420,17 @@ object AiTypeHelper {
         }
 
         if (aiPerms != null && aiPerms.mode == "custom") {
-            val allowedRaw = (aiPerms.list ?: emptyList())
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-            val allowedLower = allowedRaw.map { it.lowercase() }.toSet()
+            val aliasLookup = buildAliasLookup(validConfig)
+            val allowedLower = HashSet<String>()
+            (aiPerms.list ?: emptyList()).forEach { raw ->
+                val lower = raw.trim().lowercase()
+                if (lower.isNotEmpty()) {
+                    allowedLower.add(lower)
+                    aliasLookup[lower]?.let { allowedLower.add(it) }
+                }
+            }
 
-            val filteredModules = defaultModules.filter { mod ->
+            val filteredModules = projectModules.filter { mod ->
                 mod.key.lowercase() in allowedLower ||
                     mod.sensorType.lowercase() in allowedLower ||
                     mod.eventTypes.any { et -> et.lowercase() in allowedLower }
@@ -256,12 +438,14 @@ object AiTypeHelper {
             activeModules = filteredModules
             enabledAiTypes = filteredModules.flatMap { it.eventTypes }.toSet()
         } else {
-            activeModules = defaultModules
-            enabledAiTypes = defaultEnabledAiTypes
+            activeModules = projectModules
+            enabledAiTypes = projectEnabledTypes
         }
     }
 
     fun resetPermissions() {
+        currentModulesConfig = null
+        isProjectModuleRestricted = false
         activeModules = defaultModules
         enabledAiTypes = defaultEnabledAiTypes
     }
@@ -358,8 +542,14 @@ object AiTypeHelper {
 
     fun getAiEventTypes(aiType: String): List<String> {
         val trimmed = aiType.trim()
-        val matched = defaultModules.find {
+        val alias = buildAliasLookup(currentModulesConfig)[trimmed.lowercase()] ?: trimmed
+        val matched = activeModules.find {
             it.key.equals(trimmed, ignoreCase = true) ||
+                it.key.equals(alias, ignoreCase = true) ||
+                it.sensorType.equals(trimmed, ignoreCase = true)
+        } ?: catalogModules.find {
+            it.key.equals(trimmed, ignoreCase = true) ||
+                it.key.equals(alias, ignoreCase = true) ||
                 it.sensorType.equals(trimmed, ignoreCase = true)
         }
         if (matched != null) return matched.eventTypes
@@ -889,12 +1079,20 @@ object AiTypeHelper {
     // ---------------------------------------------------------------------------------
 
     const val PREF_USER_NOTIFICATION_SETTINGS_JSON = "user_notification_settings_json"
+    const val PREF_MODULES_CONFIG_JSON = "project_modules_config_json"
+    const val PREF_MODULES_CONFIG_DOMAIN = "project_modules_config_domain"
 
     fun findModuleByKey(moduleKey: String): AiModuleOption? {
         val target = moduleKey.trim()
         if (target.isEmpty()) return null
-        return defaultModules.firstOrNull {
+        val alias = buildAliasLookup(currentModulesConfig)[target.lowercase()] ?: target
+        return activeModules.firstOrNull {
             it.key.equals(target, ignoreCase = true) ||
+                it.key.equals(alias, ignoreCase = true) ||
+                it.sensorType.equals(target, ignoreCase = true)
+        } ?: catalogModules.firstOrNull {
+            it.key.equals(target, ignoreCase = true) ||
+                it.key.equals(alias, ignoreCase = true) ||
                 it.sensorType.equals(target, ignoreCase = true)
         }
     }
@@ -902,7 +1100,11 @@ object AiTypeHelper {
     fun findModuleByEventType(eventType: String): AiModuleOption? {
         val target = eventType.trim().lowercase()
         if (target.isEmpty()) return null
-        return defaultModules.firstOrNull { mod ->
+        return activeModules.firstOrNull { mod ->
+            mod.key.equals(target, ignoreCase = true) ||
+                mod.sensorType.equals(target, ignoreCase = true) ||
+                mod.eventTypes.any { it.equals(target, ignoreCase = true) }
+        } ?: catalogModules.firstOrNull { mod ->
             mod.key.equals(target, ignoreCase = true) ||
                 mod.sensorType.equals(target, ignoreCase = true) ||
                 mod.eventTypes.any { it.equals(target, ignoreCase = true) }

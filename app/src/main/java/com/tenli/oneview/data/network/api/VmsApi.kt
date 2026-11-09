@@ -12,6 +12,7 @@ import com.tenli.oneview.model.network.TokenModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.model.network.VmsUserModel
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -83,4 +84,9 @@ interface VmsApi {
 
     @POST("VMS/api/ChangePassword")
     suspend fun changePassword(@Body model: ChangePasswordModel): Response<Unit>
+
+    // ==================== Project Modules Config ====================
+
+    @GET
+    suspend fun getModulesConfigExt(@Url url: String): Response<ResponseBody>
 }

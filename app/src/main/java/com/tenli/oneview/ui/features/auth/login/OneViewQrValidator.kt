@@ -37,23 +37,30 @@ object OneViewQrValidator {
         if (parts.size != 4) return null
 
         val prefix = parts[0]
-        val ivHex = parts[1].lowercase()
-        val cipherBase64Url = parts[2]
-        val signature = parts[3].lowercase()
+        val rawIvHex = parts[1].trim()
+        val ivHex = rawIvHex.lowercase()
+        val rawCipher = parts[2].trim()
+        val cipherBase64Url = rawCipher
+            .replace('+', '-')
+            .replace('/', '_')
+            .trimEnd('=')
+        val signature = parts[3].trim().lowercase()
 
         if (prefix != TOKEN_PREFIX || ivHex.length != 32 || cipherBase64Url.isEmpty() || signature.length != 24) {
             return null
         }
 
         // 1. Xác thực chữ ký số HMAC-SHA256 trước khi giải mã (Encrypt-then-MAC)
-        val payloadCore = "$TOKEN_PREFIX.$ivHex.$cipherBase64Url"
-        val fullHmacHex = computeHmacSha256Hex(payloadCore, HMAC_SECRET) ?: return null
-        val expectedSig = fullHmacHex.take(24)
+        val payloadCoreNormalized = "$TOKEN_PREFIX.$ivHex.$cipherBase64Url"
+        val payloadCoreRaw = "$TOKEN_PREFIX.$rawIvHex.$rawCipher"
+        val expectedSigNormalized = computeHmacSha256Hex(payloadCoreNormalized, HMAC_SECRET)?.take(24)
+        val expectedSigRaw = computeHmacSha256Hex(payloadCoreRaw, HMAC_SECRET)?.take(24)
 
-        val isSigValid = MessageDigest.isEqual(
-            signature.toByteArray(StandardCharsets.UTF_8),
-            expectedSig.toByteArray(StandardCharsets.UTF_8)
-        )
+        val sigBytes = signature.toByteArray(StandardCharsets.UTF_8)
+        val isSigValid = (expectedSigNormalized != null &&
+            MessageDigest.isEqual(sigBytes, expectedSigNormalized.toByteArray(StandardCharsets.UTF_8))) ||
+            (expectedSigRaw != null &&
+                MessageDigest.isEqual(sigBytes, expectedSigRaw.toByteArray(StandardCharsets.UTF_8)))
         if (!isSigValid) return null
 
         // 2. Giải mã AES-256-CBC để lấy lại domain dự án

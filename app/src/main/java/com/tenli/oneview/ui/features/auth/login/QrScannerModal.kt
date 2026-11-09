@@ -1,17 +1,26 @@
 package com.tenli.oneview.ui.features.auth.login
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.util.Size as AndroidSize
+import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -26,6 +35,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,8 +67,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,14 +100,17 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
+import com.google.zxing.LuminanceSource
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.common.GlobalHistogramBinarizer
 import com.google.zxing.common.HybridBinarizer
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.theme.spacing
 import kotlinx.coroutines.delay
 import java.util.EnumMap
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 private const val INVALID_QR_COOLDOWN_MS = 2800L
 
@@ -183,6 +198,7 @@ fun QrScannerModal(
     }
 }
 
+@SuppressLint("ClickableViewAccessibility")
 @Composable
 private fun CameraQrPreview(
     onQrCodeRawDetected: (String) -> Unit,
@@ -190,16 +206,39 @@ private fun CameraQrPreview(
     invalidQrMessage: String?,
     onClose: () -> Unit
 ) {
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val currentOnQrDetected by rememberUpdatedState(onQrCodeRawDetected)
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
+    var currentZoomRatio by remember { mutableFloatStateOf(1.5f) }
 
     DisposableEffect(Unit) {
         onDispose {
             cameraExecutor.shutdown()
+        }
+    }
+
+    // Tự động lấy nét & đo sáng (AF + AE) vào đúng tâm khung quét định kỳ
+    // để chống cháy sáng (overexposure) khi quét mã QR nền trắng trên màn hình PC nền tối.
+    LaunchedEffect(cameraRef) {
+        val cam = cameraRef ?: return@LaunchedEffect
+        val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
+        while (true) {
+            try {
+                val centerPoint = factory.createPoint(0.5f, 0.5f, 0.16f)
+                val action = FocusMeteringAction.Builder(
+                    centerPoint,
+                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                )
+                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                    .build()
+                cam.cameraControl.startFocusAndMetering(action)
+            } catch (_: Exception) {
+                // Ignore if camera is closing
+            }
+            delay(3500L)
         }
     }
 
@@ -215,20 +254,79 @@ private fun CameraQrPreview(
                     scaleType = PreviewView.ScaleType.FILL_CENTER
                 }
 
+                // Hỗ trợ pinch-to-zoom & chạm để lấy nét/đo sáng trực tiếp vào vùng mã QR trên màn hình
+                val scaleGestureDetector = ScaleGestureDetector(
+                    ctx,
+                    object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                        override fun onScale(detector: ScaleGestureDetector): Boolean {
+                            val cam = cameraRef ?: return false
+                            val zoomState = cam.cameraInfo.zoomState.value ?: return false
+                            val nextZoom = (zoomState.zoomRatio * detector.scaleFactor)
+                                .coerceIn(zoomState.minZoomRatio, minOf(zoomState.maxZoomRatio, 4.0f))
+                            cam.cameraControl.setZoomRatio(nextZoom)
+                            currentZoomRatio = nextZoom
+                            return true
+                        }
+                    }
+                )
+
+                previewView.setOnTouchListener { view, event ->
+                    scaleGestureDetector.onTouchEvent(event)
+                    if (event.action == MotionEvent.ACTION_UP && !scaleGestureDetector.isInProgress) {
+                        val cam = cameraRef
+                        if (cam != null && view.width > 0 && view.height > 0) {
+                            try {
+                                val point = previewView.meteringPointFactory.createPoint(
+                                    event.x,
+                                    event.y,
+                                    0.15f
+                                )
+                                val action = FocusMeteringAction.Builder(
+                                    point,
+                                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                                )
+                                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                                    .build()
+                                cam.cameraControl.startFocusAndMetering(action)
+                            } catch (_: Exception) {
+                                // Ignore metering error
+                            }
+                        }
+                    }
+                    true
+                }
+
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
-                    val preview = Preview.Builder().build().also {
-                        it.surfaceProvider = previewView.surfaceProvider
-                    }
+
+                    // Tăng độ phân giải phân tích lên Full HD (1920x1080) thay vì mặc định 640x480
+                    // để đọc rõ các mã QR mật độ cao (Version 7-9, ~49x49 modules) trên màn hình PC.
+                    val resolutionSelector = ResolutionSelector.Builder()
+                        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                        .setResolutionStrategy(
+                            ResolutionStrategy(
+                                AndroidSize(1920, 1080),
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                            )
+                        )
+                        .build()
+
+                    val preview = Preview.Builder()
+                        .setResolutionSelector(resolutionSelector)
+                        .build()
+                        .also {
+                            it.surfaceProvider = previewView.surfaceProvider
+                        }
 
                     val qrAnalyzer = ZxingQrCodeAnalyzer { qrText ->
                         mainHandler.post {
-                            onQrCodeRawDetected(qrText)
+                            currentOnQrDetected(qrText)
                         }
                     }
 
                     val imageAnalysis = ImageAnalysis.Builder()
+                        .setResolutionSelector(resolutionSelector)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
                         .also {
@@ -237,12 +335,24 @@ private fun CameraQrPreview(
 
                     try {
                         cameraProvider.unbindAll()
-                        cameraRef = cameraProvider.bindToLifecycle(
+                        val boundCamera = cameraProvider.bindToLifecycle(
                             lifecycleOwner,
                             CameraSelector.DEFAULT_BACK_CAMERA,
                             preview,
                             imageAnalysis
                         )
+                        cameraRef = boundCamera
+
+                        // Đặt mức zoom mặc định 1.5x để người dùng để điện thoại cách màn hình PC 20-30cm
+                        // (ngoài khoảng lấy nét tối thiểu của ống kính) mà mã QR 200px vẫn đủ lớn và sắc nét.
+                        val zoomState = boundCamera.cameraInfo.zoomState.value
+                        val targetZoom = if (zoomState != null) {
+                            1.5f.coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+                        } else {
+                            1.5f
+                        }
+                        boundCamera.cameraControl.setZoomRatio(targetZoom)
+                        currentZoomRatio = targetZoom
                     } catch (_: Exception) {
                         // Ignore camera bind failure on unsupported emulators
                     }
@@ -316,14 +426,58 @@ private fun CameraQrPreview(
             }
         }
 
-        // Bottom Guidance & Validation Error Banner
+        // Bottom Guidance, Quick Zoom Selector & Validation Error Banner
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 40.dp),
+                .padding(horizontal = 24.dp, vertical = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Quick Zoom Selector (1x / 1.5x / 2x)
+            Row(
+                modifier = Modifier
+                    .padding(bottom = 14.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF0F172A).copy(alpha = 0.78f))
+                    .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(1.0f to "1x", 1.5f to "1.5x", 2.0f to "2x").forEach { (zoomVal, label) ->
+                    val isSelected = kotlin.math.abs(currentZoomRatio - zoomVal) < 0.22f
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(
+                                if (isSelected) BrandPrimary else Color.Transparent
+                            )
+                            .clickable {
+                                val cam = cameraRef ?: return@clickable
+                                val zoomState = cam.cameraInfo.zoomState.value
+                                val clamped = if (zoomState != null) {
+                                    zoomVal.coerceIn(zoomState.minZoomRatio, zoomState.maxZoomRatio)
+                                } else {
+                                    zoomVal
+                                }
+                                cam.cameraControl.setZoomRatio(clamped)
+                                currentZoomRatio = clamped
+                            }
+                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = if (isSelected) Color.White else Color(0xFFCBD5E1),
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        )
+                    }
+                }
+            }
+
             AnimatedVisibility(
                 visible = invalidQrMessage != null,
                 enter = fadeIn(),
@@ -597,41 +751,96 @@ private class ZxingQrCodeAnalyzer(
             put(DecodeHintType.POSSIBLE_FORMATS, listOf(BarcodeFormat.QR_CODE))
             put(DecodeHintType.CHARACTER_SET, "UTF-8")
             put(DecodeHintType.TRY_HARDER, true)
+            put(DecodeHintType.ALSO_INVERTED, true)
         }
         setHints(hints)
     }
+
+    private var luminanceBuffer = ByteArray(0)
+    private var rowScratchBuffer = ByteArray(0)
+    private var rotatedSquareBuffer = ByteArray(0)
 
     override fun analyze(image: ImageProxy) {
         try {
             val plane = image.planes.firstOrNull() ?: return
             val width = image.width
             val height = image.height
-            val yBytes = extractLuminanceBytes(plane, width, height)
+            if (width <= 0 || height <= 0) return
 
-            val source = PlanarYUVLuminanceSource(
+            val yBytes = extractLuminanceBytes(plane, width, height)
+            val minDim = minOf(width, height)
+
+            // 1. Ưu tiên vùng tâm khung quét (62% kích thước ngắn nhất):
+            //    Loại bỏ viền tối của màn hình PC giúp GlobalHistogramBinarizer & HybridBinarizer
+            //    không bị lệch ngưỡng sáng/tối và khử nhiễu Moiré trên tấm nền LCD/LED.
+            val tightSize = (minDim * 0.62f).toInt().coerceAtLeast(120)
+            val tightLeft = (width - tightSize) / 2
+            val tightTop = (height - tightSize) / 2
+            val tightSource = PlanarYUVLuminanceSource(
                 yBytes,
                 width,
                 height,
-                0,
-                0,
-                width,
-                height,
+                tightLeft,
+                tightTop,
+                tightSize,
+                tightSize,
                 false
             )
 
-            val result = try {
-                reader.decodeWithState(BinaryBitmap(HybridBinarizer(source)))
-            } catch (_: Exception) {
-                try {
-                    reader.decodeWithState(BinaryBitmap(HybridBinarizer(source.invert())))
-                } catch (_: Exception) {
-                    null
-                }
-            } finally {
-                reader.reset()
+            var rawText = decodeSource(tightSource)
+
+            // 2. Xoay 90 độ vùng tâm khung quét:
+            //    Cảm biến camera điện thoại nằm ngang (xoay 90 độ so với màn hình dọc), trong khi
+            //    FinderPatternFinder của ZXing quét ưu tiên theo hàng ngang trước. Xoay 90 độ giúp
+            //    ZXing quét vuông góc với các vạch quét (scanlines) của màn hình PC.
+            if (rawText.isNullOrBlank()) {
+                val rotatedBytes = rotateSquare90(yBytes, width, tightLeft, tightTop, tightSize)
+                val rotatedSource = PlanarYUVLuminanceSource(
+                    rotatedBytes,
+                    tightSize,
+                    tightSize,
+                    0,
+                    0,
+                    tightSize,
+                    tightSize,
+                    false
+                )
+                rawText = decodeSource(rotatedSource)
             }
 
-            val rawText = result?.text
+            // 3. Mở rộng vùng quét trung tâm (84%) phòng trường hợp người dùng để lệch nhẹ hoặc gần hơn
+            if (rawText.isNullOrBlank()) {
+                val wideSize = (minDim * 0.84f).toInt().coerceAtLeast(tightSize)
+                val wideLeft = (width - wideSize) / 2
+                val wideTop = (height - wideSize) / 2
+                val wideSource = PlanarYUVLuminanceSource(
+                    yBytes,
+                    width,
+                    height,
+                    wideLeft,
+                    wideTop,
+                    wideSize,
+                    wideSize,
+                    false
+                )
+                rawText = decodeSource(wideSource)
+            }
+
+            // 4. Fallback toàn khung hình
+            if (rawText.isNullOrBlank()) {
+                val fullSource = PlanarYUVLuminanceSource(
+                    yBytes,
+                    width,
+                    height,
+                    0,
+                    0,
+                    width,
+                    height,
+                    false
+                )
+                rawText = decodeSource(fullSource)
+            }
+
             if (!rawText.isNullOrBlank()) {
                 onQrDetected(rawText)
             }
@@ -640,6 +849,52 @@ private class ZxingQrCodeAnalyzer(
         } finally {
             image.close()
         }
+    }
+
+    private fun decodeSource(source: LuminanceSource): String? {
+        // Thử GlobalHistogramBinarizer trước (chống nhiễu lưới điểm ảnh RGB / Moiré trên màn hình PC tốt nhất),
+        // sau đó thử HybridBinarizer (cân bằng sáng cục bộ theo khối 8x8).
+        try {
+            val result = reader.decodeWithState(BinaryBitmap(GlobalHistogramBinarizer(source)))
+            if (!result.text.isNullOrBlank()) return result.text
+        } catch (_: Exception) {
+            // Continue to HybridBinarizer
+        } finally {
+            reader.reset()
+        }
+
+        try {
+            val result = reader.decodeWithState(BinaryBitmap(HybridBinarizer(source)))
+            if (!result.text.isNullOrBlank()) return result.text
+        } catch (_: Exception) {
+            // Ignore
+        } finally {
+            reader.reset()
+        }
+
+        return null
+    }
+
+    private fun rotateSquare90(
+        src: ByteArray,
+        srcStride: Int,
+        left: Int,
+        top: Int,
+        size: Int
+    ): ByteArray {
+        val total = size * size
+        if (rotatedSquareBuffer.size < total) {
+            rotatedSquareBuffer = ByteArray(total)
+        }
+        val dst = rotatedSquareBuffer
+        for (row in 0 until size) {
+            val srcRowOffset = (top + row) * srcStride + left
+            val dstCol = size - 1 - row
+            for (col in 0 until size) {
+                dst[col * size + dstCol] = src[srcRowOffset + col]
+            }
+        }
+        return dst
     }
 
     private fun extractLuminanceBytes(
@@ -651,25 +906,32 @@ private class ZxingQrCodeAnalyzer(
         buffer.rewind()
         val rowStride = plane.rowStride
         val pixelStride = plane.pixelStride
+        val totalPixels = width * height
 
-        if (pixelStride == 1 && rowStride == width) {
-            val data = ByteArray(buffer.remaining())
-            buffer.get(data)
-            return data
+        if (luminanceBuffer.size < totalPixels) {
+            luminanceBuffer = ByteArray(totalPixels)
+        }
+        val output = luminanceBuffer
+
+        if (pixelStride == 1 && rowStride == width && buffer.remaining() >= totalPixels) {
+            buffer.get(output, 0, totalPixels)
+            return output
         }
 
-        val output = ByteArray(width * height)
-        val rowBuffer = ByteArray(rowStride)
+        if (rowScratchBuffer.size < rowStride) {
+            rowScratchBuffer = ByteArray(rowStride)
+        }
+        val rowBuffer = rowScratchBuffer
+
         for (row in 0 until height) {
-            val bytesToRead = if (row == height - 1) {
-                minOf(rowStride, buffer.remaining())
-            } else {
-                rowStride
-            }
+            val remaining = buffer.remaining()
+            if (remaining <= 0) break
+            val bytesToRead = minOf(rowStride, remaining)
             buffer.get(rowBuffer, 0, bytesToRead)
             val outputOffset = row * width
             if (pixelStride == 1) {
-                System.arraycopy(rowBuffer, 0, output, outputOffset, width)
+                val copyLen = minOf(width, bytesToRead)
+                System.arraycopy(rowBuffer, 0, output, outputOffset, copyLen)
             } else {
                 for (col in 0 until width) {
                     val idx = col * pixelStride

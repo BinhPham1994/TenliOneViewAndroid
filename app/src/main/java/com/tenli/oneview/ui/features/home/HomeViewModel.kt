@@ -722,7 +722,9 @@ class HomeViewModel(
                             if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
                         }
                     }
-                    if (totalTasks == 0 && UserPermissionManager.canAccessEvents() && !UserPermissionManager.isCustomAiEventPermission()) {
+                    val isRestrictedAiScope = UserPermissionManager.isCustomAiEventPermission() ||
+                        AiTypeHelper.isProjectModuleRestricted
+                    if (totalTasks == 0 && UserPermissionManager.canAccessEvents() && !isRestrictedAiScope) {
                         val overviewMonitorCount = overviewStats
                             .find { it.label == "monitor-count" && it.tag == "all" }
                             ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
@@ -819,10 +821,12 @@ class HomeViewModel(
         val sumByType = eventsByType
             .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
             .sumOf { it.count.toString().toDoubleOrNull()?.toLong() ?: 0L }
+        val isRestrictedAiScope = UserPermissionManager.isCustomAiEventPermission() ||
+            AiTypeHelper.isProjectModuleRestricted
         val totalDetections = if (sumByType > 0L) {
             sumByType
-        } else if (UserPermissionManager.isCustomAiEventPermission()) {
-            recentEvents.size.toLong()
+        } else if (isRestrictedAiScope) {
+            if (eventsByType.isNotEmpty()) 0L else recentEvents.size.toLong()
         } else {
             overviewStats
                 .find { it.label == "event-count" && it.tag == "all" }

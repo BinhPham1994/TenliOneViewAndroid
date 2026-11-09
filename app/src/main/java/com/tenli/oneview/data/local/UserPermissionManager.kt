@@ -2,15 +2,21 @@ package com.tenli.oneview.data.local
 
 import android.util.Log
 import androidx.compose.runtime.Immutable
+import androidx.core.content.edit
 import com.tenli.oneview.data.network.ApiProvider
+import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.ModulesConfigModel
 import com.tenli.oneview.model.network.UserData
 import com.tenli.oneview.model.network.UserPermissions
 import com.tenli.oneview.model.network.VmsUserModel
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.utils.AiModuleOption
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,6 +94,7 @@ object UserPermissionManager {
     }
 
     fun canAccessEvents(userData: UserData? = UserSession.userData): Boolean {
+        if (AiTypeHelper.activeModules.isEmpty()) return false
         if (isAdmin(userData)) return true
         val perms = currentPermissions(userData) ?: return false
         if (perms.aiEvents?.mode == "custom" || perms.events?.mode == "custom") {
@@ -119,8 +126,14 @@ object UserPermissionManager {
         val user = UserSession.userData
         val admin = isAdmin(user)
         val perms = currentPermissions(user)
+        val modulesConfig = AiTypeHelper.currentModulesConfig
+            ?: restoreModulesConfigFromPrefs(UserSession.domain)
 
-        AiTypeHelper.applyPermissions(isAdmin = admin, permissions = perms)
+        AiTypeHelper.applyPermissions(
+            isAdmin = admin,
+            permissions = perms,
+            modulesConfig = modulesConfig
+        )
 
         val nextState = UserPermissionState(
             isAdmin = admin,
@@ -133,6 +146,91 @@ object UserPermissionManager {
             version = versionCounter.incrementAndGet()
         )
         _permissionState.value = nextState
+    }
+
+    fun restoreModulesConfigFromPrefs(domain: String = UserSession.domain): ModulesConfigModel? {
+        val cleanDomain = domain.trim().trimEnd('/')
+        if (cleanDomain.isEmpty()) return null
+        val prefs = runCatching { GlobalData.preferences }.getOrNull() ?: return AiTypeHelper.currentModulesConfig
+        val savedDomain = prefs.getString(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN, null)?.trim()?.trimEnd('/')
+        if (savedDomain == null || !savedDomain.equals(cleanDomain, ignoreCase = true)) {
+            return null
+        }
+        val rawJson = prefs.getString(AiTypeHelper.PREF_MODULES_CONFIG_JSON, null)?.trim()
+        if (rawJson.isNullOrEmpty() || !rawJson.startsWith("{")) return null
+        val parsed = runCatching {
+            LoginAuthClient.gson.fromJson(rawJson, ModulesConfigModel::class.java)
+        }.getOrNull()?.takeIf { it.isValidConfig() }
+        if (parsed != null) {
+            AiTypeHelper.updateModulesConfig(parsed)
+        }
+        return parsed
+    }
+
+    private fun saveModulesConfigToPrefs(domain: String, rawJson: String, config: ModulesConfigModel) {
+        AiTypeHelper.updateModulesConfig(config)
+        runCatching {
+            GlobalData.preferences.edit {
+                putString(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN, domain.trim().trimEnd('/'))
+                putString(AiTypeHelper.PREF_MODULES_CONFIG_JSON, rawJson)
+            }
+        }
+    }
+
+    private fun clearModulesConfigFromPrefs() {
+        AiTypeHelper.updateModulesConfig(null)
+        runCatching {
+            GlobalData.preferences.edit {
+                remove(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN)
+                remove(AiTypeHelper.PREF_MODULES_CONFIG_JSON)
+            }
+        }
+    }
+
+    /**
+     * Tải cấu hình phân quyền bài AI của dự án từ `GET https://<domain-backend>/modules-config.json`.
+     * - Nếu backend hỗ trợ và trả về JSON hợp lệ: lưu vào RAM (`AiTypeHelper`) và `SharedPreferences`.
+     * - Nếu backend chưa hỗ trợ (HTTP 404/403, trả về HTML SPA fallback, hoặc JSON rỗng):
+     *   xoá cache và dùng cơ chế mặc định hiện tại (toàn bộ `AiTypeHelper.defaultModules`).
+     * - Nếu lỗi mạng tạm thời: khôi phục cấu hình đã cache của domain hiện tại (nếu có).
+     */
+    suspend fun fetchAndCacheModulesConfig(domain: String): ModulesConfigModel? {
+        val cleanDomain = domain.trim().trimEnd('/')
+        if (cleanDomain.isEmpty()) return null
+        val url = "$cleanDomain/modules-config.json"
+        return try {
+            val response = ApiProvider.vmsApi.getModulesConfigExt(url = url)
+            if (response.isSuccessful) {
+                val rawBody = response.body()?.string()?.trim().orEmpty()
+                val parsed = if (rawBody.startsWith("{")) {
+                    runCatching {
+                        LoginAuthClient.gson.fromJson(rawBody, ModulesConfigModel::class.java)
+                    }.getOrNull()
+                } else {
+                    null
+                }
+                if (parsed != null && parsed.isValidConfig()) {
+                    saveModulesConfigToPrefs(cleanDomain, rawBody, parsed)
+                    parsed
+                } else {
+                    clearModulesConfigFromPrefs()
+                    null
+                }
+            } else {
+                val code = response.code()
+                if (code == 404 || code == 403 || code == 405 || code == 400) {
+                    clearModulesConfigFromPrefs()
+                    null
+                } else {
+                    restoreModulesConfigFromPrefs(cleanDomain)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "fetchAndCacheModulesConfig failed for domain=$cleanDomain: ${e.message}")
+            restoreModulesConfigFromPrefs(cleanDomain)
+        }
     }
 
     fun reset() {
@@ -352,12 +450,23 @@ object UserPermissionManager {
         val token = explicitToken ?: UserSession.accessToken
         val userId = explicitUserId ?: currentUser?.id ?: 0
 
-        if (domain.isBlank() || token.isBlank() || userId <= 0) {
+        if (domain.isBlank()) {
             syncFromUserSession()
             return currentUser?.permissions
         }
 
-        val vmsUser = fetchVmsUserWithRetry(domain = domain, token = token, userId = userId)
+        if (token.isBlank() || userId <= 0) {
+            fetchAndCacheModulesConfig(domain)
+            syncFromUserSession()
+            return currentUser?.permissions
+        }
+
+        val vmsUser = coroutineScope {
+            val modulesDeferred = async { fetchAndCacheModulesConfig(domain) }
+            val userDeferred = async { fetchVmsUserWithRetry(domain = domain, token = token, userId = userId) }
+            modulesDeferred.await()
+            userDeferred.await()
+        }
         if (vmsUser != null) {
             val resolvedUsername = vmsUser.username?.trim()?.takeIf { it.isNotEmpty() }
                 ?: fallbackUsername?.trim()?.takeIf { it.isNotEmpty() }
