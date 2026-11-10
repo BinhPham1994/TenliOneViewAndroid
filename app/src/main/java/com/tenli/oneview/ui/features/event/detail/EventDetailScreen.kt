@@ -159,7 +159,6 @@ import kotlin.math.roundToInt
 
 enum class EventMediaTab(val titleVi: String, val titleEn: String) {
     LIVE_CAMERA("Live Camera", "Live Camera"),
-    ORIGINAL_VIDEO("Video gốc", "Original video"),
     EVENT_IMAGE("Ảnh sự kiện", "Event photo"),
     EVENT_VIDEO("Video sự kiện", "Event video")
 }
@@ -211,11 +210,6 @@ private val BoundingBoxPalette = listOf(
     Color(0xFFEB2F96)
 )
 private val BoundingBoxStroke = Stroke(width = 4f)
-private val FocusOverlayColor = Color.Black.copy(alpha = 0.7f)
-private val FocusHighlightColor = Color.Red
-private const val FOCUS_PADDING_DP = 12f
-private const val EVENT_ZOOM_SCALE = 1.8f
-private const val EVENT_EFFECT_WINDOW_MS = 10_000L
 private val PillShadowColor = Color.Black.copy(alpha = 0.12f)
 
 private val LocationMaxWidth = 230.dp
@@ -401,7 +395,7 @@ fun EventDetailScreen(
                                 val isInsidePinnedTop =
                                     pinnedBottomY > 0f && downRootY <= pinnedBottomY
                                 val hasVideoSeekbar =
-                                    selectedTab == EventMediaTab.ORIGINAL_VIDEO || selectedTab == EventMediaTab.EVENT_VIDEO
+                                    selectedTab == EventMediaTab.EVENT_VIDEO
                                 val isInsideVideoSeekbarZone =
                                     hasVideoSeekbar &&
                                         pinnedBottomY > 0f &&
@@ -555,7 +549,7 @@ fun EventDetailScreen(
                         )
 
                         // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
-                        // Supports horizontal swipe to switch between Live Camera / Video gốc / Ảnh sự kiện / Video sự kiện
+                        // Supports horizontal swipe to switch between Live Camera / Ảnh sự kiện / Video sự kiện
                         MediaViewport(
                             selectedTab = selectedTab,
                             isScreenActive = !isClosing && !isDismissing,
@@ -568,17 +562,12 @@ fun EventDetailScreen(
                             liveStreamUrl = uiState.liveStreamUrl,
                             liveStreamChannel = uiState.liveStreamChannel,
                             liveCameraSnapshotUrl = uiState.liveCameraSnapshotUrl,
-                            originalVideoLoading = uiState.originalVideoLoading,
-                            originalVideoError = uiState.originalVideoError,
-                            originalVideoUrl = uiState.originalVideoUrl,
-                            originalVideoSeekTimeMs = uiState.originalVideoSeekTimeMs,
                             isEn = isEn,
                             onLoadLiveStream = viewModel::loadLiveStream,
                             onSwitchLiveChannel = viewModel::switchLiveChannel,
                             onLiveStreamFirstFrame = viewModel::onLiveStreamFirstFrame,
                             onRetryLiveStream = viewModel::retryLiveStream,
-                            onStopLiveStream = viewModel::stopLiveStream,
-                            onLoadOriginalVideo = viewModel::loadOriginalVideo
+                            onStopLiveStream = viewModel::stopLiveStream
                         )
 
                         Spacer(modifier = Modifier.height(spacing.space6))
@@ -957,13 +946,13 @@ private fun MediaTabSelector(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
                             ) { onSelect(tab) }
-                            .padding(horizontal = spacing.space2),
+                            .padding(horizontal = spacing.space4),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = if (isEn) tab.titleEn else tab.titleVi,
                             color = tabTextColor,
-                            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.5.sp),
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -988,17 +977,12 @@ private fun MediaViewport(
     liveStreamUrl: String?,
     liveStreamChannel: Int,
     liveCameraSnapshotUrl: String?,
-    originalVideoLoading: Boolean,
-    originalVideoError: String?,
-    originalVideoUrl: String?,
-    originalVideoSeekTimeMs: Long?,
     isEn: Boolean,
     onLoadLiveStream: (Boolean) -> Unit,
     onSwitchLiveChannel: (Int) -> Unit,
     onLiveStreamFirstFrame: () -> Unit,
     onRetryLiveStream: () -> Unit,
-    onStopLiveStream: () -> Unit,
-    onLoadOriginalVideo: () -> Unit
+    onStopLiveStream: () -> Unit
 ) {
     val viewportBg = MaterialTheme.appColors.surface
     Box(
@@ -1050,18 +1034,6 @@ private fun MediaViewport(
                     imageUrl = display.imageUrl,
                     boxes = display.boxes,
                     isEn = isEn
-                )
-
-                EventMediaTab.ORIGINAL_VIDEO -> OriginalVideoPane(
-                    eventId = eventId,
-                    display = display,
-                    isLoading = originalVideoLoading,
-                    error = originalVideoError,
-                    videoUrl = originalVideoUrl,
-                    seekTimeMs = originalVideoSeekTimeMs,
-                    isActive = isTabActive,
-                    isEn = isEn,
-                    onLoad = onLoadOriginalVideo
                 )
 
                 EventMediaTab.EVENT_VIDEO -> {
@@ -1501,135 +1473,6 @@ private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isE
     } else {
         CommonEmptyState(
             text = if (isEn) "No image" else "Không có ảnh",
-            modifier = Modifier.fillMaxSize()
-        )
-    }
-}
-
-@Composable
-private fun OriginalVideoPane(
-    eventId: Int,
-    display: EventDetailDisplay,
-    isLoading: Boolean,
-    error: String?,
-    videoUrl: String?,
-    seekTimeMs: Long?,
-    isActive: Boolean,
-    isEn: Boolean,
-    onLoad: () -> Unit
-) {
-    val context = LocalContext.current
-    LaunchedEffect(eventId, isActive) {
-        if (isActive) {
-            onLoad()
-        }
-    }
-
-    val mainBox = display.mainBox
-    val pivotX = mainBox?.let { (it[0] + it[2]) / 2 } ?: 0.5f
-    val pivotY = mainBox?.let { (it[1] + it[3]) / 2 } ?: 0.5f
-
-    var showEventEffect by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (showEventEffect && isActive) EVENT_ZOOM_SCALE else 1f,
-        animationSpec = tween(
-            durationMillis = if (showEventEffect) 2000 else 1200,
-            easing = StandardEasing
-        ),
-        label = "zoom_effect"
-    )
-
-    if (isLoading || (videoUrl == null && error == null)) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.appColors.surface),
-            contentAlignment = Alignment.Center
-        ) {
-            val previewUrl = display.imageUrl
-            if (!previewUrl.isNullOrEmpty()) {
-                val previewRequest = remember(previewUrl) {
-                    ImageRequest.Builder(context)
-                        .data(previewUrl)
-                        .size(1280, 720)
-                        .precision(Precision.INEXACT)
-                        .allowHardware(true)
-                        .crossfade(false)
-                        .build()
-                }
-                AsyncImage(
-                    model = previewRequest,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.FillBounds
-                )
-            }
-            if (isActive) {
-                WaveDotsLoading()
-            }
-        }
-    } else if (error != null) {
-        CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
-    } else if (videoUrl != null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(RectangleShape)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = scale
-                        scaleY = scale
-                        transformOrigin = TransformOrigin(pivotX, pivotY)
-                    }
-            ) {
-                VideoPlayer(
-                    videoUrl = videoUrl,
-                    thumbnailUrl = display.imageUrl,
-                    deviceKey = UserSession.accessToken,
-                    playWhenReady = isActive,
-                    initialSeekPositionMs = seekTimeMs,
-                    errorText = if (isEn) "Original video unavailable" else "Video gốc không khả dụng",
-                    onTimeUpdate = { currentMs ->
-                        val seek = seekTimeMs ?: return@VideoPlayer
-                        showEventEffect = currentMs in seek..(seek + EVENT_EFFECT_WINDOW_MS)
-                    }
-                )
-
-                // Làm tối vùng ngoài đối tượng & viền đỏ quanh đối tượng trong khoảng thời gian sự kiện
-                Spacer(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .drawWithContent {
-                            if (showEventEffect && mainBox != null) {
-                                val padding = FOCUS_PADDING_DP * density
-
-                                val boxX = mainBox[0] * size.width
-                                val boxY = mainBox[1] * size.height
-                                val boxW = (mainBox[2] - mainBox[0]) * size.width
-                                val boxH = (mainBox[3] - mainBox[1]) * size.height
-
-                                val cutX = (boxX - padding).coerceAtLeast(0f)
-                                val cutY = (boxY - padding).coerceAtLeast(0f)
-                                val cutW = (boxX + boxW + padding).coerceAtMost(size.width) - cutX
-                                val cutH = (boxY + boxH + padding).coerceAtMost(size.height) - cutY
-
-                                drawRect(FocusOverlayColor, Offset(0f, 0f), Size(size.width, cutY))
-                                drawRect(FocusOverlayColor, Offset(0f, cutY + cutH), Size(size.width, size.height - (cutY + cutH)))
-                                drawRect(FocusOverlayColor, Offset(0f, cutY), Size(cutX, cutH))
-                                drawRect(FocusOverlayColor, Offset(cutX + cutW, cutY), Size(size.width - (cutX + cutW), cutH))
-
-                                drawRect(FocusHighlightColor, Offset(cutX, cutY), Size(cutW, cutH), style = BoundingBoxStroke)
-                            }
-                        }
-                )
-            }
-        }
-    } else {
-        CommonEmptyState(
-            text = if (isEn) "No video data" else "Chưa có dữ liệu",
             modifier = Modifier.fillMaxSize()
         )
     }
