@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 data class CachedHomeData(
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
+    val hasLoadedEventsByType: Boolean = false,
     val cameraList: List<CameraModel> = emptyList(),
     val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),

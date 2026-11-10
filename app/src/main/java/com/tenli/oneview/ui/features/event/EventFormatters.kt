@@ -50,6 +50,13 @@ fun eventTimeToMillis(timestamp: Double): Long =
 /** Quy đổi `EventData.time` (giây hoặc mili-giây) sang giây. */
 fun eventTimeToSeconds(timestamp: Double): Long = eventTimeToMillis(timestamp) / 1000
 
+/** Kiểm tra thời điểm của sự kiện có nằm trong khoảng [fromSec]..[toSec] (tính theo giây) hay không. */
+fun EventData.isWithinTimeRangeSeconds(fromSec: Long, toSec: Long): Boolean {
+    if (time <= 0.0) return true
+    val evSec = eventTimeToSeconds(time)
+    return evSec in fromSec..toSec
+}
+
 /** SimpleDateFormat không thread-safe → mỗi thread giữ 1 instance, tránh tạo mới mỗi lần định dạng. */
 private fun threadLocalFormat(pattern: String): ThreadLocal<SimpleDateFormat> =
     ThreadLocal.withInitial { SimpleDateFormat(pattern, Locale.getDefault()) }

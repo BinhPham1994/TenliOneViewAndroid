@@ -277,9 +277,18 @@ class EventViewModel(
 
             val camerasForPerm = allCameras.ifEmpty { eventRepository.getCamerasInMemory() }
             for (ev in batchData) {
-                if (UserPermissionManager.isEventPermitted(ev, camerasForPerm) && seenKeys.add(ev.uniqueKey())) {
+                if (ev.isWithinTimeRangeSeconds(fromSec, toSec) &&
+                    UserPermissionManager.isEventPermitted(ev, camerasForPerm) &&
+                    seenKeys.add(ev.uniqueKey())
+                ) {
                     validData.add(ev)
                 }
+            }
+
+            val allOlderThanFrom = batchData.all { it.time > 0.0 && eventTimeToSeconds(it.time) < fromSec }
+            if (allOlderThanFrom) {
+                reachedEnd = true
+                break
             }
 
             val lastItem = batchData.lastOrNull()
@@ -315,6 +324,7 @@ class EventViewModel(
             try {
                 if (!UserPermissionManager.canAccessEvents()) return@launch
                 val state = _uiState.value
+                if (state.selectedFilter != TimeFilter.TODAY) return@launch
                 val (from, to) = getTimeRange(state.selectedFilter)
                 val response = eventRepository.getDataList(
                     count = PAGE_TARGET_COUNT,
@@ -325,16 +335,24 @@ class EventViewModel(
                     type = resolveApiEventType(state.selectedAiType)
                 )
                 if (response.isSuccessful) {
+                    if (_uiState.value.selectedFilter != state.selectedFilter ||
+                        _uiState.value.selectedServiceId != state.selectedServiceId ||
+                        _uiState.value.selectedCameraUuid != state.selectedCameraUuid ||
+                        _uiState.value.selectedAiType != state.selectedAiType
+                    ) {
+                        return@launch
+                    }
                     val allCameras = eventRepository.getCamerasInMemory().ifEmpty { state.cameraList }
                     val permittedNew = UserPermissionManager.filterEventsByPermissions(
-                        events = response.body() ?: emptyList(),
+                        events = (response.body() ?: emptyList()).filter { it.isWithinTimeRangeSeconds(from, to) },
                         allCameras = allCameras
                     )
                     if (permittedNew.isNotEmpty()) {
                         eventRepository.cacheInMemory(events = permittedNew)
                         var updatedList: List<EventData> = emptyList()
                         _uiState.update { s ->
-                            val merged = (permittedNew + s.events).distinctBy { it.uniqueKey() }
+                            val merged = (permittedNew + s.events.filter { it.isWithinTimeRangeSeconds(from, to) })
+                                .distinctBy { it.uniqueKey() }
                             updatedList = merged
                             s.copy(events = merged)
                         }
@@ -375,6 +393,8 @@ class EventViewModel(
             current.selectedCameraUuid == cameraUuid &&
             current.selectedAiType == aiType
         ) return
+        recentFetchJob?.cancel()
+        pendingNotifyRefresh = false
         _uiState.update {
             it.copy(
                 selectedFilter = filter,
@@ -425,6 +445,8 @@ class EventViewModel(
             val cameraUuid = startState.selectedCameraUuid
             val aiType = startState.selectedAiType
 
+            val (from, to) = getTimeRange(filter)
+
             // 1. Ưu tiên hiển thị ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate)
             val cachedData = eventRepository.getEventData(
                 filter = filter,
@@ -437,7 +459,9 @@ class EventViewModel(
                     eventRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
                 }
                 val permittedCached = withContext(Dispatchers.Default) {
-                    cachedData.events.permittedDistinct(rawCachedCameras)
+                    cachedData.events
+                        .filter { it.isWithinTimeRangeSeconds(from, to) }
+                        .permittedDistinct(rawCachedCameras)
                 }
                 lastFetchedRawId = permittedCached.lastOrNull()?.id
                 _uiState.update {
@@ -456,7 +480,14 @@ class EventViewModel(
                     )
                 }
             } else if (!isUserRefresh) {
-                _uiState.update { it.copy(isLoading = true, error = null, hasMore = true) }
+                _uiState.update {
+                    it.copy(
+                        isLoading = true,
+                        error = null,
+                        events = emptyList(),
+                        hasMore = true
+                    )
+                }
             }
 
             try {
@@ -486,7 +517,6 @@ class EventViewModel(
                         }
                     }
 
-                    val (from, to) = getTimeRange(filter)
                     val eventsDeferred = async {
                         fetchPermittedEventBatch(
                             startLastId = null,
@@ -528,7 +558,9 @@ class EventViewModel(
                     } else {
                         currentState.events
                     }
-                    val finalEvents = rawFinalEvents.permittedDistinct(allCameraList)
+                    val finalEvents = rawFinalEvents
+                        .filter { it.isWithinTimeRangeSeconds(from, to) }
+                        .permittedDistinct(allCameraList)
 
                     val failure = batchResult.firstError
                         ?: cameraResult?.exceptionOrNull()
