@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.features.home
 
 import android.app.Application
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -180,6 +181,7 @@ enum class TimeFilter(val title: String, val titleEn: String = title) {
     }
 }
 
+@Immutable
 data class HomeUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
@@ -191,8 +193,6 @@ data class HomeUiState(
     val cameraList: List<CameraModel> = emptyList(),
     val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
-    val cameraStatusMap: Map<String, String> = emptyMap(),
-    val recordStatusMap: Map<String, String> = emptyMap(),
     val totalDetectionsCount: Long = 0L,
     val totalCamerasCount: Int = 0,
     val onlineCamerasCount: Int = 0,
@@ -209,6 +209,9 @@ class HomeViewModel(
     private val dashboardRepository: DashboardRepository,
     private val webSocketManager: WebSocketManager
 ) : AndroidViewModel(application) {
+
+    @Volatile private var latestCameraStatusMap: Map<String, String> = webSocketManager.cameraStatusMap.value
+    @Volatile private var latestRecordStatusMap: Map<String, String> = webSocketManager.recordStatusMap.value
 
     private val _uiState = MutableStateFlow(buildInitialState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -236,11 +239,9 @@ class HomeViewModel(
         if (pendingCameraStatusRecompute) {
             pendingCameraStatusRecompute = false
             viewModelScope.launch(Dispatchers.Default) {
-                val camMap = webSocketManager.cameraStatusMap.value
-                val recMap = webSocketManager.recordStatusMap.value
-                _uiState.update {
-                    it.copy(cameraStatusMap = camMap, recordStatusMap = recMap).withRecomputedCameraMetrics()
-                }
+                latestCameraStatusMap = webSocketManager.cameraStatusMap.value
+                latestRecordStatusMap = webSocketManager.recordStatusMap.value
+                _uiState.update { it.withRecomputedCameraMetrics() }
             }
         }
         if (pendingNotifyRefresh && _uiState.value.selectedFilter == TimeFilter.TODAY) {
@@ -326,8 +327,9 @@ class HomeViewModel(
             webSocketManager.cameraStatusMap
                 .debounce(STATUS_DEBOUNCE_MS)
                 .collect { statusMap ->
+                    latestCameraStatusMap = statusMap
                     if (isHomeTabActive) {
-                        _uiState.update { it.copy(cameraStatusMap = statusMap).withRecomputedCameraMetrics() }
+                        _uiState.update { it.withRecomputedCameraMetrics() }
                     } else {
                         pendingCameraStatusRecompute = true
                     }
@@ -337,8 +339,9 @@ class HomeViewModel(
             webSocketManager.recordStatusMap
                 .debounce(STATUS_DEBOUNCE_MS)
                 .collect { recMap ->
+                    latestRecordStatusMap = recMap
                     if (isHomeTabActive) {
-                        _uiState.update { it.copy(recordStatusMap = recMap).withRecomputedCameraMetrics() }
+                        _uiState.update { it.withRecomputedCameraMetrics() }
                     } else {
                         pendingCameraStatusRecompute = true
                     }
@@ -952,6 +955,8 @@ class HomeViewModel(
     }
 
     private fun HomeUiState.withRecomputedCameraMetrics(): HomeUiState {
+        val statusMap = latestCameraStatusMap
+        val recMap = latestRecordStatusMap
         val totalCams = if (UserPermissionManager.isCustomCameraPermission()) {
             cameraList.size
         } else {
@@ -965,10 +970,10 @@ class HomeViewModel(
             totalCams
         } else {
             cameraList.count { cam ->
-                val wsStatus = cameraStatusMap["cam-0-${cam.id}"]
-                    ?: cameraStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
-                    ?: cameraStatusMap["cam-${cam.vmsId}-${cam.id}"]
-                    ?: cameraStatusMap["cam-${cam.id}"]
+                val wsStatus = statusMap["cam-0-${cam.id}"]
+                    ?: statusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                    ?: statusMap["cam-${cam.vmsId}-${cam.id}"]
+                    ?: statusMap["cam-${cam.id}"]
                 var isOffline = wsStatus == "red"
                 if (!isOffline) {
                     val issues = cam.extra?.latestReport?.issues
@@ -981,15 +986,22 @@ class HomeViewModel(
         }
 
         val recordingCams = cameraList.count { cam ->
-            val wsRecStatus = recordStatusMap["cam-0-${cam.id}"]
-                ?: recordStatusMap["cam-${cam.vmsId}-${cam.cameraId}"]
-                ?: recordStatusMap["cam-${cam.vmsId}-${cam.id}"]
-                ?: recordStatusMap["cam-${cam.id}"]
+            val wsRecStatus = recMap["cam-0-${cam.id}"]
+                ?: recMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                ?: recMap["cam-${cam.vmsId}-${cam.id}"]
+                ?: recMap["cam-${cam.id}"]
             if (wsRecStatus != null) {
                 wsRecStatus == "green"
             } else {
                 cam.enableRecord || cam.extra?.recording == true || cam.extra?.recordStatus == "green"
             }
+        }
+
+        if (totalCamerasCount == totalCams &&
+            onlineCamerasCount == onlineCams &&
+            recordingCamerasCount == recordingCams
+        ) {
+            return this
         }
 
         return copy(

@@ -13,14 +13,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tenli.oneview.ui.theme.spacing
 import kotlin.math.PI
 import kotlin.math.cos
@@ -57,25 +63,46 @@ fun WaveDotsLoading(
     }
     val containerSize = remember(dotSize) { dotSize * CLUSTER_CONTAINER_FACTOR }
 
-    val transition = rememberInfiniteTransition(label = "clusterDots")
-    val rotationDeg by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = ROTATION_DURATION_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "clusterRotation"
-    )
-    val phaseMs by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = PULSE_CYCLE_DURATION_MS.toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = PULSE_CYCLE_DURATION_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "clusterPulse"
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val rotationDeg: Float
+    val phaseMs: Float
+    if (isStarted) {
+        val transition = rememberInfiniteTransition(label = "clusterDots")
+        val animRotation by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = ROTATION_DURATION_MS, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "clusterRotation"
+        )
+        val animPhase by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = PULSE_CYCLE_DURATION_MS.toFloat(),
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = PULSE_CYCLE_DURATION_MS, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "clusterPulse"
+        )
+        rotationDeg = animRotation
+        phaseMs = animPhase
+    } else {
+        rotationDeg = 0f
+        phaseMs = 0f
+    }
 
     Box(
         modifier = modifier

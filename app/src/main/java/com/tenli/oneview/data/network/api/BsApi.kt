@@ -12,11 +12,13 @@ import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Header
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.QueryMap
+import retrofit2.http.Url
 
 interface BsApi {
 
@@ -69,6 +71,12 @@ interface BsApi {
 
     @DELETE("ts/api/v1/notification-tokens/{token}")
     suspend fun unregisterNotificationToken(@Path("token") token: String): Response<Any>
+
+    @DELETE
+    suspend fun unregisterNotificationTokenExt(
+        @Url url: String,
+        @Header("Authorization") authHeader: String
+    ): Response<Any>
 
     @GET("ts/api/v1/config/public")
     suspend fun getPublicConfig(@Query("client_id") clientId: String = "oneview-android"): Response<PublicConfigModel>

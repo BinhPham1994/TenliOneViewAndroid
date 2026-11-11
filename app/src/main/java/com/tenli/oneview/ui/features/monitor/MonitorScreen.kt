@@ -2190,7 +2190,7 @@ private fun CameraEventsTabContent(
             verticalArrangement = Arrangement.spacedBy(spacing.space10)
         ) {
             if (uiState.isLoadingCameraEvents && uiState.cameraEvents.isEmpty()) {
-                item(key = "cam_event_loading") {
+                item(key = "cam_event_loading", contentType = "state") {
                     Box(
                         modifier = Modifier.fillParentMaxSize(),
                         contentAlignment = Alignment.Center
@@ -2201,7 +2201,7 @@ private fun CameraEventsTabContent(
                     }
                 }
             } else if (uiState.cameraEvents.isEmpty()) {
-                item(key = "cam_event_empty") {
+                item(key = "cam_event_empty", contentType = "state") {
                     Box(
                         modifier = Modifier.fillParentMaxSize(),
                         contentAlignment = Alignment.Center
@@ -2212,7 +2212,8 @@ private fun CameraEventsTabContent(
             } else {
                 items(
                     items = uiState.cameraEvents,
-                    key = { event -> "cam_ev_${event.uniqueKey()}" }
+                    key = { event -> "cam_ev_${event.uniqueKey()}" },
+                    contentType = { "cam_event_card" }
                 ) { event ->
                     Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
                         MobileEventCard(
@@ -2225,8 +2226,8 @@ private fun CameraEventsTabContent(
                     }
                 }
 
-                if (uiState.isPaginatingCameraEvents || (uiState.hasMoreCameraEvents && !uiState.isLoadingCameraEvents)) {
-                    item(key = "cam_event_paging") {
+                if (uiState.isPaginatingCameraEvents) {
+                    item(key = "cam_event_paging", contentType = "paging") {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()

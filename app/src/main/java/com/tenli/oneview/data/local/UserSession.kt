@@ -80,6 +80,7 @@ object UserSession {
         saveSession(prefs)
     }
 
+    @Synchronized
     fun clear() {
         userData = null
         accessToken = ""
@@ -90,6 +91,7 @@ object UserSession {
         UserPermissionManager.reset()
     }
 
+    @Synchronized
     fun saveSession(prefs: SharedPreferences?) {
         val userDataJson = gson.toJson(this.userData)
         prefs?.edit { putString(AppKeys.USER_DATA_KEY, userDataJson) }

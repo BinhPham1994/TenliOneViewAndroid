@@ -14,10 +14,11 @@ import kotlinx.coroutines.flow.flowOn
 import java.util.concurrent.ConcurrentHashMap
 
 class NetworkMonitor(context: Context, private val dispatcherProvider: DispatcherProvider) {
-    private val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val appContext = context.applicationContext
+    private val connectivityManager = appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     init {
-        init(context)
+        init(appContext)
     }
 
     /**
@@ -49,21 +50,29 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
         }
 
         // Send initial state and seed onlineNetworks so initial callbacks don't cause a false offline flicker
-        val activeNetwork = connectivityManager.activeNetwork
-        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
-        val isInitiallyOnline = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        if (isInitiallyOnline && activeNetwork != null) {
-            onlineNetworks.add(activeNetwork)
-        }
+        val isInitiallyOnline = runCatching {
+            val activeNetwork = connectivityManager.activeNetwork
+            val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
+            val online = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+            if (online && activeNetwork != null) {
+                onlineNetworks.add(activeNetwork)
+            }
+            online
+        }.getOrDefault(true)
         trySend(isInitiallyOnline)
 
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivityManager.registerNetworkCallback(request, callback)
+        val registered = runCatching {
+            connectivityManager.registerNetworkCallback(request, callback)
+            true
+        }.getOrDefault(false)
 
         awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
+            if (registered) {
+                runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+            }
         }
     }.conflate().distinctUntilChanged().flowOn(dispatcherProvider.io)
 

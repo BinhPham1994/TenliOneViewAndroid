@@ -77,13 +77,20 @@ class TokenAuthenticator : Authenticator {
             return null
         }
 
-        // Token lúc request bị 401
-        val failedToken = UserSession.accessToken
+        // Token thực tế đã gửi kèm request bị 401 (đọc từ request header thay vì biến toàn cục để chống đua luồng 401 lệch nhịp)
+        val failedToken = response.request.header("Authorization")
+            ?.removePrefix("Bearer ")
+            ?.removePrefix("bearer ")
+            ?.trim()
+            .orEmpty()
 
         synchronized(lock) {
-            // Kiểm tra xem thread khác đã re-login thành công chưa
+            // Kiểm tra xem thread khác đã re-login thành công chưa (hoặc phiên đã bị đăng xuất)
             val currentToken = UserSession.accessToken
-            if (currentToken.isNotEmpty() && currentToken != failedToken) {
+            if (currentToken.isEmpty()) {
+                return null
+            }
+            if (failedToken.isNotEmpty() && currentToken != failedToken) {
                 // Token đã được thread khác cập nhật → dùng luôn token mới
                 Log.d(TAG, "Token đã được cập nhật bởi thread khác → dùng token mới")
                 return response.request.newBuilder()
@@ -158,9 +165,20 @@ class TokenAuthenticator : Authenticator {
                 return null
             }
 
+            // Chống ghi đè "zombie token" nếu người dùng đã bấm Đăng xuất hoặc đổi tài khoản/domain trong lúc chờ HTTP re-login
+            if (UserSession.accessToken.isEmpty() ||
+                UserSession.domain != domain ||
+                UserSession.savedUsername != username
+            ) {
+                Log.w(TAG, "Phiên đăng nhập đã thay đổi hoặc đăng xuất trong lúc re-login → huỷ cập nhật token")
+                return null
+            }
+
             // Cập nhật UserSession
-            UserSession.accessToken = tokenModel.token
-            UserSession.refreshToken = tokenModel.token
+            synchronized(UserSession) {
+                UserSession.accessToken = tokenModel.token
+                UserSession.refreshToken = tokenModel.token
+            }
 
             // Cập nhật SharedPreferences
             try {

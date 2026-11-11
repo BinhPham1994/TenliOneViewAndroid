@@ -66,10 +66,8 @@ object PermissionUtils {
     fun openEmergencyCallPermissionSettings(context: Context, preferManufacturerSettings: Boolean = false) {
         val pkgUri = Uri.parse("package:${context.packageName}")
         if (!Settings.canDrawOverlays(context)) {
-            if (preferManufacturerSettings) {
-                openManufacturerPermissions(context)
-                return
-            }
+            // Luôn ưu tiên mở đúng màn cấp quyền "Hiển thị trên ứng dụng khác" (ACTION_MANAGE_OVERLAY_PERMISSION)
+            // vì isEmergencyCallPermissionGranted kiểm tra trực tiếp Settings.canDrawOverlays(context).
             try {
                 context.startActivity(
                     Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkgUri).apply {
@@ -78,6 +76,10 @@ object PermissionUtils {
                 )
                 return
             } catch (_: Exception) {
+                if (preferManufacturerSettings) {
+                    openManufacturerPermissions(context)
+                    return
+                }
             }
         }
 

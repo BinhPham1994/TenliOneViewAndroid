@@ -177,7 +177,7 @@ fun EventScreen(
                         }
                     }
 
-                    if (uiState.isPaginating || (uiState.hasMore && !uiState.isLoading)) {
+                    if (uiState.isPaginating) {
                         item(key = "paging_indicator", contentType = CONTENT_TYPE_PAGING) {
                             Box(
                                 modifier = Modifier

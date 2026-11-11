@@ -77,6 +77,9 @@ class EventRepository(
     fun getCamerasInMemory(): List<CameraModel> =
         EventCacheManager.getCamerasInMemory()
 
+    fun getCameraNameMapInMemory(): Map<String, String> =
+        EventCacheManager.getCameraNameMapInMemory()
+
     fun getAiServicesInMemory(): List<AIServiceModel> =
         EventCacheManager.getAiServicesInMemory()
 

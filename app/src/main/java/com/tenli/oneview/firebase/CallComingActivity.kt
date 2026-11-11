@@ -221,10 +221,20 @@ class CallComingActivity : ComponentActivity() {
         val next = intent.toIncomingCall()
         cancelCallNotification(previous.eventId, previous.notificationId)
         cancelCallNotification(next.eventId, next.notificationId)
+        if (next.eventId.isNotEmpty() && next.eventId == previous.eventId) {
+            if (ringtone?.isPlaying != true) startRinging()
+            return
+        }
         setIntent(intent)
         viewModel.onIncomingCall(next)
         if (ringtone?.isPlaying != true) startRinging()
         scheduleTimeout()
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Tắt chuông & rung khi người dùng chủ động bấm nút Home / chuyển sang ứng dụng khác
+        stopRinging()
     }
 
     override fun onDestroy() {
@@ -1021,12 +1031,18 @@ private fun CallSnapshotPlaceholder(isEn: Boolean) {
 }
 
 private fun showMissedCallNotification(context: Context, title: String, eId: String) {
-    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+    val notifId = if (eId.isNotEmpty()) eId.hashCode() + 1 else (System.currentTimeMillis().toInt() + 1)
+    val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(context).startsWith("en", ignoreCase = true)
 
-    // Intent khi bấm vào thông báo nhỡ sẽ mở app vào sự kiện đó
+    // Intent khi bấm vào thông báo nhỡ sẽ mở app vào sự kiện đó và tự huỷ thông báo
     val intent = Intent(context, MainActivity::class.java).apply {
         putExtra(EXTRA_EVENT_ID, eId)
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        putExtra("FROM_NOTIFICATION", true)
+        putExtra(EXTRA_NOTIFICATION_ID, notifId)
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP
     }
 
     val splashOptions = when {
@@ -1047,26 +1063,29 @@ private fun showMissedCallNotification(context: Context, title: String, eId: Str
     val pendingIntent = runCatching {
         PendingIntent.getActivity(
             context,
-            eId.hashCode() + 1, // ID khác với cuộc gọi đang reo
+            notifId, // ID khác với cuộc gọi đang reo
             intent,
             piFlags,
             splashOptions
         )
     }.getOrElse {
-        PendingIntent.getActivity(context, eId.hashCode() + 1, intent, piFlags)
+        PendingIntent.getActivity(context, notifId, intent, piFlags)
     }
+
+    val missedTitle = if (isEn) "Missed alert: $title" else "Cuộc gọi nhỡ: $title"
+    val missedBody = if (isEn) "Tap to view security alert event" else "Bấm để xem lại sự kiện cảnh báo"
 
     val missedCallBuilder = NotificationCompat.Builder(context, MISSED_CALL_CHANNEL_ID) // Dùng kênh cảnh báo thường
         .setSmallIcon(R.mipmap.app_icon_notify)
-        .setContentTitle("Cuộc gọi nhỡ: $title")
-        .setContentText("Bấm để xem lại sự kiện cảnh báo")
+        .setContentTitle(missedTitle)
+        .setContentText(missedBody)
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .setAutoCancel(true)
         .setContentIntent(pendingIntent)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
     runCatching {
-        notificationManager.notify(eId.hashCode() + 1, missedCallBuilder.build())
+        notificationManager.notify(notifId, missedCallBuilder.build())
     }
 }
 

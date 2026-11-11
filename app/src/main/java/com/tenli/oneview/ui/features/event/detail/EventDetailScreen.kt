@@ -9,12 +9,10 @@ import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -34,7 +32,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -46,7 +43,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -78,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
@@ -112,12 +109,15 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.Coil
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.compose.rememberAsyncImagePainter
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.AppConfirmDialog
@@ -155,7 +155,6 @@ import com.tenli.oneview.ui.utils.AiTypeHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 enum class EventMediaTab(val titleVi: String, val titleEn: String) {
     LIVE_CAMERA("Live Camera", "Live Camera"),
@@ -331,7 +330,9 @@ fun EventDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .offset { IntOffset(0, sheetOffsetY.value.roundToInt()) }
+                .graphicsLayer {
+                    translationY = sheetOffsetY.value
+                }
                 .clip(sheetShape)
                 .background(colors.pageBg),
             contentAlignment = Alignment.TopCenter
@@ -369,7 +370,11 @@ fun EventDetailScreen(
                         isEn = isEn
                     )
                 }
-                val cameraMap = remember(uiState.cameraList) { buildCameraNameMap(uiState.cameraList) }
+                val cameraMap = if (uiState.cameraNameMap.isNotEmpty()) {
+                    uiState.cameraNameMap
+                } else {
+                    remember(uiState.cameraList) { buildCameraNameMap(uiState.cameraList) }
+                }
 
                 Column(
                     modifier = Modifier
@@ -885,7 +890,13 @@ private fun MediaTabSelector(
     val pillShape = RoundedCornerShape(spacing.radiusSmall)
     val selectedTabIndex = MediaTabs.indexOf(selectedTab).coerceAtLeast(0)
 
-    BoxWithConstraints(
+    val pillIndex by animateFloatAsState(
+        targetValue = selectedTabIndex.toFloat(),
+        animationSpec = tween(durationMillis = 260, easing = SegmentEasing),
+        label = "mediaSegmentIndicator"
+    )
+
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = spacing.space10, end = spacing.space10, top = spacing.space6, bottom = spacing.space12)
@@ -894,19 +905,14 @@ private fun MediaTabSelector(
             .background(tabsTrackBg)
             .padding(spacing.space3)
     ) {
-        val segmentWidth = maxWidth / MediaTabs.size
-        val pillOffset by animateDpAsState(
-            targetValue = segmentWidth * selectedTabIndex,
-            animationSpec = tween(durationMillis = 280, easing = SegmentEasing),
-            label = "mediaSegmentIndicator"
-        )
-
-        // Sliding Active Pill – offset đọc trong pha layout nên animation không gây recompose
+        // Sliding Active Pill – dịch chuyển trực tiếp trên GPU RenderThread, không dùng BoxWithConstraints (SubcomposeLayout)
         Box(
             modifier = Modifier
-                .offset { IntOffset(pillOffset.roundToPx(), 0) }
-                .width(segmentWidth)
+                .fillMaxWidth(1f / MediaTabs.size)
                 .fillMaxHeight()
+                .graphicsLayer {
+                    translationX = pillIndex * size.width
+                }
                 .shadow(
                     elevation = spacing.space2,
                     shape = pillShape,
@@ -994,7 +1000,9 @@ private fun MediaViewport(
     ) {
         AnimatedContent(
             targetState = selectedTab,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds(),
             transitionSpec = {
                 val isForward = MediaTabs.indexOf(targetState) >= MediaTabs.indexOf(initialState)
                 val enterSlide = slideInHorizontally(
@@ -1005,7 +1013,7 @@ private fun MediaViewport(
                     animationSpec = tween(durationMillis = 250, easing = SlideEasing),
                     targetOffsetX = { fullWidth -> if (isForward) -fullWidth else fullWidth }
                 )
-                (enterSlide togetherWith exitSlide).using(SizeTransform(clip = true))
+                enterSlide togetherWith exitSlide
             },
             label = "mediaViewportTransition"
         ) { activeMediaTab ->
@@ -1018,6 +1026,7 @@ private fun MediaViewport(
                     hasSubStream = hasSubStream,
                     channel = liveStreamChannel,
                     snapshotUrl = display.imageUrl ?: liveCameraSnapshotUrl,
+                    isCameraFallbackSnapshot = display.imageUrl.isNullOrEmpty(),
                     isLoading = liveStreamLoading,
                     error = liveStreamError,
                     streamUrl = liveStreamUrl,
@@ -1064,6 +1073,7 @@ private fun LiveCameraPane(
     hasSubStream: Boolean,
     channel: Int,
     snapshotUrl: String?,
+    isCameraFallbackSnapshot: Boolean = false,
     isLoading: Boolean,
     error: String?,
     streamUrl: String?,
@@ -1117,7 +1127,9 @@ private fun LiveCameraPane(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            currentOnStop()
+            if (currentIsActive) {
+                currentOnStop()
+            }
         }
     }
     LaunchedEffect(showInfo, autoHideToken, isPlaying) {
@@ -1185,14 +1197,13 @@ private fun LiveCameraPane(
                 contentAlignment = Alignment.Center
             ) {
                 if (!snapshotUrl.isNullOrEmpty()) {
-                    val previewRequest = remember(snapshotUrl) {
-                        ImageRequest.Builder(context)
-                            .data(snapshotUrl)
-                            .size(1280, 720)
-                            .precision(Precision.INEXACT)
-                            .allowHardware(true)
-                            .crossfade(false)
-                            .build()
+                    val previewRequest = remember(snapshotUrl, cameraId, isCameraFallbackSnapshot) {
+                        buildEventPreviewImageRequest(
+                            context = context,
+                            imageUrl = snapshotUrl,
+                            cameraId = cameraId,
+                            isCameraFallback = isCameraFallbackSnapshot
+                        )
                     }
                     AsyncImage(
                         model = previewRequest,
@@ -1427,6 +1438,68 @@ private fun LiveCameraPane(
     }
 }
 
+private fun findCachedEventImageKey(
+    context: Context,
+    imageUrl: String,
+    cameraId: Int = 0
+): String? {
+    val memCache = Coil.imageLoader(context).memoryCache ?: return null
+    fun has(key: String): Boolean = memCache[MemoryCache.Key(key)] != null
+
+    val fullKey = "${imageUrl}_1280x720"
+    if (has(fullKey)) return fullKey
+    val gridKey = "${imageUrl}_800x450"
+    if (has(gridKey)) return gridKey
+    val mediumKey = "${imageUrl}_480x270"
+    if (has(mediumKey)) return mediumKey
+    val listKey = "${imageUrl}_420x236"
+    if (has(listKey)) return listKey
+    if (cameraId > 0) {
+        val liveCamKey = MonitorCacheManager.liveStageMemCacheKey(cameraId, imageUrl)
+        if (has(liveCamKey)) return liveCamKey
+        val camCardKey = MonitorCacheManager.cardMemCacheKey(cameraId, imageUrl)
+        if (has(camCardKey)) return camCardKey
+    }
+    if (has(imageUrl)) return imageUrl
+    return null
+}
+
+private fun buildEventPreviewImageRequest(
+    context: Context,
+    imageUrl: String,
+    cameraId: Int = 0,
+    isCameraFallback: Boolean = false
+): ImageRequest {
+    val targetMemKey = if (isCameraFallback && cameraId > 0) {
+        MonitorCacheManager.liveStageMemCacheKey(cameraId, imageUrl)
+    } else {
+        "${imageUrl}_1280x720"
+    }
+    val placeholderKey = findCachedEventImageKey(context, imageUrl, cameraId)
+    return ImageRequest.Builder(context)
+        .data(MonitorCacheManager.coilDataModel(imageUrl))
+        .size(1280, 720)
+        .precision(Precision.INEXACT)
+        .allowHardware(true)
+        .crossfade(false)
+        .memoryCacheKey(targetMemKey)
+        .apply {
+            if (!imageUrl.startsWith("file://")) {
+                diskCacheKey(
+                    if (isCameraFallback && cameraId > 0) {
+                        MonitorCacheManager.diskCacheKey(cameraId, imageUrl)
+                    } else {
+                        imageUrl.substringBefore('?')
+                    }
+                )
+            }
+            if (placeholderKey != null) {
+                placeholderMemoryCacheKey(placeholderKey)
+            }
+        }
+        .build()
+}
+
 @Composable
 private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isEn: Boolean) {
     val context = LocalContext.current
@@ -1435,13 +1508,7 @@ private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isE
         if (imageUrl.isNullOrEmpty()) {
             null
         } else {
-            ImageRequest.Builder(context)
-                .data(imageUrl)
-                .size(1280, 720)
-                .precision(Precision.INEXACT)
-                .allowHardware(true)
-                .crossfade(false)
-                .build()
+            buildEventPreviewImageRequest(context = context, imageUrl = imageUrl)
         }
     }
     if (request != null && !imageLoadError) {
@@ -1733,6 +1800,8 @@ private fun EvidenceCropThumbnail(
             .precision(Precision.INEXACT)
             .allowHardware(true)
             .crossfade(false)
+            .memoryCacheKey("${url}_crop_$decodeSizePx")
+            .diskCacheKey(url.substringBefore('?'))
             .build()
     }
 

@@ -1,6 +1,7 @@
 package com.tenli.oneview.firebase
 
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -13,6 +14,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.model.network.NotificationTokenRegisterModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -234,6 +236,7 @@ object FcmTokenManager {
                         logWarn { "[Server PublicConfig] GET /ts/api/v1/config/public trả về HTTP ${pubResp.code()}" }
                     }
                 }.onFailure { e ->
+                    if (e is CancellationException) throw e
                     logWarn { "[Server PublicConfig] Lỗi khi kiểm tra /ts/api/v1/config/public: ${e.message}" }
                 }
 
@@ -357,6 +360,8 @@ object FcmTokenManager {
                     }
                     null
                 }
+            } catch (t: CancellationException) {
+                throw t
             } catch (t: Throwable) {
                 logError(t) { "❌ [EXCEPTION KHI ĐĂNG KÝ FCM TOKEN] ${t.message}" }
                 null
@@ -368,12 +373,25 @@ object FcmTokenManager {
      * Huỷ đăng ký FCM token trên backend `DELETE /ts/api/v1/notification-tokens/{token}`
      * và xoá token cục bộ (`FirebaseMessaging.deleteToken()`) giống `unregisterDevicePushToken` trong `firebaseMessaging.ts`
      * để khi đăng nhập tài khoản mới trên cùng thiết bị sẽ được cấp FCM token mới hoàn toàn.
-     * Lưu ý: Phải gọi **trước khi** xoá `UserSession.accessToken` khi đăng xuất để request có `Bearer` token hợp lệ.
+     * Cho phép truyền [explicitDomain] & [explicitAccessToken] đã snapshot trước khi xoá [UserSession]
+     * để tránh race condition rò rỉ token trong lúc chờ mạng khi đăng xuất.
      */
-    suspend fun unregisterDevicePushToken(deleteLocalToken: Boolean = true) = withContext(Dispatchers.IO) {
+    suspend fun unregisterDevicePushToken(
+        deleteLocalToken: Boolean = true,
+        explicitDomain: String? = null,
+        explicitAccessToken: String? = null
+    ) = withContext(Dispatchers.IO) {
         registerMutex.withLock {
             try {
-                UserSession.ensureRestored()
+                if (explicitDomain.isNullOrBlank() && explicitAccessToken.isNullOrBlank()) {
+                    UserSession.ensureRestored()
+                }
+                val effectiveDomain = (explicitDomain?.takeIf { it.isNotBlank() } ?: UserSession.domain)
+                    .trim()
+                    .trimEnd('/')
+                val effectiveAccessToken = (explicitAccessToken?.takeIf { it.isNotBlank() } ?: UserSession.accessToken)
+                    .trim()
+
                 val prefs = runCatching { GlobalData.preferences }.getOrNull()
                 val targetToken = prefs?.getString(PREF_REGISTERED_TOKEN, null)?.takeIf { it.isNotBlank() }
                     ?: prefs?.getString(PREF_LATEST_DEVICE_TOKEN, null)?.takeIf { it.isNotBlank() }
@@ -391,13 +409,17 @@ object FcmTokenManager {
                     }
                 }
 
-                if (!targetToken.isNullOrBlank() && UserSession.accessToken.isNotEmpty()) {
+                if (!targetToken.isNullOrBlank() && effectiveAccessToken.isNotEmpty() && effectiveDomain.isNotEmpty()) {
                     logInfo {
-                        "[HUỶ ĐĂNG KÝ FCM] DELETE /ts/api/v1/notification-tokens/${targetToken.take(24)}... | user=${currentUserIdentifier()}"
+                        "[HUỶ ĐĂNG KÝ FCM] DELETE $effectiveDomain/ts/api/v1/notification-tokens/${targetToken.take(24)}..."
                     }
                     withTimeoutOrNull(UNREGISTER_TIMEOUT_MS) {
                         runCatching {
-                            ApiProvider.bsApi.unregisterNotificationToken(targetToken)
+                            val encodedToken = Uri.encode(targetToken)
+                            ApiProvider.bsApi.unregisterNotificationTokenExt(
+                                url = "$effectiveDomain/ts/api/v1/notification-tokens/$encodedToken",
+                                authHeader = "Bearer $effectiveAccessToken"
+                            )
                         }.onSuccess { resp ->
                             logInfo {
                                 val errBody = if (!resp.isSuccessful) {
@@ -406,12 +428,13 @@ object FcmTokenManager {
                                 "[HUỶ ĐĂNG KÝ FCM] Kết quả HTTP ${resp.code()}${if (errBody != null) " | errorBody=$errBody" else ""}"
                             }
                         }.onFailure { err ->
+                            if (err is CancellationException) throw err
                             logWarn { "[HUỶ ĐĂNG KÝ FCM] Lỗi: ${err.message}" }
                         }
                     }
                 } else {
                     logWarn {
-                        "[HUỶ ĐĂNG KÝ FCM] Bỏ qua gọi DELETE vì hasToken=${!targetToken.isNullOrBlank()}, hasAccessToken=${UserSession.accessToken.isNotEmpty()}"
+                        "[HUỶ ĐĂNG KÝ FCM] Bỏ qua gọi DELETE vì hasToken=${!targetToken.isNullOrBlank()}, hasAccessToken=${effectiveAccessToken.isNotEmpty()}"
                     }
                 }
 
@@ -419,6 +442,8 @@ object FcmTokenManager {
                     logInfo { "[HUỶ ĐĂNG KÝ FCM] Xoá FCM token cục bộ (FirebaseMessaging.deleteToken) để cấp mới cho phiên sau..." }
                     awaitDeleteDefaultFcmToken()
                 }
+            } catch (t: CancellationException) {
+                throw t
             } catch (t: Throwable) {
                 logWarn(t) { "[HUỶ ĐĂNG KÝ FCM] Exception: ${t.message}" }
             }

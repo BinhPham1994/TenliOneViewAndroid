@@ -60,6 +60,7 @@ private val sharedWsStreamClient: OkHttpClient by lazy {
         .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+        .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 }
 
@@ -124,7 +125,7 @@ fun LiveStreamPlayer(
     var isPlaying by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var isError by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var hasCapturedFrame by remember(cameraId, wsUrl) { mutableStateOf(false) }
-    var playerViewRef by remember(cameraId, wsUrl) { mutableStateOf<PlayerView?>(null) }
+    val playerViewHolder = remember(cameraId, wsUrl) { arrayOfNulls<PlayerView>(1) }
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentIsPaused by rememberUpdatedState(effectivePaused)
@@ -156,7 +157,7 @@ fun LiveStreamPlayer(
         val boundCameraId = cameraId
         if (isPlaying && !effectivePaused && !hasCapturedFrame && boundCameraId > 0) {
             delay(900L)
-            if (captureCurrentFrameToCache(boundCameraId, playerViewRef)) {
+            if (captureCurrentFrameToCache(boundCameraId, playerViewHolder[0])) {
                 hasCapturedFrame = true
             }
         }
@@ -221,6 +222,7 @@ fun LiveStreamPlayer(
                 /* bufferForPlaybackMs = */ 100,
                 /* bufferForPlaybackAfterRebufferMs = */ 300
             )
+            .setTargetBufferBytes(8 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .setBackBuffer(0, false)
             .build()
@@ -250,7 +252,7 @@ fun LiveStreamPlayer(
     LaunchedEffect(effectivePaused, exoPlayer) {
         if (effectivePaused) {
             if (isPlaying && !hasCapturedFrame && cameraId > 0) {
-                if (captureCurrentFrameToCache(cameraId, playerViewRef)) {
+                if (captureCurrentFrameToCache(cameraId, playerViewHolder[0])) {
                     hasCapturedFrame = true
                 }
             }
@@ -259,6 +261,7 @@ fun LiveStreamPlayer(
                 exoPlayer.stop()
             }
         } else if (exoPlayer.playbackState == Player.STATE_IDLE) {
+            isError = false
             exoPlayer.prepare()
             exoPlayer.playWhenReady = true
         } else {
@@ -270,11 +273,11 @@ fun LiveStreamPlayer(
         val boundCameraId = cameraId
         onDispose {
             if (isPlaying && !hasCapturedFrame && boundCameraId > 0) {
-                captureCurrentFrameToCache(boundCameraId, playerViewRef)
+                captureCurrentFrameToCache(boundCameraId, playerViewHolder[0])
             }
             exoPlayer.removeListener(playerListener)
-            playerViewRef?.player = null
-            playerViewRef = null
+            playerViewHolder[0]?.player = null
+            playerViewHolder[0] = null
             exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()
@@ -291,7 +294,7 @@ fun LiveStreamPlayer(
             factory = { ctx ->
                 android.view.LayoutInflater.from(ctx).inflate(com.tenli.oneview.R.layout.view_exo_texture, null).apply {
                     (this as PlayerView).apply {
-                        playerViewRef = this
+                        playerViewHolder[0] = this
                         player = exoPlayer
                         useController = false
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -301,16 +304,18 @@ fun LiveStreamPlayer(
             },
             update = { view ->
                 (view as PlayerView).let {
-                    playerViewRef = it
-                    it.player = exoPlayer
+                    playerViewHolder[0] = it
+                    if (it.player !== exoPlayer) {
+                        it.player = exoPlayer
+                    }
                     if (it.resizeMode != targetResizeMode) {
                         it.resizeMode = targetResizeMode
                     }
                 }
             },
             onRelease = { view ->
-                if (playerViewRef === view) {
-                    playerViewRef = null
+                if (playerViewHolder[0] === view) {
+                    playerViewHolder[0] = null
                 }
                 (view as? PlayerView)?.player = null
             },

@@ -48,7 +48,17 @@ class MainViewModel(
     private val webSocketManager: WebSocketManager
 ) : AndroidViewModel(application) {
 
-    private val _uiState = MutableStateFlow(MainUiState())
+    private val _uiState = MutableStateFlow(
+        run {
+            UserPermissionManager.syncFromUserSession()
+            val perm = UserPermissionManager.permissionState.value
+            MainUiState(
+                accountName = resolveAccountName(),
+                canAccessEvents = perm.canAccessEvents,
+                canAccessLiveStream = perm.canAccessLiveStream
+            )
+        }
+    )
     val uiState = _uiState.asStateFlow()
 
     private val _event = MutableSharedFlow<MainEvent>()
@@ -75,11 +85,23 @@ class MainViewModel(
 
     private fun localized(en: String, vi: String): String = if (isEnglish) en else vi
 
+    private fun resolveAccountName(): String =
+        UserSession.userData?.name?.takeIf { it.isNotBlank() }
+            ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
+            ?: ""
+
     init {
         UserPermissionManager.syncFromUserSession()
         viewModelScope.launch {
             var lastPermVersion = UserPermissionManager.permissionState.value.version
             UserPermissionManager.permissionState.collect { permState ->
+                _uiState.update {
+                    it.copy(
+                        accountName = resolveAccountName(),
+                        canAccessEvents = permState.canAccessEvents,
+                        canAccessLiveStream = permState.canAccessLiveStream
+                    )
+                }
                 if (permState.version != lastPermVersion) {
                     lastPermVersion = permState.version
                     val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
@@ -122,13 +144,17 @@ class MainViewModel(
             if (UserSession.accessToken.isEmpty()) return@launch
             runCatching {
                 UserPermissionManager.fetchAndApplyPermissions()
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
             }
             if (UserSession.accessToken.isEmpty()) return@launch
             if (UserPermissionManager.canAccessEvents()) {
                 syncNotificationSettingsAndRegisterToken()
             } else {
                 logInfo { "[SYNC CẤU HÌNH] Tài khoản không có quyền xem sự kiện AI -> hủy đăng ký FCM token nếu có" }
-                runCatching { FcmTokenManager.unregisterDevicePushToken() }
+                runCatching { FcmTokenManager.unregisterDevicePushToken() }.onFailure { e ->
+                    if (e is CancellationException) throw e
+                }
             }
         }
     }
@@ -281,7 +307,9 @@ class MainViewModel(
             try {
                 // Đồng bộ lại quyền mới nhất của user từ server để danh sách bài AI luôn khớp phân quyền hiện tại
                 withContext(Dispatchers.IO) {
-                    runCatching { UserPermissionManager.fetchAndApplyPermissions() }
+                    runCatching { UserPermissionManager.fetchAndApplyPermissions() }.onFailure { e ->
+                        if (e is CancellationException) throw e
+                    }
                 }
                 logInfo {
                     "[TẢI CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | hasCachedPref=$hasCachedPref, cachedEnabled=$cachedEnabled | ${currentAccountDebugInfo()}"
@@ -394,6 +422,7 @@ class MainViewModel(
                             FcmTokenManager.unregisterDevicePushToken()
                         }
                     }.onFailure { tokenErr ->
+                        if (tokenErr is CancellationException) throw tokenErr
                         logWarn(tokenErr) { "⚠️ [LƯU CẤU HÌNH] Lỗi đồng bộ FCM token sau khi PUT thành công: ${tokenErr.message}" }
                     }
                 } else {
@@ -522,6 +551,8 @@ class MainViewModel(
             } else {
                 null
             }
+        }.onFailure { e ->
+            if (e is CancellationException) throw e
         }.getOrNull()
     }
 
@@ -620,6 +651,7 @@ class MainViewModel(
                     )
                 )
                 if (resp.isSuccessful) {
+                    UserSession.savedPassword = ""
                     GlobalData.preferences.edit {
                         remove(AppKeys.PASSWORD_KEY)
                     }

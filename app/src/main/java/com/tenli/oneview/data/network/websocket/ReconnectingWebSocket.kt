@@ -111,10 +111,11 @@ abstract class ReconnectingWebSocket(
             reconnectJob = null
             val ws = webSocket
             webSocket = null
-            try {
-                ws?.close(NORMAL_CLOSURE, "User disconnected")
-            } catch (_: Exception) {
-                runCatching { ws?.cancel() }
+            if (ws != null) {
+                val closedGracefully = runCatching { ws.close(NORMAL_CLOSURE, "User disconnected") }.getOrDefault(false)
+                if (!closedGracefully) {
+                    runCatching { ws.cancel() }
+                }
             }
         }
     }
@@ -126,26 +127,34 @@ abstract class ReconnectingWebSocket(
         private fun isCurrent(ws: WebSocket) = ws === this@ReconnectingWebSocket.webSocket
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            if (!isCurrent(webSocket)) {
-                runCatching { webSocket.close(NORMAL_CLOSURE, null) }
-                return
-            }
-            if (BuildConfig.DEBUG) Log.d(logTag, "Connected")
-            isConnecting = false
-            isConnected = true
-            hasReceivedMessage = false
-            reconnectDelay = INITIAL_RECONNECT_DELAY_MS
-            reconnectJob?.cancel()
-            send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
-            // Khớp websocketReport.ts: gửi lại subscribe 1 lần sau 3.5s nếu chưa nhận dữ liệu
-            subscribeRetryJob?.cancel()
-            subscribeRetryJob = scope.launch {
-                delay(SUBSCRIBE_RETRY_DELAY_MS)
-                if (isCurrent(webSocket) && isConnected && !hasReceivedMessage) {
-                    send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
+            synchronized(lock) {
+                if (!isCurrent(webSocket) || manuallyDisconnected) {
+                    runCatching {
+                        if (!webSocket.close(NORMAL_CLOSURE, null)) webSocket.cancel()
+                    }
+                    return
                 }
+                if (BuildConfig.DEBUG) Log.d(logTag, "Connected")
+                isConnecting = false
+                isConnected = true
+                hasReceivedMessage = false
+                reconnectDelay = INITIAL_RECONNECT_DELAY_MS
+                reconnectJob?.cancel()
+                reconnectJob = null
+                // Khớp websocketReport.ts: gửi lại subscribe 1 lần sau 3.5s nếu chưa nhận dữ liệu
+                subscribeRetryJob?.cancel()
+                subscribeRetryJob = scope.launch {
+                    delay(SUBSCRIBE_RETRY_DELAY_MS)
+                    val shouldRetry = synchronized(lock) {
+                        isCurrent(webSocket) && isConnected && !manuallyDisconnected && !hasReceivedMessage
+                    }
+                    if (shouldRetry) {
+                        send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
+                    }
+                }
+                startHeartbeat()
             }
-            startHeartbeat()
+            send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -163,35 +172,38 @@ abstract class ReconnectingWebSocket(
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (!isCurrent(webSocket)) return
             if (BuildConfig.DEBUG) Log.d(logTag, "Closed: $reason")
-            handleDisconnect()
+            handleDisconnect(webSocket)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!isCurrent(webSocket)) return
             if (BuildConfig.DEBUG) Log.w(logTag, "Failure: ${t.message}")
-            handleDisconnect()
+            handleDisconnect(webSocket)
         }
     }
 
-    private fun handleDisconnect() {
-        isConnecting = false
-        isConnected = false
-        hasReceivedMessage = false
-        subscribeRetryJob?.cancel()
-        subscribeRetryJob = null
-        stopHeartbeat()
-        webSocket = null
-        if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
-            scheduleReconnect()
+    private fun handleDisconnect(ws: WebSocket) {
+        synchronized(lock) {
+            if (ws !== this.webSocket) return
+            isConnecting = false
+            isConnected = false
+            hasReceivedMessage = false
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = null
+            stopHeartbeat()
+            webSocket = null
+            if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+                scheduleReconnectLocked()
+            }
         }
     }
 
     private fun startHeartbeat() {
         stopHeartbeat()
         heartbeatJob = scope.launch {
-            while (isActive && isConnected) {
+            while (isActive && isConnected && !manuallyDisconnected) {
                 delay(HEARTBEAT_INTERVAL_MS)
-                if (isConnected) send(PING_MESSAGE)
+                if (isConnected && !manuallyDisconnected) send(PING_MESSAGE)
             }
         }
     }
@@ -201,7 +213,7 @@ abstract class ReconnectingWebSocket(
         heartbeatJob = null
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnectLocked() {
         if (manuallyDisconnected || reconnectJob?.isActive == true || rawUrl.isEmpty() || UserSession.accessToken.isEmpty()) return
 
         val currentDelay = reconnectDelay + Random.nextLong(RECONNECT_JITTER_MS)
@@ -221,7 +233,7 @@ abstract class ReconnectingWebSocket(
         private const val MAX_RECONNECT_DELAY_MS = 30_000L
         private const val RECONNECT_JITTER_MS = 1_000L
         private const val BACKOFF_MULTIPLIER = 1.5
-        private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val HEARTBEAT_INTERVAL_MS = 30_000L
         private const val SUBSCRIBE_RETRY_DELAY_MS = 3_500L
         private val PING_MESSAGE = mapOf("action" to "ping")
         private val TOKEN_PARAM_REGEX = Regex("([?&])token=[^&]*(&|$)")

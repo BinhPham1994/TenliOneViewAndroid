@@ -53,6 +53,12 @@ object EventCacheManager {
     private var inMemoryCameras: List<CameraModel> = emptyList()
 
     @Volatile
+    private var cameraNameMapSource: List<CameraModel> = emptyList()
+
+    @Volatile
+    private var inMemoryCameraNameMap: Map<String, String> = emptyMap()
+
+    @Volatile
     private var inMemoryAiServices: List<AIServiceModel> = emptyList()
 
     @Volatile
@@ -174,6 +180,24 @@ object EventCacheManager {
     }
 
     fun getCamerasInMemory(): List<CameraModel> = inMemoryCameras
+
+    fun getCameraNameMapInMemory(): Map<String, String> {
+        val cameras = inMemoryCameras
+        if (cameras.isEmpty()) return emptyMap()
+        if (cameras === cameraNameMapSource && inMemoryCameraNameMap.isNotEmpty()) {
+            return inMemoryCameraNameMap
+        }
+        val map = HashMap<String, String>(cameras.size)
+        for (cam in cameras) {
+            val uuid = cam.extra?.uuid
+            if (!uuid.isNullOrBlank()) {
+                map[uuid] = cam.name
+            }
+        }
+        cameraNameMapSource = cameras
+        inMemoryCameraNameMap = map
+        return map
+    }
 
     fun getAiServicesInMemory(): List<AIServiceModel> = inMemoryAiServices
 
@@ -302,6 +326,8 @@ object EventCacheManager {
         inMemoryDatasetCache.evictAll()
         inMemoryRelatedEvents.evictAll()
         inMemoryCameras = emptyList()
+        cameraNameMapSource = emptyList()
+        inMemoryCameraNameMap = emptyMap()
         inMemoryAiServices = emptyList()
         inMemoryProfiles = emptyList()
         inMemoryProfileGroups = emptyList()

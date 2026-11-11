@@ -21,16 +21,20 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil.Coil
 import coil.compose.AsyncImage
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
+import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.ui.theme.appColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -60,7 +64,9 @@ fun VideoPlayer(
     val context = LocalContext.current
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
     var isActuallyPlaying by remember(videoUrl) { mutableStateOf(false) }
-    var playerViewRef by remember(videoUrl) { mutableStateOf<PlayerView?>(null) }
+    val playerViewHolder = remember(videoUrl) { arrayOfNulls<PlayerView>(1) }
+    val savedResumePositionMs = remember(videoUrl) { longArrayOf(C.TIME_UNSET) }
+    val wasStoppedForBackground = remember(videoUrl) { booleanArrayOf(false) }
     val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
     val colors = MaterialTheme.appColors
     val containerBg = colors.surface
@@ -139,7 +145,11 @@ fun VideoPlayer(
                     .setConnectTimeoutMs(10_000)
                     .setReadTimeoutMs(15_000)
                     .setAllowCrossProtocolRedirects(true)
-                    .setDefaultRequestProperties(mapOf("Authorization" to "Bearer $deviceKey"))
+                    .apply {
+                        if (deviceKey.isNotBlank() && !VideoFrameCache.isPresignedUrl(videoUrl)) {
+                            setDefaultRequestProperties(mapOf("Authorization" to "Bearer $deviceKey"))
+                        }
+                    }
                 setMediaSource(
                     androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
                         .createMediaSource(MediaItem.fromUri(videoUrl))
@@ -165,7 +175,12 @@ fun VideoPlayer(
         try {
             if (playWhenReady) {
                 if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                    val resumePos = savedResumePositionMs[0]
                     exoPlayer.prepare()
+                    if (resumePos != C.TIME_UNSET && resumePos > 0L) {
+                        exoPlayer.seekTo(resumePos)
+                        savedResumePositionMs[0] = C.TIME_UNSET
+                    }
                 } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
                     exoPlayer.seekTo(0)
                 }
@@ -186,8 +201,8 @@ fun VideoPlayer(
         onDispose {
             isActuallyPlaying = false
             exoPlayer.removeListener(playerListener)
-            playerViewRef?.player = null
-            playerViewRef = null
+            playerViewHolder[0]?.player = null
+            playerViewHolder[0] = null
             exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()
@@ -197,25 +212,53 @@ fun VideoPlayer(
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
-                suppressPlayWhenReadyCallback[0] = true
-                try {
-                    exoPlayer.pause()
-                } finally {
-                    suppressPlayWhenReadyCallback[0] = false
-                }
-            } else if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                if (currentPlayWhenReady && exoPlayer.playbackState != Player.STATE_ENDED) {
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
                     suppressPlayWhenReadyCallback[0] = true
                     try {
-                        if (exoPlayer.playbackState == Player.STATE_IDLE) {
-                            exoPlayer.prepare()
-                        }
-                        exoPlayer.play()
+                        exoPlayer.pause()
                     } finally {
                         suppressPlayWhenReadyCallback[0] = false
                     }
                 }
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                    suppressPlayWhenReadyCallback[0] = true
+                    try {
+                        if (exoPlayer.playbackState != Player.STATE_IDLE && exoPlayer.playbackState != Player.STATE_ENDED) {
+                            savedResumePositionMs[0] = exoPlayer.currentPosition.coerceAtLeast(0L)
+                            wasStoppedForBackground[0] = true
+                            isActuallyPlaying = false
+                            exoPlayer.stop()
+                        } else {
+                            exoPlayer.pause()
+                        }
+                    } finally {
+                        suppressPlayWhenReadyCallback[0] = false
+                    }
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
+                    val stoppedForBg = wasStoppedForBackground[0]
+                    wasStoppedForBackground[0] = false
+                    if (currentPlayWhenReady && exoPlayer.playbackState != Player.STATE_ENDED) {
+                        suppressPlayWhenReadyCallback[0] = true
+                        try {
+                            if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                                val resumePos = savedResumePositionMs[0]
+                                exoPlayer.prepare()
+                                if (resumePos != C.TIME_UNSET && resumePos > 0L) {
+                                    exoPlayer.seekTo(resumePos)
+                                    savedResumePositionMs[0] = C.TIME_UNSET
+                                }
+                            }
+                            exoPlayer.play()
+                        } finally {
+                            suppressPlayWhenReadyCallback[0] = false
+                        }
+                    } else if (stoppedForBg && !currentPlayWhenReady) {
+                        isVideoReady = false
+                    }
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -238,10 +281,10 @@ fun VideoPlayer(
     androidx.compose.runtime.LaunchedEffect(isVideoReady, isError, showControllerInitially) {
         if (isVideoReady && !isError) {
             if (showControllerInitially) {
-                playerViewRef?.showController()
+                playerViewHolder[0]?.showController()
                 currentOnControllerVisibilityChange(true)
             } else {
-                playerViewRef?.hideController()
+                playerViewHolder[0]?.hideController()
                 currentOnControllerVisibilityChange(false)
             }
         }
@@ -260,7 +303,7 @@ fun VideoPlayer(
         AndroidView(factory = { ctx ->
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
-                    playerViewRef = this
+                    playerViewHolder[0] = this
                     useController = true
                     controllerAutoShow = showControllerInitially
                     controllerHideOnTouch = true
@@ -290,7 +333,7 @@ fun VideoPlayer(
             }
         }, update = { view ->
             (view as PlayerView).let {
-                playerViewRef = it
+                playerViewHolder[0] = it
                 it.controllerAutoShow = showControllerInitially
                 if (it.player !== exoPlayer) {
                     it.player = exoPlayer
@@ -307,8 +350,8 @@ fun VideoPlayer(
                 }
             }
         }, onRelease = { view ->
-            if (playerViewRef === view) {
-                playerViewRef = null
+            if (playerViewHolder[0] === view) {
+                playerViewHolder[0] = null
             }
             (view as? PlayerView)?.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
             (view as? PlayerView)?.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
@@ -344,12 +387,33 @@ fun VideoPlayer(
             ) {
                 if (!thumbnailUrl.isNullOrEmpty()) {
                     val thumbRequest = remember(thumbnailUrl) {
+                        val memCache = Coil.imageLoader(context).memoryCache
+                        val placeholderKey = if (memCache != null) {
+                            listOf(
+                                "${thumbnailUrl}_1280x720",
+                                "${thumbnailUrl}_800x450",
+                                "${thumbnailUrl}_480x270",
+                                "${thumbnailUrl}_420x236",
+                                thumbnailUrl
+                            ).firstOrNull { key -> memCache[MemoryCache.Key(key)] != null }
+                        } else {
+                            null
+                        }
                         ImageRequest.Builder(context)
-                            .data(thumbnailUrl)
+                            .data(MonitorCacheManager.coilDataModel(thumbnailUrl))
                             .size(1280, 720)
                             .precision(Precision.INEXACT)
                             .allowHardware(true)
                             .crossfade(false)
+                            .memoryCacheKey("${thumbnailUrl}_1280x720")
+                            .apply {
+                                if (!thumbnailUrl.startsWith("file://")) {
+                                    diskCacheKey(thumbnailUrl.substringBefore('?'))
+                                }
+                                if (placeholderKey != null) {
+                                    placeholderMemoryCacheKey(placeholderKey)
+                                }
+                            }
                             .build()
                     }
                     AsyncImage(

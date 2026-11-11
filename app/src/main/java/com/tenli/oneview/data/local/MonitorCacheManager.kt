@@ -177,6 +177,7 @@ object MonitorCacheManager {
         persistJob?.cancel()
         persistJob = ioScope.launch {
             delay(SNAPSHOT_PERSIST_DEBOUNCE_MS)
+            if (UserSession.accessToken.isEmpty()) return@launch
             val now = System.currentTimeMillis()
             val cleanMap = HashMap<String, SnapshotCacheItem>(snapshotMap.size)
             for ((id, item) in snapshotMap.entries) {
@@ -298,12 +299,16 @@ object MonitorCacheManager {
                 val targetW = (bitmap.width * scale).toInt().coerceAtLeast(1)
                 val targetH = (bitmap.height * scale).toInt().coerceAtLeast(1)
                 val scaled = if (targetW != bitmap.width || targetH != bitmap.height) {
-                    Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+                    Bitmap.createScaledBitmap(bitmap, targetW, targetH, true).also { created ->
+                        if (created !== bitmap && !bitmap.isRecycled) {
+                            bitmap.recycle()
+                        }
+                    }
                 } else {
                     bitmap
                 }
                 if (UserSession.accessToken.isEmpty()) {
-                    if (scaled !== bitmap) scaled.recycle()
+                    if (!scaled.isRecycled) scaled.recycle()
                     return@launch
                 }
                 val outFile = File(getSnapshotImageDir(appContext), "cam_${cameraId}.jpg")
@@ -358,26 +363,34 @@ object MonitorCacheManager {
 
     fun clearCache(context: Context) {
         inMemoryMonitorData = null
+        snapshotsLoaded = false
         persistJob?.cancel()
         try {
-            val file = getCacheFile(context)
+            val appContext = context.applicationContext
+            val file = getCacheFile(appContext)
             if (file.exists()) {
                 file.delete()
             }
-            val snapFile = getSnapshotCacheFile(context)
+            val snapFile = getSnapshotCacheFile(appContext)
             if (snapFile.exists()) {
                 snapFile.delete()
             }
-            deleteLegacySnapshotCacheFiles(context)
-            getSnapshotImageDir(context).listFiles()?.forEach { it.delete() }
+            deleteLegacySnapshotCacheFiles(appContext)
+            getSnapshotImageDir(appContext).listFiles()?.forEach { it.delete() }
             snapshotMap.clear()
             sessionRefreshedAtMap.clear()
             failedPlaybackThumbUrls.clear()
             runCatching {
-                context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE).edit().clear().apply()
+                appContext.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE).edit().clear().apply()
             }
             runCatching {
-                Coil.imageLoader(context.applicationContext).memoryCache?.clear()
+                val imageLoader = Coil.imageLoader(appContext)
+                imageLoader.memoryCache?.clear()
+                @OptIn(coil.annotation.ExperimentalCoilApi::class)
+                imageLoader.diskCache?.clear()
+            }
+            runCatching {
+                com.tenli.oneview.ui.component.VideoFrameCache.clear(appContext)
             }
         } catch (e: Exception) {
             e.printStackTrace()

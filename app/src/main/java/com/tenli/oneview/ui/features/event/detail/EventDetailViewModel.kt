@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.features.event.detail
 
 import android.app.Application
 import android.util.Log
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -23,11 +24,8 @@ import com.tenli.oneview.model.network.ParamPlateModel
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.features.event.directProfileId
 import com.tenli.oneview.ui.features.event.directProfileUuid
-import com.tenli.oneview.ui.features.event.eventTimeToMillis
 import com.tenli.oneview.ui.features.event.eventTimeToSeconds
-import com.tenli.oneview.ui.features.event.formatVideoQueryTime
 import com.tenli.oneview.ui.features.event.moveToStartOfDay
-import com.tenli.oneview.ui.features.event.parseVideoQueryTime
 import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
@@ -77,11 +75,13 @@ enum class JourneyPeriod(val code: String, private val timeFilter: TimeFilter) {
     val isCustom: Boolean get() = this == CUSTOM_DATE || this == CUSTOM_RANGE
 }
 
+@Immutable
 data class EventDetailUiState(
     val baseEvent: EventData? = null,
     val event: EventData? = null,
     val camera: CameraModel? = null,
     val cameraList: List<CameraModel> = emptyList(),
+    val cameraNameMap: Map<String, String> = emptyMap(),
     val relatedEvents: List<EventData> = emptyList(),
     val isJourneyLoading: Boolean = false,
     val selectedJourneyPeriod: JourneyPeriod = JourneyPeriod.TODAY,
@@ -95,11 +95,6 @@ data class EventDetailUiState(
     val liveStreamError: String? = null,
     val liveStreamChannel: Int = 1,
     val liveCameraSnapshotUrl: String? = null,
-    val originalVideoUrl: String? = null,
-    val originalVideoSeekTimeMs: Long? = null,
-    val originalVideoEventPositionMs: Long? = null,
-    val originalVideoLoading: Boolean = false,
-    val originalVideoError: String? = null,
     val aiServices: List<AIServiceModel> = emptyList(),
     val profileList: List<BsProfileModel> = emptyList(),
     val profileGroupList: List<BsProfileGroupModel> = emptyList()
@@ -126,6 +121,7 @@ class EventDetailViewModel(
                 event = initialEvent,
                 camera = initialCamera,
                 cameraList = initialCameras,
+                cameraNameMap = eventRepository.getCameraNameMapInMemory(),
                 liveCameraSnapshotUrl = initialSnap?.let { raw ->
                     val trimmed = raw.trim()
                     if (trimmed.isEmpty() || trimmed == "NO_IMAGE") null
@@ -148,7 +144,6 @@ class EventDetailViewModel(
 
     private var relatedEventsJob: Job? = null
     private var licensePlateJob: Job? = null
-    private var originalVideoJob: Job? = null
     private var liveStreamJob: Job? = null
     private var liveRetryCount: Int = 0
     private var liveFallbackTried: Boolean = false
@@ -169,6 +164,7 @@ class EventDetailViewModel(
         viewModelScope.launch {
             try {
                 var foundEvent = _uiState.value.event
+                val hadInitialEvent = foundEvent != null
                 var cameraList = _uiState.value.cameraList
 
                 if (foundEvent == null) {
@@ -211,10 +207,15 @@ class EventDetailViewModel(
                             event = foundEvent,
                             camera = resolvedCam,
                             cameraList = cameraList,
+                            cameraNameMap = eventRepository.getCameraNameMapInMemory(),
                             isLoading = false,
                             isJourneyLoading = true
                         )
                     }
+                } else {
+                    // Khi sự kiện đã có sẵn trong RAM, nhường 100% CPU/GPU cho hiệu ứng trượt mở màn hình
+                    // trước khi khởi chạy các API phụ trợ & parse JSON danh sách Lịch sử xuất hiện.
+                    delay(200L)
                 }
 
                 // Gọi API lấy danh sách Lịch sử xuất hiện (Sự kiện liên quan) ở phần dưới màn hình
@@ -222,7 +223,10 @@ class EventDetailViewModel(
                 val needProfiles = eventNeedsProfiles(foundEvent)
                 val needProfilesForRelated = needProfiles && _uiState.value.profileList.isEmpty()
 
-                if (!needProfilesForRelated) {
+                if (!needProfilesForRelated && (!hadInitialEvent || _uiState.value.relatedEvents.isEmpty())) {
+                    loadRelatedEvents()
+                } else if (!needProfilesForRelated) {
+                    // Đã có sẵn relatedEvents trong RAM, vẫn làm mới ngầm nhẹ nhàng
                     loadRelatedEvents()
                 }
 
@@ -285,6 +289,7 @@ class EventDetailViewModel(
                             it.copy(
                                 camera = camera ?: it.camera,
                                 cameraList = finalCameras,
+                                cameraNameMap = eventRepository.getCameraNameMapInMemory(),
                                 liveCameraSnapshotUrl = resolvedSnap ?: it.liveCameraSnapshotUrl,
                                 aiServices = finalAiServices,
                                 profileList = finalProfiles,
@@ -303,7 +308,9 @@ class EventDetailViewModel(
                         cameras = cameraList,
                         aiServices = current.aiServices
                     )
-                    _uiState.update { it.copy(isLoading = false) }
+                    if (_uiState.value.isLoading) {
+                        _uiState.update { it.copy(isLoading = false) }
+                    }
                 }
 
                 if (needProfilesForRelated) {
@@ -324,9 +331,8 @@ class EventDetailViewModel(
         }
     }
 
-    /** Đổi sự kiện đang xem (ảnh/video/thông tin), hủy tải video gốc & luồng live của sự kiện trước. */
+    /** Đổi sự kiện đang xem (ảnh/video/thông tin), hủy luồng live của sự kiện trước. */
     private fun showEvent(event: EventData) {
-        originalVideoJob?.cancel()
         liveStreamJob?.cancel()
         liveRetryCount = 0
         liveFallbackTried = false
@@ -342,10 +348,7 @@ class EventDetailViewModel(
                 liveStreamUrl = null,
                 liveStreamLoading = false,
                 liveStreamError = null,
-                liveCameraSnapshotUrl = resolvedSnap,
-                originalVideoUrl = null,
-                originalVideoLoading = false,
-                originalVideoError = null
+                liveCameraSnapshotUrl = resolvedSnap
             )
         }
     }
@@ -882,84 +885,6 @@ class EventDetailViewModel(
         }
     }
 
-    fun loadOriginalVideo() {
-        val state = _uiState.value
-        val event = state.event ?: return
-        val isEn = isEnglishLocale
-        val camera = state.camera ?: resolveCameraForEvent(event, state.cameraList)
-
-        if (camera == null) {
-            _uiState.update {
-                it.copy(
-                    originalVideoLoading = false,
-                    originalVideoError = if (isEn) "Original video unavailable" else "Video không khả dụng"
-                )
-            }
-            return
-        }
-
-        if (state.originalVideoUrl != null || state.originalVideoLoading) {
-            return
-        }
-
-        originalVideoJob?.cancel()
-        originalVideoJob = viewModelScope.launch {
-            _uiState.update { it.copy(originalVideoLoading = true, originalVideoError = null) }
-            try {
-                val eventTimeMs = eventTimeToMillis(event.time)
-                val fromMs = eventTimeMs - ORIGINAL_VIDEO_LOOKBACK_MS
-
-                val response = eventRepository.getVideoList(
-                    camera = camera.id,
-                    count = 1,
-                    from = formatVideoQueryTime(fromMs),
-                    to = formatVideoQueryTime(eventTimeMs)
-                )
-                val videoItem = if (response.isSuccessful) response.body()?.firstOrNull() else null
-                when {
-                    !response.isSuccessful -> _uiState.update {
-                        it.copy(
-                            originalVideoLoading = false,
-                            originalVideoError = if (isEn) "Error fetching original video" else "Lỗi khi lấy video gốc"
-                        )
-                    }
-
-                    videoItem != null && videoItem.videoLink.isNotEmpty() -> {
-                        val videoStartMs = parseVideoQueryTime(videoItem.time) ?: 0L
-                        val diffSeconds = (eventTimeMs - videoStartMs) / 1000
-                        val seekSeconds = (diffSeconds - 10L).coerceIn(0L, 61L)
-
-                        _uiState.update {
-                            it.copy(
-                                originalVideoUrl = resolveFullMediaUrl(videoItem.videoLink),
-                                originalVideoSeekTimeMs = seekSeconds * 1000,
-                                originalVideoEventPositionMs = diffSeconds * 1000,
-                                originalVideoLoading = false
-                            )
-                        }
-                    }
-
-                    else -> _uiState.update {
-                        it.copy(
-                            originalVideoLoading = false,
-                            originalVideoError = if (isEn) "Original video unavailable" else "Video không khả dụng"
-                        )
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Error loading original video", e)
-                _uiState.update {
-                    it.copy(
-                        originalVideoLoading = false,
-                        originalVideoError = if (isEn) "Error loading video" else "Lỗi khi tải video"
-                    )
-                }
-            }
-        }
-    }
-
     fun reportEventAsFalse(eventId: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
         val isEn = isEnglishLocale
         viewModelScope.launch {
@@ -983,8 +908,6 @@ class EventDetailViewModel(
         private const val TAG = "EventDetailVM"
         /** Cửa sổ ±15 giây quanh thời điểm sự kiện để tìm biển số liên quan */
         private const val PLATE_WINDOW_SEC = 15L
-        /** Video gốc lấy từ 61 giây trước thời điểm sự kiện */
-        private const val ORIGINAL_VIDEO_LOOKBACK_MS = 61_000L
         private const val LIVE_POLL_MAX_ATTEMPTS = 10
         private const val LIVE_POLL_INTERVAL_MS = 2000L
 

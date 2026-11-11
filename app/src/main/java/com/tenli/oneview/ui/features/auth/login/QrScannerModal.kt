@@ -210,12 +210,27 @@ private fun CameraQrPreview(
     val currentOnQrDetected by rememberUpdatedState(onQrCodeRawDetected)
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    val isDisposed = remember { booleanArrayOf(false) }
+    val cameraProviderHolder = remember { arrayOfNulls<ProcessCameraProvider>(1) }
+    val imageAnalysisHolder = remember { arrayOfNulls<ImageAnalysis>(1) }
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
     var currentZoomRatio by remember { mutableFloatStateOf(1.5f) }
 
     DisposableEffect(Unit) {
         onDispose {
+            isDisposed[0] = true
+            mainHandler.removeCallbacksAndMessages(null)
+            runCatching {
+                if (isTorchOn) {
+                    cameraRef?.cameraControl?.enableTorch(false)
+                }
+            }
+            runCatching { imageAnalysisHolder[0]?.clearAnalyzer() }
+            runCatching { cameraProviderHolder[0]?.unbindAll() }
+            imageAnalysisHolder[0] = null
+            cameraProviderHolder[0] = null
+            cameraRef = null
             cameraExecutor.shutdown()
         }
     }
@@ -298,7 +313,12 @@ private fun CameraQrPreview(
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
-                    val cameraProvider = cameraProviderFuture.get()
+                    val cameraProvider = runCatching { cameraProviderFuture.get() }.getOrNull() ?: return@addListener
+                    if (isDisposed[0]) {
+                        runCatching { cameraProvider.unbindAll() }
+                        return@addListener
+                    }
+                    cameraProviderHolder[0] = cameraProvider
 
                     // Tăng độ phân giải phân tích lên Full HD (1920x1080) thay vì mặc định 640x480
                     // để đọc rõ các mã QR mật độ cao (Version 7-9, ~49x49 modules) trên màn hình PC.
@@ -321,7 +341,9 @@ private fun CameraQrPreview(
 
                     val qrAnalyzer = ZxingQrCodeAnalyzer { qrText ->
                         mainHandler.post {
-                            currentOnQrDetected(qrText)
+                            if (!isDisposed[0]) {
+                                currentOnQrDetected(qrText)
+                            }
                         }
                     }
 
@@ -330,6 +352,7 @@ private fun CameraQrPreview(
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
                         .also {
+                            imageAnalysisHolder[0] = it
                             it.setAnalyzer(cameraExecutor, qrAnalyzer)
                         }
 

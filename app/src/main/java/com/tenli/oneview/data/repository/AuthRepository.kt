@@ -23,6 +23,7 @@ import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
@@ -168,12 +169,15 @@ class AuthRepository(
      */
     suspend fun clearAuthenticatedSession() {
         val appContext = context.applicationContext
+        val previousDomain = UserSession.domain
+        val previousAccessToken = UserSession.accessToken
+
+        // Xoá ngay UserSession trên RAM trước khi await bất kỳ I/O hay mạng nào để mọi interceptor,
+        // TokenAuthenticator, WebSocket và tác vụ ghi cache đang chạy dừng dùng token cũ ngay lập tức.
+        UserSession.clear()
         runCatching { NotificationManagerCompat.from(appContext).cancelAll() }
 
-        FcmTokenManager.unregisterDevicePushToken()
-        UserSession.clear()
-
-        withContext(Dispatchers.IO) {
+        withContext(NonCancellable + Dispatchers.IO) {
             val prefs = GlobalData.preferences
             val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
             prefs.edit {
@@ -199,6 +203,12 @@ class AuthRepository(
             HomeCacheManager.clearCache(appContext)
             EventCacheManager.clearCache(appContext)
             MonitorCacheManager.clearCache(appContext)
+
+            FcmTokenManager.unregisterDevicePushToken(
+                deleteLocalToken = true,
+                explicitDomain = previousDomain,
+                explicitAccessToken = previousAccessToken
+            )
         }
     }
 
@@ -233,7 +243,7 @@ class AuthRepository(
 
         return when {
             explicitHttp -> listOf("http://$hostPart", "https://$hostPart")
-            explicitHttps -> listOf("https://$hostPart", "http://$hostPart")
+            explicitHttps -> listOf("https://$hostPart")
             else -> listOf("https://$hostPart", "http://$hostPart")
         }
     }

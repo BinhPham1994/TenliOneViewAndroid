@@ -14,7 +14,6 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import com.google.gson.GsonBuilder
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
@@ -26,6 +25,7 @@ import com.tenli.oneview.di.AppContainer
 import com.tenli.oneview.di.DefaultAppContainer
 import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.service.NotificationChannels
+import com.tenli.oneview.ui.component.VideoFrameCache
 import com.tenli.oneview.ui.theme.ThemeManager
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
@@ -80,10 +80,7 @@ class TenliApp : Application(), ImageLoaderFactory {
 
         GlobalData.apply {
             preferences = getSharedPreferences(AppKeys.KEY_HOME_APP, MODE_PRIVATE)
-            gson = GsonBuilder()
-                .serializeNulls()
-                .registerTypeAdapterFactory(LoginAuthClient.KotlinDefaultValueAdapterFactory)
-                .create()
+            gson = LoginAuthClient.gson
         }
         // Khôi phục ngay phiên đăng nhập vào RAM (< 0.2ms) để SplashViewModel mở thẳng vào Main ở Frame 1
         runCatching { UserSession.ensureRestored(GlobalData.preferences) }
@@ -114,14 +111,14 @@ class TenliApp : Application(), ImageLoaderFactory {
 
         override fun onActivityStarted(activity: Activity) {
             if (startedCount++ == 0) {
-                appScope.launch { container.webSocketManager.onAppForegroundChanged(true) }
+                container.webSocketManager.onAppForegroundChanged(true)
             }
         }
 
         override fun onActivityStopped(activity: Activity) {
             startedCount = (startedCount - 1).coerceAtLeast(0)
             if (startedCount == 0 && !activity.isChangingConfigurations) {
-                appScope.launch { container.webSocketManager.onAppForegroundChanged(false) }
+                container.webSocketManager.onAppForegroundChanged(false)
             }
         }
 
@@ -130,6 +127,11 @@ class TenliApp : Application(), ImageLoaderFactory {
         override fun onActivityPaused(activity: Activity) = Unit
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
         override fun onActivityDestroyed(activity: Activity) = Unit
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        VideoFrameCache.trimMemory(level)
     }
 
     private fun setupBackgroundWorkers() {

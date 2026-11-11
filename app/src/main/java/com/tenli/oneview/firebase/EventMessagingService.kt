@@ -34,6 +34,7 @@ import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -349,9 +350,10 @@ class EventMessagingService : FirebaseMessagingService() {
         eId: String,
         requestCode: Int,
         fromNotification: Boolean,
-        notificationIdToCancel: Int = 0
+        notificationIdToCancel: Int = 0,
+        ctx: Context = this
     ): PendingIntent {
-        val intent = Intent(this, MainActivity::class.java).apply {
+        val intent = Intent(ctx, MainActivity::class.java).apply {
             putExtra(EXTRA_EVENT_ID, eId)
             if (fromNotification) putExtra(EXTRA_FROM_NOTIFICATION, true)
             if (notificationIdToCancel != 0) putExtra("NOTIFICATION_ID", notificationIdToCancel)
@@ -362,14 +364,14 @@ class EventMessagingService : FirebaseMessagingService() {
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         return runCatching {
             PendingIntent.getActivity(
-                this,
+                ctx,
                 requestCode,
                 intent,
                 flags,
                 splashIconOptionsBundle()
             )
         }.getOrElse {
-            PendingIntent.getActivity(this, requestCode, intent, flags)
+            PendingIntent.getActivity(ctx, requestCode, intent, flags)
         }
     }
 
@@ -408,37 +410,53 @@ class EventMessagingService : FirebaseMessagingService() {
         }
     }
 
-    private fun showMissedCallNotification(title: String, body: String, url: String?, eId: String) {
+    private fun showMissedCallNotification(
+        title: String,
+        body: String,
+        url: String?,
+        eId: String,
+        ctx: Context = this
+    ) {
         val notificationId = getSafeNotificationId(eId, 1)
 
-        val builder = NotificationCompat.Builder(this, NotificationChannels.EVENT)
+        val builder = NotificationCompat.Builder(ctx, NotificationChannels.EVENT)
             .setSmallIcon(R.mipmap.app_icon_notify)
-            .setContentTitle(getString(R.string.notif_missed_call_title, title))
-            .setContentText(getString(R.string.notif_missed_call_text, body.take(MISSED_CALL_BODY_PREVIEW)))
+            .setContentTitle(ctx.getString(R.string.notif_missed_call_title, title))
+            .setContentText(ctx.getString(R.string.notif_missed_call_text, body.take(MISSED_CALL_BODY_PREVIEW)))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
             .setAutoCancel(true)
-            .setContentIntent(eventDetailPendingIntent(eId, notificationId, fromNotification = false))
+            .setContentIntent(
+                eventDetailPendingIntent(
+                    eId = eId,
+                    requestCode = notificationId,
+                    fromNotification = true,
+                    notificationIdToCancel = notificationId,
+                    ctx = ctx
+                )
+            )
 
-        loadImageAndNotify(builder, url, notificationId)
+        loadImageAndNotify(builder, url, notificationId, ctx)
     }
 
     private fun loadImageAndNotify(
         builder: NotificationCompat.Builder,
         url: String?,
-        notificationId: Int
+        notificationId: Int,
+        ctx: Context = this
     ) {
-        val manager = NotificationManagerCompat.from(this)
+        val appCtx = ctx.applicationContext
+        val manager = NotificationManagerCompat.from(appCtx)
 
         // Gửi thông báo ngay lập tức để tránh process bị kill
         notifySafely(manager, notificationId, builder)
 
         if (url.isNullOrEmpty()) return
-        val app = applicationContext as? TenliApp ?: return
-        val loader = Coil.imageLoader(this)
+        val app = appCtx as? TenliApp ?: return
+        val loader = Coil.imageLoader(appCtx)
         // Giới hạn kích thước decode: ảnh thông báo không cần full-res → tiết kiệm RAM/CPU
-        val request = ImageRequest.Builder(this)
+        val request = ImageRequest.Builder(appCtx)
             .data(url)
             .size(NOTIFICATION_IMAGE_MAX_PX)
             .allowHardware(false)
@@ -449,6 +467,8 @@ class EventMessagingService : FirebaseMessagingService() {
                 builder.setLargeIcon(bitmap)
                 builder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
                 notifySafely(manager, notificationId, builder)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Load notification image failed: ${e.message}")
             }
@@ -541,29 +561,39 @@ class EventMessagingService : FirebaseMessagingService() {
 
         notifySafely(manager, notificationId, builder)
 
-        val launchCallScreen = Runnable {
-            try {
-                startActivity(callIntent)
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Cannot start call activity directly: ${e.message}")
+        val appCtx = applicationContext
+        var startedDirectly = false
+        try {
+            startActivity(callIntent)
+            startedDirectly = true
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Cannot start call activity directly: ${e.message}")
+        }
+        // Chỉ bồi thêm trên MainLooper nếu lần start trực tiếp bị từ chối khi tiến trình vừa cold-start
+        if (!startedDirectly) {
+            Handler(Looper.getMainLooper()).post {
+                if (!AppState.isShowCallActivity) {
+                    try {
+                        appCtx.startActivity(callIntent)
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Cannot start call activity on MainLooper: ${e.message}")
+                    }
+                }
             }
         }
-        // Gọi trực tiếp và bồi thêm trên MainLooper để đảm bảo bật màn hình Call kể cả khi tiến trình vừa cold-start từ trạng thái bị kill
-        launchCallScreen.run()
-        Handler(Looper.getMainLooper()).post(launchCallScreen)
 
         // Bảo hiểm trường hợp hệ điều hành chỉ hiển thị Heads-Up Notification mà chặn mở CallComingActivity:
         // Sau 30s tự động huỷ thông báo đang reo và chuyển thành thông báo cuộc gọi nhỡ
-        val app = applicationContext as? TenliApp
+        val app = appCtx as? TenliApp
         app?.appScope?.launch {
             delay(CALL_NOTIFICATION_TIMEOUT_MS + 500L)
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@launch
+            val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@launch
             val isStillActive = runCatching {
                 nm.activeNotifications.any { it.id == notificationId }
             }.getOrDefault(false)
             if (isStillActive && !AppState.isShowCallActivity) {
                 runCatching { nm.cancel(notificationId) }
-                showMissedCallNotification(title, body, url, eId)
+                showMissedCallNotification(title, body, url, eId, appCtx)
             }
         }
     }
@@ -596,7 +626,14 @@ class EventMessagingService : FirebaseMessagingService() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
             .setAutoCancel(true)
-            .setContentIntent(eventDetailPendingIntent(eId, notificationId, fromNotification = true))
+            .setContentIntent(
+                eventDetailPendingIntent(
+                    eId = eId,
+                    requestCode = notificationId,
+                    fromNotification = true,
+                    notificationIdToCancel = notificationId
+                )
+            )
 
         loadImageAndNotify(builder, url, notificationId)
     }

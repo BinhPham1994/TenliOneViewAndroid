@@ -1,5 +1,6 @@
 package com.tenli.oneview.ui.component
 
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -28,10 +29,13 @@ import androidx.compose.ui.res.painterResource
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.util.NetworkMonitor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
@@ -42,7 +46,7 @@ import android.graphics.Color as AndroidColor
 
 object VideoFrameCache {
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
-    private val cacheSize = (maxMemory / 10).coerceAtLeast(4096)
+    private val cacheSize = (maxMemory / 16).coerceAtLeast(4096)
     val cache = object : LruCache<String, Bitmap>(cacheSize) {
         override fun sizeOf(key: String, bitmap: Bitmap): Int {
             return bitmap.byteCount / 1024
@@ -60,6 +64,40 @@ object VideoFrameCache {
 
     // Giới hạn tối đa 2 MediaMetadataRetriever chạy đồng thời để chống nóng máy & nghẽn I/O khi cuộn nhanh
     val extractionSemaphore = Semaphore(2)
+
+    private val PRESIGNED_QUERY_KEYS = listOf(
+        "X-Amz-Signature",
+        "X-Amz-Algorithm",
+        "X-Amz-Credential",
+        "GoogleAccessId",
+        "Signature"
+    )
+
+    fun isPresignedUrl(url: String): Boolean {
+        val parsed = url.toHttpUrlOrNull() ?: return false
+        return PRESIGNED_QUERY_KEYS.any { parsed.queryParameter(it) != null }
+    }
+
+    @Suppress("DEPRECATION")
+    fun trimMemory(level: Int) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        ) {
+            cache.evictAll()
+        } else if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
+            cache.trimToSize(cache.maxSize() / 2)
+        }
+    }
+
+    fun clear(context: Context) {
+        cache.evictAll()
+        knownVideoUrls.clear()
+        failedUrls.clear()
+        runCatching {
+            File(context.cacheDir, "video_thumbs").listFiles()?.forEach { it.delete() }
+        }
+    }
 
     fun looksLikeVideoUrl(url: String?): Boolean {
         if (url.isNullOrBlank()) return false
@@ -129,7 +167,9 @@ fun VideoFrameImage(
                             VideoFrameCache.knownVideoUrls.add(effectiveKey)
                             isVideoFallback = true
                         } else if (effectiveKey.isNotEmpty()) {
-                            VideoFrameCache.failedUrls.add(effectiveKey)
+                            if (NetworkMonitor.isNetworkAvailable()) {
+                                VideoFrameCache.failedUrls.add(effectiveKey)
+                            }
                             isImageError = true
                         }
                     }
@@ -151,7 +191,9 @@ fun VideoFrameImage(
 
             val extracted = extractVideoFrameWithRange(context, url, effectiveKey)
             if (extracted == null) {
-                VideoFrameCache.failedUrls.add(effectiveKey)
+                if (NetworkMonitor.isNetworkAvailable()) {
+                    VideoFrameCache.failedUrls.add(effectiveKey)
+                }
                 hasError = true
             } else {
                 VideoFrameCache.cache.put(effectiveKey, extracted)
@@ -246,14 +288,14 @@ private suspend fun extractVideoFrameWithRange(
         VideoFrameCache.cache.get(cacheKey)?.let { return@withPermit it }
 
         var tempFile: File? = null
-        val retriever = MediaMetadataRetriever()
+        var retriever: MediaMetadataRetriever? = null
         try {
             val token = com.tenli.oneview.data.local.UserSession.accessToken
             val client = VideoFrameCache.rangeHttpClient
             val requestBuilder = Request.Builder()
                 .url(url)
                 .header("Range", "bytes=0-2097152") // First 2MB
-            if (token.isNotEmpty()) {
+            if (token.isNotEmpty() && !VideoFrameCache.isPresignedUrl(url)) {
                 requestBuilder.header("Authorization", "Bearer $token")
             }
             val request = requestBuilder.build()
@@ -275,14 +317,15 @@ private suspend fun extractVideoFrameWithRange(
             }
 
             val videoFile = tempFile ?: return@withPermit null
-            retriever.setDataSource(videoFile.absolutePath)
+            val mediaRetriever = MediaMetadataRetriever().also { retriever = it }
+            mediaRetriever.setDataSource(videoFile.absolutePath)
 
             val tryPoints = longArrayOf(100_000L, 1_000L, 500_000L)
             var bestFrame: Bitmap? = null
             var fallbackFrame: Bitmap? = null
 
             for (timeUs in tryPoints) {
-                val frame = decodeThumbnailFrame(retriever, timeUs) ?: continue
+                val frame = decodeThumbnailFrame(mediaRetriever, timeUs) ?: continue
                 if (getBrightness(frame) > 20f) {
                     bestFrame = frame
                     break
@@ -296,7 +339,7 @@ private suspend fun extractVideoFrameWithRange(
             if (bestFrame != null && fallbackFrame != null && fallbackFrame !== bestFrame) {
                 fallbackFrame.recycle()
             } else if (bestFrame == null) {
-                bestFrame = fallbackFrame ?: retriever.getFrameAtTime()
+                bestFrame = fallbackFrame ?: mediaRetriever.getFrameAtTime()
             }
 
             if (bestFrame != null) {
@@ -319,10 +362,16 @@ private suspend fun extractVideoFrameWithRange(
             }
 
             bestFrame
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         } finally {
-            runCatching { retriever.release() }
+            runCatching {
+                retriever?.let { r ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) r.close() else r.release()
+                }
+            }
             runCatching { tempFile?.delete() }
         }
     }
@@ -342,7 +391,9 @@ private fun getBrightness(bitmap: Bitmap): Float {
                 b += AndroidColor.blue(pixel)
             }
         }
-        scaled.recycle()
+        if (scaled !== bitmap) {
+            scaled.recycle()
+        }
         (r + g + b).toFloat() / 300f
     } catch (_: Exception) {
         100f

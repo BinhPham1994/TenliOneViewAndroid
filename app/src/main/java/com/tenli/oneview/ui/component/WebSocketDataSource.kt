@@ -22,6 +22,7 @@ class WebSocketDataSource(
     private val token: String? = null
 ) : BaseDataSource(true) {
 
+    @Volatile
     private var webSocket: WebSocket? = null
     private var dataSpec: DataSpec? = null
     // Giới hạn kích thước queue đủ chứa burst keyframe fMP4 mà không làm tràn bộ nhớ RAM
@@ -68,15 +69,26 @@ class WebSocketDataSource(
 
         try {
             webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
+                private fun isCurrentSocket(ws: WebSocket): Boolean = ws === this@WebSocketDataSource.webSocket
+
                 override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (!isOpen || !isCurrentSocket(webSocket)) {
+                        runCatching { webSocket.cancel() }
+                        return
+                    }
                     if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Opened")
                 }
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    if (isOpen) {
+                    if (isOpen && isCurrentSocket(webSocket)) {
                         val chunk = bytes.toByteArray()
                         if (!dataQueue.offer(chunk)) {
-                            dataQueue.poll()
-                            dataQueue.offer(chunk)
+                            // Không poll() bỏ 1 chunk giữa chừng vì làm hỏng cấu trúc moof/mdat của fMP4.
+                            // Báo lỗi tràn bộ đệm để LiveStreamPlayer tự kết nối lại luồng mới từ keyframe.
+                            isOpen = false
+                            error = IOException("WebSocket live buffer overflow")
+                            dataQueue.clear()
+                            dataQueue.offer(ByteArray(0))
+                            runCatching { webSocket.cancel() }
                         }
                     } else {
                         // Nếu player đã đóng mà server vẫn đẩy dữ liệu video xuống, ngắt ngay socket để tránh tốn băng thông & nóng máy
@@ -84,12 +96,14 @@ class WebSocketDataSource(
                     }
                 }
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (!isCurrentSocket(webSocket)) return
                     if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
                     isOpen = false
                     dataQueue.clear()
                     dataQueue.offer(ByteArray(0)) // Unblock read
                 }
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (!isCurrentSocket(webSocket)) return
                     if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
                     isOpen = false
                     error = IOException("WebSocket failure", t)

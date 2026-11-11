@@ -8,6 +8,7 @@ import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.CameraInfo
 import com.tenli.oneview.model.network.NotifyData
 import com.tenli.oneview.model.network.ReportPayload
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,11 +20,11 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Quản lý toàn bộ WebSocket realtime (Notify + Report từng VMS).
@@ -57,8 +58,9 @@ class WebSocketManager(
     @Volatile private var isReportsTabActive = true
     @Volatile private var isAppInForeground = false
     @Volatile private var suspendedForBackground = false
-    private var backgroundJob: Job? = null
-    private var reportInactiveJob: Job? = null
+    @Volatile private var backgroundJob: Job? = null
+    @Volatile private var reportInactiveJob: Job? = null
+    private val sessionGeneration = AtomicLong(0L)
 
     // Exposed Flows
     private val _notifyEvent = MutableSharedFlow<NotifyData>(extraBufferCapacity = 10)
@@ -129,6 +131,7 @@ class WebSocketManager(
     /** Đóng socket khi app ở nền lâu nhưng giữ trạng thái mong muốn để khôi phục */
     private fun suspendConnections() {
         if (BuildConfig.DEBUG) Log.d(TAG, "App in background → suspend websockets")
+        sessionGeneration.incrementAndGet()
         suspendedForBackground = true
         reportInactiveJob?.cancel()
         synchronized(notifyLock) { notifyClient?.disconnect() }
@@ -141,10 +144,14 @@ class WebSocketManager(
      */
     fun connectNotify(baseUrl: String) {
         desiredNotifyBaseUrl = baseUrl
-        if (!isAppInForeground) return
+        if (!isAppInForeground || UserSession.accessToken.isEmpty()) return
+        val gen = sessionGeneration.get()
 
         scope.launch {
             synchronized(notifyLock) {
+                if (gen != sessionGeneration.get() || !isAppInForeground || UserSession.accessToken.isEmpty()) {
+                    return@launch
+                }
                 if (notifyClient?.isConnected() == true) return@launch
 
                 val clientInstance = notifyClient ?: WebSocketNotifyClient(client, gson, scope) { data ->
@@ -164,22 +171,30 @@ class WebSocketManager(
      */
     fun connectAllReports() {
         reportsRequested = true
-        if (!isAppInForeground || !isReportsTabActive) return
+        if (!isAppInForeground || !isReportsTabActive || UserSession.accessToken.isEmpty()) return
         if (reportClients.isNotEmpty() && reportClients.values.all { it.isConnected() }) return
         if (!isConnectingReports.compareAndSet(false, true)) return
+        val gen = sessionGeneration.get()
 
         scope.launch {
             try {
                 val response = vmsApi.getVMSServiceList()
+                if (gen != sessionGeneration.get() || !isAppInForeground || !isReportsTabActive || !reportsRequested || UserSession.accessToken.isEmpty()) {
+                    return@launch
+                }
                 val ids = if (response.isSuccessful) {
                     (listOf(LOCAL_VMS_ID) + (response.body() ?: emptyList()).map { it.id }).distinct()
                 } else {
                     listOf(LOCAL_VMS_ID)
                 }
-                connectReports(ids)
+                connectReports(ids, gen)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Failed to fetch VMS list: ${e.message}")
-                connectReports(listOf(LOCAL_VMS_ID))
+                if (gen == sessionGeneration.get() && isAppInForeground && isReportsTabActive && reportsRequested && UserSession.accessToken.isNotEmpty()) {
+                    connectReports(listOf(LOCAL_VMS_ID), gen)
+                }
             } finally {
                 isConnectingReports.set(false)
             }
@@ -189,7 +204,8 @@ class WebSocketManager(
     /**
      * Connect or update Report WebSockets for the given VMS IDs.
      */
-    private fun connectReports(vmsIds: List<Int>) {
+    private fun connectReports(vmsIds: List<Int>, expectedGen: Long) {
+        if (expectedGen != sessionGeneration.get()) return
         // Disconnect removed VMS IDs
         reportClients.keys.toList().forEach { id ->
             if (id !in vmsIds) reportClients.remove(id)?.disconnect()
@@ -202,12 +218,25 @@ class WebSocketManager(
                 try {
                     val response = vmsApi.getReportLink(id)
                     val link = response.body()?.link
-                    if (response.isSuccessful && link != null && isAppInForeground && UserSession.accessToken.isNotEmpty()) {
+                    if (expectedGen == sessionGeneration.get() &&
+                        response.isSuccessful &&
+                        link != null &&
+                        isAppInForeground &&
+                        isReportsTabActive &&
+                        reportsRequested &&
+                        UserSession.accessToken.isNotEmpty()
+                    ) {
                         val reportClient = reportClients.getOrPut(id) {
                             WebSocketReportClient(id, client, gson, scope, ::handleReportPayload)
                         }
-                        reportClient.connect(link)
+                        if (expectedGen == sessionGeneration.get() && isAppInForeground && isReportsTabActive && reportsRequested) {
+                            reportClient.connect(link)
+                        } else {
+                            reportClients.remove(id)?.disconnect()
+                        }
                     }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     if (BuildConfig.DEBUG) Log.w(TAG, "Failed to fetch report link for VMS $id: ${e.message}")
                 }
@@ -288,6 +317,7 @@ class WebSocketManager(
      * Disconnect everything when user logs out
      */
     fun disconnectAll() {
+        sessionGeneration.incrementAndGet()
         desiredNotifyBaseUrl = null
         reportsRequested = false
         suspendedForBackground = false

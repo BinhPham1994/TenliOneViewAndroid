@@ -5,7 +5,10 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class MainUiState(
     val currentTab: MainTab = MainTab.Home,
-    val isOffline: Boolean = false
+    val isOffline: Boolean = false,
+    val accountName: String = "",
+    val canAccessEvents: Boolean = true,
+    val canAccessLiveStream: Boolean = true
 )
 
 enum class MainTab(val route: String) {

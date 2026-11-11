@@ -5,19 +5,25 @@ import com.google.gson.Gson
 import com.tenli.oneview.BuildConfig
 import java.io.File
 import java.lang.reflect.Type
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Đọc/ghi cache JSON ra đĩa dùng chung cho Home/Event/Monitor cache managers.
  *
  * - Streaming (Reader/Writer) thay vì `readText()/writeText(toJson())` → không tạo chuỗi JSON khổng lồ
  *   trong RAM (giảm GC, giảm giật).
- * - Ghi nguyên tử: ghi ra file tạm rồi rename → không bao giờ để lại file hỏng nếu app bị kill giữa chừng.
+ * - Ghi nguyên tử + khóa đồng bộ theo từng đường dẫn file: ghi ra file tạm rồi rename → không bao giờ
+ *   bị xung đột `.tmp` khi nhiều luồng ghi cùng lúc hoặc để lại file hỏng nếu app bị kill giữa chừng.
  * - Phải gọi trên Dispatchers.IO.
  */
 internal object JsonFileStore {
     private const val TAG = "JsonFileStore"
+    private val fileLocks = ConcurrentHashMap<String, Any>()
 
-    fun <T> read(gson: Gson, file: File, type: Type): T? {
+    private fun lockFor(file: File): Any =
+        fileLocks.computeIfAbsent(file.absolutePath) { Any() }
+
+    fun <T> read(gson: Gson, file: File, type: Type): T? = synchronized(lockFor(file)) {
         if (!file.exists()) return null
         return try {
             file.bufferedReader().use { reader -> gson.fromJson<T>(reader, type) }
@@ -29,7 +35,8 @@ internal object JsonFileStore {
 
     fun <T> read(gson: Gson, file: File, clazz: Class<T>): T? = read(gson, file, clazz as Type)
 
-    fun write(gson: Gson, file: File, data: Any) {
+    fun write(gson: Gson, file: File, data: Any) = synchronized(lockFor(file)) {
+        file.parentFile?.let { parent -> if (!parent.exists()) parent.mkdirs() }
         val tmp = File(file.parentFile, "${file.name}.tmp")
         try {
             tmp.bufferedWriter().use { writer -> gson.toJson(data, writer) }

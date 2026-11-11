@@ -71,7 +71,6 @@ import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.firebase.FcmTokenManager
-import com.tenli.oneview.ui.component.ProvideAppLanguage
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.auth.login.LoginScreen
@@ -98,7 +97,12 @@ private val EVENT_ID_EXTRA_KEYS = arrayOf(
     "id"
 )
 
-private val CHINESE_OEM_KEYWORDS = listOf("xiaomi", "oppo", "vivo", "huawei")
+private val CHINESE_OEM_KEYWORDS = listOf(
+    "xiaomi", "redmi", "poco",
+    "oppo", "realme", "oneplus",
+    "vivo", "iqoo",
+    "huawei", "honor"
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -137,41 +141,39 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             TenliAIoTTheme {
-                ProvideAppLanguage {
-                    val uiState by splashViewModel.uiState.collectAsStateWithLifecycle()
+                val uiState by splashViewModel.uiState.collectAsStateWithLifecycle()
 
-                    LaunchedEffect(Unit) {
-                        com.tenli.oneview.util.EventBus.unauthorized.collect {
-                            splashViewModel.logout()
+                LaunchedEffect(Unit) {
+                    com.tenli.oneview.util.EventBus.unauthorized.collect {
+                        splashViewModel.logout()
+                    }
+                }
+
+                when (uiState.destination) {
+                    is SplashDestination.Login -> {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            LoginScreen(onLoginSuccess = splashViewModel::navigateToMain)
                         }
                     }
 
-                    when (uiState.destination) {
-                        is SplashDestination.Login -> {
-                            Surface(
-                                modifier = Modifier.fillMaxSize(),
-                                color = MaterialTheme.colorScheme.background
-                            ) {
-                                LoginScreen(onLoginSuccess = splashViewModel::navigateToMain)
+                    is SplashDestination.Main -> {
+                        AppNavigation(
+                            onLogoutRequest = splashViewModel::logout,
+                            pendingEventNav = pendingEventNav,
+                            onEventNavConsumed = {
+                                pendingEventNav = null
+                                intent.clearEventIdExtras()
                             }
-                        }
+                        )
 
-                        is SplashDestination.Main -> {
-                            AppNavigation(
-                                onLogoutRequest = splashViewModel::logout,
-                                pendingEventNav = pendingEventNav,
-                                onEventNavConsumed = {
-                                    pendingEventNav = null
-                                    intent.clearEventIdExtras()
-                                }
-                            )
-
-                            // Vẽ sau AppNavigation để các dialog xin quyền nằm trên cùng (và BackHandler được ưu tiên)
-                            StartupPermissionDialogs()
-                        }
-
-                        is SplashDestination.Loading -> { /* Keep Splash */ }
+                        // Vẽ sau AppNavigation để các dialog xin quyền nằm trên cùng (và BackHandler được ưu tiên)
+                        StartupPermissionDialogs()
                     }
+
+                    is SplashDestination.Loading -> { /* Keep Splash */ }
                 }
             }
         }
@@ -195,7 +197,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Tiếp tục flow cập nhật IMMEDIATE nếu đang dở (vd. người dùng thoát app giữa chừng)
-        appUpdateManager.appUpdateInfo.addOnSuccessListener { info ->
+        appUpdateManager.appUpdateInfo.addOnSuccessListener(this) { info ->
             if (info.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
                 startImmediateUpdate(info)
             }
@@ -203,7 +205,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkUpdate() {
-        appUpdateManager.appUpdateInfo.addOnSuccessListener { info ->
+        appUpdateManager.appUpdateInfo.addOnSuccessListener(this) { info ->
             if (info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE &&
                 info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)
             ) {
@@ -263,6 +265,7 @@ private fun StartupPermissionDialogs() {
     val isChinesePhone = remember(manufacturer) { CHINESE_OEM_KEYWORDS.any { manufacturer.contains(it) } }
 
     var activeDialog by remember { mutableStateOf(StartupPermissionDialog.NONE) }
+    var dismissedInSession by remember { mutableStateOf(emptySet<StartupPermissionDialog>()) }
     // Không hiện cảnh báo phía sau hộp thoại xin quyền hệ thống đang mở
     var isRequestingNotification by remember { mutableStateOf(false) }
 
@@ -273,9 +276,12 @@ private fun StartupPermissionDialogs() {
             FcmTokenManager.registerDevicePushTokenAsync(force = false)
         }
         activeDialog = when {
-            !hasNotificationPerm -> StartupPermissionDialog.NOTIFICATION
-            !PermissionUtils.isEmergencyCallPermissionGranted(context) -> StartupPermissionDialog.OVERLAY
-            !PermissionUtils.isIgnoringBattery(context) -> StartupPermissionDialog.BATTERY
+            !hasNotificationPerm && StartupPermissionDialog.NOTIFICATION !in dismissedInSession ->
+                StartupPermissionDialog.NOTIFICATION
+            !PermissionUtils.isEmergencyCallPermissionGranted(context) && StartupPermissionDialog.OVERLAY !in dismissedInSession ->
+                StartupPermissionDialog.OVERLAY
+            !PermissionUtils.isIgnoringBattery(context) && StartupPermissionDialog.BATTERY !in dismissedInSession ->
+                StartupPermissionDialog.BATTERY
             else -> StartupPermissionDialog.NONE
         }
     }
@@ -307,9 +313,15 @@ private fun StartupPermissionDialogs() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val dismiss = { activeDialog = StartupPermissionDialog.NONE }
+    val closeActive = { activeDialog = StartupPermissionDialog.NONE }
+    val dismissForSession = {
+        if (activeDialog != StartupPermissionDialog.NONE) {
+            dismissedInSession = dismissedInSession + activeDialog
+        }
+        activeDialog = StartupPermissionDialog.NONE
+    }
     val openAppDetails: () -> Unit = {
-        dismiss()
+        closeActive()
         runCatching {
             context.startActivity(
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
@@ -325,7 +337,7 @@ private fun StartupPermissionDialogs() {
             title = if (isEn) "Enable Alert Notifications" else "Bật thông báo cảnh báo",
             description = remember(isEn, strongTextColor) { notificationDescription(isEn, strongTextColor) },
             onConfirm = openAppDetails,
-            onDismiss = dismiss
+            onDismiss = dismissForSession
         )
 
         StartupPermissionDialog.OVERLAY -> PermissionExplanationDialog(
@@ -339,20 +351,20 @@ private fun StartupPermissionDialogs() {
                 overlayDescription(isEn, isChinesePhone, manufacturer, strongTextColor)
             },
             onConfirm = {
-                dismiss()
+                closeActive()
                 PermissionUtils.openEmergencyCallPermissionSettings(
                     context = context,
                     preferManufacturerSettings = isChinesePhone
                 )
             },
-            onDismiss = dismiss
+            onDismiss = dismissForSession
         )
 
         StartupPermissionDialog.BATTERY -> PermissionExplanationDialog(
             title = if (isEn) "Keep Connection Active" else "Duy trì kết nối",
             description = remember(isEn, strongTextColor) { batteryDescription(isEn, strongTextColor) },
             onConfirm = openAppDetails,
-            onDismiss = dismiss
+            onDismiss = dismissForSession
         )
 
         StartupPermissionDialog.NONE -> Unit
@@ -461,14 +473,15 @@ fun PermissionExplanationDialog(
     val isEn = rememberIsEnglish()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val noRipple = remember { MutableInteractionSource() }
+    val backdropInteraction = remember { MutableInteractionSource() }
+    val sheetInteraction = remember { MutableInteractionSource() }
     val buttonShape = RoundedCornerShape(spacing.radiusCompact)
 
     MobileFullScreenOverlay(onDismissRequest = onDismiss) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(interactionSource = noRipple, indication = null, onClick = onDismiss),
+                .clickable(interactionSource = backdropInteraction, indication = null, onClick = onDismiss),
             contentAlignment = Alignment.BottomCenter
         ) {
             Surface(
@@ -476,7 +489,7 @@ fun PermissionExplanationDialog(
                     .fillMaxWidth()
                     .widthIn(max = spacing.contentMaxWidth)
                     // Chặn click xuyên xuống lớp nền (không đóng sheet khi chạm vào nội dung)
-                    .clickable(interactionSource = noRipple, indication = null, onClick = {}),
+                    .clickable(interactionSource = sheetInteraction, indication = null, onClick = {}),
                 shape = RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge),
                 color = colors.surfaceGrouped
             ) {

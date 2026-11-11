@@ -194,20 +194,23 @@ object LoginAuthClient {
 
     /**
      * Client cho WebSocket Notify / Report:
+     * - Tách trực tiếp từ [baseClient] (vì [ReconnectingWebSocket] đã tự gắn `?token=` và chuẩn hóa URL `ws(s)://`)
+     *   để tránh lộ JWT qua log URL và không gắn nhầm header Authorization của server chính sang VMS nhánh.
      * - Bỏ readTimeout (WebSocket cần giữ kết nối lâu dài, readTimeout sẽ kill connection)
      * - pingInterval để OkHttp phát hiện kết nối chết và đóng → kích hoạt reconnect
      */
     val webSocketClient: OkHttpClient by lazy {
-        client.newBuilder()
+        baseClient.newBuilder()
             .readTimeout(0, TimeUnit.SECONDS)
             .pingInterval(WS_PING_INTERVAL_SEC, TimeUnit.SECONDS)
             .build()
     }
 
-    /** Client cho Coil tải ảnh: chỉ gắn token cho host backend (không lộ token cho host bên thứ 3) */
+    /** Client cho Coil tải ảnh: chỉ gắn token cho host backend & tự re-login khi gặp 401 */
     val imageClient: OkHttpClient by lazy {
         baseClient.newBuilder()
             .addInterceptor(ImageAuthInterceptor())
+            .authenticator(TokenAuthenticator())
             .connectTimeout(IMAGE_TIMEOUT_SEC, TimeUnit.SECONDS)
             .readTimeout(IMAGE_TIMEOUT_SEC, TimeUnit.SECONDS)
             .build()

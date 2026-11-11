@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
 object EventBus {
-    private val _eventReportedFalse = MutableSharedFlow<Int>()
+    private val _eventReportedFalse = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val eventReportedFalse = _eventReportedFalse.asSharedFlow()
 
     private val _networkRestored = MutableSharedFlow<Unit>(extraBufferCapacity = 1)

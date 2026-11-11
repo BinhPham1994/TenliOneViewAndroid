@@ -998,32 +998,38 @@ fun MobileEventCard(
         resolveCardImages(event, cameraName, domain)
     }
 
+    val context = LocalContext.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     var isTapFlashing by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val currentOnClick by rememberUpdatedState(onClick)
-    val currentIsPressed by rememberUpdatedState(isPressed)
+
+    // Pre-warm ảnh toàn cảnh 16:9 ngay khi chạm xuống (dành cho thẻ List dùng ảnh crop mặt/biển số)
+    val fullPrewarmUrl = images.fullImageUrl?.takeIf { isListView && it.isNotEmpty() && it != images.snapshotUrl }
+    LaunchedEffect(isPressed, fullPrewarmUrl) {
+        if (isPressed && fullPrewarmUrl != null) {
+            coil.Coil.imageLoader(context).enqueue(
+                ImageRequest.Builder(context)
+                    .data(fullPrewarmUrl)
+                    .size(1280, 720)
+                    .precision(Precision.INEXACT)
+                    .allowHardware(true)
+                    .memoryCacheKey("${fullPrewarmUrl}_1280x720")
+                    .diskCacheKey(fullPrewarmUrl.substringBefore('?'))
+                    .build()
+            )
+        }
+    }
 
     val handleCardClick: () -> Unit = remember(scope) {
         {
-            if (currentIsPressed) {
-                isTapFlashing = true
-                currentOnClick()
-                scope.launch {
-                    delay(180L)
-                    isTapFlashing = false
-                }
-            } else {
-                // Khi chạm nhanh (<100ms) trong LazyColumn, isPressed bị trễ bởi TapIndicationDelay.
-                // Bật nền phản hồi ngay lập tức trong ~60ms trước khi chuyển màn hình để người dùng cảm nhận rõ thao tác bấm.
-                isTapFlashing = true
-                scope.launch {
-                    delay(60L)
-                    currentOnClick()
-                    delay(180L)
-                    isTapFlashing = false
-                }
+            // Điều hướng ngay tức thì (0ms delay), đồng thời giữ hiệu ứng nhấn sáng trên thẻ bên dưới khi màn chi tiết trượt lên
+            isTapFlashing = true
+            currentOnClick()
+            scope.launch {
+                delay(160L)
+                isTapFlashing = false
             }
         }
     }

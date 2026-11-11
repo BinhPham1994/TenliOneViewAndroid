@@ -128,8 +128,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
-import com.tenli.oneview.data.local.UserPermissionManager
-import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LocalMobileOverlayHost
 import com.tenli.oneview.ui.component.MobileNativeBottomSheet
@@ -222,13 +220,12 @@ fun MainScreen(
     onNavigateToEventDetail: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
 
-    val visibleMainTabs = remember(permissionState.canAccessEvents, permissionState.canAccessLiveStream) {
+    val visibleMainTabs = remember(uiState.canAccessEvents, uiState.canAccessLiveStream) {
         buildList {
             add(MainTab.Home)
-            if (permissionState.canAccessEvents) add(MainTab.Event)
-            if (permissionState.canAccessLiveStream) add(MainTab.Monitor)
+            if (uiState.canAccessEvents) add(MainTab.Event)
+            if (uiState.canAccessLiveStream) add(MainTab.Monitor)
             add(MainTab.Setting)
         }
     }
@@ -334,7 +331,19 @@ fun MainScreen(
     val showAboutPageState by rememberUpdatedState(showAboutPage)
     val isLiveCameraPageOpenState by rememberUpdatedState(isLiveCameraPageOpen)
 
-    val isScreenUncovered = !showNotificationConfigPage && !showAboutPage && !isOverlayCovered
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isLifecycleStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isLifecycleStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val isScreenUncovered = isLifecycleStarted && !showNotificationConfigPage && !showAboutPage && !isOverlayCovered
     val isHomeActive = uiState.currentTab == MainTab.Home && isScreenUncovered
     val isEventActive = uiState.currentTab == MainTab.Event && isScreenUncovered
     val isMonitorActive = uiState.currentTab == MainTab.Monitor && isScreenUncovered
@@ -643,6 +652,11 @@ fun MainScreen(
                 val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab) {
                     mountedTabs + uiState.currentTab
                 }
+                val monitorViewModel: MonitorViewModel? = if (MainTab.Monitor in effectiveMountedTabs) {
+                    viewModel(factory = MonitorViewModel.Factory)
+                } else {
+                    null
+                }
 
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
                 // Tất cả các tab được pre-measure sẵn 1 lần khi màn hình nghỉ; trong suốt lúc kéo tay và trượt:
@@ -712,14 +726,15 @@ fun MainScreen(
                                         }
 
                                         MainTab.Monitor -> {
-                                            val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
-                                            MonitorScreen(
-                                                viewModel = monitorViewModel,
-                                                gridState = monitorGridState,
-                                                isTabActive = isMonitorActive,
-                                                onEventClick = onEventIdClick,
-                                                onFullscreenChange = onMonitorFullscreenChange
-                                            )
+                                            if (monitorViewModel != null) {
+                                                MonitorScreen(
+                                                    viewModel = monitorViewModel,
+                                                    gridState = monitorGridState,
+                                                    isTabActive = isMonitorActive,
+                                                    onEventClick = onEventIdClick,
+                                                    onFullscreenChange = onMonitorFullscreenChange
+                                                )
+                                            }
                                         }
 
                                         MainTab.Setting -> SettingScreen(
@@ -753,8 +768,7 @@ fun MainScreen(
 
                 // Full-screen Live Camera Page sliding in from right & sliding out to right at zIndex(30f)
                 // (above MainBottomNavigation at zIndex(10f), identical to MobileNotificationConfigScreen)
-                if (MainTab.Monitor in effectiveMountedTabs) {
-                    val monitorViewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory)
+                if (monitorViewModel != null) {
                     MonitorLiveCameraOverlay(
                         viewModel = monitorViewModel,
                         isTabActive = isMonitorActive,
@@ -834,8 +848,8 @@ fun SettingScreen(
     onOpenNotificationConfig: () -> Unit,
     onOpenAbout: () -> Unit = {}
 ) {
+    val mainUiState by viewModel.uiState.collectAsStateWithLifecycle()
     val themeMode by ThemeManager.themeModeFlow.collectAsStateWithLifecycle()
-    val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
     var showLogoutSheet by remember { mutableStateOf(false) }
     var showLanguageSheet by remember { mutableStateOf(false) }
     var showThemeSheet by remember { mutableStateOf(false) }
@@ -847,14 +861,9 @@ fun SettingScreen(
     val uriHandler = LocalUriHandler.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val textColor = MaterialTheme.colorScheme.onBackground
 
     val defaultMyPage = stringResource(id = R.string.setting_my_page)
-    val userName: String = remember(permissionState.version) {
-        UserSession.userData?.name?.takeIf { it.isNotBlank() }
-            ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
-            ?: defaultMyPage
-    }
+    val userName: String = mainUiState.accountName.ifBlank { defaultMyPage }
 
     val isEn = currentLanguage.startsWith("en")
     val groupModifier = Modifier

@@ -17,10 +17,16 @@ class ImageAuthInterceptor : Interceptor {
             return chain.proceed(req)
         }
 
-        val path = req.url.encodedPath
+        val url = req.url
+        // Không gắn Authorization vào URL lưu trữ đã ký sẵn (S3/MinIO/GCS presigned URL) để tránh lỗi HTTP 400 & tránh lộ token
+        if (PRESIGNED_QUERY_KEYS.any { url.queryParameter(it) != null }) {
+            return chain.proceed(req)
+        }
+
+        val path = url.encodedPath
         val domainHost = HostResolver.currentDomainHost()
-        val needsAuth = (domainHost != null && req.url.host.equals(domainHost, ignoreCase = true)) ||
-            AUTH_PATH_MARKERS.any { path.contains(it) }
+        val isSameBackendHost = domainHost != null && url.host.equals(domainHost, ignoreCase = true)
+        val needsAuth = isSameBackendHost || AUTH_PATH_MARKERS.any { path.contains(it) }
 
         return if (needsAuth) {
             chain.proceed(req.newBuilder().header("Authorization", "Bearer $token").build())
@@ -31,6 +37,13 @@ class ImageAuthInterceptor : Interceptor {
 
     private companion object {
         val AUTH_PATH_MARKERS = arrayOf("/files/download/", "/Data/", "/VMS/", "/api/", "/ts/api/")
+        val PRESIGNED_QUERY_KEYS = arrayOf(
+            "X-Amz-Signature",
+            "X-Amz-Algorithm",
+            "X-Amz-Credential",
+            "GoogleAccessId",
+            "Signature"
+        )
     }
 }
 

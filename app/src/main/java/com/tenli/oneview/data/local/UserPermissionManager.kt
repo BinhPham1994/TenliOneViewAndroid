@@ -15,12 +15,14 @@ import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.utils.AiModuleOption
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
 @Immutable
@@ -199,30 +201,32 @@ object UserPermissionManager {
         if (cleanDomain.isEmpty()) return null
         val url = "$cleanDomain/modules-config.json"
         return try {
-            val response = ApiProvider.vmsApi.getModulesConfigExt(url = url)
-            if (response.isSuccessful) {
-                val rawBody = response.body()?.string()?.trim().orEmpty()
-                val parsed = if (rawBody.startsWith("{")) {
-                    runCatching {
-                        LoginAuthClient.gson.fromJson(rawBody, ModulesConfigModel::class.java)
-                    }.getOrNull()
+            withContext(Dispatchers.IO) {
+                val response = ApiProvider.vmsApi.getModulesConfigExt(url = url)
+                if (response.isSuccessful) {
+                    val rawBody = response.body()?.string()?.trim().orEmpty()
+                    val parsed = if (rawBody.startsWith("{")) {
+                        runCatching {
+                            LoginAuthClient.gson.fromJson(rawBody, ModulesConfigModel::class.java)
+                        }.getOrNull()
+                    } else {
+                        null
+                    }
+                    if (parsed != null && parsed.isValidConfig()) {
+                        saveModulesConfigToPrefs(cleanDomain, rawBody, parsed)
+                        parsed
+                    } else {
+                        clearModulesConfigFromPrefs()
+                        null
+                    }
                 } else {
-                    null
-                }
-                if (parsed != null && parsed.isValidConfig()) {
-                    saveModulesConfigToPrefs(cleanDomain, rawBody, parsed)
-                    parsed
-                } else {
-                    clearModulesConfigFromPrefs()
-                    null
-                }
-            } else {
-                val code = response.code()
-                if (code == 404 || code == 403 || code == 405 || code == 400) {
-                    clearModulesConfigFromPrefs()
-                    null
-                } else {
-                    restoreModulesConfigFromPrefs(cleanDomain)
+                    val code = response.code()
+                    if (code == 404 || code == 403 || code == 405 || code == 400) {
+                        clearModulesConfigFromPrefs()
+                        null
+                    } else {
+                        restoreModulesConfigFromPrefs(cleanDomain)
+                    }
                 }
             }
         } catch (e: CancellationException) {
@@ -422,6 +426,8 @@ object UserPermissionManager {
                 }
                 Log.w(TAG, "fetchVmsUserWithRetry HTTP $code for userId=$userId")
                 return null
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (attempt == 0) {
                     delay(1500)

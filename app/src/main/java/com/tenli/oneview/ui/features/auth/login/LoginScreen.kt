@@ -371,14 +371,9 @@ private fun LoginContent(
             }
 
             // 3. Cụm đổi Ngôn ngữ & Giao diện: cố định ở góc trên phải, khi cuộn form lên gần chạm thì đẩy lên cùng thành 1 khối và cắt ẩn ngay tại mép thanh trạng thái
-            val settingsBaseTopDp = padding.calculateTopPadding() + spacing.space12
-            val settingsPushUpOffsetPx = with(density) {
-                val baseTopPx = settingsBaseTopDp.toPx()
-                val settingsBarHeightPx = spacing.space32.toPx()
-                val minGapPx = spacing.space12.toPx()
-                val maxAllowedTopPx = cardTopInRootPx - minGapPx - settingsBarHeightPx
-                (maxAllowedTopPx - baseTopPx).coerceAtMost(0f).roundToInt()
-            }
+            val settingsBaseTopPx = with(density) { (padding.calculateTopPadding() + spacing.space12).toPx() }
+            val settingsBarHeightPx = with(density) { spacing.space32.toPx() }
+            val settingsMinGapPx = with(density) { spacing.space12.toPx() }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -395,7 +390,11 @@ private fun LoginContent(
                             top = spacing.space12,
                             end = spacing.space24
                         )
-                        .offset { IntOffset(0, settingsPushUpOffsetPx) }
+                        .offset {
+                            val maxAllowedTopPx = cardTopInRootPx - settingsMinGapPx - settingsBarHeightPx
+                            val pushUpOffsetPx = (maxAllowedTopPx - settingsBaseTopPx).coerceAtMost(0f).roundToInt()
+                            IntOffset(0, pushUpOffsetPx)
+                        }
                 )
             }
 
@@ -755,7 +754,8 @@ private fun TermsAgreementRow(
             if (isVietnamese) append(" của Tenli")
         }
     }
-    val noRipple = remember { MutableInteractionSource() }
+    val checkboxNoRipple = remember { MutableInteractionSource() }
+    val textNoRipple = remember { MutableInteractionSource() }
 
     Row(
         modifier = Modifier
@@ -771,7 +771,7 @@ private fun TermsAgreementRow(
             checkIconSize = spacing.iconTiny,
             modifier = Modifier
                 .padding(top = spacing.space1)
-                .clickable(interactionSource = noRipple, indication = null, onClick = onToggle)
+                .clickable(interactionSource = checkboxNoRipple, indication = null, onClick = onToggle)
         )
         Spacer(modifier = Modifier.width(spacing.space8))
         Text(
@@ -780,7 +780,7 @@ private fun TermsAgreementRow(
             color = colors.textSubtle,
             modifier = Modifier
                 .weight(1f)
-                .clickable(interactionSource = noRipple, indication = null, onClick = onToggle)
+                .clickable(interactionSource = textNoRipple, indication = null, onClick = onToggle)
         )
     }
 }

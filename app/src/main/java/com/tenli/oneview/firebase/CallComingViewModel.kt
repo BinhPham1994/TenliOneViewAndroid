@@ -16,6 +16,7 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -120,7 +121,9 @@ class CallComingViewModel(
 
                 if (foundEvent == null || foundEvent.data?.video.isNullOrBlank()) {
                     val resp = withContext(Dispatchers.IO) {
-                        runCatching { eventRepository.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
+                        runCatching { eventRepository.getDataList(lastId = eventIdInt + 1, count = 5) }
+                            .onFailure { if (it is CancellationException) throw it }
+                            .getOrNull()
                     }
                     val fetched = resp?.body()?.firstOrNull { it.id == eventIdInt }
                     if (fetched != null) {
@@ -208,7 +211,9 @@ class CallComingViewModel(
                 if (targetEvent.data?.video.isNullOrBlank()) {
                     delay(1800L)
                     val retryResp = withContext(Dispatchers.IO) {
-                        runCatching { eventRepository.getDataList(lastId = eventIdInt + 1, count = 5) }.getOrNull()
+                        runCatching { eventRepository.getDataList(lastId = eventIdInt + 1, count = 5) }
+                            .onFailure { if (it is CancellationException) throw it }
+                            .getOrNull()
                     }
                     val refreshed = retryResp?.body()?.firstOrNull { it.id == eventIdInt }
                     if (refreshed != null && !refreshed.data?.video.isNullOrBlank()) {
@@ -220,6 +225,8 @@ class CallComingViewModel(
                         )
                     }
                 }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
             }
         }
     }
