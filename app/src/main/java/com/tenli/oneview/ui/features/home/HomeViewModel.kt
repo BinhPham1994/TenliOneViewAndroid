@@ -13,6 +13,7 @@ import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.CachedHomeData
 import com.tenli.oneview.data.local.UserPermissionManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.data.repository.DashboardRepository
 import com.tenli.oneview.model.network.AIServiceModel
@@ -364,6 +365,7 @@ class HomeViewModel(
             UserPermissionManager.permissionState.collect { permState ->
                 if (permState.version != lastVersion) {
                     lastVersion = permState.version
+                    if (UserSession.accessToken.isEmpty()) return@collect
                     val allCameras = dashboardRepository.getCamerasInMemory()
                     _uiState.update { cur ->
                         val baseCameras = allCameras.ifEmpty { cur.cameraList }
@@ -590,6 +592,7 @@ class HomeViewModel(
     fun fetchDashboardData(isUserRefresh: Boolean = false) {
         dashboardJob?.cancel()
         recentEventsJob?.cancel()
+        if (UserSession.accessToken.isEmpty() || UserSession.domain.isEmpty()) return
         dashboardJob = viewModelScope.launch(Dispatchers.IO) {
             val filter = _uiState.value.selectedFilter
             val serviceId = _uiState.value.selectedServiceId
@@ -838,7 +841,9 @@ class HomeViewModel(
                         ?: recentResult.firstError
                         ?: byTypeResult.exceptionOrNull()
                         ?: cameraResult.exceptionOrNull()
-                    val errorMsg = primaryFailure?.toUserFriendlyMessage()
+                    val errorMsg = primaryFailure?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() }
+
+                    if (UserSession.accessToken.isEmpty()) return@coroutineScope
 
                     val rawFinalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
                         recentEvents
@@ -897,11 +902,12 @@ class HomeViewModel(
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.e(TAG, "Error fetching data", e)
+                if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
-                        error = e.toUserFriendlyMessage()
+                        error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
                     )
                 }
             }

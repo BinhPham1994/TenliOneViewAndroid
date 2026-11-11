@@ -50,17 +50,19 @@ class LoginViewModel(
 
     fun loadSavedCredentials() {
         val prefs = GlobalData.preferences
-        val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-        val savedDomain = stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
-        val termsAccepted = prefs.getBoolean(AppKeys.TERMS_ACCEPTED_KEY, false) || savedDomain.isNotEmpty()
-        val savedUser = if (rememberMe) prefs.getString(AppKeys.USERNAME_KEY, "").orEmpty() else ""
-        val savedPass = if (rememberMe) prefs.getString(AppKeys.PASSWORD_KEY, "").orEmpty() else ""
+        val isFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
+        val savedDomain = if (isFromQr) {
+            ""
+        } else {
+            stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
+        }
+        val termsAccepted = prefs.getBoolean(AppKeys.TERMS_ACCEPTED_KEY, false)
         _uiState.update {
             it.copy(
                 domain = savedDomain,
-                email = savedUser,
-                password = savedPass,
-                rememberMe = rememberMe,
+                isDomainFromQr = false,
+                email = "",
+                password = "",
                 termsAccepted = termsAccepted,
                 showPassword = false
             )
@@ -69,24 +71,49 @@ class LoginViewModel(
 
     private fun stripDomainScheme(raw: String): String = normalizeDomainInput(raw)
 
-    fun onRememberMeChanged(rememberMe: Boolean) {
-        _uiState.update { it.copy(rememberMe = rememberMe) }
-        if (!rememberMe) {
-            GlobalData.preferences.edit {
-                putBoolean(AppKeys.REMEMBER_ME_KEY, false)
-                remove(AppKeys.USERNAME_KEY)
-                remove(AppKeys.PASSWORD_KEY)
-            }
-        }
-    }
-
     fun onDomainChanged(domain: String) {
         val cleaned = if (domain.contains("://")) {
             domain.replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
         } else {
             domain
         }
-        _uiState.update { it.copy(domain = cleaned) }
+        _uiState.update { it.copy(domain = cleaned, isDomainFromQr = false) }
+    }
+
+    fun onQrDomainScanned(scannedDomain: String) {
+        _uiState.update {
+            it.copy(
+                domain = normalizeDomainInput(scannedDomain),
+                isDomainFromQr = true,
+                email = "",
+                password = "",
+                showPassword = false
+            )
+        }
+    }
+
+    fun onProceedToCredentialsStep() {
+        _uiState.update {
+            it.copy(
+                domain = normalizeDomainInput(it.domain),
+                isDomainFromQr = false,
+                email = "",
+                password = "",
+                showPassword = false
+            )
+        }
+    }
+
+    fun onBackToDomainStep() {
+        _uiState.update {
+            it.copy(
+                domain = if (it.isDomainFromQr) "" else it.domain,
+                isDomainFromQr = false,
+                email = "",
+                password = "",
+                showPassword = false
+            )
+        }
     }
 
     fun onEmailChanged(email: String) {
@@ -113,6 +140,7 @@ class LoginViewModel(
         val email = state.email.trim()
         val domain = state.domain.trim()
         val password = state.password
+        val isDomainFromQr = state.isDomainFromQr
         val isEn = LocaleManager.getLocale(getApplication()).startsWith("en")
 
         val validationError = when {
@@ -120,6 +148,11 @@ class LoginViewModel(
             !isValidProjectDomain(domain) -> if (isEn) "Invalid project domain" else "Domain dự án không hợp lệ"
             email.isEmpty() -> if (isEn) "Please enter username" else "Vui lòng nhập tên đăng nhập"
             password.isEmpty() -> if (isEn) "Please enter password" else "Vui lòng nhập mật khẩu"
+            !state.termsAccepted -> if (isEn) {
+                "Please agree to Terms of Use & Privacy Policy"
+            } else {
+                "Vui lòng đồng ý với Điều khoản sử dụng & Chính sách Bảo mật"
+            }
             else -> null
         }
         if (validationError != null) {
@@ -145,7 +178,13 @@ class LoginViewModel(
                         if (isEn) "Empty response data" else "Dữ liệu phản hồi rỗng"
                     )
                     else -> {
-                        handleLoginSuccess(loginData, domain, email, password, state.rememberMe)
+                        handleLoginSuccess(
+                            loginData = loginData,
+                            domain = domain,
+                            username = email,
+                            password = password,
+                            isDomainFromQr = isDomainFromQr
+                        )
                         _event.emit(LoginEvent.LoginSuccess)
                     }
                 }
@@ -189,7 +228,7 @@ class LoginViewModel(
         domain: String,
         username: String,
         password: String,
-        rememberMe: Boolean
+        isDomainFromQr: Boolean
     ) {
         val cleanHost = stripDomainScheme(domain)
         val formattedDomain = loginData.resolvedDomain.ifEmpty {
@@ -207,8 +246,21 @@ class LoginViewModel(
             formattedDomain = formattedDomain,
             username = username,
             password = password,
-            rememberMe = rememberMe
+            isDomainFromQr = isDomainFromQr
         )
+        // Chuẩn bị sẵn trạng thái sạch cho lần quay lại màn hình Login tiếp theo (sau khi đăng xuất):
+        // - Quét QR: xoá trống ô domain; Nhập tay: giữ domain đã nhập
+        // - Luôn xoá trống tài khoản & mật khẩu để nhập mới
+        _uiState.update {
+            it.copy(
+                domain = if (isDomainFromQr) "" else cleanHost,
+                isDomainFromQr = false,
+                email = "",
+                password = "",
+                termsAccepted = true,
+                showPassword = false
+            )
+        }
     }
 
     companion object {

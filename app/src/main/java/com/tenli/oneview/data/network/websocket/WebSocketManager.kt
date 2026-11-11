@@ -227,7 +227,14 @@ class WebSocketManager(
                         UserSession.accessToken.isNotEmpty()
                     ) {
                         val reportClient = reportClients.getOrPut(id) {
-                            WebSocketReportClient(id, client, gson, scope, ::handleReportPayload)
+                            WebSocketReportClient(
+                                vmsId = id,
+                                client = client,
+                                gson = gson,
+                                scope = scope,
+                                onMessageReceived = ::handleReportPayload,
+                                onReconnectRefreshUrl = { vmsApi.getReportLink(id).body()?.link }
+                            )
                         }
                         if (expectedGen == sessionGeneration.get() && isAppInForeground && isReportsTabActive && reportsRequested) {
                             reportClient.connect(link)

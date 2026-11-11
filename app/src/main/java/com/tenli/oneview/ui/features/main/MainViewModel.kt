@@ -95,6 +95,7 @@ class MainViewModel(
         viewModelScope.launch {
             var lastPermVersion = UserPermissionManager.permissionState.value.version
             UserPermissionManager.permissionState.collect { permState ->
+                if (UserSession.accessToken.isEmpty()) return@collect
                 _uiState.update {
                     it.copy(
                         accountName = resolveAccountName(),
@@ -274,10 +275,9 @@ class MainViewModel(
         notificationLoadJob?.cancel()
         aiModuleSaveJob?.cancel()
         passwordChangeJob?.cancel()
+        cachedNotificationSettings = null
+        webSocketManager.disconnectAll()
         logoutJob = viewModelScope.launch {
-            webSocketManager.disconnectAll()
-            cachedNotificationSettings = null
-            authRepository.clearAuthenticatedSession()
             _event.emit(MainEvent.Logout)
         }
     }

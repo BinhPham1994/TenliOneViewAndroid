@@ -1,6 +1,7 @@
 package com.tenli.oneview.util
 
 import com.google.gson.JsonSyntaxException
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.ui.utils.LocaleManager
 import kotlinx.coroutines.CancellationException
 import retrofit2.Response
@@ -10,6 +11,9 @@ import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.net.ssl.SSLException
+
+/** Ném ra khi request mạng vẫn chạy sau khi phiên đăng nhập đã bị xoá (logout) – không phải lỗi kết nối máy chủ. */
+class SessionClearedException : IOException("No active backend domain configured")
 
 class BackendHttpException(
     val code: Int,
@@ -47,6 +51,9 @@ fun noNetworkMessage(
 fun Throwable.toUserFriendlyMessage(
     isEn: Boolean = LocaleManager.languageFlow.value.startsWith("en")
 ): String {
+    if (this is SessionClearedException || UserSession.accessToken.isEmpty()) {
+        return ""
+    }
     if (!NetworkMonitor.isNetworkAvailable()) {
         return noNetworkMessage(isEn)
     }

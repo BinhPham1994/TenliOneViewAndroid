@@ -41,6 +41,115 @@ class TokenAuthenticator : Authenticator {
                 .writeTimeout(LOGIN_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .build()
         }
+
+        /**
+         * Làm mới accessToken đồng bộ (single-flight dưới [lock]), dùng chung cho cả HTTP [Authenticator],
+         * WebSocket reconnect và ExoPlayer khi gặp lỗi 401/403 do token ngắn hạn (vd. 15 phút).
+         */
+        fun refreshAccessToken(failedToken: String = UserSession.accessToken): String? {
+            if (!UserSession.hasSavedCredentials()) {
+                Log.w(TAG, "Không có credentials đã lưu → không thể tự re-login")
+                if (UserSession.accessToken.isNotEmpty()) {
+                    EventBus.emitUnauthorized()
+                }
+                return null
+            }
+
+            synchronized(lock) {
+                val currentToken = UserSession.accessToken
+                if (currentToken.isEmpty()) {
+                    return null
+                }
+                if (failedToken.isNotEmpty() && currentToken != failedToken) {
+                    Log.d(TAG, "Token đã được cập nhật bởi thread khác → dùng token mới")
+                    return currentToken
+                }
+
+                Log.d(TAG, "Đang thực hiện re-login...")
+                return try {
+                    performSyncLogin()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Lỗi khi re-login: ${e.message}")
+                    null
+                }
+            }
+        }
+
+        /**
+         * Thực hiện login đồng bộ (blocking) để lấy token mới.
+         * Dùng OkHttpClient riêng (không có Authenticator) để tránh vòng lặp.
+         */
+        private fun performSyncLogin(): String? {
+            val domain = UserSession.domain
+            val username = UserSession.savedUsername
+            val password = UserSession.savedPassword
+
+            if (domain.isEmpty() || username.isEmpty() || password.isEmpty()) {
+                return null
+            }
+
+            val normalizedDomain = domain.trim().trimEnd('/').removeSuffix("/api/v1")
+            val loginUrl = "$normalizedDomain/VMS/api/LogIn"
+
+            val gson = LoginAuthClient.gson
+            val jsonBody = gson.toJson(LogInModel(username = username, password = password))
+            val body = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
+
+            val request = Request.Builder()
+                .url(loginUrl)
+                .post(body)
+                .header("Content-Type", "application/json")
+                .build()
+
+            return loginClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Log.w(TAG, "Re-login HTTP ${response.code}")
+                    if (response.code == 400 || response.code == 401 || response.code == 403) {
+                        EventBus.emitUnauthorized()
+                    }
+                    return null
+                }
+
+                val responseBody = response.body?.string() ?: return null
+                val tokenModel = try {
+                    gson.fromJson(responseBody, com.tenli.oneview.model.network.TokenModel::class.java)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Parse token response lỗi: ${e.message}")
+                    return null
+                }
+
+                if (tokenModel?.token.isNullOrBlank()) {
+                    return null
+                }
+
+                // Chống ghi đè "zombie token" nếu người dùng đã bấm Đăng xuất hoặc đổi tài khoản/domain trong lúc chờ HTTP re-login
+                if (UserSession.accessToken.isEmpty() ||
+                    UserSession.domain != domain ||
+                    UserSession.savedUsername != username
+                ) {
+                    Log.w(TAG, "Phiên đăng nhập đã thay đổi hoặc đăng xuất trong lúc re-login → huỷ cập nhật token")
+                    return null
+                }
+
+                // Cập nhật UserSession
+                synchronized(UserSession) {
+                    UserSession.accessToken = tokenModel.token
+                    UserSession.refreshToken = tokenModel.token
+                }
+
+                // Cập nhật SharedPreferences
+                try {
+                    GlobalData.preferences.edit {
+                        putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
+                        putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
+                }
+
+                tokenModel.token
+            }
+        }
     }
 
     override fun authenticate(route: Route?, response: Response): Request? {
@@ -68,15 +177,6 @@ class TokenAuthenticator : Authenticator {
             return null
         }
 
-        // Không có credentials đã lưu → không thể re-login; nếu đang có phiên đăng nhập thì báo hết hạn phiên để đưa về màn Login
-        if (!UserSession.hasSavedCredentials()) {
-            Log.w(TAG, "Không có credentials đã lưu → không thể tự re-login")
-            if (UserSession.accessToken.isNotEmpty()) {
-                EventBus.emitUnauthorized()
-            }
-            return null
-        }
-
         // Token thực tế đã gửi kèm request bị 401 (đọc từ request header thay vì biến toàn cục để chống đua luồng 401 lệch nhịp)
         val failedToken = response.request.header("Authorization")
             ?.removePrefix("Bearer ")
@@ -84,113 +184,15 @@ class TokenAuthenticator : Authenticator {
             ?.trim()
             .orEmpty()
 
-        synchronized(lock) {
-            // Kiểm tra xem thread khác đã re-login thành công chưa (hoặc phiên đã bị đăng xuất)
-            val currentToken = UserSession.accessToken
-            if (currentToken.isEmpty()) {
-                return null
-            }
-            if (failedToken.isNotEmpty() && currentToken != failedToken) {
-                // Token đã được thread khác cập nhật → dùng luôn token mới
-                Log.d(TAG, "Token đã được cập nhật bởi thread khác → dùng token mới")
-                return response.request.newBuilder()
-                    .header("Authorization", "Bearer $currentToken")
-                    .build()
-            }
-
-            // Thread này phải thực hiện re-login
-            Log.d(TAG, "Đang thực hiện re-login...")
-            return try {
-                val newToken = performSyncLogin()
-                if (newToken != null) {
-                    Log.d(TAG, "Re-login thành công → retry request với token mới")
-                    response.request.newBuilder()
-                        .header("Authorization", "Bearer $newToken")
-                        .build()
-                } else {
-                    Log.w(TAG, "Re-login thất bại → trả 401")
-                    null
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Lỗi khi re-login: ${e.message}")
-                null
-            }
-        }
-    }
-
-    /**
-     * Thực hiện login đồng bộ (blocking) để lấy token mới.
-     * Dùng OkHttpClient riêng (không có Authenticator) để tránh vòng lặp.
-     */
-    private fun performSyncLogin(): String? {
-        val domain = UserSession.domain
-        val username = UserSession.savedUsername
-        val password = UserSession.savedPassword
-
-        if (domain.isEmpty() || username.isEmpty() || password.isEmpty()) {
-            return null
-        }
-
-        val normalizedDomain = domain.trim().trimEnd('/').removeSuffix("/api/v1")
-        val loginUrl = "$normalizedDomain/VMS/api/LogIn"
-
-        val gson = LoginAuthClient.gson
-        val jsonBody = gson.toJson(LogInModel(username = username, password = password))
-        val body = jsonBody.toRequestBody(JSON_MEDIA_TYPE)
-
-        val request = Request.Builder()
-            .url(loginUrl)
-            .post(body)
-            .header("Content-Type", "application/json")
-            .build()
-
-        return loginClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                Log.w(TAG, "Re-login HTTP ${response.code}")
-                if (response.code == 400 || response.code == 401 || response.code == 403) {
-                    EventBus.emitUnauthorized()
-                }
-                return null
-            }
-
-            val responseBody = response.body?.string() ?: return null
-            val tokenModel = try {
-                gson.fromJson(responseBody, com.tenli.oneview.model.network.TokenModel::class.java)
-            } catch (e: Exception) {
-                Log.e(TAG, "Parse token response lỗi: ${e.message}")
-                return null
-            }
-
-            if (tokenModel?.token.isNullOrBlank()) {
-                return null
-            }
-
-            // Chống ghi đè "zombie token" nếu người dùng đã bấm Đăng xuất hoặc đổi tài khoản/domain trong lúc chờ HTTP re-login
-            if (UserSession.accessToken.isEmpty() ||
-                UserSession.domain != domain ||
-                UserSession.savedUsername != username
-            ) {
-                Log.w(TAG, "Phiên đăng nhập đã thay đổi hoặc đăng xuất trong lúc re-login → huỷ cập nhật token")
-                return null
-            }
-
-            // Cập nhật UserSession
-            synchronized(UserSession) {
-                UserSession.accessToken = tokenModel.token
-                UserSession.refreshToken = tokenModel.token
-            }
-
-            // Cập nhật SharedPreferences
-            try {
-                GlobalData.preferences.edit {
-                    putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
-                    putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
-            }
-
-            tokenModel.token
+        val newToken = refreshAccessToken(failedToken)
+        return if (newToken != null) {
+            Log.d(TAG, "Re-login thành công → retry request với token mới")
+            response.request.newBuilder()
+                .header("Authorization", "Bearer $newToken")
+                .build()
+        } else {
+            Log.w(TAG, "Re-login thất bại → trả 401")
+            null
         }
     }
 

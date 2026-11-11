@@ -1,9 +1,9 @@
 package com.tenli.oneview.data.network.retrofit
 
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.util.SessionClearedException
 import okhttp3.Interceptor
 import okhttp3.Response
-import java.io.IOException
 
 class LoginAuthInterceptor : Interceptor {
 
@@ -16,7 +16,7 @@ class LoginAuthInterceptor : Interceptor {
         var effectiveUrl = request.url
         if (effectiveUrl.host == defaultHost) {
             val domainUrl = HostResolver.currentDomainUrl()
-                ?: throw IOException("No active backend domain configured")
+                ?: throw SessionClearedException()
             var newPath = effectiveUrl.encodedPath
             if (newPath.startsWith("/api/v1/")) {
                 newPath = newPath.removePrefix("/api/v1")

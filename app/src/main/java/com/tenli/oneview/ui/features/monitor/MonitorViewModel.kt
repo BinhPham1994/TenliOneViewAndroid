@@ -706,6 +706,7 @@ class MonitorViewModel(
             UserPermissionManager.permissionState.collect { permState ->
                 if (permState.version != lastVersion) {
                     lastVersion = permState.version
+                    if (UserSession.accessToken.isEmpty()) return@collect
                     if (rawCameraList.isNotEmpty() || rawVmsList.isNotEmpty()) {
                         val rebuiltIndex = buildIndex(rawVmsList, rawGroupList, rawCameraList, rawCameraInGroups)
                         applyTree(rebuiltIndex)
@@ -1427,12 +1428,14 @@ class MonitorViewModel(
                             )
                         )
                     } else {
+                        if (UserSession.accessToken.isEmpty()) return@coroutineScope
                         val firstFailure = cameraResult.exceptionOrNull()
                             ?: vmsResult.exceptionOrNull()
                             ?: groupResult.exceptionOrNull()
                             ?: cameraInGroupResult.exceptionOrNull()
-                        val errMsg = firstFailure?.toUserFriendlyMessage()
-                            ?: Throwable().toUserFriendlyMessage()
+                        val errMsg = (firstFailure ?: Throwable())
+                            .toUserFriendlyMessage()
+                            .takeIf { it.isNotEmpty() }
                         // Giữ nguyên dữ liệu cây camera cache trên màn hình (nếu có) nhưng vẫn báo lỗi backend cho người dùng
                         _uiState.update { it.copy(isLoading = false, error = errMsg) }
                     }
@@ -1440,8 +1443,12 @@ class MonitorViewModel(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
-                    it.copy(isLoading = false, error = e.toUserFriendlyMessage())
+                    it.copy(
+                        isLoading = false,
+                        error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
+                    )
                 }
             }
         }
@@ -2470,7 +2477,11 @@ class MonitorViewModel(
                 isLoadingPlaybacks = false,
                 isLoadingMorePlaybackDays = false,
                 hasMorePlaybackDays = effectiveHasMoreDays,
-                error = if (!anyBatchSucceeded) firstBatchError?.toUserFriendlyMessage() ?: state.error else state.error
+                error = if (!anyBatchSucceeded) {
+                    firstBatchError?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() } ?: state.error
+                } else {
+                    state.error
+                }
             )
         }
         if (_uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && autoSelectedVideo != null) {
@@ -2702,19 +2713,28 @@ class MonitorViewModel(
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
                         hasMoreCameraEvents = hasMore,
-                        error = if (!isBackgroundPrewarm) batchResult.firstError?.toUserFriendlyMessage() ?: it.error else it.error
+                        error = if (!isBackgroundPrewarm) {
+                            batchResult.firstError?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() } ?: it.error
+                        } else {
+                            it.error
+                        }
                     )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
                     it.copy(
                         isLoadingCameraEvents = false,
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
                         hasMoreCameraEvents = false,
-                        error = if (!isBackgroundPrewarm) e.toUserFriendlyMessage() else it.error
+                        error = if (!isBackgroundPrewarm) {
+                            e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
+                        } else {
+                            it.error
+                        }
                     )
                 }
             }
@@ -2766,16 +2786,17 @@ class MonitorViewModel(
                         } else {
                             cur.hasMoreCameraEvents
                         },
-                        error = batchResult.firstError?.toUserFriendlyMessage() ?: cur.error
+                        error = batchResult.firstError?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() } ?: cur.error
                     )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
                     it.copy(
                         isPaginatingCameraEvents = false,
-                        error = e.toUserFriendlyMessage()
+                        error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
                     )
                 }
             }

@@ -119,7 +119,7 @@ class AuthRepository(
         formattedDomain: String,
         username: String,
         password: String,
-        rememberMe: Boolean
+        isDomainFromQr: Boolean = false
     ) {
         val appContext = context.applicationContext
         withContext(Dispatchers.IO) {
@@ -143,15 +143,10 @@ class AuthRepository(
                 putString(AppKeys.ACCESS_TOKEN_KEY, loginData.credential.accessToken)
                 putString(AppKeys.REFRESH_TOKEN_KEY, loginData.credential.refreshToken)
                 putString(PREF_DOMAIN_KEY, formattedDomain)
-                putBoolean(AppKeys.REMEMBER_ME_KEY, rememberMe)
+                putBoolean(AppKeys.DOMAIN_FROM_QR_KEY, isDomainFromQr)
                 putBoolean(AppKeys.TERMS_ACCEPTED_KEY, true)
-                if (rememberMe) {
-                    putString(AppKeys.USERNAME_KEY, username)
-                    putString(AppKeys.PASSWORD_KEY, password)
-                } else {
-                    remove(AppKeys.USERNAME_KEY)
-                    remove(AppKeys.PASSWORD_KEY)
-                }
+                putString(AppKeys.USERNAME_KEY, username)
+                putString(AppKeys.PASSWORD_KEY, password)
                 remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
                 remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
                 remove(PREF_EXPANDED_NODES)
@@ -162,54 +157,82 @@ class AuthRepository(
         }
     }
 
+    data class SessionSnapshot(
+        val domain: String,
+        val accessToken: String
+    )
+
     /**
-     * Dọn dẹp toàn diện phiên đăng nhập khi người dùng đăng xuất hoặc hết hạn phiên (401):
-     * đóng thông báo hệ thống, huỷ đăng ký FCM token, xoá [UserSession], xoá các khóa cấu hình
-     * theo tài khoản trong [SharedPreferences] và xoá sạch RAM/Disk/Image cache.
+     * Bước 1 (đồng bộ, < 0.2ms): chụp lại token/domain cũ để huỷ FCM dưới nền, xoá ngay [UserSession] trên RAM,
+     * đóng thông báo hệ thống và gỡ các khoá phiên trong [SharedPreferences] để điều hướng về Login tức thì.
      */
-    suspend fun clearAuthenticatedSession() {
+    fun clearSessionMemoryAndPrefs(): SessionSnapshot {
         val appContext = context.applicationContext
-        val previousDomain = UserSession.domain
-        val previousAccessToken = UserSession.accessToken
+        val snapshot = SessionSnapshot(
+            domain = UserSession.domain,
+            accessToken = UserSession.accessToken
+        )
+        val prefs = GlobalData.preferences
+        val wasDomainFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
 
         // Xoá ngay UserSession trên RAM trước khi await bất kỳ I/O hay mạng nào để mọi interceptor,
         // TokenAuthenticator, WebSocket và tác vụ ghi cache đang chạy dừng dùng token cũ ngay lập tức.
         UserSession.clear()
         runCatching { NotificationManagerCompat.from(appContext).cancelAll() }
 
-        withContext(NonCancellable + Dispatchers.IO) {
-            val prefs = GlobalData.preferences
-            val rememberMe = prefs.getBoolean(AppKeys.REMEMBER_ME_KEY, false)
-            prefs.edit {
-                remove(AppKeys.ACCESS_TOKEN_KEY)
-                remove(AppKeys.REFRESH_TOKEN_KEY)
-                remove(AppKeys.USER_DATA_KEY)
-                remove(AppKeys.GROUP_ID)
-                remove(AppKeys.GROUP_ID_CAMERA)
-                remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
-                remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
-                remove(AiTypeHelper.PREF_MODULES_CONFIG_JSON)
-                remove(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN)
-                remove(PREF_EXPANDED_NODES)
-                remove(PREF_MONITOR_GRID_SIZE)
-                remove(PREF_MONITOR_GRID_CAMERA_IDS)
-                remove(PREF_MONITOR_CAMERA_ID)
-                if (!rememberMe) {
-                    remove(AppKeys.USERNAME_KEY)
-                    remove(AppKeys.PASSWORD_KEY)
-                }
+        prefs.edit {
+            remove(AppKeys.ACCESS_TOKEN_KEY)
+            remove(AppKeys.REFRESH_TOKEN_KEY)
+            remove(AppKeys.USER_DATA_KEY)
+            remove(AppKeys.USERNAME_KEY)
+            remove(AppKeys.PASSWORD_KEY)
+            remove(AppKeys.DOMAIN_FROM_QR_KEY)
+            if (wasDomainFromQr) {
+                remove(PREF_DOMAIN_KEY)
             }
+            remove(AppKeys.GROUP_ID)
+            remove(AppKeys.GROUP_ID_CAMERA)
+            remove(PREF_PUSH_NOTIFICATIONS_ENABLED)
+            remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+            remove(AiTypeHelper.PREF_MODULES_CONFIG_JSON)
+            remove(AiTypeHelper.PREF_MODULES_CONFIG_DOMAIN)
+            remove(PREF_EXPANDED_NODES)
+            remove(PREF_MONITOR_GRID_SIZE)
+            remove(PREF_MONITOR_GRID_CAMERA_IDS)
+            remove(PREF_MONITOR_CAMERA_ID)
+        }
+        return snapshot
+    }
 
-            HomeCacheManager.clearCache(appContext)
-            EventCacheManager.clearCache(appContext)
-            MonitorCacheManager.clearCache(appContext)
+    /**
+     * Bước 2 (chạy nền trên IO): xoá sạch RAM/Disk/Image cache và huỷ đăng ký FCM token trên backend
+     * mà không chặn UI lúc chuyển về màn hình đăng nhập.
+     */
+    suspend fun clearSessionCachesAndPushToken(snapshot: SessionSnapshot) {
+        val appContext = context.applicationContext
+        withContext(NonCancellable + Dispatchers.IO) {
+            if (UserSession.accessToken.isEmpty()) {
+                HomeCacheManager.clearCache(appContext)
+                EventCacheManager.clearCache(appContext)
+                MonitorCacheManager.clearCache(appContext)
+            }
 
             FcmTokenManager.unregisterDevicePushToken(
                 deleteLocalToken = true,
-                explicitDomain = previousDomain,
-                explicitAccessToken = previousAccessToken
+                explicitDomain = snapshot.domain,
+                explicitAccessToken = snapshot.accessToken
             )
         }
+    }
+
+    /**
+     * Dọn dẹp toàn diện phiên đăng nhập khi người dùng đăng xuất hoặc hết hạn phiên (401):
+     * đóng thông báo hệ thống, huỷ đăng ký FCM token, xoá [UserSession], xoá các khóa cấu hình
+     * theo tài khoản trong [SharedPreferences] và xoá sạch RAM/Disk/Image cache.
+     */
+    suspend fun clearAuthenticatedSession() {
+        val snapshot = clearSessionMemoryAndPrefs()
+        clearSessionCachesAndPushToken(snapshot)
     }
 
     suspend fun getUserNotificationSettings(): Response<UserNotificationSettingsModel> =

@@ -5,9 +5,9 @@ import androidx.compose.runtime.Immutable
 @Immutable
 data class LoginUiState(
     val domain: String = "",
+    val isDomainFromQr: Boolean = false,
     val email: String = "",
     val password: String = "",
-    val rememberMe: Boolean = false,
     val termsAccepted: Boolean = false,
     val showPassword: Boolean = false,
     val isLoading: Boolean = false

@@ -338,6 +338,13 @@ object MobileTopPopupManager {
     fun dismiss() {
         _currentMessage.value = null
     }
+
+    /** Đóng popup nếu đang hiển thị lỗi (giữ nguyên thông báo thành công như sau khi đổi mật khẩu). */
+    fun dismissIfError() {
+        if (_currentMessage.value?.type == MobileTopPopupType.ERROR) {
+            _currentMessage.value = null
+        }
+    }
 }
 
 @Composable

@@ -158,9 +158,11 @@ fun LoginScreen(
     LoginContent(
         uiState = uiState,
         onDomainChange = viewModel::onDomainChanged,
+        onQrDomainScanned = viewModel::onQrDomainScanned,
+        onProceedToCredentialsStep = viewModel::onProceedToCredentialsStep,
+        onBackFromCredentialsStep = viewModel::onBackToDomainStep,
         onEmailChange = viewModel::onEmailChanged,
         onPasswordChange = viewModel::onPasswordChanged,
-        onRememberMeChange = viewModel::onRememberMeChanged,
         onToggleTerms = viewModel::toggleTermsAccepted,
         onTogglePassword = viewModel::toggleShowPassword,
         onLoginClick = viewModel::login,
@@ -172,9 +174,11 @@ fun LoginScreen(
 private fun LoginContent(
     uiState: LoginUiState,
     onDomainChange: (String) -> Unit,
+    onQrDomainScanned: (String) -> Unit,
+    onProceedToCredentialsStep: () -> Unit,
+    onBackFromCredentialsStep: () -> Unit,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
-    onRememberMeChange: (Boolean) -> Unit,
     onToggleTerms: () -> Unit,
     onTogglePassword: () -> Unit,
     onLoginClick: () -> Unit,
@@ -189,7 +193,6 @@ private fun LoginContent(
     val emailFocusRequester = remember { FocusRequester() }
     var currentStep by remember { mutableIntStateOf(STEP_DOMAIN) }
     var showQrScanner by remember { mutableStateOf(false) }
-    var isDomainFromQr by remember { mutableStateOf(false) }
     var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val isVietnamese = !rememberIsEnglish()
 
@@ -202,10 +205,7 @@ private fun LoginContent(
     val onBackToDomainStep: () -> Unit = {
         focusManager.clearFocus()
         keyboardController?.hide()
-        if (isDomainFromQr) {
-            onDomainChange("")
-            isDomainFromQr = false
-        }
+        onBackFromCredentialsStep()
         currentStep = STEP_DOMAIN
     }
 
@@ -244,17 +244,24 @@ private fun LoginContent(
         } else if (!NetworkMonitor.isNetworkAvailable()) {
             MobileTopPopupManager.error(noNetworkMessage(!isVietnamese))
         } else {
-            onDomainChange(LoginViewModel.normalizeDomainInput(uiState.domain))
-            isDomainFromQr = false
+            onProceedToCredentialsStep()
             focusManager.clearFocus()
             keyboardController?.hide()
             currentStep = STEP_CREDENTIALS
         }
     }
-    val canSubmit = !uiState.isLoading && uiState.termsAccepted
+    val isCredentialsReady = uiState.email.isNotBlank() &&
+        uiState.password.isNotEmpty() &&
+        uiState.termsAccepted
+    val canSubmit = !uiState.isLoading && isCredentialsReady
     val onSubmit: () -> Unit = {
         focusManager.clearFocus()
         if (canSubmit) onLoginClick()
+    }
+    val onKeyboardDone: () -> Unit = {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        if (!uiState.isLoading) onLoginClick()
     }
 
     Scaffold(containerColor = colors.pageBg) { padding ->
@@ -354,14 +361,15 @@ private fun LoginContent(
                                     uiState = uiState,
                                     isVietnamese = isVietnamese,
                                     isTermsAccepted = uiState.termsAccepted,
+                                    isFormReady = isCredentialsReady,
                                     canSubmit = canSubmit,
                                     emailFocusRequester = emailFocusRequester,
                                     onEmailChange = onEmailChange,
                                     onPasswordChange = onPasswordChange,
                                     onTogglePassword = onTogglePassword,
-                                    onRememberMeChange = onRememberMeChange,
                                     onToggleTerms = onToggleTerms,
                                     onMoveFocusDown = { focusManager.moveFocus(FocusDirection.Down) },
+                                    onKeyboardDone = onKeyboardDone,
                                     onSubmit = onSubmit
                                 )
                             }
@@ -411,8 +419,7 @@ private fun LoginContent(
                     onDismiss = { showQrScanner = false },
                     onValidDomainScanned = { scannedDomain ->
                         showQrScanner = false
-                        isDomainFromQr = true
-                        onDomainChange(scannedDomain)
+                        onQrDomainScanned(scannedDomain)
                         focusManager.clearFocus()
                         keyboardController?.hide()
                         currentStep = STEP_CREDENTIALS
@@ -634,17 +641,17 @@ private fun CredentialsStep(
     uiState: LoginUiState,
     isVietnamese: Boolean,
     isTermsAccepted: Boolean,
+    isFormReady: Boolean,
     canSubmit: Boolean,
     emailFocusRequester: FocusRequester,
     onEmailChange: (String) -> Unit,
     onPasswordChange: (String) -> Unit,
     onTogglePassword: () -> Unit,
-    onRememberMeChange: (Boolean) -> Unit,
     onToggleTerms: () -> Unit,
     onMoveFocusDown: () -> Unit,
+    onKeyboardDone: () -> Unit,
     onSubmit: () -> Unit
 ) {
-    val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
     LoginInputField(
@@ -676,35 +683,8 @@ private fun CredentialsStep(
             keyboardType = KeyboardType.Password,
             imeAction = ImeAction.Done
         ),
-        keyboardActions = KeyboardActions(onDone = { onSubmit() })
+        keyboardActions = KeyboardActions(onDone = { onKeyboardDone() })
     )
-
-    Spacer(modifier = Modifier.height(spacing.space16))
-
-    // Remember Me (.premium-checkbox)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onRememberMeChange(!uiState.rememberMe) }
-            .padding(vertical = spacing.space2),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        LoginCheckbox(
-            checked = uiState.rememberMe,
-            size = spacing.iconRegular,
-            cornerRadius = spacing.radiusTiny,
-            checkIconSize = spacing.iconXSmall
-        )
-        Spacer(modifier = Modifier.width(spacing.space8))
-        Text(
-            text = if (isVietnamese) "Ghi nhớ đăng nhập" else "Remember me",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSubtle
-        )
-    }
 
     Spacer(modifier = Modifier.height(spacing.space20))
 
@@ -715,7 +695,7 @@ private fun CredentialsStep(
             else -> "Sign In"
         },
         onClick = onSubmit,
-        active = isTermsAccepted,
+        active = isFormReady,
         enabled = canSubmit,
         isLoading = uiState.isLoading
     )

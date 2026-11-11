@@ -12,6 +12,7 @@ import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.data.repository.AuthRepository
+import com.tenli.oneview.ui.component.MobileTopPopupManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,14 +44,19 @@ class SplashViewModel(
 
     fun logout() {
         val needsCleanup = UserSession.accessToken.isNotEmpty() || UserSession.refreshToken.isNotEmpty()
+        val snapshot = if (needsCleanup) {
+            webSocketManager.disconnectAll()
+            authRepository.clearSessionMemoryAndPrefs()
+        } else {
+            null
+        }
+        MobileTopPopupManager.dismissIfError()
         _uiState.update { it.copy(destination = SplashDestination.Login) }
 
-        if (!needsCleanup) return
-
-        // Dự phòng trường hợp gọi trực tiếp SplashViewModel.logout() (vd. hết hạn phiên 401) mà chưa chạy MainViewModel.logout()
-        webSocketManager.disconnectAll()
-        viewModelScope.launch(Dispatchers.IO) {
-            authRepository.clearAuthenticatedSession()
+        if (snapshot != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                authRepository.clearSessionCachesAndPushToken(snapshot)
+            }
         }
     }
 

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.TenliApp
 import com.tenli.oneview.data.local.CachedEventData
 import com.tenli.oneview.data.local.UserPermissionManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.data.repository.EventRepository
 import com.tenli.oneview.model.network.AIServiceModel
@@ -183,6 +184,7 @@ class EventViewModel(
             UserPermissionManager.permissionState.collect { permState ->
                 if (permState.version != lastVersion) {
                     lastVersion = permState.version
+                    if (UserSession.accessToken.isEmpty()) return@collect
                     val allCameras = eventRepository.getCamerasInMemory()
                     val permittedCameras = UserPermissionManager.filterPermittedCameras(
                         allCameras.ifEmpty { _uiState.value.cameraList }
@@ -438,6 +440,7 @@ class EventViewModel(
         initialFetchJob?.cancel()
         paginateJob?.cancel()
         recentFetchJob?.cancel()
+        if (UserSession.accessToken.isEmpty() || UserSession.domain.isEmpty()) return
         initialFetchJob = viewModelScope.launch(Dispatchers.IO) {
             lastFetchedRawId = null
             _uiState.update { it.copy(isPaginating = false) }
@@ -568,6 +571,8 @@ class EventViewModel(
                         ?: cameraResult?.exceptionOrNull()
                         ?: aiServiceResult?.exceptionOrNull()
 
+                    if (UserSession.accessToken.isEmpty()) return@coroutineScope
+
                     eventRepository.cacheInMemory(
                         events = finalEvents,
                         cameras = allCameraList,
@@ -586,7 +591,7 @@ class EventViewModel(
                             aiServices = aiServices,
                             events = finalEvents,
                             hasMore = hasMore,
-                            error = failure?.toUserFriendlyMessage()
+                            error = failure?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() }
                         )
                     }
 
@@ -609,12 +614,13 @@ class EventViewModel(
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching initial events", e)
+                if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
                     it.copy(
                         isLoading = false,
                         isRefreshing = false,
                         hasMore = false,
-                        error = e.toUserFriendlyMessage()
+                        error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
                     )
                 }
             }
@@ -658,14 +664,20 @@ class EventViewModel(
                         } else {
                             it.hasMore
                         },
-                        error = batchResult.firstError?.toUserFriendlyMessage()
+                        error = batchResult.firstError?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() }
                     )
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading more events", e)
-                _uiState.update { it.copy(isPaginating = false, error = e.toUserFriendlyMessage()) }
+                if (UserSession.accessToken.isEmpty()) return@launch
+                _uiState.update {
+                    it.copy(
+                        isPaginating = false,
+                        error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
+                    )
+                }
             }
         }
     }

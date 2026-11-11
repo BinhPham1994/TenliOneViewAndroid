@@ -4,11 +4,15 @@ import android.util.Log
 import com.google.gson.Gson
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -34,11 +38,13 @@ abstract class ReconnectingWebSocket(
     private val scope: CoroutineScope,
     private val logTag: String,
     private val subscribeTopic: String,
-    private val preserveExistingUrlToken: Boolean = false
+    private val preserveExistingUrlToken: Boolean = false,
+    private val onReconnectRefreshUrl: (suspend () -> String?)? = null
 ) {
     @Volatile private var webSocket: WebSocket? = null
     /** URL gốc (chưa chuẩn hóa) – được chuẩn hóa lại mỗi lần connect để luôn theo domain/token hiện tại */
     @Volatile private var rawUrl: String = ""
+    @Volatile private var lastUsedToken: String = ""
     @Volatile private var isConnected = false
     @Volatile private var isConnecting = false
     @Volatile private var manuallyDisconnected = false
@@ -79,6 +85,7 @@ abstract class ReconnectingWebSocket(
             runCatching { oldSocket?.cancel() }
 
             rawUrl = urlStr
+            lastUsedToken = UserSession.accessToken
             val finalUrl = appendTokenToUrl(protocolUrl, preserveExistingToken = preserveExistingUrlToken)
             if (BuildConfig.DEBUG) Log.d(logTag, "Connecting: $protocolUrl")
             try {
@@ -172,17 +179,20 @@ abstract class ReconnectingWebSocket(
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (!isCurrent(webSocket)) return
             if (BuildConfig.DEBUG) Log.d(logTag, "Closed: $reason")
-            handleDisconnect(webSocket)
+            val authFailed = code == 1008 || code == 4001 || code == 4003
+            handleDisconnect(webSocket, authFailed = authFailed)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!isCurrent(webSocket)) return
             if (BuildConfig.DEBUG) Log.w(logTag, "Failure: ${t.message}")
-            handleDisconnect(webSocket)
+            val httpCode = response?.code
+            val authFailed = httpCode == 401 || httpCode == 403
+            handleDisconnect(webSocket, authFailed = authFailed)
         }
     }
 
-    private fun handleDisconnect(ws: WebSocket) {
+    private fun handleDisconnect(ws: WebSocket, authFailed: Boolean = false) {
         synchronized(lock) {
             if (ws !== this.webSocket) return
             isConnecting = false
@@ -193,7 +203,7 @@ abstract class ReconnectingWebSocket(
             stopHeartbeat()
             webSocket = null
             if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
-                scheduleReconnectLocked()
+                scheduleReconnectLocked(authFailed)
             }
         }
     }
@@ -213,16 +223,36 @@ abstract class ReconnectingWebSocket(
         heartbeatJob = null
     }
 
-    private fun scheduleReconnectLocked() {
+    private fun scheduleReconnectLocked(authFailed: Boolean = false) {
         if (manuallyDisconnected || reconnectJob?.isActive == true || rawUrl.isEmpty() || UserSession.accessToken.isEmpty()) return
 
         val currentDelay = reconnectDelay + Random.nextLong(RECONNECT_JITTER_MS)
         reconnectDelay = min((reconnectDelay * BACKOFF_MULTIPLIER).roundToLong(), MAX_RECONNECT_DELAY_MS)
+        val failedTok = lastUsedToken
 
         reconnectJob = scope.launch {
             delay(currentDelay)
-            if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
-                connect(rawUrl)
+            if (manuallyDisconnected || UserSession.accessToken.isEmpty()) return@launch
+            try {
+                if (authFailed && !preserveExistingUrlToken) {
+                    withContext(Dispatchers.IO) {
+                        TokenAuthenticator.refreshAccessToken(failedTok)
+                    }
+                }
+                val refreshedUrl = if (onReconnectRefreshUrl != null && (authFailed || preserveExistingUrlToken)) {
+                    withContext(Dispatchers.IO) {
+                        runCatching { onReconnectRefreshUrl.invoke() }.onFailure { e ->
+                            if (e is CancellationException) throw e
+                        }.getOrNull()
+                    }
+                } else {
+                    null
+                }
+                if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
+                    connect(refreshedUrl?.takeIf { it.isNotBlank() } ?: rawUrl)
+                }
+            } catch (e: CancellationException) {
+                throw e
             }
         }
     }
@@ -308,8 +338,17 @@ class WebSocketReportClient(
     client: OkHttpClient,
     gson: Gson,
     scope: CoroutineScope,
-    private val onMessageReceived: (com.tenli.oneview.model.network.ReportPayload, Int) -> Unit
-) : ReconnectingWebSocket(client, gson, scope, "WebSocketReport-$vmsId", "report", preserveExistingUrlToken = true) {
+    private val onMessageReceived: (com.tenli.oneview.model.network.ReportPayload, Int) -> Unit,
+    onReconnectRefreshUrl: (suspend () -> String?)? = null
+) : ReconnectingWebSocket(
+    client = client,
+    gson = gson,
+    scope = scope,
+    logTag = "WebSocketReport-$vmsId",
+    subscribeTopic = "report",
+    preserveExistingUrlToken = true,
+    onReconnectRefreshUrl = onReconnectRefreshUrl
+) {
     override fun onTextMessage(text: String) {
         gson.fromJson(text, com.tenli.oneview.model.network.ReportPayload::class.java)?.let { onMessageReceived(it, vmsId) }
     }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -26,6 +27,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.Coil
@@ -35,9 +37,13 @@ import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
 import com.tenli.oneview.ui.theme.appColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @SuppressLint("InflateParams")
 @OptIn(UnstableApi::class)
@@ -62,9 +68,13 @@ fun VideoPlayer(
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
     var isActuallyPlaying by remember(videoUrl) { mutableStateOf(false) }
     val playerViewHolder = remember(videoUrl) { arrayOfNulls<PlayerView>(1) }
+    val exoPlayerHolder = remember(videoUrl) { arrayOfNulls<ExoPlayer>(1) }
+    val currentTokenHolder = remember(videoUrl) { arrayOf(deviceKey) }
+    val hasRetriedAuth = remember(videoUrl) { booleanArrayOf(false) }
     val savedResumePositionMs = remember(videoUrl) { longArrayOf(C.TIME_UNSET) }
     val wasStoppedForBackground = remember(videoUrl) { booleanArrayOf(false) }
     val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
@@ -81,6 +91,19 @@ fun VideoPlayer(
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
     val currentOnFullscreenToggle by rememberUpdatedState(onFullscreenToggle)
+
+    fun createAuthenticatedMediaSource(token: String) =
+        androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+            DefaultHttpDataSource.Factory()
+                .setConnectTimeoutMs(10_000)
+                .setReadTimeoutMs(15_000)
+                .setAllowCrossProtocolRedirects(true)
+                .apply {
+                    if (token.isNotBlank() && !VideoFrameCache.isPresignedUrl(videoUrl)) {
+                        setDefaultRequestProperties(mapOf("Authorization" to "Bearer $token"))
+                    }
+                }
+        ).createMediaSource(MediaItem.fromUri(videoUrl))
 
     val playerListener = remember(videoUrl) {
         object : Player.Listener {
@@ -112,6 +135,48 @@ fun VideoPlayer(
             }
 
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                var cause: Throwable? = error.cause
+                var isAuthHttpError = false
+                while (cause != null) {
+                    if (cause is HttpDataSource.InvalidResponseCodeException &&
+                        (cause.responseCode == 401 || cause.responseCode == 403)
+                    ) {
+                        isAuthHttpError = true
+                        break
+                    }
+                    cause = cause.cause
+                }
+
+                val player = exoPlayerHolder[0]
+                if (isAuthHttpError &&
+                    !hasRetriedAuth[0] &&
+                    player != null &&
+                    !VideoFrameCache.isPresignedUrl(videoUrl)
+                ) {
+                    hasRetriedAuth[0] = true
+                    val failedToken = currentTokenHolder[0]
+                    val resumePos = player.currentPosition.coerceAtLeast(0L)
+                    coroutineScope.launch {
+                        val newToken = withContext(Dispatchers.IO) {
+                            TokenAuthenticator.refreshAccessToken(failedToken)
+                        }
+                        val activePlayer = exoPlayerHolder[0]
+                        if (!newToken.isNullOrBlank() && activePlayer === player) {
+                            currentTokenHolder[0] = newToken
+                            activePlayer.setMediaSource(createAuthenticatedMediaSource(newToken), resumePos)
+                            activePlayer.prepare()
+                        } else {
+                            isError = true
+                            isVideoReady = false
+                            isActuallyPlaying = false
+                            currentOnPlayingChange(false)
+                            currentOnPlayWhenReadyChange(false)
+                            currentOnErrorChange(true)
+                        }
+                    }
+                    return
+                }
+
                 android.util.Log.e("VideoPlayer", "ExoPlayer Error: ${error.message}", error)
                 isError = true
                 isVideoReady = false
@@ -141,19 +206,8 @@ fun VideoPlayer(
             .setLoadControl(loadControl)
             .build()
             .apply {
-                val dataSourceFactory = DefaultHttpDataSource.Factory()
-                    .setConnectTimeoutMs(10_000)
-                    .setReadTimeoutMs(15_000)
-                    .setAllowCrossProtocolRedirects(true)
-                    .apply {
-                        if (deviceKey.isNotBlank() && !VideoFrameCache.isPresignedUrl(videoUrl)) {
-                            setDefaultRequestProperties(mapOf("Authorization" to "Bearer $deviceKey"))
-                        }
-                    }
-                setMediaSource(
-                    androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
-                        .createMediaSource(MediaItem.fromUri(videoUrl))
-                )
+                exoPlayerHolder[0] = this
+                setMediaSource(createAuthenticatedMediaSource(currentTokenHolder[0]))
                 if (initialSeekPositionMs != null) {
                     seekTo(initialSeekPositionMs)
                 }
