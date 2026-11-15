@@ -209,8 +209,8 @@ fun HomeScreen(
                             .padding(
                                 start = spacing.space16,
                                 end = spacing.space12,
-                                top = spacing.space14,
-                                bottom = spacing.space6
+                                top = spacing.space20,
+                                bottom = spacing.space4
                             ),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -223,7 +223,8 @@ fun HomeScreen(
                         )
                         MobileViewToggleButton(
                             isListView = uiState.isListView,
-                            onToggle = viewModel::toggleViewMode
+                            onToggle = viewModel::toggleViewMode,
+                            size = spacing.iconButtonSmall
                         )
                     }
                 }

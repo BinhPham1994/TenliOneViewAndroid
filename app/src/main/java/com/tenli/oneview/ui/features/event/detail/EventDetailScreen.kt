@@ -32,17 +32,19 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -77,9 +79,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -91,6 +93,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
@@ -106,7 +109,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.Coil
@@ -120,10 +122,12 @@ import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.component.AnchoredFilterDropdownMenu
 import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.CustomDatePickerDialogModal
 import com.tenli.oneview.ui.component.CustomRangePickerDialogModal
+import com.tenli.oneview.ui.component.FilterCellRow
 import com.tenli.oneview.ui.component.LiveStreamPlayer
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileTopPopupManager
@@ -148,6 +152,7 @@ import com.tenli.oneview.ui.theme.Slate900
 import com.tenli.oneview.ui.theme.SurfaceVariant
 import com.tenli.oneview.ui.theme.SurfaceVariantDark
 import com.tenli.oneview.ui.theme.WarningAmberDeep
+import com.tenli.oneview.ui.theme.WarningOrange
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.spacing
@@ -216,7 +221,6 @@ private val CropPopupMaxWidth = 280.dp
 private val CropPopupMaxHeight = 180.dp
 private val CropPopupFallbackSize = 156.dp
 private val RelatedPlateCardWidth = 148.dp
-private val PeriodMenuMinWidth = 190.dp
 private val PlatesLoadingHeight = 110.dp
 private val HistoryLoadingHeight = 180.dp
 private val HistoryEmptyHeight = 160.dp
@@ -237,6 +241,8 @@ private class GestureBounds {
     var pinnedTopBottomY = 0f
     var dataBoardBottomY = 0f
     var lastTabSwipeTimeMs = 0L
+    var sheetRootCoords: LayoutCoordinates? = null
+    var periodRowCoords: LayoutCoordinates? = null
 }
 
 @Composable
@@ -277,8 +283,19 @@ fun EventDetailScreen(
     var showCustomDateModal by remember(eventId) { mutableStateOf(false) }
     var showCustomRangeModal by remember(eventId) { mutableStateOf(false) }
     var customPickerVersion by remember(eventId) { mutableIntStateOf(0) }
+    var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
+    var periodAnchorRect by remember(eventId) { mutableStateOf<Rect?>(null) }
+
+    BackHandler(enabled = showPeriodMenu) {
+        showPeriodMenu = false
+    }
 
     val listState = rememberLazyListState()
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress && showPeriodMenu) {
+            showPeriodMenu = false
+        }
+    }
 
     // Drag-to-dismiss vertical offset (matching PWA bottom-sheet swipe down to dismiss)
     val sheetOffsetY = remember(eventId) { Animatable(0f) }
@@ -316,6 +333,7 @@ fun EventDetailScreen(
     fun resetMediaState() {
         selectedTab = EventMediaTab.EVENT_IMAGE
         expandedCropUrl = null
+        showPeriodMenu = false
     }
 
     Box(
@@ -330,6 +348,7 @@ fun EventDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .onGloballyPositioned { bounds.sheetRootCoords = it }
                 .graphicsLayer {
                     translationY = sheetOffsetY.value
                 }
@@ -599,8 +618,8 @@ fun EventDetailScreen(
                                 modifier = Modifier.padding(
                                     start = spacing.space24,
                                     end = spacing.space14,
-                                    top = spacing.space10,
-                                    bottom = spacing.space6
+                                    top = spacing.space16,
+                                    bottom = spacing.space8
                                 )
                             )
                         }
@@ -652,15 +671,31 @@ fun EventDetailScreen(
                                 uiState.selectedJourneyPeriod.formatDisplayLabel(isEn)
                             }
                             HistoryHeader(
-                                selectedPeriod = uiState.selectedJourneyPeriod,
                                 periodLabel = periodDisplayLabel,
+                                isExpanded = showPeriodMenu,
                                 isEn = isEn,
-                                onPeriodSelected = { period ->
-                                    when (period) {
-                                        JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
-                                        JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
-                                        else -> viewModel.setJourneyPeriod(period)
+                                anchorModifier = Modifier.onGloballyPositioned { coords ->
+                                    bounds.periodRowCoords = coords
+                                    if (showPeriodMenu) {
+                                        val root = bounds.sheetRootCoords
+                                        if (root != null && root.isAttached && coords.isAttached) {
+                                            val rect = root.localBoundingBoxOf(coords, clipBounds = false)
+                                            if (periodAnchorRect != rect) periodAnchorRect = rect
+                                        }
                                     }
+                                },
+                                onToggleMenu = {
+                                    val nextOpen = !showPeriodMenu
+                                    if (nextOpen) {
+                                        val root = bounds.sheetRootCoords
+                                        val row = bounds.periodRowCoords
+                                        periodAnchorRect = if (root != null && row != null && root.isAttached && row.isAttached) {
+                                            root.localBoundingBoxOf(row, clipBounds = false)
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                    showPeriodMenu = nextOpen && periodAnchorRect != null
                                 }
                             )
                         }
@@ -727,6 +762,42 @@ fun EventDetailScreen(
                                 )
                             }
                         }
+                    }
+                }
+
+                // Anchored Period Dropdown Menu dùng chung chính hàm AnchoredFilterDropdownMenu với MobileFilterBottomSheet
+                // (kế thừa đúng responsiveDensity, tự mở lên trên khi ở sát đáy màn hình, không bao giờ đè lên ô chọn)
+                val currentAnchorRect = periodAnchorRect
+                val rawRootHeightPx = bounds.sheetRootCoords?.size?.height?.toFloat() ?: 0f
+                val navBarBottomPx = WindowInsets.navigationBars.getBottom(density).toFloat()
+                val usableRootHeightPx = (rawRootHeightPx - navBarBottomPx).coerceAtLeast(0f)
+                if (showPeriodMenu && currentAnchorRect != null && usableRootHeightPx > 0f) {
+                    val periodOptions = remember(isEn) {
+                        JourneyPeriod.entries.map { period -> period to period.label(isEn) }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { showPeriodMenu = false }
+                            )
+                    ) {
+                        AnchoredFilterDropdownMenu(
+                            anchorRect = currentAnchorRect,
+                            rootHeightPx = usableRootHeightPx,
+                            options = periodOptions,
+                            selectedKey = uiState.selectedJourneyPeriod,
+                            onSelect = { period ->
+                                showPeriodMenu = false
+                                when (period) {
+                                    JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
+                                    JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
+                                    else -> viewModel.setJourneyPeriod(period)
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -1920,7 +1991,7 @@ private fun RelatedPlatesSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = spacing.space24, end = spacing.space14, top = spacing.space2, bottom = spacing.space6),
+                .padding(start = spacing.space24, end = spacing.space14, top = spacing.space6, bottom = spacing.space8),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2040,16 +2111,14 @@ private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: 
 
 @Composable
 private fun HistoryHeader(
-    selectedPeriod: JourneyPeriod,
     periodLabel: String,
+    isExpanded: Boolean,
     isEn: Boolean,
-    onPeriodSelected: (JourneyPeriod) -> Unit
+    anchorModifier: Modifier = Modifier,
+    onToggleMenu: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val density = LocalDensity.current
-    val controlHeight = segmentControlHeight()
-    var showPeriodMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -2058,139 +2127,27 @@ private fun HistoryHeader(
     ) {
         SectionHeaderText(
             text = if (isEn) "APPEARANCE HISTORY" else "LỊCH SỬ XUẤT HIỆN",
-            modifier = Modifier.padding(start = spacing.space14, top = spacing.space2, bottom = spacing.space8)
+            modifier = Modifier.padding(start = spacing.space14, top = spacing.space6, bottom = spacing.space8)
         )
 
-        // Period Filter Dropdown (.journey-filter-compact BaseSelect with clock icon)
+        // Period Filter Row dùng chung chính hàm FilterCellRow với MobileFilterBottomSheet
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = spacing.space12)
+                .padding(bottom = spacing.space6)
+                .then(anchorModifier)
+                .clip(RoundedCornerShape(spacing.radiusMedium))
+                .background(colors.surface)
         ) {
-            val iconTint = if (showPeriodMenu) colors.accent else colors.textMuted
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(controlHeight)
-                    .clip(RoundedCornerShape(spacing.radiusCompact))
-                    .background(colors.surface)
-                    .clickable { showPeriodMenu = !showPeriodMenu }
-                    .padding(horizontal = spacing.space14),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(spacing.space10)
-                ) {
-                    Icon(
-                        imageVector = LucideIcons.Clock,
-                        contentDescription = null,
-                        tint = iconTint,
-                        modifier = Modifier.size(spacing.iconSmall)
-                    )
-                    Text(
-                        text = periodLabel,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = colors.textTitle,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Icon(
-                    imageVector = LucideIcons.ChevronDown,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier
-                        .size(spacing.iconSmall)
-                        .rotate(if (showPeriodMenu) 180f else 0f)
-                )
-            }
-
-            if (showPeriodMenu) {
-                val popupOffsetY = with(density) { (controlHeight + spacing.space4).roundToPx() }
-                JourneyPeriodMenu(
-                    selectedPeriod = selectedPeriod,
-                    isEn = isEn,
-                    offsetY = popupOffsetY,
-                    onDismiss = { showPeriodMenu = false },
-                    onSelect = { period ->
-                        showPeriodMenu = false
-                        onPeriodSelected(period)
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun JourneyPeriodMenu(
-    selectedPeriod: JourneyPeriod,
-    isEn: Boolean,
-    offsetY: Int,
-    onDismiss: () -> Unit,
-    onSelect: (JourneyPeriod) -> Unit
-) {
-    val spacing = MaterialTheme.spacing
-    val colors = MaterialTheme.appColors
-    val menuShape = RoundedCornerShape(spacing.radiusCompact)
-    val itemShape = RoundedCornerShape(spacing.radiusSmall)
-    val selectedPillBg = colors.accent.copy(alpha = if (colors.isDark) 0.18f else 0.10f)
-
-    Popup(
-        alignment = Alignment.TopStart,
-        offset = IntOffset(0, offsetY),
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true)
-    ) {
-        Column(
-            modifier = Modifier
-                .width(IntrinsicSize.Max)
-                .widthIn(min = PeriodMenuMinWidth)
-                .shadow(
-                    elevation = spacing.space16,
-                    shape = menuShape,
-                    ambientColor = Color.Black.copy(alpha = if (colors.isDark) 0.5f else 0.15f),
-                    spotColor = Color.Black.copy(alpha = if (colors.isDark) 0.6f else 0.2f)
-                )
-                .clip(menuShape)
-                .background(colors.surfaceMenu)
-                .border(spacing.borderMedium, colors.border, menuShape)
-                .padding(spacing.space5),
-            verticalArrangement = Arrangement.spacedBy(spacing.space2)
-        ) {
-            JourneyPeriod.entries.forEach { period ->
-                val isPeriodSelected = selectedPeriod == period
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(itemShape)
-                        .background(if (isPeriodSelected) selectedPillBg else Color.Transparent)
-                        .clickable { onSelect(period) }
-                        .padding(horizontal = spacing.space12, vertical = spacing.space8),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = period.label(isEn),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (isPeriodSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isPeriodSelected) colors.accent else colors.textTitle
-                    )
-                    if (isPeriodSelected) {
-                        Spacer(modifier = Modifier.width(spacing.space12))
-                        Icon(
-                            imageVector = LucideIcons.Check,
-                            contentDescription = null,
-                            tint = colors.accent,
-                            modifier = Modifier.size(spacing.iconXSmall)
-                        )
-                    }
-                }
-            }
+            FilterCellRow(
+                icon = LucideIcons.Clock,
+                badgeColor = WarningOrange,
+                label = periodLabel,
+                textColor = colors.textTitle,
+                secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                isExpanded = isExpanded,
+                onClick = onToggleMenu
+            )
         }
     }
 }
@@ -2258,7 +2215,7 @@ private fun SectionCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = spacing.space10)
-            .padding(bottom = spacing.space14),
+            .padding(bottom = spacing.space20),
         color = MaterialTheme.appColors.surface,
         shape = RoundedCornerShape(spacing.radiusMedium),
         content = content

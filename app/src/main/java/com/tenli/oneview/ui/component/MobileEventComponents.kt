@@ -907,10 +907,11 @@ fun MobileTopActionButton(
 @Composable
 fun MobileViewToggleButton(
     isListView: Boolean,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    size: Dp = MaterialTheme.spacing.iconButton
 ) {
     val spacing = MaterialTheme.spacing
-    TopBarIconBox(onClick = onToggle, cornerRadius = spacing.radiusSmall) {
+    TopBarIconBox(onClick = onToggle, cornerRadius = spacing.radiusSmall, size = size) {
         Icon(
             imageVector = if (isListView) LucideIcons.LayoutGrid else LucideIcons.List,
             contentDescription = if (isListView) "Grid View" else "List View",
@@ -925,11 +926,12 @@ fun MobileViewToggleButton(
 private fun TopBarIconBox(
     onClick: () -> Unit,
     cornerRadius: Dp,
+    size: Dp = MaterialTheme.spacing.iconButton,
     content: @Composable BoxScope.() -> Unit
 ) {
     Box(
         modifier = Modifier
-            .size(MaterialTheme.spacing.iconButton)
+            .size(size)
             .clip(RoundedCornerShape(cornerRadius))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1901,7 +1903,7 @@ private fun RowScope.FilterFooterButton(
 }
 
 @Composable
-private fun FilterCellRow(
+internal fun FilterCellRow(
     icon: ImageVector,
     badgeColor: Color,
     label: String,
@@ -1951,7 +1953,7 @@ private fun FilterCellRow(
 }
 
 @Composable
-private fun <K> AnchoredFilterDropdownMenu(
+internal fun <K> AnchoredFilterDropdownMenu(
     anchorRect: Rect,
     rootHeightPx: Float,
     options: List<Pair<K, String>>,
