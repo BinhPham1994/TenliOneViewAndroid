@@ -102,9 +102,17 @@ class DashboardRepository(
     suspend fun getVmsCountOverview(
         serviceId: String,
         fromTime: Long,
-        toTime: Long
+        toTime: Long,
+        eventType: String? = null,
+        dataEventType: String? = null
     ): Response<List<VmsCountOverviewModel>> =
-        bsApi.getVmsCountOverview(serviceId = serviceId, fromTime = fromTime, toTime = toTime)
+        bsApi.getVmsCountOverview(
+            serviceId = serviceId,
+            fromTime = fromTime,
+            toTime = toTime,
+            eventType = eventType,
+            dataEventType = dataEventType
+        )
 
     suspend fun getVmsEventCountByType(
         fromTime: Long,

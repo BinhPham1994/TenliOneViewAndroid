@@ -114,12 +114,15 @@ data class VmsCountOverviewModel(
     val tag: String = "",
     val count: Double = 0.0,
     @SerializedName("service_id", alternate = ["serviceId"])
-    val serviceId: String? = null
+    val serviceId: String? = null,
+    @SerializedName("event_type", alternate = ["eventType"])
+    val eventType: String? = null
 )
 
 data class VmsEventCountByTypeModel(
+    @SerializedName("type", alternate = ["event_type", "eventType"])
     val type: String = "",
-    val count: Int = 0,
+    val count: Double = 0.0,
     @SerializedName("min_time")
     val minTime: Double? = null,
     @SerializedName("max_time")

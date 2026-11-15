@@ -1490,5 +1490,183 @@ object LucideIcons {
             }
         }
     }
+
+    val Star: ImageVector by lazy {
+        lucideVector("LucideStar") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(12f, 2f)
+                lineTo(15.09f, 8.26f)
+                lineTo(22f, 9.27f)
+                lineTo(17f, 14.14f)
+                lineTo(18.18f, 21.02f)
+                lineTo(12f, 17.77f)
+                lineTo(5.82f, 21.02f)
+                lineTo(7f, 14.14f)
+                lineTo(2f, 9.27f)
+                lineTo(8.91f, 8.26f)
+                close()
+            }
+        }
+    }
+
+    val StarFilled: ImageVector by lazy {
+        lucideVector("LucideStarFilled") {
+            path(
+                fill = SolidColor(Color.Black),
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(12f, 2f)
+                lineTo(15.09f, 8.26f)
+                lineTo(22f, 9.27f)
+                lineTo(17f, 14.14f)
+                lineTo(18.18f, 21.02f)
+                lineTo(12f, 17.77f)
+                lineTo(5.82f, 21.02f)
+                lineTo(7f, 14.14f)
+                lineTo(2f, 9.27f)
+                lineTo(8.91f, 8.26f)
+                close()
+            }
+        }
+    }
+
+    val WifiOff: ImageVector by lazy {
+        lucideVector("LucideWifiOff") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(12f, 20f)
+                lineTo(12.01f, 20f)
+                moveTo(8.5f, 16.429f)
+                arcTo(5f, 5f, 0f, false, true, 15.5f, 16.429f)
+                moveTo(5f, 12.859f)
+                arcTo(10f, 10f, 0f, false, true, 10.17f, 10.169f)
+                moveTo(19f, 12.859f)
+                arcTo(10f, 10f, 0f, false, false, 16.993f, 11.336f)
+                moveTo(2f, 8.82f)
+                arcTo(15f, 15f, 0f, false, true, 6.177f, 6.177f)
+                moveTo(22f, 8.82f)
+                arcTo(15f, 15f, 0f, false, false, 10.712f, 5.056f)
+                moveTo(2f, 2f)
+                lineTo(22f, 22f)
+            }
+        }
+    }
+
+    val BarChart2: ImageVector by lazy {
+        lucideVector("LucideBarChart2") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(18f, 20f)
+                verticalLineTo(10f)
+                moveTo(12f, 20f)
+                verticalLineTo(4f)
+                moveTo(6f, 20f)
+                verticalLineTo(14f)
+            }
+        }
+    }
+
+    val Flame: ImageVector by lazy {
+        lucideVector("LucideFlame") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(8.5f, 14.5f)
+                arcTo(2.5f, 2.5f, 0f, false, false, 11f, 12f)
+                curveToRelative(0f, -1.38f, -0.5f, -2f, -1f, -3f)
+                curveToRelative(-1.072f, -2.143f, -0.224f, -4.054f, 2f, -6f)
+                curveToRelative(0.5f, 2.5f, 2f, 4.9f, 4f, 6.5f)
+                curveToRelative(2f, 1.6f, 3f, 3.5f, 3f, 5.5f)
+                arcToRelative(7f, 7f, 0f, true, true, -14f, 0f)
+                curveToRelative(0f, -1.153f, 0.433f, -2.294f, 1f, -3f)
+                arcToRelative(2.5f, 2.5f, 0f, false, false, 2.5f, 2.5f)
+                close()
+            }
+        }
+    }
+
+    val Users: ImageVector by lazy {
+        lucideVector("LucideUsers") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(16f, 21f)
+                verticalLineTo(19f)
+                arcTo(4f, 4f, 0f, false, false, 12f, 15f)
+                horizontalLineTo(6f)
+                arcTo(4f, 4f, 0f, false, false, 2f, 19f)
+                verticalLineTo(21f)
+                moveTo(13f, 7f)
+                arcTo(4f, 4f, 0f, true, true, 5f, 7f)
+                arcTo(4f, 4f, 0f, true, true, 13f, 7f)
+                close()
+                moveTo(22f, 21f)
+                verticalLineTo(19f)
+                arcToRelative(4f, 4f, 0f, false, false, -3f, -3.87f)
+                moveTo(16f, 3.13f)
+                arcToRelative(4f, 4f, 0f, false, true, 0f, 7.75f)
+            }
+        }
+    }
+
+    val Car: ImageVector by lazy {
+        lucideVector("LucideCar") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(21f, 8f)
+                lineTo(19f, 10f)
+                lineTo(17.5f, 6.3f)
+                arcTo(2f, 2f, 0f, false, false, 15.646f, 5f)
+                horizontalLineTo(8.4f)
+                arcTo(2f, 2f, 0f, false, false, 6.497f, 6.257f)
+                lineTo(5f, 10f)
+                lineTo(3f, 8f)
+                moveTo(7f, 14f)
+                lineTo(7.01f, 14f)
+                moveTo(17f, 14f)
+                lineTo(17.01f, 14f)
+                moveTo(5f, 10f)
+                horizontalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, true, 21f, 12f)
+                verticalLineTo(16f)
+                arcTo(2f, 2f, 0f, false, true, 19f, 18f)
+                horizontalLineTo(5f)
+                arcTo(2f, 2f, 0f, false, true, 3f, 16f)
+                verticalLineTo(12f)
+                arcTo(2f, 2f, 0f, false, true, 5f, 10f)
+                close()
+                moveTo(5f, 18f)
+                verticalLineTo(20f)
+                moveTo(19f, 18f)
+                verticalLineTo(20f)
+            }
+        }
+    }
 }
 

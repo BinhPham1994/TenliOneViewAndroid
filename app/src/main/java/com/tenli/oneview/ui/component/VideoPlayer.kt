@@ -3,13 +3,25 @@ package com.tenli.oneview.ui.component
 
 import android.annotation.SuppressLint
 import androidx.annotation.OptIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -17,11 +29,20 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.abs
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -64,13 +85,20 @@ fun VideoPlayer(
     onErrorChange: (Boolean) -> Unit = {},
     onControllerVisibilityChange: (Boolean) -> Unit = {},
     onFullscreenToggle: (() -> Unit)? = null,
-    onTimeUpdate: ((Long) -> Unit)? = null
+    onTimeUpdate: ((Long) -> Unit)? = null,
+    enableZoom: Boolean = false,
+    onZoomChanged: (Boolean) -> Unit = {}
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var isVideoReady by remember(videoUrl) { mutableStateOf(false) }
     var isActuallyPlaying by remember(videoUrl) { mutableStateOf(false) }
+    var isControllerShown by remember(videoUrl) { mutableStateOf(showControllerInitially) }
+    var zoomScale by remember(videoUrl) { mutableFloatStateOf(1f) }
+    var zoomOffsetX by remember(videoUrl) { mutableFloatStateOf(0f) }
+    var zoomOffsetY by remember(videoUrl) { mutableFloatStateOf(0f) }
+    var viewportSize = remember(videoUrl) { IntSize.Zero }
     val playerViewHolder = remember(videoUrl) { arrayOfNulls<PlayerView>(1) }
     val exoPlayerHolder = remember(videoUrl) { arrayOfNulls<ExoPlayer>(1) }
     val currentTokenHolder = remember(videoUrl) { arrayOf(deviceKey) }
@@ -91,6 +119,60 @@ fun VideoPlayer(
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
     val currentOnFullscreenToggle by rememberUpdatedState(onFullscreenToggle)
+    val currentOnZoomChanged by rememberUpdatedState(onZoomChanged)
+
+    fun syncSurfaceZoom(view: PlayerView?, targetScale: Float, ox: Float, oy: Float) {
+        val frame = view?.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_content_frame)
+            ?: view?.videoSurfaceView
+        frame?.apply {
+            scaleX = targetScale
+            scaleY = targetScale
+            translationX = ox
+            translationY = oy
+        }
+    }
+
+    fun applyVideoZoom(targetScale: Float, rawX: Float, rawY: Float) {
+        val s = targetScale.coerceIn(1f, 5f)
+        val clamped = if (s <= 1.001f || viewportSize.width <= 0 || viewportSize.height <= 0) {
+            Offset.Zero
+        } else {
+            val maxX = (viewportSize.width * (s - 1f)) * 0.5f
+            val maxY = (viewportSize.height * (s - 1f)) * 0.5f
+            Offset(rawX.coerceIn(-maxX, maxX), rawY.coerceIn(-maxY, maxY))
+        }
+        val wasZoomed = zoomScale > 1.02f
+        zoomScale = s
+        zoomOffsetX = clamped.x
+        zoomOffsetY = clamped.y
+        syncSurfaceZoom(playerViewHolder[0], s, clamped.x, clamped.y)
+        val nowZoomed = s > 1.02f
+        if (wasZoomed != nowZoomed) {
+            currentOnZoomChanged(nowZoomed)
+        }
+    }
+
+    val resetVideoZoom: () -> Unit = {
+        coroutineScope.launch {
+            val startScale = zoomScale
+            val startX = zoomOffsetX
+            val startY = zoomOffsetY
+            if (startScale <= 1.005f) {
+                applyVideoZoom(1f, 0f, 0f)
+                return@launch
+            }
+            val anim = Animatable(0f)
+            anim.animateTo(1f, animationSpec = tween(durationMillis = 200)) {
+                val f = value
+                applyVideoZoom(
+                    targetScale = startScale + (1f - startScale) * f,
+                    rawX = startX * (1f - f),
+                    rawY = startY * (1f - f)
+                )
+            }
+            applyVideoZoom(1f, 0f, 0f)
+        }
+    }
 
     fun createAuthenticatedMediaSource(token: String) =
         androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
@@ -347,7 +429,94 @@ fun VideoPlayer(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .clipToBounds()
             .background(stageBg)
+            .onSizeChanged { size ->
+                viewportSize = size
+                if (zoomScale > 1.001f) {
+                    applyVideoZoom(zoomScale, zoomOffsetX, zoomOffsetY)
+                }
+            }
+            .then(
+                if (enableZoom) {
+                    Modifier.pointerInput(videoUrl) {
+                        val touchSlop = viewConfiguration.touchSlop
+                        val controllerSafeZonePx = 64.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false,
+                                pass = PointerEventPass.Initial
+                            )
+                            val startedInBottomBar =
+                                isControllerShown && down.position.y >= (size.height - controllerSafeZonePx)
+                            var isTransforming = false
+                            var panAccumulated = Offset.Zero
+
+                            do {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val pressedCount = event.changes.count { it.pressed }
+                                if (pressedCount == 0) break
+
+                                if (pressedCount >= 2) {
+                                    val zoomChange = event.calculateZoom()
+                                    val panChange = event.calculatePan()
+                                    val centroid = event.calculateCentroid(useCurrent = false)
+
+                                    if (!isTransforming) {
+                                        panAccumulated += panChange
+                                        if (abs(1f - zoomChange) > 0.015f || panAccumulated.getDistance() > touchSlop) {
+                                            isTransforming = true
+                                        }
+                                    }
+
+                                    if (isTransforming && centroid != Offset.Unspecified) {
+                                        val oldScale = zoomScale
+                                        val newScale = (oldScale * zoomChange).coerceIn(1f, 5f)
+                                        val effectiveZoom = if (oldScale > 0f) newScale / oldScale else 1f
+                                        val center = Offset(size.width * 0.5f, size.height * 0.5f)
+                                        val newOffset = (centroid - center) * (1f - effectiveZoom) +
+                                            Offset(zoomOffsetX, zoomOffsetY) * effectiveZoom +
+                                            panChange
+                                        applyVideoZoom(newScale, newOffset.x, newOffset.y)
+                                    }
+
+                                    event.changes.forEach { change ->
+                                        if (change.positionChanged()) {
+                                            change.consume()
+                                        }
+                                    }
+                                } else if (zoomScale > 1.02f && !startedInBottomBar) {
+                                    val panChange = event.calculatePan()
+                                    if (!isTransforming) {
+                                        panAccumulated += panChange
+                                        if (panAccumulated.getDistance() > touchSlop) {
+                                            isTransforming = true
+                                        }
+                                    }
+                                    if (isTransforming) {
+                                        applyVideoZoom(
+                                            targetScale = zoomScale,
+                                            rawX = zoomOffsetX + panChange.x,
+                                            rawY = zoomOffsetY + panChange.y
+                                        )
+                                        event.changes.forEach { change ->
+                                            if (change.positionChanged()) {
+                                                change.consume()
+                                            }
+                                        }
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+
+                            if (zoomScale in 1.0001f..1.03f) {
+                                applyVideoZoom(1f, 0f, 0f)
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                }
+            )
     ) {
         val targetResizeMode = if (isOriginalRatio) {
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
@@ -358,6 +527,7 @@ fun VideoPlayer(
             android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
                 (this as PlayerView).apply {
                     playerViewHolder[0] = this
+                    clipChildren = true
                     useController = true
                     controllerAutoShow = showControllerInitially
                     controllerHideOnTouch = true
@@ -366,7 +536,9 @@ fun VideoPlayer(
                     resizeMode = targetResizeMode
                     setControllerVisibilityListener(
                         PlayerView.ControllerVisibilityListener { visibility ->
-                            currentOnControllerVisibilityChange(visibility == android.view.View.VISIBLE)
+                            val visible = visibility == android.view.View.VISIBLE
+                            isControllerShown = visible
+                            currentOnControllerVisibilityChange(visible)
                         }
                     )
                     player = exoPlayer
@@ -383,6 +555,7 @@ fun VideoPlayer(
                     } else {
                         setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
                     }
+                    syncSurfaceZoom(this, zoomScale, zoomOffsetX, zoomOffsetY)
                 }
             }
         }, update = { view ->
@@ -393,6 +566,7 @@ fun VideoPlayer(
                     it.player = exoPlayer
                     if (!showControllerInitially) {
                         it.hideController()
+                        isControllerShown = false
                         currentOnControllerVisibilityChange(false)
                     }
                 }
@@ -402,8 +576,10 @@ fun VideoPlayer(
                 if (currentOnFullscreenToggle != null) {
                     it.setFullscreenButtonState(isFullscreen)
                 }
+                syncSurfaceZoom(it, zoomScale, zoomOffsetX, zoomOffsetY)
             }
         }, onRelease = { view ->
+            syncSurfaceZoom(view as? PlayerView, 1f, 0f, 0f)
             if (playerViewHolder[0] === view) {
                 playerViewHolder[0] = null
             }
@@ -413,6 +589,22 @@ fun VideoPlayer(
         }, modifier = Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = if (isVideoReady && !isError) 1f else 0f })
+
+        if (enableZoom) {
+            AnimatedVisibility(
+                visible = zoomScale > 1.06f && isVideoReady && !isError,
+                enter = fadeIn(animationSpec = tween(160)),
+                exit = fadeOut(animationSpec = tween(160)),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            ) {
+                ZoomResetPill(
+                    scale = zoomScale,
+                    onClick = resetVideoZoom
+                )
+            }
+        }
 
         if (isError) {
             val isEn = rememberIsEnglish()

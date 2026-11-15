@@ -1,12 +1,24 @@
 package com.tenli.oneview.ui.features.event.detail
 
+import android.Manifest
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
 import android.os.SystemClock
+import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -71,6 +83,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,9 +106,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -103,6 +118,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -135,6 +151,7 @@ import com.tenli.oneview.ui.component.SheetCloseButton
 import com.tenli.oneview.ui.component.VideoFrameImage
 import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.ZoomableMediaBox
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.buildCameraNameMap
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
@@ -157,6 +174,7 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import com.tenli.oneview.ui.utils.MediaActionHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -242,6 +260,7 @@ private class GestureBounds {
     var dataBoardBottomY = 0f
     var lastTabSwipeTimeMs = 0L
     var sheetRootCoords: LayoutCoordinates? = null
+    var mediaViewportCoords: LayoutCoordinates? = null
     var periodRowCoords: LayoutCoordinates? = null
 }
 
@@ -274,10 +293,57 @@ fun EventDetailScreen(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
     val density = LocalDensity.current
     val haptic = LocalHapticFeedback.current
 
     var selectedTab by remember(eventId) { mutableStateOf(EventMediaTab.EVENT_IMAGE) }
+
+    // 1. Fullscreen cho Live Camera & Video sự kiện (xoay cửa sổ Activity, đồng bộ với trạng thái xoay thực tế
+    //    để không bị nháy khung dọc lúc mở và không bị lộ các tab ở chế độ ngang lúc thu nhỏ)
+    var wantsVideoFullscreen by remember(eventId) { mutableStateOf(false) }
+    var isExitingVideoFullscreen by remember(eventId) { mutableStateOf(false) }
+    var videoFullscreenFallbackReady by remember(eventId) { mutableStateOf(false) }
+    val isWindowLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    LaunchedEffect(wantsVideoFullscreen) {
+        if (wantsVideoFullscreen) {
+            videoFullscreenFallbackReady = false
+            delay(450L)
+            videoFullscreenFallbackReady = true
+        } else {
+            videoFullscreenFallbackReady = false
+        }
+    }
+
+    LaunchedEffect(isWindowLandscape, isExitingVideoFullscreen) {
+        if (isExitingVideoFullscreen) {
+            if (!isWindowLandscape) {
+                isExitingVideoFullscreen = false
+            } else {
+                delay(500L)
+                isExitingVideoFullscreen = false
+            }
+        }
+    }
+
+    val isMediaFullscreen =
+        (wantsVideoFullscreen && (isWindowLandscape || videoFullscreenFallbackReady)) ||
+            (isExitingVideoFullscreen && isWindowLandscape)
+
+    // 2. Fullscreen cho Ảnh sự kiện: Hero-Rotation 120Hz xoay ngang mượt 0° <-> ±90° ngay trong cửa sổ Portrait
+    //    (không bao giờ hiển thị dọc trước rồi mới giật ngang, và khi thu nhỏ xoay thẳng ảnh về đúng khung cũ)
+    var isImageFullscreenOpen by remember(eventId) { mutableStateOf(false) }
+    var imageInlineOriginRect by remember(eventId) { mutableStateOf<Rect?>(null) }
+    var inlineImageResetTrigger by remember(eventId) { mutableIntStateOf(0) }
+    var overlayImageResetTrigger by remember(eventId) { mutableIntStateOf(0) }
+    val imageFullscreenProgress = remember(eventId) { Animatable(0f) }
+    val isImageOverlayActive by remember(imageFullscreenProgress) {
+        derivedStateOf { isImageFullscreenOpen || imageFullscreenProgress.value > 0.001f }
+    }
+
+    var isMediaZoomed by remember(eventId) { mutableStateOf(false) }
     var expandedCropUrl by remember(eventId) { mutableStateOf<String?>(null) }
     var showConfirmReportDialog by remember(eventId) { mutableStateOf(false) }
     var showCustomDateModal by remember(eventId) { mutableStateOf(false) }
@@ -285,6 +351,55 @@ fun EventDetailScreen(
     var customPickerVersion by remember(eventId) { mutableIntStateOf(0) }
     var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
     var periodAnchorRect by remember(eventId) { mutableStateOf<Rect?>(null) }
+
+    val currentIsMediaFullscreen by rememberUpdatedState(isMediaFullscreen || isImageOverlayActive)
+    val currentIsMediaZoomed by rememberUpdatedState(isMediaZoomed)
+
+    LaunchedEffect(selectedTab, uiState.event?.id) {
+        isMediaZoomed = false
+    }
+
+    LaunchedEffect(isImageFullscreenOpen) {
+        val activity = context.findActivity()
+        val insetsController = activity?.window?.let { win ->
+            WindowCompat.getInsetsController(win, win.decorView)
+        }
+        if (isImageFullscreenOpen) {
+            if (insetsController != null) {
+                insetsController.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            }
+            imageFullscreenProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(
+                    durationMillis = 300,
+                    easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+                )
+            )
+        } else {
+            if (!wantsVideoFullscreen) {
+                insetsController?.show(WindowInsetsCompat.Type.systemBars())
+            }
+            if (imageFullscreenProgress.value > 0f) {
+                imageFullscreenProgress.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(
+                        durationMillis = 280,
+                        easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+                    )
+                )
+            }
+        }
+    }
+
+    LandscapeFullscreenEffect(
+        isFullscreen = wantsVideoFullscreen,
+        onExitFullscreen = {
+            isExitingVideoFullscreen = true
+            wantsVideoFullscreen = false
+        }
+    )
 
     BackHandler(enabled = showPeriodMenu) {
         showPeriodMenu = false
@@ -306,9 +421,38 @@ fun EventDetailScreen(
     val videoControllerZoneHeightPx = remember(density) { with(density) { VideoControllerZoneHeight.toPx() } }
     val bounds = remember(eventId) { GestureBounds() }
 
+    fun captureInlineMediaViewportRect(): Rect? {
+        val root = bounds.sheetRootCoords
+        val vp = bounds.mediaViewportCoords
+        return if (root != null && vp != null && root.isAttached && vp.isAttached) {
+            root.localBoundingBoxOf(vp, clipBounds = false)
+        } else {
+            null
+        }
+    }
+
+    fun openImageFullscreen() {
+        captureInlineMediaViewportRect()?.let { imageInlineOriginRect = it }
+        inlineImageResetTrigger++
+        isImageFullscreenOpen = true
+    }
+
+    fun closeImageFullscreen() {
+        captureInlineMediaViewportRect()?.let { imageInlineOriginRect = it }
+        overlayImageResetTrigger++
+        isImageFullscreenOpen = false
+    }
+
+    BackHandler(enabled = isImageFullscreenOpen) {
+        closeImageFullscreen()
+    }
+
     fun triggerSmoothDismiss() {
         if (isDismissing) return
         isDismissing = true
+        isImageFullscreenOpen = false
+        wantsVideoFullscreen = false
+        isExitingVideoFullscreen = false
         viewModel.stopLiveStream()
         scope.launch {
             sheetOffsetY.animateTo(
@@ -332,6 +476,10 @@ fun EventDetailScreen(
     /** Chuyển sang xem 1 sự kiện khác: về tab ảnh & đóng popup ảnh minh chứng */
     fun resetMediaState() {
         selectedTab = EventMediaTab.EVENT_IMAGE
+        isMediaZoomed = false
+        isImageFullscreenOpen = false
+        wantsVideoFullscreen = false
+        isExitingVideoFullscreen = false
         expandedCropUrl = null
         showPeriodMenu = false
     }
@@ -350,10 +498,10 @@ fun EventDetailScreen(
                 .fillMaxSize()
                 .onGloballyPositioned { bounds.sheetRootCoords = it }
                 .graphicsLayer {
-                    translationY = sheetOffsetY.value
+                    translationY = if (isMediaFullscreen) 0f else sheetOffsetY.value
                 }
-                .clip(sheetShape)
-                .background(colors.pageBg),
+                .clip(if (isMediaFullscreen) RectangleShape else sheetShape)
+                .background(if (isMediaFullscreen) Color.Black else colors.pageBg),
             contentAlignment = Alignment.TopCenter
         ) {
             val event = uiState.event
@@ -398,9 +546,16 @@ fun EventDetailScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxHeight()
-                        .widthIn(max = spacing.contentMaxWidth)
-                        .fillMaxWidth()
-                        .statusBarsPadding()
+                        .then(
+                            if (isMediaFullscreen) {
+                                Modifier.fillMaxWidth()
+                            } else {
+                                Modifier
+                                    .widthIn(max = spacing.contentMaxWidth)
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                            }
+                        )
                         .onGloballyPositioned { coords ->
                             bounds.rootTopY = coords.positionInRoot().y
                         }
@@ -410,6 +565,10 @@ fun EventDetailScreen(
                                     requireUnconsumed = false,
                                     pass = PointerEventPass.Initial
                                 )
+                                if (currentIsMediaFullscreen) {
+                                    return@awaitEachGesture
+                                }
+
                                 val startX = down.position.x
                                 val startY = down.position.y
                                 val downRootY = bounds.rootTopY + startY
@@ -435,14 +594,19 @@ fun EventDetailScreen(
                                         downRootY > pinnedBottomY &&
                                         downRootY <= bounds.dataBoardBottomY
 
-                                // Horizontal swipe to switch media tabs: works across the screen except the video player seekbar
-                                var canSwipeTab = !isInsideVideoSeekbarZone
+                                val isBlockedByMediaZoom = currentIsMediaZoomed && isInsidePinnedTop
+
+                                // Horizontal swipe to switch media tabs: works across the screen except the video player seekbar or zoomed media
+                                var canSwipeTab = !isInsideVideoSeekbarZone && !isBlockedByMediaZoom
 
                                 // Vertical swipe-down to dismiss:
-                                // - Allowed on Pinned Top Section (Header + Tabs + 16:9 Media area)
+                                // - Allowed on Pinned Top Section (Header + Tabs + 16:9 Media area) unless zoomed in
                                 // - Allowed on THÔNG TIN SỰ KIỆN section (header + .event-data-board card)
                                 // - NEVER allowed when touching inside LỊCH SỬ XUẤT HIỆN (related events list)
-                                var canSwipeDismiss = !isInsideVideoSeekbarZone && (isInsidePinnedTop || isInsideDataBoard)
+                                var canSwipeDismiss =
+                                    !isInsideVideoSeekbarZone &&
+                                        !isBlockedByMediaZoom &&
+                                        (isInsidePinnedTop || isInsideDataBoard)
 
                                 var lockedMode = 0 // 0 = NONE, 1 = HORIZONTAL_TAB, 2 = VERTICAL_DISMISS
                                 var lastDx = 0f
@@ -451,6 +615,16 @@ fun EventDetailScreen(
 
                                 while (true) {
                                     val ptrEvent = awaitPointerEvent(PointerEventPass.Initial)
+                                    // Ngay khi người dùng chạm ngón thứ 2 (Pinch-to-Zoom), hủy ngay cử chỉ 1 ngón
+                                    if (ptrEvent.changes.count { it.pressed } > 1 || currentIsMediaFullscreen) {
+                                        lockedMode = 0
+                                        if (sheetOffsetY.value > 0f) {
+                                            scope.launch {
+                                                sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                            }
+                                        }
+                                        break
+                                    }
                                     val change = ptrEvent.changes.firstOrNull { it.id == pointerId }
                                         ?: ptrEvent.changes.firstOrNull()
                                         ?: break
@@ -541,42 +715,46 @@ fun EventDetailScreen(
                 ) {
                     // =========================================================================
                     // 1. PINNED TOP SECTION (.media-header-pinned-section in BaseAiEventDetailModal.vue)
-                    //    Supports swipe-down to dismiss & horizontal swipe to switch media tab
+                    //    Giữ MediaViewport ở đúng vị trí cây Compose để xoay ngang Fullscreen
+                    //    không bao giờ khởi tạo lại ExoPlayer / LiveStreamPlayer (0ms reload).
                     // =========================================================================
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(colors.pageBg)
+                        modifier = (if (isMediaFullscreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth())
+                            .background(if (isMediaFullscreen) Color.Black else colors.pageBg)
                             .onGloballyPositioned { coords ->
                                 bounds.pinnedTopBottomY = coords.positionInRoot().y + coords.size.height
                             }
                     ) {
-                        // Header: Centered AI Task Title + Top-right Circular X Button (.dashboard-header)
-                        DetailHeader(
-                            title = display.aiTaskTitle,
-                            showBackToOriginal = baseEvent != null && baseEvent.id != event.id,
-                            isEn = isEn,
-                            onBackToOriginal = {
-                                if (baseEvent != null) {
-                                    viewModel.selectEvent(baseEvent)
-                                    resetMediaState()
-                                }
-                            },
-                            onClose = handleBack
-                        )
+                        if (!isMediaFullscreen) {
+                            // Header: Centered AI Task Title + Top-right Circular X Button (.dashboard-header)
+                            DetailHeader(
+                                title = display.aiTaskTitle,
+                                showBackToOriginal = baseEvent != null && baseEvent.id != event.id,
+                                isEn = isEn,
+                                onBackToOriginal = {
+                                    if (baseEvent != null) {
+                                        viewModel.selectEvent(baseEvent)
+                                        resetMediaState()
+                                    }
+                                },
+                                onClose = handleBack
+                            )
 
-                        // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list) with Smooth Sliding Pill Indicator
-                        MediaTabSelector(
-                            selectedTab = selectedTab,
-                            isEn = isEn,
-                            onSelect = { selectedTab = it }
-                        )
+                            // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list) with Smooth Sliding Pill Indicator
+                            MediaTabSelector(
+                                selectedTab = selectedTab,
+                                isEn = isEn,
+                                onSelect = { selectedTab = it }
+                            )
+                        }
 
-                        // Full-bleed 16:9 Media Viewport (.media-display-wrapper)
-                        // Supports horizontal swipe to switch between Live Camera / Ảnh sự kiện / Video sự kiện
+                        // Full-bleed 16:9 Media Viewport (hoặc Fullscreen Landscape khi phóng to toàn màn hình)
                         MediaViewport(
                             selectedTab = selectedTab,
                             isScreenActive = !isClosing && !isDismissing,
+                            isFullscreen = isMediaFullscreen,
+                            isImageHiddenForOverlay = isImageOverlayActive,
+                            inlineImageResetTrigger = inlineImageResetTrigger,
                             eventId = event.id,
                             cameraId = camera?.id ?: 0,
                             hasSubStream = camera?.sub?.isNotBlank() == true,
@@ -587,6 +765,27 @@ fun EventDetailScreen(
                             liveStreamChannel = uiState.liveStreamChannel,
                             liveCameraSnapshotUrl = uiState.liveCameraSnapshotUrl,
                             isEn = isEn,
+                            modifier = Modifier.onGloballyPositioned { coords ->
+                                bounds.mediaViewportCoords = coords
+                            },
+                            onToggleFullscreen = {
+                                if (selectedTab == EventMediaTab.EVENT_IMAGE) {
+                                    if (isImageFullscreenOpen) {
+                                        closeImageFullscreen()
+                                    } else {
+                                        openImageFullscreen()
+                                    }
+                                } else {
+                                    if (wantsVideoFullscreen) {
+                                        isExitingVideoFullscreen = true
+                                        wantsVideoFullscreen = false
+                                    } else {
+                                        isExitingVideoFullscreen = false
+                                        wantsVideoFullscreen = true
+                                    }
+                                }
+                            },
+                            onZoomChanged = { zoomed -> isMediaZoomed = zoomed },
                             onLoadLiveStream = viewModel::loadLiveStream,
                             onSwitchLiveChannel = viewModel::switchLiveChannel,
                             onLiveStreamFirstFrame = viewModel::onLiveStreamFirstFrame,
@@ -594,16 +793,15 @@ fun EventDetailScreen(
                             onStopLiveStream = viewModel::stopLiveStream
                         )
 
-                        Spacer(modifier = Modifier.height(spacing.space6))
+                        if (!isMediaFullscreen) {
+                            Spacer(modifier = Modifier.height(spacing.space6))
+                        }
                     }
 
                     // =========================================================================
                     // 2. SCROLLABLE BOTTOM CONTAINER (.event-info-scroll-container in PWA)
-                    //    Contains:
-                    //    - THÔNG TIN SỰ KIỆN + .event-data-board card
-                    //    - BIỂN SỐ LIÊN QUAN (when toggled via barcode button)
-                    //    - LỊCH SỬ XUẤT HIỆN + Period Select + MobileEventCard list + End message
                     // =========================================================================
+                    if (!isMediaFullscreen) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
@@ -632,6 +830,8 @@ fun EventDetailScreen(
                                 }
                             ) {
                                 EventInfoBoard(
+                                    eventId = event.id,
+                                    selectedTab = selectedTab,
                                     display = display,
                                     isEn = isEn,
                                     isRelatedPlatesOpen = uiState.showRelatedPlates,
@@ -763,6 +963,7 @@ fun EventDetailScreen(
                             }
                         }
                     }
+                    }
                 }
 
                 // Anchored Period Dropdown Menu dùng chung chính hàm AnchoredFilterDropdownMenu với MobileFilterBottomSheet
@@ -799,6 +1000,20 @@ fun EventDetailScreen(
                             }
                         )
                     }
+                }
+
+                // Lớp phủ phóng to ngang mượt 120Hz cho Ảnh sự kiện (xoay trực tiếp từ khung 16:9 và thu thẳng về chỗ cũ)
+                if (isImageOverlayActive && !display.imageUrl.isNullOrEmpty()) {
+                    FullscreenEventImageOverlay(
+                        imageUrl = display.imageUrl,
+                        boxes = display.boxes,
+                        isOpen = isImageFullscreenOpen,
+                        progressProvider = { imageFullscreenProgress.value },
+                        originRect = imageInlineOriginRect,
+                        smoothResetTrigger = overlayImageResetTrigger,
+                        isEn = isEn,
+                        onRequestClose = ::closeImageFullscreen
+                    )
                 }
             }
         }
@@ -1041,10 +1256,56 @@ private fun MediaTabSelector(
     }
 }
 
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
+
+@Composable
+private fun LandscapeFullscreenEffect(
+    isFullscreen: Boolean,
+    onExitFullscreen: () -> Unit
+) {
+    val context = LocalContext.current
+    BackHandler(enabled = isFullscreen) {
+        onExitFullscreen()
+    }
+    LaunchedEffect(isFullscreen) {
+        val activity = context.findActivity() ?: return@LaunchedEffect
+        val window = activity.window
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (isFullscreen) {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            val activity = context.findActivity() ?: return@onDispose
+            val window = activity.window
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+}
+
 @Composable
 private fun MediaViewport(
     selectedTab: EventMediaTab,
     isScreenActive: Boolean,
+    isFullscreen: Boolean,
+    isImageHiddenForOverlay: Boolean = false,
+    inlineImageResetTrigger: Int = 0,
     eventId: Int,
     cameraId: Int,
     hasSubStream: Boolean,
@@ -1055,17 +1316,27 @@ private fun MediaViewport(
     liveStreamChannel: Int,
     liveCameraSnapshotUrl: String?,
     isEn: Boolean,
+    modifier: Modifier = Modifier,
+    onToggleFullscreen: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit,
     onLoadLiveStream: (Boolean) -> Unit,
     onSwitchLiveChannel: (Int) -> Unit,
     onLiveStreamFirstFrame: () -> Unit,
     onRetryLiveStream: () -> Unit,
     onStopLiveStream: () -> Unit
 ) {
-    val viewportBg = MaterialTheme.appColors.surface
+    val viewportBg = if (isFullscreen) Color.Black else MaterialTheme.appColors.surface
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(16f / 9f)
+        modifier = modifier
+            .then(
+                if (isFullscreen) {
+                    Modifier.fillMaxSize()
+                } else {
+                    Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                }
+            )
             .background(viewportBg),
         contentAlignment = Alignment.Center
     ) {
@@ -1102,7 +1373,10 @@ private fun MediaViewport(
                     error = liveStreamError,
                     streamUrl = liveStreamUrl,
                     isActive = isTabActive,
+                    isFullscreen = isFullscreen,
                     isEn = isEn,
+                    onToggleFullscreen = onToggleFullscreen,
+                    onZoomChanged = onZoomChanged,
                     onLoad = onLoadLiveStream,
                     onSwitchChannel = onSwitchLiveChannel,
                     onFirstFrame = onLiveStreamFirstFrame,
@@ -1113,7 +1387,12 @@ private fun MediaViewport(
                 EventMediaTab.EVENT_IMAGE -> EventImageWithBoxes(
                     imageUrl = display.imageUrl,
                     boxes = display.boxes,
-                    isEn = isEn
+                    isFullscreen = isFullscreen,
+                    isHiddenForOverlay = isImageHiddenForOverlay,
+                    smoothResetTrigger = inlineImageResetTrigger,
+                    isEn = isEn,
+                    onToggleFullscreen = onToggleFullscreen,
+                    onZoomChanged = onZoomChanged
                 )
 
                 EventMediaTab.EVENT_VIDEO -> {
@@ -1124,8 +1403,13 @@ private fun MediaViewport(
                             videoUrl = videoUrl,
                             thumbnailUrl = display.imageUrl,
                             deviceKey = UserSession.accessToken,
+                            isOriginalRatio = isFullscreen,
+                            isFullscreen = isFullscreen,
                             playWhenReady = isTabActive,
-                            errorText = noVideoText
+                            errorText = noVideoText,
+                            onFullscreenToggle = onToggleFullscreen,
+                            enableZoom = true,
+                            onZoomChanged = onZoomChanged
                         )
                     } else {
                         CommonEmptyState(text = noVideoText, modifier = Modifier.fillMaxSize())
@@ -1149,7 +1433,10 @@ private fun LiveCameraPane(
     error: String?,
     streamUrl: String?,
     isActive: Boolean,
+    isFullscreen: Boolean,
     isEn: Boolean,
+    onToggleFullscreen: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit,
     onLoad: (Boolean) -> Unit,
     onSwitchChannel: (Int) -> Unit,
     onFirstFrame: () -> Unit,
@@ -1165,9 +1452,9 @@ private fun LiveCameraPane(
     var showInfo by remember(cameraId) { mutableStateOf(false) }
     var showChannelDropdown by remember(cameraId) { mutableStateOf(false) }
     var autoHideToken by remember(cameraId) { mutableIntStateOf(0) }
-    val currentIsActive by androidx.compose.runtime.rememberUpdatedState(isActive)
-    val currentOnLoad by androidx.compose.runtime.rememberUpdatedState(onLoad)
-    val currentOnStop by androidx.compose.runtime.rememberUpdatedState(onStop)
+    val currentIsActive by rememberUpdatedState(isActive)
+    val currentOnLoad by rememberUpdatedState(onLoad)
+    val currentOnStop by rememberUpdatedState(onStop)
 
     LaunchedEffect(eventId, cameraId, isActive) {
         if (isActive) {
@@ -1211,27 +1498,292 @@ private fun LiveCameraPane(
         }
     }
 
-    Box(
+    ZoomableMediaBox(
         modifier = Modifier
             .fillMaxSize()
-            .background(colors.surface)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
+            .background(if (isFullscreen) Color.Black else colors.surface),
+        zoomResetKey = "$eventId-$cameraId-$channel",
+        enableDoubleTapZoom = true,
+        badgeAlignment = Alignment.BottomStart,
+        badgePadding = PaddingValues(spacing.space8),
+        onZoomChanged = onZoomChanged,
+        onTap = {
+            if (error != null) {
+                onLoad(true)
+            } else if (isPlaying) {
+                val nextShow = !showInfo
+                showInfo = nextShow
+                if (!nextShow) {
+                    showChannelDropdown = false
+                } else {
+                    autoHideToken++
+                }
+            }
+        },
+        overlay = { _, _ ->
+            if (error != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(if (isFullscreen) Color.Black else colors.surface)
+                        .clickable { onLoad(true) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
+                }
+                if (isFullscreen) {
+                    MediaFullscreenFloatingButton(
+                        isFullscreen = true,
+                        isEn = isEn,
+                        onClick = onToggleFullscreen,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(spacing.space10)
+                    )
+                }
+            }
+
+            // Top-Left Camera Name Pill & Top-Right Stream Controls (đồng bộ với LiveCameraView ở màn Giám sát)
+            AnimatedVisibility(
+                visible = showInfo && isPlaying && error == null,
+                enter = fadeIn(animationSpec = tween(200)),
+                exit = fadeOut(animationSpec = tween(200)),
+                modifier = Modifier.fillMaxSize()
             ) {
-                if (error != null) {
-                    onLoad(true)
-                } else if (isPlaying) {
-                    val nextShow = !showInfo
-                    showInfo = nextShow
-                    if (!nextShow) {
-                        showChannelDropdown = false
-                    } else {
-                        autoHideToken++
+                val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
+                val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
+                val pillHeight = spacing.iconButtonSmall
+                val actionBtnSize = spacing.iconMedium
+                val actionIconSize = spacing.iconSmall
+                val textStyle = MaterialTheme.typography.labelMedium
+
+                val currentStreamLabel = if (channel == 1) {
+                    if (isEn) "Sub Stream" else "Luồng phụ"
+                } else {
+                    if (isEn) "Main Stream" else "Luồng chính"
+                }
+                val alternateStreamLabel = if (channel == 0) {
+                    if (isEn) "Sub Stream" else "Luồng phụ"
+                } else {
+                    if (isEn) "Main Stream" else "Luồng chính"
+                }
+                val alternateChannel = if (channel == 0) 1 else 0
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .padding(spacing.space8),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        // Camera Name Pill (Top-Left)
+                        if (cameraName.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .padding(end = spacing.space8)
+                                    .height(pillHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(overlayPillBg)
+                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .padding(horizontal = spacing.space8),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    text = cameraName,
+                                    color = colors.onMedia,
+                                    style = textStyle,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.width(spacing.space1))
+                        }
+
+                        // Action Controls Pill + Channel Dropdown (Top-Right)
+                        Column(horizontalAlignment = Alignment.Start) {
+                            Row(
+                                modifier = Modifier
+                                    .height(pillHeight)
+                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .background(overlayPillBg)
+                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .padding(horizontal = spacing.space2),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                            ) {
+                                // 1. Channel selector (Luồng chính / Luồng phụ)
+                                Row(
+                                    modifier = Modifier
+                                        .height(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .background(
+                                            if (showChannelDropdown && hasSubStream) {
+                                                colors.onMedia.copy(alpha = 0.2f)
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .alpha(if (hasSubStream) 1f else 0.65f)
+                                        .then(
+                                            if (hasSubStream) {
+                                                Modifier.clickable {
+                                                    showChannelDropdown = !showChannelDropdown
+                                                    autoHideToken++
+                                                }
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .padding(horizontal = spacing.space8),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(spacing.space4)
+                                ) {
+                                    Text(
+                                        text = currentStreamLabel,
+                                        color = colors.onMedia,
+                                        style = textStyle,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    if (hasSubStream) {
+                                        Icon(
+                                            imageVector = LucideIcons.CaretDown,
+                                            contentDescription = null,
+                                            tint = colors.onMedia.copy(alpha = 0.85f),
+                                            modifier = Modifier.size(spacing.iconTiny)
+                                        )
+                                    }
+                                }
+
+                                // 2. Aspect ratio toggle button (Tỷ lệ khung hình gốc / Lấp đầy khung 16:9)
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .background(
+                                            if (isOriginalRatio) {
+                                                BrandActiveNavDark.copy(alpha = 0.35f)
+                                            } else {
+                                                Color.Transparent
+                                            }
+                                        )
+                                        .clickable {
+                                            showChannelDropdown = false
+                                            autoHideToken++
+                                            isOriginalRatio = !isOriginalRatio
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
+                                        contentDescription = if (isOriginalRatio) {
+                                            if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
+                                        } else {
+                                            if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
+                                        },
+                                        tint = if (isOriginalRatio) BrandLight else colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+
+                                // 3. Reload stream button (Tải lại luồng trực tiếp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clickable {
+                                            showChannelDropdown = false
+                                            autoHideToken++
+                                            onLoad(true)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = LucideIcons.RotateCw,
+                                        contentDescription = if (isEn) "Reload live stream" else "Tải lại luồng trực tiếp",
+                                        tint = colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+
+                                // 4. Fullscreen landscape toggle button
+                                Box(
+                                    modifier = Modifier
+                                        .size(actionBtnSize)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clickable {
+                                            showChannelDropdown = false
+                                            autoHideToken++
+                                            onToggleFullscreen()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
+                                        contentDescription = if (isFullscreen) {
+                                            if (isEn) "Exit fullscreen" else "Thoát toàn màn hình"
+                                        } else {
+                                            if (isEn) "Fullscreen" else "Toàn màn hình"
+                                        },
+                                        tint = colors.onMedia,
+                                        modifier = Modifier.size(actionIconSize)
+                                    )
+                                }
+                            }
+
+                            if (showChannelDropdown && hasSubStream) {
+                                Spacer(modifier = Modifier.height(spacing.space4))
+                                Box(
+                                    modifier = Modifier
+                                        .padding(start = spacing.space3)
+                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .background(colors.mediaOverlay.copy(alpha = 0.95f))
+                                        .border(
+                                            spacing.borderMedium,
+                                            colors.onMedia.copy(alpha = 0.15f),
+                                            RoundedCornerShape(spacing.radiusTiny)
+                                        )
+                                        .clickable {
+                                            showChannelDropdown = false
+                                            autoHideToken++
+                                            onSwitchChannel(alternateChannel)
+                                        }
+                                        .padding(
+                                            horizontal = spacing.space10,
+                                            vertical = spacing.space5
+                                        ),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    Text(
+                                        text = alternateStreamLabel,
+                                        color = colors.onMedia.copy(alpha = 0.9f),
+                                        style = textStyle,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-            },
-        contentAlignment = Alignment.Center
+            }
+
+            if (error == null && (!isPlaying || showInfo)) {
+                MediaFullscreenFloatingButton(
+                    isFullscreen = isFullscreen,
+                    isEn = isEn,
+                    onClick = onToggleFullscreen,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(spacing.space8)
+                )
+            }
+        }
     ) {
         if (!streamUrl.isNullOrEmpty() && error == null) {
             LiveStreamPlayer(
@@ -1264,7 +1816,7 @@ private fun LiveCameraPane(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(colors.surface),
+                    .background(if (isFullscreen) Color.Black else colors.surface),
                 contentAlignment = Alignment.Center
             ) {
                 if (!snapshotUrl.isNullOrEmpty()) {
@@ -1280,7 +1832,7 @@ private fun LiveCameraPane(
                         model = previewRequest,
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.FillBounds
+                        contentScale = if (isFullscreen) ContentScale.Fit else ContentScale.FillBounds
                     )
                 }
                 if (isActive) {
@@ -1288,224 +1840,38 @@ private fun LiveCameraPane(
                 }
             }
         }
+    }
+}
 
-        if (error != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(colors.surface)
-                    .clickable { onLoad(true) },
-                contentAlignment = Alignment.Center
-            ) {
-                CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
-            }
-        }
-
-        // Top-Left Camera Name Pill & Top-Right Stream Controls (đồng bộ với LiveCameraView ở màn Giám sát)
-        AnimatedVisibility(
-            visible = showInfo && isPlaying && error == null,
-            enter = fadeIn(animationSpec = tween(200)),
-            exit = fadeOut(animationSpec = tween(200)),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
-            val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
-            val pillHeight = spacing.iconButtonSmall
-            val actionBtnSize = spacing.iconMedium
-            val actionIconSize = spacing.iconSmall
-            val textStyle = MaterialTheme.typography.labelMedium
-
-            val currentStreamLabel = if (channel == 1) {
-                if (isEn) "Sub Stream" else "Luồng phụ"
+@Composable
+private fun MediaFullscreenFloatingButton(
+    isFullscreen: Boolean,
+    isEn: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val btnShape = RoundedCornerShape(spacing.radiusSmall)
+    Box(
+        modifier = modifier
+            .size(spacing.iconButtonSmall)
+            .clip(btnShape)
+            .background(colors.mediaBg.copy(alpha = 0.52f))
+            .border(spacing.borderMedium, colors.onMedia.copy(alpha = 0.16f), btnShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = if (isFullscreen) LucideIcons.Minimize else LucideIcons.Maximize,
+            contentDescription = if (isFullscreen) {
+                if (isEn) "Exit fullscreen" else "Thoát toàn màn hình"
             } else {
-                if (isEn) "Main Stream" else "Luồng chính"
-            }
-            val alternateStreamLabel = if (channel == 0) {
-                if (isEn) "Sub Stream" else "Luồng phụ"
-            } else {
-                if (isEn) "Main Stream" else "Luồng chính"
-            }
-            val alternateChannel = if (channel == 0) 1 else 0
-
-            Box(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .padding(spacing.space8),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    // Camera Name Pill (Top-Left)
-                    if (cameraName.isNotBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .padding(end = spacing.space8)
-                                .height(pillHeight)
-                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                .background(overlayPillBg)
-                                .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
-                                .padding(horizontal = spacing.space8),
-                            contentAlignment = Alignment.CenterStart
-                        ) {
-                            Text(
-                                text = cameraName,
-                                color = colors.onMedia,
-                                style = textStyle,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    } else {
-                        Spacer(modifier = Modifier.width(spacing.space1))
-                    }
-
-                    // Action Controls Pill + Channel Dropdown (Top-Right)
-                    Column(horizontalAlignment = Alignment.Start) {
-                        Row(
-                            modifier = Modifier
-                                .height(pillHeight)
-                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                .background(overlayPillBg)
-                                .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
-                                .padding(horizontal = spacing.space2),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-                        ) {
-                            // 1. Channel selector (Luồng chính / Luồng phụ)
-                            Row(
-                                modifier = Modifier
-                                    .height(actionBtnSize)
-                                    .clip(RoundedCornerShape(spacing.radiusTiny))
-                                    .background(
-                                        if (showChannelDropdown && hasSubStream) {
-                                            colors.onMedia.copy(alpha = 0.2f)
-                                        } else {
-                                            Color.Transparent
-                                        }
-                                    )
-                                    .alpha(if (hasSubStream) 1f else 0.65f)
-                                    .then(
-                                        if (hasSubStream) {
-                                            Modifier.clickable {
-                                                showChannelDropdown = !showChannelDropdown
-                                                autoHideToken++
-                                            }
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
-                                    .padding(horizontal = spacing.space8),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(spacing.space4)
-                            ) {
-                                Text(
-                                    text = currentStreamLabel,
-                                    color = colors.onMedia,
-                                    style = textStyle,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                                if (hasSubStream) {
-                                    Icon(
-                                        imageVector = LucideIcons.CaretDown,
-                                        contentDescription = null,
-                                        tint = colors.onMedia.copy(alpha = 0.85f),
-                                        modifier = Modifier.size(spacing.iconTiny)
-                                    )
-                                }
-                            }
-
-                            // 2. Aspect ratio toggle button (Tỷ lệ khung hình gốc / Lấp đầy khung 16:9)
-                            Box(
-                                modifier = Modifier
-                                    .size(actionBtnSize)
-                                    .clip(RoundedCornerShape(spacing.radiusTiny))
-                                    .background(
-                                        if (isOriginalRatio) {
-                                            BrandActiveNavDark.copy(alpha = 0.35f)
-                                        } else {
-                                            Color.Transparent
-                                        }
-                                    )
-                                    .clickable {
-                                        showChannelDropdown = false
-                                        autoHideToken++
-                                        isOriginalRatio = !isOriginalRatio
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isOriginalRatio) LucideIcons.StretchHorizontal else LucideIcons.Proportions,
-                                    contentDescription = if (isOriginalRatio) {
-                                        if (isEn) "Fill 16:9 frame" else "Lấp đầy khung 16:9"
-                                    } else {
-                                        if (isEn) "Original aspect ratio" else "Tỷ lệ khung hình gốc"
-                                    },
-                                    tint = if (isOriginalRatio) BrandLight else colors.onMedia,
-                                    modifier = Modifier.size(actionIconSize)
-                                )
-                            }
-
-                            // 3. Reload stream button (Tải lại luồng trực tiếp)
-                            Box(
-                                modifier = Modifier
-                                    .size(actionBtnSize)
-                                    .clip(RoundedCornerShape(spacing.radiusTiny))
-                                    .clickable {
-                                        showChannelDropdown = false
-                                        autoHideToken++
-                                        onLoad(true)
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = LucideIcons.RotateCw,
-                                    contentDescription = if (isEn) "Reload live stream" else "Tải lại luồng trực tiếp",
-                                    tint = colors.onMedia,
-                                    modifier = Modifier.size(actionIconSize)
-                                )
-                            }
-                        }
-
-                        if (showChannelDropdown && hasSubStream) {
-                            Spacer(modifier = Modifier.height(spacing.space4))
-                            Box(
-                                modifier = Modifier
-                                    .padding(start = spacing.space3)
-                                    .clip(RoundedCornerShape(spacing.radiusTiny))
-                                    .background(colors.mediaOverlay.copy(alpha = 0.95f))
-                                    .border(
-                                        spacing.borderMedium,
-                                        colors.onMedia.copy(alpha = 0.15f),
-                                        RoundedCornerShape(spacing.radiusTiny)
-                                    )
-                                    .clickable {
-                                        showChannelDropdown = false
-                                        autoHideToken++
-                                        onSwitchChannel(alternateChannel)
-                                    }
-                                    .padding(
-                                        horizontal = spacing.space10,
-                                        vertical = spacing.space5
-                                    ),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    text = alternateStreamLabel,
-                                    color = colors.onMedia.copy(alpha = 0.9f),
-                                    style = textStyle,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+                if (isEn) "Fullscreen" else "Toàn màn hình"
+            },
+            tint = colors.onMedia,
+            modifier = Modifier.size(spacing.iconSmall)
+        )
     }
 }
 
@@ -1571,9 +1937,38 @@ private fun buildEventPreviewImageRequest(
         .build()
 }
 
+private fun Modifier.drawEventBoundingBoxes(boxes: List<List<Float>>): Modifier =
+    drawWithContent {
+        drawContent()
+        boxes.forEachIndexed { index, boxArr ->
+            if (boxArr.size == 4) {
+                val minX = boxArr[0]
+                val minY = boxArr[1]
+                val maxX = boxArr[2]
+                val maxY = boxArr[3]
+                drawRect(
+                    color = BoundingBoxPalette[index % BoundingBoxPalette.size],
+                    topLeft = Offset(minX * size.width, minY * size.height),
+                    size = Size((maxX - minX) * size.width, (maxY - minY) * size.height),
+                    style = BoundingBoxStroke
+                )
+            }
+        }
+    }
+
 @Composable
-private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isEn: Boolean) {
+private fun EventImageWithBoxes(
+    imageUrl: String?,
+    boxes: List<List<Float>>,
+    isFullscreen: Boolean,
+    isHiddenForOverlay: Boolean = false,
+    smoothResetTrigger: Int = 0,
+    isEn: Boolean,
+    onToggleFullscreen: () -> Unit,
+    onZoomChanged: (Boolean) -> Unit
+) {
     val context = LocalContext.current
+    val spacing = MaterialTheme.spacing
     var imageLoadError by remember(imageUrl) { mutableStateOf(false) }
     val request = remember(imageUrl) {
         if (imageUrl.isNullOrEmpty()) {
@@ -1583,36 +1978,230 @@ private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isE
         }
     }
     if (request != null && !imageLoadError) {
-        AsyncImage(
-            model = request,
-            contentDescription = "Event Image",
-            onError = { imageLoadError = true },
+        ZoomableMediaBox(
             modifier = Modifier
                 .fillMaxSize()
-                .drawWithContent {
-                    drawContent()
-                    boxes.forEachIndexed { index, boxArr ->
-                        if (boxArr.size == 4) {
-                            val minX = boxArr[0]
-                            val minY = boxArr[1]
-                            val maxX = boxArr[2]
-                            val maxY = boxArr[3]
-                            drawRect(
-                                color = BoundingBoxPalette[index % BoundingBoxPalette.size],
-                                topLeft = Offset(minX * size.width, minY * size.height),
-                                size = Size((maxX - minX) * size.width, (maxY - minY) * size.height),
-                                style = BoundingBoxStroke
+                .background(if (isFullscreen) Color.Black else MaterialTheme.appColors.surface)
+                .graphicsLayer { alpha = if (isHiddenForOverlay) 0f else 1f },
+            zoomResetKey = imageUrl,
+            smoothResetTrigger = smoothResetTrigger,
+            enableDoubleTapZoom = true,
+            badgeAlignment = Alignment.BottomStart,
+            badgePadding = PaddingValues(spacing.space8),
+            onZoomChanged = onZoomChanged,
+            overlay = { _, _ ->
+                MediaFullscreenFloatingButton(
+                    isFullscreen = isFullscreen,
+                    isEn = isEn,
+                    onClick = onToggleFullscreen,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(spacing.space8)
+                )
+            }
+        ) {
+            val imageBoxModifier = if (isFullscreen) {
+                Modifier.aspectRatio(16f / 9f, matchHeightConstraintsFirst = true)
+            } else {
+                Modifier.fillMaxSize()
+            }
+            AsyncImage(
+                model = request,
+                contentDescription = "Event Image",
+                onError = { imageLoadError = true },
+                modifier = imageBoxModifier.drawEventBoundingBoxes(boxes),
+                contentScale = ContentScale.FillBounds
+            )
+        }
+    } else {
+        Box(modifier = Modifier.fillMaxSize()) {
+            CommonEmptyState(
+                text = if (isEn) "No image" else "Không có ảnh",
+                modifier = Modifier.fillMaxSize()
+            )
+            if (isFullscreen) {
+                MediaFullscreenFloatingButton(
+                    isFullscreen = true,
+                    isEn = isEn,
+                    onClick = onToggleFullscreen,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(spacing.space8)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Lớp phủ phóng to ngang 120Hz cho Ảnh sự kiện:
+ * - Xoay trực tiếp từ khung 16:9 inline sang ngang (±90°) bằng GPU `graphicsLayer`, không làm xoay lại
+ *   layout dọc bên dưới của `EventDetailScreen`.
+ * - Hỗ trợ cảm biến xoay 2 chiều ngang (+90° / -90°), Pinch-to-Zoom 5x, chạm đúp 2.5x và khi bấm thu nhỏ
+ *   sẽ xoay mượt ảnh thẳng về đúng khung inline ban đầu.
+ */
+@Composable
+private fun FullscreenEventImageOverlay(
+    imageUrl: String,
+    boxes: List<List<Float>>,
+    isOpen: Boolean,
+    progressProvider: () -> Float,
+    originRect: Rect?,
+    smoothResetTrigger: Int,
+    isEn: Boolean,
+    onRequestClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+    val spacing = MaterialTheme.spacing
+    val request = remember(imageUrl) {
+        buildEventPreviewImageRequest(context = context, imageUrl = imageUrl)
+    }
+
+    var targetLandscapeAngle by remember { mutableStateOf(90f) }
+    LaunchedEffect(isOpen) {
+        if (!isOpen) {
+            delay(300L)
+            targetLandscapeAngle = 90f
+        }
+    }
+    DisposableEffect(context, isOpen) {
+        if (!isOpen) {
+            onDispose { }
+        } else {
+            val listener = object : OrientationEventListener(context) {
+                override fun onOrientationChanged(orientation: Int) {
+                    if (orientation == ORIENTATION_UNKNOWN) return
+                    when (orientation) {
+                        in 235..305 -> if (targetLandscapeAngle != 90f) targetLandscapeAngle = 90f
+                        in 55..125 -> if (targetLandscapeAngle != -90f) targetLandscapeAngle = -90f
+                    }
+                }
+            }
+            if (listener.canDetectOrientation()) {
+                listener.enable()
+            }
+            onDispose {
+                listener.disable()
+            }
+        }
+    }
+
+    val animatedLandscapeAngle by animateFloatAsState(
+        targetValue = targetLandscapeAngle,
+        animationSpec = tween(durationMillis = 260, easing = StandardEasing),
+        label = "fullscreenImageLandscapeAngle"
+    )
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val rootW = constraints.maxWidth
+        val rootH = constraints.maxHeight
+
+        // Lớp nền đen mờ dần theo đúng tiến độ xoay mở / thu nhỏ ảnh
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    drawRect(Color.Black, alpha = progressProvider().coerceIn(0f, 1f))
+                }
+                .then(
+                    if (isOpen) {
+                        Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {}
+                        )
+                    } else {
+                        Modifier
+                    }
+                )
+        )
+
+        if (rootW > 0 && rootH > 0) {
+            val landW = rootH
+            val landH = rootW
+            val targetAspect = 16f / 9f
+            val fittedImgW: Float
+            val fittedImgH: Float
+            if (landW.toFloat() / landH.toFloat() >= targetAspect) {
+                fittedImgH = landH.toFloat()
+                fittedImgW = fittedImgH * targetAspect
+            } else {
+                fittedImgW = landW.toFloat()
+                fittedImgH = fittedImgW / targetAspect
+            }
+            val fittedImgWidthDp = with(density) { fittedImgW.toDp() }
+            val fittedImgHeightDp = with(density) { fittedImgH.toDp() }
+            val safeControlPadding = PaddingValues(
+                horizontal = spacing.space20,
+                vertical = spacing.space12
+            )
+
+            Layout(
+                content = {
+                    ZoomableMediaBox(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val p = progressProvider().coerceIn(0f, 1f)
+                                val startW = originRect?.width?.takeIf { it > 1f } ?: rootW.toFloat()
+                                val startH = originRect?.height?.takeIf { it > 1f } ?: (startW * 9f / 16f)
+                                val startCx = originRect?.center?.x ?: (rootW * 0.5f)
+                                val startCy = originRect?.center?.y ?: (rootH * 0.5f)
+
+                                val startScaleX = startW / fittedImgW
+                                val startScaleY = startH / fittedImgH
+                                val startTx = startCx - rootW * 0.5f
+                                val startTy = startCy - rootH * 0.5f
+
+                                scaleX = startScaleX + (1f - startScaleX) * p
+                                scaleY = startScaleY + (1f - startScaleY) * p
+                                rotationZ = animatedLandscapeAngle * p
+                                translationX = startTx * (1f - p)
+                                translationY = startTy * (1f - p)
+                            },
+                        zoomResetKey = imageUrl,
+                        smoothResetTrigger = smoothResetTrigger,
+                        enableDoubleTapZoom = isOpen,
+                        badgeAlignment = Alignment.BottomStart,
+                        badgePadding = safeControlPadding,
+                        overlay = { _, resetZoom ->
+                            MediaFullscreenFloatingButton(
+                                isFullscreen = true,
+                                isEn = isEn,
+                                onClick = {
+                                    if (isOpen) {
+                                        resetZoom()
+                                        onRequestClose()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(safeControlPadding)
+                                    .graphicsLayer {
+                                        alpha = progressProvider().coerceIn(0f, 1f)
+                                    }
                             )
                         }
+                    ) {
+                        AsyncImage(
+                            model = request,
+                            contentDescription = "Event Image Fullscreen",
+                            modifier = Modifier
+                                .size(width = fittedImgWidthDp, height = fittedImgHeightDp)
+                                .drawEventBoundingBoxes(boxes),
+                            contentScale = ContentScale.FillBounds
+                        )
                     }
                 },
-            contentScale = ContentScale.FillBounds
-        )
-    } else {
-        CommonEmptyState(
-            text = if (isEn) "No image" else "Không có ảnh",
-            modifier = Modifier.fillMaxSize()
-        )
+                modifier = Modifier.fillMaxSize()
+            ) { measurables, _ ->
+                val placeable = measurables[0].measure(Constraints.fixed(landW, landH))
+                layout(rootW, rootH) {
+                    placeable.place((rootW - landW) / 2, (rootH - landH) / 2)
+                }
+            }
+        }
     }
 }
 
@@ -1622,6 +2211,8 @@ private fun EventImageWithBoxes(imageUrl: String?, boxes: List<List<Float>>, isE
 
 @Composable
 private fun EventInfoBoard(
+    eventId: Int,
+    selectedTab: EventMediaTab,
     display: EventDetailDisplay,
     isEn: Boolean,
     isRelatedPlatesOpen: Boolean,
@@ -1632,8 +2223,71 @@ private fun EventInfoBoard(
     onReport: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    var isDownloading by remember(eventId) { mutableStateOf(false) }
+    var isSharing by remember(eventId) { mutableStateOf(false) }
+
+    val performMediaSave: () -> Unit = {
+        if (!isDownloading) {
+            val prefersVideo = selectedTab == EventMediaTab.EVENT_VIDEO && !display.videoUrl.isNullOrBlank()
+            val primaryImgUrl = display.imageUrl ?: display.cropUrls.firstOrNull()
+            val onlyVideoAvailable = primaryImgUrl.isNullOrBlank() && !display.videoUrl.isNullOrBlank()
+            when {
+                prefersVideo || onlyVideoAvailable -> {
+                    val vUrl = display.videoUrl.orEmpty()
+                    isDownloading = true
+                    scope.launch {
+                        try {
+                            MediaActionHelper.downloadEventVideoToGallery(
+                                context = context,
+                                videoUrl = vUrl,
+                                eventId = eventId,
+                                isEn = isEn
+                            )
+                        } finally {
+                            isDownloading = false
+                        }
+                    }
+                }
+                !primaryImgUrl.isNullOrBlank() -> {
+                    val boxesToDraw = if (primaryImgUrl == display.imageUrl) display.boxes else emptyList()
+                    isDownloading = true
+                    scope.launch {
+                        try {
+                            MediaActionHelper.downloadEventImageToGallery(
+                                context = context,
+                                imageUrl = primaryImgUrl,
+                                boxes = boxesToDraw,
+                                eventId = eventId,
+                                isEn = isEn
+                            )
+                        } finally {
+                            isDownloading = false
+                        }
+                    }
+                }
+                else -> {
+                    MobileTopPopupManager.warning(
+                        if (isEn) "No media available to save" else "Không có hình ảnh hoặc video để tải về"
+                    )
+                }
+            }
+        }
+    }
+
+    val legacyStoragePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            performMediaSave()
+        } else {
+            MobileTopPopupManager.warning(
+                if (isEn) "Storage permission is required to save media" else "Cần cấp quyền bộ nhớ để lưu vào Thư viện"
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -1779,29 +2433,42 @@ private fun EventInfoBoard(
                 horizontalArrangement = Arrangement.spacedBy(spacing.space8),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Download Image Button (.download-btn)
+                // Download Image / Video directly to Gallery (.download-btn)
                 PwaActionButton(
                     icon = LucideIcons.Download,
-                    bgColor = colors.accent,
+                    bgColor = if (isDownloading) colors.accent.copy(alpha = 0.55f) else colors.accent,
                     onClick = {
-                        val imgUrl = display.imageUrl ?: display.cropUrls.firstOrNull()
-                        if (!imgUrl.isNullOrBlank()) {
-                            runCatching {
-                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(imgUrl)))
+                        if (!isDownloading) {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                legacyStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            } else {
+                                performMediaSave()
                             }
-                        } else {
-                            MobileTopPopupManager.warning(
-                                if (isEn) "No image available" else "Không có hình ảnh để tải về"
-                            )
                         }
                     }
                 )
 
-                // Share Event Button (.share-btn)
+                // Share Event with Annotated Photo (.share-btn)
                 PwaActionButton(
                     icon = LucideIcons.Share2,
-                    bgColor = colors.success,
-                    onClick = { shareEvent(context, display, isEn) }
+                    bgColor = if (isSharing) colors.success.copy(alpha = 0.55f) else colors.success,
+                    onClick = {
+                        if (!isSharing) {
+                            isSharing = true
+                            scope.launch {
+                                try {
+                                    shareEvent(context, eventId, display, isEn)
+                                } finally {
+                                    isSharing = false
+                                }
+                            }
+                        }
+                    }
                 )
 
                 // Related License Plates Toggle Button (.lpr-btn)
@@ -1824,27 +2491,44 @@ private fun EventInfoBoard(
     }
 }
 
-private fun shareEvent(context: Context, display: EventDetailDisplay, isEn: Boolean) {
-    val imgUrl = display.imageUrl.orEmpty()
+private suspend fun shareEvent(
+    context: Context,
+    eventId: Int,
+    display: EventDetailDisplay,
+    isEn: Boolean
+) {
+    val primaryImgUrl = display.imageUrl ?: display.cropUrls.firstOrNull()
+    val boxesToDraw = if (primaryImgUrl == display.imageUrl) display.boxes else emptyList()
     val title = display.aiTaskTitle
     val subjectText = if (isEn) "[AI Event] $title" else "[Sự kiện AI] $title"
-    val timeText = "${display.formattedTime} ${display.formattedDate}"
+    val timeText = listOf(display.formattedTime, display.formattedDate)
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
     val shareText = buildString {
         appendLine(subjectText)
-        appendLine(if (isEn) "Location: ${display.locationText}" else "Vị trí: ${display.locationText}")
-        appendLine(if (isEn) "Time: $timeText" else "Thời gian: $timeText")
-        if (imgUrl.isNotEmpty()) {
-            appendLine(if (isEn) "Image: $imgUrl" else "Hình ảnh: $imgUrl")
+        if (display.plateNumber.isNotEmpty()) {
+            appendLine(if (isEn) "License plate: ${display.plateNumber}" else "Biển số xe: ${display.plateNumber}")
         }
+        display.face?.let { face ->
+            if (face.profileName.isNotBlank() && face.profileName != "---") {
+                appendLine(if (isEn) "Identity: ${face.profileName}" else "Định danh: ${face.profileName}")
+            }
+        }
+        display.fireAlertLabel?.let { fireLabel ->
+            appendLine(if (isEn) "Alert type: $fireLabel" else "Loại cảnh báo: $fireLabel")
+        }
+        appendLine(if (isEn) "Location: ${display.locationText}" else "Vị trí: ${display.locationText}")
+        append(if (isEn) "Time: $timeText" else "Thời gian: $timeText")
     }
-    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(Intent.EXTRA_SUBJECT, subjectText)
-        putExtra(Intent.EXTRA_TEXT, shareText)
-    }
-    runCatching {
-        context.startActivity(Intent.createChooser(sendIntent, if (isEn) "Share event" else "Chia sẻ sự kiện"))
-    }
+    MediaActionHelper.shareEventWithMedia(
+        context = context,
+        imageUrl = primaryImgUrl,
+        boxes = boxesToDraw,
+        eventId = eventId,
+        subjectText = subjectText,
+        shareText = shareText,
+        chooserTitle = if (isEn) "Share event" else "Chia sẻ sự kiện"
+    )
 }
 
 /** Ảnh minh chứng 48dp, chạm để phóng to trong popup (giới hạn kích thước giải mã theo popup) */

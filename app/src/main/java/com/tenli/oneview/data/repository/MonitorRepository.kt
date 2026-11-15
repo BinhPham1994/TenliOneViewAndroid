@@ -7,6 +7,7 @@ import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.api.EventApi
 import com.tenli.oneview.data.network.api.VmsApi
@@ -59,6 +60,22 @@ class MonitorRepository(
                 remove(PREF_CAMERA_ID)
             }
         }
+    }
+
+    private fun favoritePrefKey(): String {
+        val domainKey = UserSession.domain.trim().lowercase().ifEmpty { "default" }
+        return "$PREF_FAVORITE_CAMERAS_PREFIX$domainKey"
+    }
+
+    fun getFavoriteCameraIds(): Set<Int> {
+        val raw = GlobalData.preferences.getStringSet(favoritePrefKey(), emptySet()) ?: emptySet()
+        if (raw.isEmpty()) return emptySet()
+        return raw.mapNotNull { it.toIntOrNull() }.toSet()
+    }
+
+    fun saveFavoriteCameraIds(ids: Set<Int>) {
+        val strSet = ids.mapTo(HashSet(ids.size)) { it.toString() }
+        GlobalData.preferences.edit { putStringSet(favoritePrefKey(), strSet) }
     }
 
     fun getMonitorDataInMemory(): CachedMonitorData? =
@@ -191,5 +208,6 @@ class MonitorRepository(
         private const val PREF_GRID_SIZE = "saved_monitor_grid_size"
         private const val PREF_GRID_CAMERA_IDS = "saved_monitor_grid_camera_ids"
         private const val PREF_CAMERA_ID = "saved_monitor_camera_id"
+        private const val PREF_FAVORITE_CAMERAS_PREFIX = "saved_favorite_cameras_"
     }
 }

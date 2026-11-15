@@ -836,7 +836,8 @@ fun rememberIsEnglish(): Boolean {
 fun MobileTopBar(
     title: String,
     leftAction: @Composable (() -> Unit)? = null,
-    rightAction: @Composable (() -> Unit)? = null
+    rightAction: @Composable (() -> Unit)? = null,
+    endReservedWidth: Dp = MaterialTheme.spacing.iconButtonLarge
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
@@ -863,7 +864,7 @@ fun MobileTopBar(
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
             // Chừa chỗ cho nút trái/phải để tiêu đề luôn nằm giữa
-            modifier = Modifier.padding(horizontal = spacing.iconButtonLarge)
+            modifier = Modifier.padding(start = spacing.iconButtonLarge, end = endReservedWidth)
         )
 
         if (rightAction != null) {
@@ -879,6 +880,7 @@ fun MobileTopActionButton(
     icon: ImageVector,
     contentDescription: String? = null,
     hasActiveDot: Boolean = false,
+    iconTint: Color = MaterialTheme.appColors.iconDefault,
     onClick: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
@@ -888,7 +890,7 @@ fun MobileTopActionButton(
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
-            tint = colors.iconDefault,
+            tint = iconTint,
             modifier = Modifier.size(spacing.iconRegular)
         )
         if (hasActiveDot) {

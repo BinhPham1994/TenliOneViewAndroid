@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.home
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.AndroidViewModel
@@ -35,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +44,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -183,6 +187,15 @@ enum class TimeFilter(val title: String, val titleEn: String = title) {
 }
 
 @Immutable
+data class HomeAiDistributionItem(
+    val filterSensorType: String,
+    val labelVi: String,
+    val labelEn: String,
+    val count: Long,
+    val percentage: Float
+)
+
+@Immutable
 data class HomeUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
@@ -191,6 +204,7 @@ data class HomeUiState(
     val overviewStats: List<VmsCountOverviewModel> = emptyList(),
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
     val hasLoadedEventsByType: Boolean = false,
+    val aiDistribution: List<HomeAiDistributionItem> = emptyList(),
     val cameraList: List<CameraModel> = emptyList(),
     val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
@@ -222,6 +236,8 @@ class HomeViewModel(
     @Volatile private var isHomeTabActive: Boolean = true
     @Volatile private var pendingNotifyRefresh: Boolean = false
     @Volatile private var pendingCameraStatusRecompute: Boolean = false
+    @Volatile private var lastByTypeOverviewSyncMs: Long = 0L
+    @Volatile private var lastCountedRealtimeEventId: Int = 0
 
     init {
         fetchDashboardData()
@@ -232,7 +248,7 @@ class HomeViewModel(
     fun setHomeTabActive(active: Boolean) {
         if (isHomeTabActive == active) return
         isHomeTabActive = active
-        webSocketManager.setReportsActive(active)
+        webSocketManager.setReportsActive(active, "home")
         if (!active) {
             recentEventsJob?.cancel()
             return
@@ -503,6 +519,61 @@ class HomeViewModel(
                     if (newEvents.isNotEmpty()) {
                         dashboardRepository.cacheInMemory(events = newEvents)
                     }
+                    val latestOverviewStats = if (overviewResp?.isSuccessful == true) {
+                        overviewResp.body() ?: _uiState.value.overviewStats
+                    } else {
+                        _uiState.value.overviewStats
+                    }
+                    val byTypeSucceeded = byTypeResp?.isSuccessful == true
+                    val byTypeBody = byTypeResp?.body().orEmpty()
+                    val nowElapsed = SystemClock.elapsedRealtime()
+                    val curSnapshot = _uiState.value
+                    val (resolvedByType, resolvedHasLoadedByType) = if (byTypeSucceeded && byTypeBody.isNotEmpty()) {
+                        lastByTypeOverviewSyncMs = nowElapsed
+                        lastCountedRealtimeEventId = maxOf(
+                            lastCountedRealtimeEventId,
+                            newEvents.maxOfOrNull { it.id } ?: 0
+                        )
+                        byTypeBody to true
+                    } else if (
+                        UserPermissionManager.canAccessEvents() &&
+                        NetworkMonitor.isNetworkAvailable() &&
+                        (curSnapshot.eventsByType.isEmpty() || nowElapsed - lastByTypeOverviewSyncMs >= BY_TYPE_WS_REFRESH_INTERVAL_MS)
+                    ) {
+                        val fallback = fetchEventCountsViaOverview(
+                            fromTime = fromTime,
+                            toTime = toTime,
+                            serviceIdStr = serviceIdStr,
+                            unfilteredOverviewStats = latestOverviewStats,
+                            seedEvents = newEvents
+                        )
+                        if (fallback != null) {
+                            lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
+                            lastCountedRealtimeEventId = maxOf(
+                                lastCountedRealtimeEventId,
+                                newEvents.maxOfOrNull { it.id } ?: 0
+                            )
+                            fallback to true
+                        } else {
+                            curSnapshot.eventsByType to (curSnapshot.hasLoadedEventsByType || byTypeSucceeded)
+                        }
+                    } else if (curSnapshot.eventsByType.isNotEmpty()) {
+                        val (incremented, nextMaxId) = mergeRealtimeDeltasIntoByType(
+                            currentByType = curSnapshot.eventsByType,
+                            newEvents = newEvents,
+                            baselineMaxId = lastCountedRealtimeEventId
+                        )
+                        lastCountedRealtimeEventId = nextMaxId
+                        incremented to true
+                    } else {
+                        val emptyOrExisting = if (byTypeSucceeded) emptyList() else curSnapshot.eventsByType
+                        emptyOrExisting to (curSnapshot.hasLoadedEventsByType || byTypeSucceeded)
+                    }
+
+                    if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
+                        return@coroutineScope
+                    }
+
                     val nextState = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
                         val allCameras = dashboardRepository.getCamerasInMemory().ifEmpty { cur.cameraList }
@@ -518,11 +589,10 @@ class HomeViewModel(
                                 .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
                         }
-                        val byTypeSucceeded = byTypeResp?.isSuccessful == true
                         cur.copy(
-                            overviewStats = if (overviewResp?.isSuccessful == true) overviewResp.body() ?: cur.overviewStats else cur.overviewStats,
-                            eventsByType = if (byTypeSucceeded) byTypeResp?.body() ?: emptyList() else cur.eventsByType,
-                            hasLoadedEventsByType = cur.hasLoadedEventsByType || byTypeSucceeded,
+                            overviewStats = latestOverviewStats,
+                            eventsByType = resolvedByType,
+                            hasLoadedEventsByType = resolvedHasLoadedByType,
                             recentEvents = mergedEvents
                         ).withRecomputedMetrics()
                     }
@@ -559,6 +629,8 @@ class HomeViewModel(
         if (!isCustom && _uiState.value.selectedFilter == filter) return
         recentEventsJob?.cancel()
         pendingNotifyRefresh = false
+        lastByTypeOverviewSyncMs = 0L
+        lastCountedRealtimeEventId = 0
         _uiState.update { it.copy(selectedFilter = filter, isRefreshing = false) }
         fetchDashboardData()
     }
@@ -567,6 +639,8 @@ class HomeViewModel(
         if (_uiState.value.selectedServiceId == serviceId) return
         recentEventsJob?.cancel()
         pendingNotifyRefresh = false
+        lastByTypeOverviewSyncMs = 0L
+        lastCountedRealtimeEventId = 0
         _uiState.update { it.copy(selectedServiceId = serviceId, isRefreshing = false) }
         fetchDashboardData()
     }
@@ -576,6 +650,8 @@ class HomeViewModel(
         if (!isCustom && _uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
         recentEventsJob?.cancel()
         pendingNotifyRefresh = false
+        lastByTypeOverviewSyncMs = 0L
+        lastCountedRealtimeEventId = 0
         _uiState.update { it.copy(selectedFilter = filter, selectedServiceId = serviceId, isRefreshing = false) }
         fetchDashboardData()
     }
@@ -722,10 +798,7 @@ class HomeViewModel(
                         overviewResponse.body() ?: emptyList()
                     } else _uiState.value.overviewStats
 
-                    val eventsByType = if (byTypeSucceeded) {
-                        byTypeResponse?.body() ?: emptyList()
-                    } else _uiState.value.eventsByType
-                    val hasLoadedEventsByType = byTypeSucceeded || _uiState.value.hasLoadedEventsByType
+                    val byTypeBody = byTypeResponse?.body().orEmpty()
 
                     val allCameraList = if (cameraResponse?.isSuccessful == true) {
                         cameraResponse.body() ?: emptyList()
@@ -743,7 +816,26 @@ class HomeViewModel(
                     var runningTasks = 0
                     var totalTasks = 0
                     val wave1Alive = NetworkMonitor.isNetworkAvailable() &&
-                        (overviewResponse?.isSuccessful == true || aiServiceResponse?.isSuccessful == true)
+                        (overviewResponse?.isSuccessful == true ||
+                            byTypeSucceeded ||
+                            aiServiceResponse?.isSuccessful == true)
+                    val fallbackByTypeDeferred = if (
+                        !(byTypeSucceeded && byTypeBody.isNotEmpty()) &&
+                        wave1Alive &&
+                        UserPermissionManager.canAccessEvents()
+                    ) {
+                        async {
+                            fetchEventCountsViaOverview(
+                                fromTime = fromTime,
+                                toTime = toTime,
+                                serviceIdStr = serviceIdStr,
+                                unfilteredOverviewStats = overviewStats,
+                                seedEvents = recentEvents
+                            )
+                        }
+                    } else {
+                        null
+                    }
                     if (wave1Alive && UserPermissionManager.canAccessEvents()) {
                         try {
                             val targetServices = if (serviceId != null) {
@@ -836,6 +928,29 @@ class HomeViewModel(
                         }
                     }
 
+                    val fallbackByType = fallbackByTypeDeferred?.await()
+                    val (eventsByType, hasLoadedEventsByType) = when {
+                        byTypeSucceeded && byTypeBody.isNotEmpty() -> {
+                            lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
+                            lastCountedRealtimeEventId = maxOf(
+                                lastCountedRealtimeEventId,
+                                recentEvents.maxOfOrNull { it.id } ?: 0
+                            )
+                            byTypeBody to true
+                        }
+                        fallbackByType != null -> {
+                            lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
+                            lastCountedRealtimeEventId = maxOf(
+                                lastCountedRealtimeEventId,
+                                recentEvents.maxOfOrNull { it.id } ?: 0
+                            )
+                            fallbackByType to true
+                        }
+                        else -> {
+                            _uiState.value.eventsByType to (byTypeSucceeded || _uiState.value.hasLoadedEventsByType)
+                        }
+                    }
+
                     // Báo lỗi backend kể cả khi đã có dữ liệu cache hiển thị trên màn hình
                     val primaryFailure = overviewResult.exceptionOrNull()
                         ?: recentResult.firstError
@@ -883,7 +998,7 @@ class HomeViewModel(
                     }
                     _uiState.value = nextState
 
-                    if (overviewResponse?.isSuccessful == true || byTypeSucceeded || recentEventsSucceeded) {
+                    if (overviewResponse?.isSuccessful == true || byTypeSucceeded || fallbackByType != null || recentEventsSucceeded) {
                         val newCachedData = CachedHomeData(
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,
@@ -918,13 +1033,173 @@ class HomeViewModel(
         _uiState.update { it.copy(error = null) }
     }
 
+    private fun extractOverviewEventCount(
+        stats: List<VmsCountOverviewModel>,
+        serviceIdStr: String?,
+        expectedEventType: String? = null
+    ): Long? {
+        if (stats.isEmpty()) {
+            return if (expectedEventType != null) 0L else null
+        }
+        val relevant = stats.filter { item ->
+            item.label == "event-count" &&
+                (expectedEventType == null ||
+                    item.eventType.isNullOrBlank() ||
+                    item.eventType.equals(expectedEventType, ignoreCase = true))
+        }
+        if (relevant.isEmpty()) {
+            return when {
+                expectedEventType != null -> 0L
+                serviceIdStr != null -> 0L
+                else -> null
+            }
+        }
+        return if (serviceIdStr != null) {
+            val hasItemBreakdown = relevant.any { it.tag == "item" }
+            if (hasItemBreakdown) {
+                relevant.find { it.tag == "item" && it.serviceId == serviceIdStr }
+                    ?.count?.toLong() ?: 0L
+            } else {
+                relevant.find { it.tag == "all" }?.count?.toLong()
+            }
+        } else {
+            relevant.find { it.tag == "all" }?.count?.toLong()
+        }
+    }
+
+    private fun collectEnabledEventTypesForOverview(seedEvents: List<EventData>): List<String> {
+        val result = LinkedHashSet<String>()
+        for (mod in AiTypeHelper.activeModules) {
+            for (et in mod.eventTypes) {
+                val trimmed = et.trim()
+                if (trimmed.isNotEmpty() && AiTypeHelper.isAiTypeEnabled(trimmed)) {
+                    result.add(trimmed)
+                }
+            }
+        }
+        for (ev in seedEvents) {
+            val trimmed = ev.type.trim()
+            if (trimmed.isNotEmpty() && AiTypeHelper.isAiTypeEnabled(trimmed)) {
+                result.add(trimmed)
+            }
+        }
+        return result.toList()
+    }
+
+    /**
+     * Khi `vms-event/count-by-type` trả về mảng rỗng `[]` (nhưng hệ thống có sự kiện),
+     * truy vấn song song `vms-core/count-overview?eventType=<type>` theo đúng cơ chế Dashboard từng bài AI trên Web
+     * để lấy số lượng sự kiện thực tế của từng bài AI.
+     * Trả về `null` nếu tất cả request đều lỗi mạng để bảo toàn state/cache hiện tại.
+     */
+    private suspend fun fetchEventCountsViaOverview(
+        fromTime: Long,
+        toTime: Long,
+        serviceIdStr: String?,
+        unfilteredOverviewStats: List<VmsCountOverviewModel>,
+        seedEvents: List<EventData>
+    ): List<VmsEventCountByTypeModel>? = coroutineScope {
+        val unfilteredTotal = extractOverviewEventCount(unfilteredOverviewStats, serviceIdStr)
+        if (unfilteredTotal != null && unfilteredTotal <= 0L) {
+            return@coroutineScope emptyList()
+        }
+        val eventTypes = collectEnabledEventTypesForOverview(seedEvents)
+        if (eventTypes.isEmpty()) {
+            return@coroutineScope emptyList()
+        }
+        val semaphore = Semaphore(MAX_OVERVIEW_BY_TYPE_CONCURRENCY)
+        val queryOutputs = eventTypes.map { et ->
+            async {
+                semaphore.withPermit {
+                    val resp = safeApiCall {
+                        dashboardRepository.getVmsCountOverview(
+                            serviceId = serviceIdStr ?: "-1",
+                            fromTime = fromTime,
+                            toTime = toTime,
+                            eventType = et
+                        )
+                    }.getOrNull()
+                    if (resp?.isSuccessful == true) {
+                        val body = resp.body() ?: emptyList()
+                        val echoedEventType = body.any { !it.eventType.isNullOrBlank() }
+                        val cnt = extractOverviewEventCount(body, serviceIdStr, et) ?: 0L
+                        Triple(et, cnt, echoedEventType)
+                    } else {
+                        null
+                    }
+                }
+            }
+        }.awaitAll()
+
+        val succeeded = queryOutputs.filterNotNull()
+        if (succeeded.isEmpty()) {
+            return@coroutineScope null
+        }
+
+        // Phòng trường hợp backend cũ bỏ qua query param `eventType` và trả trùng tổng unfiltered cho mọi loại
+        if (unfilteredTotal != null && unfilteredTotal > 0L && succeeded.size >= 2) {
+            val distinctModules = succeeded.map { (et, _, _) ->
+                AiTypeHelper.findModuleByEventType(et)?.sensorType ?: et
+            }.toSet()
+            val noneEchoed = succeeded.none { (_, _, echoed) -> echoed }
+            val allEqualTotal = succeeded.all { (_, cnt, _) -> cnt == unfilteredTotal }
+            if (distinctModules.size >= 2 && noneEchoed && allEqualTotal) {
+                return@coroutineScope emptyList()
+            }
+        }
+
+        succeeded
+            .filter { (_, cnt, _) -> cnt > 0L }
+            .map { (et, cnt, _) ->
+                VmsEventCountByTypeModel(
+                    type = et,
+                    count = cnt.toDouble()
+                )
+            }
+    }
+
+    private fun mergeRealtimeDeltasIntoByType(
+        currentByType: List<VmsEventCountByTypeModel>,
+        newEvents: List<EventData>,
+        baselineMaxId: Int
+    ): Pair<List<VmsEventCountByTypeModel>, Int> {
+        if (baselineMaxId <= 0 || newEvents.isEmpty()) {
+            val nextMax = maxOf(baselineMaxId, newEvents.maxOfOrNull { it.id } ?: 0)
+            return currentByType to nextMax
+        }
+        val freshEvents = newEvents.filter { it.id > baselineMaxId && AiTypeHelper.isAiTypeEnabled(it.type) }
+        if (freshEvents.isEmpty()) {
+            return currentByType to baselineMaxId
+        }
+        val nextMaxId = maxOf(baselineMaxId, freshEvents.maxOf { it.id })
+        val countsMap = LinkedHashMap<String, Double>()
+        for (item in currentByType) {
+            if (item.type.isNotBlank()) {
+                countsMap[item.type] = (countsMap[item.type] ?: 0.0) + item.count
+            }
+        }
+        for (ev in freshEvents) {
+            val t = ev.type.trim()
+            if (t.isNotEmpty()) {
+                countsMap[t] = (countsMap[t] ?: 0.0) + 1.0
+            }
+        }
+        val updated = countsMap.map { (type, cnt) ->
+            VmsEventCountByTypeModel(type = type, count = cnt)
+        }
+        return updated to nextMaxId
+    }
+
     private fun HomeUiState.withRecomputedMetrics(): HomeUiState {
         if (!UserPermissionManager.canAccessEvents()) {
-            return copy(totalDetectionsCount = 0L).withRecomputedCameraMetrics()
+            return copy(
+                totalDetectionsCount = 0L,
+                aiDistribution = emptyList()
+            ).withRecomputedCameraMetrics()
         }
-        val sumByType = eventsByType
-            .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-            .sumOf { it.count.toString().toDoubleOrNull()?.toLong() ?: 0L }
+        val enabledByType = eventsByType.filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+        val sumByType = enabledByType
+            .sumOf { it.count.toLong() }
         val isCustomUserAi = UserPermissionManager.isCustomAiEventPermission()
         val totalDetections = when {
             sumByType > 0L -> maxOf(sumByType, recentEvents.size.toLong())
@@ -933,23 +1208,7 @@ class HomeViewModel(
                 recentEvents.size.toLong()
             }
             else -> {
-                val srvIdStr = selectedServiceId?.toString()
-                val overviewCount = if (srvIdStr != null) {
-                    val hasItemBreakdown = overviewStats.any { it.label == "event-count" && it.tag == "item" }
-                    if (hasItemBreakdown) {
-                        overviewStats
-                            .find { it.label == "event-count" && it.tag == "item" && it.serviceId == srvIdStr }
-                            ?.count?.toString()?.toDoubleOrNull()?.toLong() ?: 0L
-                    } else {
-                        overviewStats
-                            .find { it.label == "event-count" && it.tag == "all" }
-                            ?.count?.toString()?.toDoubleOrNull()?.toLong()
-                    }
-                } else {
-                    overviewStats
-                        .find { it.label == "event-count" && it.tag == "all" }
-                        ?.count?.toString()?.toDoubleOrNull()?.toLong()
-                }
+                val overviewCount = extractOverviewEventCount(overviewStats, selectedServiceId?.toString())
                 if (overviewCount != null) {
                     maxOf(overviewCount, recentEvents.size.toLong())
                 } else {
@@ -957,7 +1216,78 @@ class HomeViewModel(
                 }
             }
         }
-        return copy(totalDetectionsCount = totalDetections).withRecomputedCameraMetrics()
+
+        // Tổng hợp phân bố sự kiện theo từng bài AI (gộp các eventTypes cùng module vào 1 dòng)
+        data class ModuleBucket(
+            val sensorType: String,
+            val labelVi: String,
+            val labelEn: String,
+            var count: Long
+        )
+        val bucketMap = LinkedHashMap<String, ModuleBucket>()
+        if (sumByType > 0L) {
+            for (item in enabledByType) {
+                val cnt = item.count.toLong()
+                if (cnt <= 0L) continue
+                val mod = AiTypeHelper.findModuleByEventType(item.type)
+                val key = mod?.sensorType ?: item.type.trim()
+                val existing = bucketMap[key]
+                if (existing != null) {
+                    existing.count += cnt
+                } else {
+                    bucketMap[key] = ModuleBucket(
+                        sensorType = key,
+                        labelVi = mod?.labelVi ?: AiTypeHelper.getTypeName(item.type, isEn = false),
+                        labelEn = mod?.labelEn ?: AiTypeHelper.getTypeName(item.type, isEn = true),
+                        count = cnt
+                    )
+                }
+            }
+        } else if (
+            recentEvents.isNotEmpty() &&
+            totalDetections <= recentEvents.size.toLong() &&
+            !(eventsByType.isNotEmpty() && isCustomUserAi)
+        ) {
+            for (ev in recentEvents) {
+                if (!AiTypeHelper.isAiTypeEnabled(ev.type)) continue
+                val mod = AiTypeHelper.findModuleByEventType(ev.type)
+                val key = mod?.sensorType ?: ev.type.trim()
+                if (key.isEmpty()) continue
+                val existing = bucketMap[key]
+                if (existing != null) {
+                    existing.count += 1L
+                } else {
+                    bucketMap[key] = ModuleBucket(
+                        sensorType = key,
+                        labelVi = mod?.labelVi ?: AiTypeHelper.getTypeName(ev.type, isEn = false),
+                        labelEn = mod?.labelEn ?: AiTypeHelper.getTypeName(ev.type, isEn = true),
+                        count = 1L
+                    )
+                }
+            }
+        }
+
+        val totalBucketCount = bucketMap.values.sumOf { it.count }
+        val distribution = if (totalBucketCount > 0L) {
+            bucketMap.values
+                .sortedByDescending { it.count }
+                .map { b ->
+                    HomeAiDistributionItem(
+                        filterSensorType = b.sensorType,
+                        labelVi = b.labelVi,
+                        labelEn = b.labelEn,
+                        count = b.count,
+                        percentage = ((b.count.toFloat() * 100f) / totalBucketCount.toFloat()).coerceIn(0f, 100f)
+                    )
+                }
+        } else {
+            emptyList()
+        }
+
+        return copy(
+            totalDetectionsCount = totalDetections,
+            aiDistribution = if (distribution == aiDistribution) aiDistribution else distribution
+        ).withRecomputedCameraMetrics()
     }
 
     private fun HomeUiState.withRecomputedCameraMetrics(): HomeUiState {
@@ -981,7 +1311,7 @@ class HomeViewModel(
                     ?: statusMap["cam-${cam.vmsId}-${cam.id}"]
                     ?: statusMap["cam-${cam.id}"]
                 var isOffline = wsStatus == "red"
-                if (!isOffline) {
+                if (!isOffline && wsStatus != "green") {
                     val issues = cam.extra?.latestReport?.issues
                     if (issues != null && (issues.contains("loi_ket_noi") || issues.contains("mat_ket_noi"))) {
                         isOffline = true
@@ -1024,6 +1354,8 @@ class HomeViewModel(
         private const val MAX_BATCH_ATTEMPTS = 3
         private const val NOTIFY_DEBOUNCE_MS = 600L
         private const val STATUS_DEBOUNCE_MS = 800L
+        private const val BY_TYPE_WS_REFRESH_INTERVAL_MS = 10_000L
+        private const val MAX_OVERVIEW_BY_TYPE_CONCURRENCY = 8
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

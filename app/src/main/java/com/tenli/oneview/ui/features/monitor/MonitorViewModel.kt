@@ -17,6 +17,7 @@ import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
+import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.data.repository.MonitorRepository
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraGroupModel
@@ -28,9 +29,10 @@ import com.tenli.oneview.model.network.RecordSchedule
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.features.event.EventDescendingComparator
 import com.tenli.oneview.ui.features.event.formatVideoQueryTime
 import com.tenli.oneview.ui.features.event.parseVideoQueryTime
-import com.tenli.oneview.ui.features.event.resolveApiEventType
+import com.tenli.oneview.ui.features.event.resolveApiEventTypes
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.features.main.CameraDetailTab
@@ -107,6 +109,12 @@ data class PlaybackDayGroup(
     val labelEn: String = ""
 )
 
+enum class CameraQuickFilter {
+    ALL,
+    FAVORITES,
+    OFFLINE
+}
+
 @Immutable
 data class MonitorUiState(
     val isLoading: Boolean = false,
@@ -114,6 +122,11 @@ data class MonitorUiState(
     val activeSlotIndex: Int = 0,
     val blinkStates: List<Boolean> = List(MonitorViewModel.SLOT_COUNT) { false },
     val searchQuery: String = "",
+    val quickFilter: CameraQuickFilter = CameraQuickFilter.ALL,
+    val favoriteCameraIds: Set<Int> = emptySet(),
+    val offlineCameraIds: Set<Int> = emptySet(),
+    val favoriteCamerasCount: Int = 0,
+    val offlineCamerasCount: Int = 0,
     val selectedCameras: List<SelectedCamera?> = List(MonitorViewModel.SLOT_COUNT) { null },
     val expandedNodes: Set<String> = emptySet(),
     val selectedFilterNodeKey: String = MonitorViewModel.FILTER_ALL,
@@ -375,7 +388,8 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
 
 class MonitorViewModel(
     application: Application,
-    private val monitorRepository: MonitorRepository
+    private val monitorRepository: MonitorRepository,
+    private val webSocketManager: WebSocketManager = (application as TenliApp).container.webSocketManager
 ) : AndroidViewModel(application) {
     private val app: Application get() = getApplication()
 
@@ -389,6 +403,7 @@ class MonitorViewModel(
 
     /** Chỉ được đọc/ghi trên Main thread (cùng luồng với _uiState.update) */
     private var treeIndex = CameraTreeIndex(emptyList())
+    private var latestCameraStatusMap: Map<String, String> = emptyMap()
 
     /** Dữ liệu gốc chưa lọc phân quyền để dựng lại cây khi quyền tài khoản thay đổi */
     private var rawVmsList: List<VMSServiceModel> = emptyList()
@@ -410,6 +425,8 @@ class MonitorViewModel(
     private var cameraEventFetchJob: Job? = null
     private var cameraEventPaginateJob: Job? = null
     private var lastCameraEventRawId: Int? = null
+    private var lastCameraEventRawIdByType: Map<String, Int?> = emptyMap()
+    private var exhaustedCameraEventTypes: Set<String> = emptySet()
     private var playbackLoadedForCameraId: Int? = null
     private var eventsLoadedForCameraId: Int? = null
     private var playbackCurrentSearchDayMs: Long? = null
@@ -494,9 +511,25 @@ class MonitorViewModel(
                 val application = this[APPLICATION_KEY] as TenliApp
                 MonitorViewModel(
                     application = application,
-                    monitorRepository = application.container.monitorRepository
+                    monitorRepository = application.container.monitorRepository,
+                    webSocketManager = application.container.webSocketManager
                 )
             }
+        }
+
+        fun isCameraOffline(cam: CameraModel, statusMap: Map<String, String>): Boolean {
+            val wsStatus = statusMap["cam-0-${cam.id}"]
+                ?: statusMap["cam-${cam.vmsId}-${cam.cameraId}"]
+                ?: statusMap["cam-${cam.vmsId}-${cam.id}"]
+                ?: statusMap["cam-${cam.id}"]
+            var isOffline = wsStatus == "red"
+            if (!isOffline && wsStatus != "green") {
+                val issues = cam.extra?.latestReport?.issues
+                if (issues != null && (issues.contains("loi_ket_noi") || issues.contains("mat_ket_noi"))) {
+                    isOffline = true
+                }
+            }
+            return isOffline
         }
 
         /** Đồng bộ LiveVideoView.vue (line 969): trên mobile ưu tiên luồng phụ (channel = 1, độ phân giải thấp) nếu có */
@@ -633,7 +666,25 @@ class MonitorViewModel(
 
     init {
         val savedNodes = monitorRepository.getExpandedNodesPref()
-        _uiState.update { it.copy(expandedNodes = savedNodes, gridSize = 1) }
+        val savedFavorites = monitorRepository.getFavoriteCameraIds()
+        _uiState.update {
+            it.copy(
+                expandedNodes = savedNodes,
+                favoriteCameraIds = savedFavorites,
+                gridSize = 1
+            )
+        }
+
+        viewModelScope.launch {
+            webSocketManager.cameraStatusMap.collect { statusMap ->
+                latestCameraStatusMap = statusMap
+                val nextOffline = computeOfflineCameraIds(treeIndex.allCameras, statusMap)
+                _uiState.update { cur ->
+                    if (cur.offlineCameraIds == nextOffline) cur
+                    else cur.copy(offlineCameraIds = nextOffline).withDerivedData()
+                }
+            }
+        }
 
         // Nếu dữ liệu cây camera đã được preload sẵn trong RAM, áp dụng ngay tức thì (0ms)
         val memCached = monitorRepository.getMonitorDataInMemory()
@@ -792,6 +843,20 @@ class MonitorViewModel(
     // State helpers
     // ---------------------------------------------------------------------------------------------
 
+    private fun computeOfflineCameraIds(
+        cameras: List<CameraCardItem>,
+        statusMap: Map<String, String>
+    ): Set<Int> {
+        if (cameras.isEmpty()) return emptySet()
+        val offline = HashSet<Int>()
+        for (item in cameras) {
+            if (isCameraOffline(item.camera, statusMap)) {
+                offline.add(item.camera.id)
+            }
+        }
+        return offline
+    }
+
     /**
      * Chuẩn hoá bộ lọc/trang và tính lại dữ liệu suy ra (danh sách camera theo trang, cây nhóm...).
      * Chỉ gọi khi cây / bộ lọc / tìm kiếm / trang / nhóm mở rộng thay đổi. Giữ nguyên instance list cũ nếu nội dung
@@ -805,12 +870,27 @@ class MonitorViewModel(
 
         val baseCameras = index.camerasForFilter(filterKey)
         val query = searchQuery.trim()
-        val displayed = if (query.isEmpty()) {
+        val searchFiltered = if (query.isEmpty()) {
             baseCameras
         } else {
             val normalizedQuery = normalizeVietnameseText(query)
             val rawLower = query.lowercase()
             baseCameras.filter { index.matchesSearch(it.camera, normalizedQuery, rawLower) }
+        }
+
+        val favCount = if (favoriteCameraIds.isEmpty()) 0 else searchFiltered.count { it.camera.id in favoriteCameraIds }
+        val offCount = if (offlineCameraIds.isEmpty()) 0 else searchFiltered.count { it.camera.id in offlineCameraIds }
+
+        val quickFiltered = when (quickFilter) {
+            CameraQuickFilter.ALL -> searchFiltered
+            CameraQuickFilter.FAVORITES -> searchFiltered.filter { it.camera.id in favoriteCameraIds }
+            CameraQuickFilter.OFFLINE -> searchFiltered.filter { it.camera.id in offlineCameraIds }
+        }
+
+        val displayed = if (favoriteCameraIds.isEmpty() || quickFilter == CameraQuickFilter.FAVORITES) {
+            quickFiltered
+        } else {
+            quickFiltered.sortedByDescending { it.camera.id in favoriteCameraIds }
         }
 
         // Ưu tiên nạp đồng bộ tức thì (0ms) từ RAM cache cho toàn bộ camera được lọc
@@ -844,6 +924,8 @@ class MonitorViewModel(
             hasAvailableCameras = index.vmsNodes.isNotEmpty(),
             totalAllCamerasCount = index.totalCameraCount,
             totalFilteredCamerasCount = displayed.size,
+            favoriteCamerasCount = favCount,
+            offlineCamerasCount = offCount,
             groupTreeRows = if (rows == groupTreeRows) groupTreeRows else rows,
             pagedCameraItems = if (displayed == pagedCameraItems) pagedCameraItems else displayed,
             totalCameraPages = 1,
@@ -880,6 +962,10 @@ class MonitorViewModel(
     // ---------------------------------------------------------------------------------------------
 
     fun setMonitorTabActive(active: Boolean) {
+        webSocketManager.setReportsActive(active, "monitor")
+        if (active) {
+            webSocketManager.connectAllReports()
+        }
         if (isMonitorTabActive == active) return
         isMonitorTabActive = active
         if (!active) {
@@ -948,6 +1034,55 @@ class MonitorViewModel(
 
     fun setSearchQuery(query: String) {
         _uiState.update { it.copy(searchQuery = query, currentCameraPage = 1).withDerivedData() }
+        loadVisibleCameraSnapshots()
+    }
+
+    fun setQuickFilter(filter: CameraQuickFilter) {
+        if (_uiState.value.quickFilter == filter) return
+        _uiState.update { it.copy(quickFilter = filter, currentCameraPage = 1).withDerivedData() }
+        loadVisibleCameraSnapshots()
+    }
+
+    fun applyExternalQuickFilter(filter: CameraQuickFilter) {
+        if (_uiState.value.selectedCameras.getOrNull(0) != null) {
+            closeLiveCamera()
+        }
+        _uiState.update {
+            it.copy(
+                selectedFilterNodeKey = FILTER_ALL,
+                searchQuery = "",
+                quickFilter = filter,
+                currentCameraPage = 1
+            ).withDerivedData()
+        }
+        loadVisibleCameraSnapshots()
+    }
+
+    fun toggleFavoriteCamera(cameraId: Int) {
+        if (cameraId == 0) return
+        var added = false
+        _uiState.update { state ->
+            val nextFavs = if (cameraId in state.favoriteCameraIds) {
+                added = false
+                state.favoriteCameraIds - cameraId
+            } else {
+                added = true
+                state.favoriteCameraIds + cameraId
+            }
+            monitorRepository.saveFavoriteCameraIds(nextFavs)
+            state.copy(favoriteCameraIds = nextFavs).withDerivedData()
+        }
+        val isEnglish = com.tenli.oneview.data.local.GlobalData.preferences
+            .getString("selected_language", "vi") == "en"
+        if (added) {
+            MobileTopPopupManager.info(
+                if (isEnglish) "Pinned camera to favorites" else "Đã ghim camera yêu thích"
+            )
+        } else {
+            MobileTopPopupManager.info(
+                if (isEnglish) "Removed from favorites" else "Đã bỏ ghim camera yêu thích"
+            )
+        }
         loadVisibleCameraSnapshots()
     }
 
@@ -1345,6 +1480,8 @@ class MonitorViewModel(
 
     private fun applyTree(index: CameraTreeIndex) {
         treeIndex = index
+        val savedFavorites = monitorRepository.getFavoriteCameraIds()
+        val offlineIds = computeOfflineCameraIds(index.allCameras, latestCameraStatusMap)
         _uiState.update { state ->
             // Mặc định mở rộng các VMS ở lần đầu (chưa có trạng thái lưu)
             val expanded = if (state.expandedNodes.isEmpty() && index.tree.isNotEmpty()) {
@@ -1352,7 +1489,13 @@ class MonitorViewModel(
             } else {
                 state.expandedNodes
             }
-            state.copy(isLoading = false, error = null, expandedNodes = expanded).withDerivedData()
+            state.copy(
+                isLoading = false,
+                error = null,
+                expandedNodes = expanded,
+                favoriteCameraIds = savedFavorites,
+                offlineCameraIds = offlineIds
+            ).withDerivedData()
         }
         // Không tự động chọn camera phát live khi mới vào màn hình: chỉ hiển thị lưới snapshot camera,
         // người dùng chạm vào camera nào mới mở màn hình xem trực tiếp của camera đó.
@@ -1477,6 +1620,8 @@ class MonitorViewModel(
         playbackLoadedForCameraId = null
         eventsLoadedForCameraId = null
         lastCameraEventRawId = null
+        lastCameraEventRawIdByType = emptyMap()
+        exhaustedCameraEventTypes = emptySet()
         val preferredPlaybackChan = resolvePreferredPlaybackChannel(camera)
         val cachedPlayback = getPlaybackSessionCache(camera.id, TimeFilter.TODAY, preferredPlaybackChan)
         if (cachedPlayback != null) {
@@ -2644,6 +2789,8 @@ class MonitorViewModel(
         cameraEventFetchJob?.cancel()
         cameraEventPaginateJob?.cancel()
         lastCameraEventRawId = null
+        lastCameraEventRawIdByType = emptyMap()
+        exhaustedCameraEventTypes = emptySet()
 
         // Nếu camera chưa có UUID thì không gọi API sự kiện (tránh trả về sự kiện của toàn bộ camera)
         if (cameraUuid.isEmpty()) {
@@ -2679,14 +2826,14 @@ class MonitorViewModel(
                 val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(filter)
                 val fromSec = fromMs / 1000
                 val toSec = toMs / 1000
-                val resolvedType = resolveApiEventType(aiType)
+                val resolvedTypes = resolveApiEventTypes(aiType)
 
                 val batchResult = fetchPermittedCameraEventBatch(
                     startLastId = null,
                     fromSec = fromSec,
                     toSec = toSec,
                     cameraUuid = cameraUuid,
-                    resolvedType = resolvedType
+                    resolvedTypes = resolvedTypes
                 )
                 val events = batchResult.events
                 val nextLastId = batchResult.lastRawId
@@ -2696,6 +2843,8 @@ class MonitorViewModel(
                 if (activeCamId != camera.id) return@launch
 
                 lastCameraEventRawId = nextLastId
+                lastCameraEventRawIdByType = batchResult.lastRawIdByType
+                exhaustedCameraEventTypes = batchResult.exhaustedTypes
                 eventsLoadedForCameraId = camera.id
 
                 if (events.isNotEmpty()) {
@@ -2753,14 +2902,31 @@ class MonitorViewModel(
         cameraEventPaginateJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isPaginatingCameraEvents = true) }
             try {
-                val startId = lastCameraEventRawId ?: state.cameraEvents.lastOrNull()?.id ?: return@launch
+                val resolvedTypes = resolveApiEventTypes(state.cameraEventAiType)
+                val startId: Int? = if (resolvedTypes.size <= 1) {
+                    val sid = lastCameraEventRawId ?: state.cameraEvents.lastOrNull()?.id
+                    if (sid == null) {
+                        _uiState.update { it.copy(isPaginatingCameraEvents = false, hasMoreCameraEvents = false) }
+                        return@launch
+                    }
+                    sid
+                } else {
+                    if (resolvedTypes.all { it in exhaustedCameraEventTypes }) {
+                        _uiState.update { it.copy(isPaginatingCameraEvents = false, hasMoreCameraEvents = false) }
+                        return@launch
+                    }
+                    null
+                }
                 val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(state.cameraEventTimeFilter)
                 val batchResult = fetchPermittedCameraEventBatch(
                     startLastId = startId,
                     fromSec = fromMs / 1000,
                     toSec = toMs / 1000,
                     cameraUuid = cameraUuid,
-                    resolvedType = resolveApiEventType(state.cameraEventAiType)
+                    resolvedTypes = resolvedTypes,
+                    startLastIdByType = lastCameraEventRawIdByType,
+                    currentExhaustedTypes = exhaustedCameraEventTypes,
+                    isLoadMore = true
                 )
                 val newEvents = batchResult.events
                 val nextLastId = batchResult.lastRawId
@@ -2771,13 +2937,17 @@ class MonitorViewModel(
 
                 if (batchResult.apiSucceeded) {
                     lastCameraEventRawId = nextLastId
+                    lastCameraEventRawIdByType = batchResult.lastRawIdByType
+                    exhaustedCameraEventTypes = batchResult.exhaustedTypes
                 }
                 if (newEvents.isNotEmpty()) {
                     monitorRepository.cacheInMemory(events = newEvents)
                 }
 
                 _uiState.update { cur ->
-                    val merged = (cur.cameraEvents + newEvents).distinctBy { ev -> ev.uniqueKey() }
+                    val merged = (cur.cameraEvents + newEvents)
+                        .distinctBy { ev -> ev.uniqueKey() }
+                        .let { list -> if (resolvedTypes.size > 1) list.sortedWith(EventDescendingComparator) else list }
                     cur.copy(
                         isPaginatingCameraEvents = false,
                         cameraEvents = merged,
@@ -2806,12 +2976,14 @@ class MonitorViewModel(
     private data class CameraEventBatchResult(
         val events: List<EventData>,
         val lastRawId: Int?,
+        val lastRawIdByType: Map<String, Int?> = emptyMap(),
+        val exhaustedTypes: Set<String> = emptySet(),
         val hasMore: Boolean,
         val apiSucceeded: Boolean,
         val firstError: Throwable? = null
     )
 
-    private suspend fun fetchPermittedCameraEventBatch(
+    private suspend fun fetchSingleTypeCameraEventBatch(
         startLastId: Int?,
         fromSec: Long,
         toSec: Long,
@@ -2891,6 +3063,98 @@ class MonitorViewModel(
             hasMore = hasMore,
             apiSucceeded = anySuccessful,
             firstError = if (anySuccessful) null else firstError
+        )
+    }
+
+    private suspend fun fetchPermittedCameraEventBatch(
+        startLastId: Int?,
+        fromSec: Long,
+        toSec: Long,
+        cameraUuid: String,
+        resolvedTypes: List<String>,
+        startLastIdByType: Map<String, Int?> = emptyMap(),
+        currentExhaustedTypes: Set<String> = emptySet(),
+        isLoadMore: Boolean = false
+    ): CameraEventBatchResult = coroutineScope {
+        if (!UserPermissionManager.canAccessEvents()) {
+            return@coroutineScope CameraEventBatchResult(
+                events = emptyList(),
+                lastRawId = startLastId,
+                hasMore = false,
+                apiSucceeded = true
+            )
+        }
+        if (resolvedTypes.size <= 1) {
+            return@coroutineScope fetchSingleTypeCameraEventBatch(
+                startLastId = startLastId,
+                fromSec = fromSec,
+                toSec = toSec,
+                cameraUuid = cameraUuid,
+                resolvedType = resolvedTypes.firstOrNull()
+            )
+        }
+        val typesToQuery = if (isLoadMore) {
+            resolvedTypes.filter { it !in currentExhaustedTypes }
+        } else {
+            resolvedTypes
+        }
+        if (typesToQuery.isEmpty()) {
+            return@coroutineScope CameraEventBatchResult(
+                events = emptyList(),
+                lastRawId = null,
+                lastRawIdByType = startLastIdByType,
+                exhaustedTypes = currentExhaustedTypes,
+                hasMore = false,
+                apiSucceeded = true
+            )
+        }
+
+        val subResults = typesToQuery.map { type ->
+            async {
+                type to fetchSingleTypeCameraEventBatch(
+                    startLastId = if (isLoadMore) startLastIdByType[type] else null,
+                    fromSec = fromSec,
+                    toSec = toSec,
+                    cameraUuid = cameraUuid,
+                    resolvedType = type
+                )
+            }
+        }.awaitAll()
+
+        val nextCursors = LinkedHashMap<String, Int?>(startLastIdByType)
+        val nextExhausted = HashSet<String>(if (isLoadMore) currentExhaustedTypes else emptySet())
+        var anySucceeded = false
+        var firstError: Throwable? = null
+        val combined = ArrayList<EventData>()
+
+        for ((type, sub) in subResults) {
+            if (sub.apiSucceeded) {
+                anySucceeded = true
+                nextCursors[type] = sub.lastRawId
+                if (!sub.hasMore) {
+                    nextExhausted.add(type)
+                } else {
+                    nextExhausted.remove(type)
+                }
+            } else if (firstError == null && sub.firstError != null) {
+                firstError = sub.firstError
+            }
+            combined.addAll(sub.events)
+        }
+
+        val mergedEvents = combined
+            .distinctBy { it.uniqueKey() }
+            .sortedWith(EventDescendingComparator)
+        val hasMore = resolvedTypes.any { it !in nextExhausted } && mergedEvents.isNotEmpty()
+
+        CameraEventBatchResult(
+            events = mergedEvents,
+            lastRawId = mergedEvents.lastOrNull()?.id,
+            lastRawIdByType = nextCursors,
+            exhaustedTypes = nextExhausted,
+            hasMore = hasMore,
+            apiSucceeded = anySucceeded,
+            firstError = if (anySucceeded) null else firstError
         )
     }
 }

@@ -140,6 +140,8 @@ import com.tenli.oneview.ui.features.event.EventScreen
 import com.tenli.oneview.ui.features.event.EventViewModel
 import com.tenli.oneview.ui.features.home.HomeScreen
 import com.tenli.oneview.ui.features.home.HomeViewModel
+import com.tenli.oneview.ui.features.home.TimeFilter
+import com.tenli.oneview.ui.features.monitor.CameraQuickFilter
 import com.tenli.oneview.ui.features.monitor.MonitorLiveCameraOverlay
 import com.tenli.oneview.ui.features.monitor.MonitorScreen
 import com.tenli.oneview.ui.features.monitor.MonitorViewModel
@@ -494,6 +496,21 @@ fun MainScreen(
 
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
+                                if (event.changes.count { it.pressed } > 1) {
+                                    if (isDraggingTab) {
+                                        val startFrom = dragOffsetFraction
+                                        isDraggingTab = false
+                                        scope.launch {
+                                            activeOffsetFraction.snapTo(startFrom)
+                                            activeOffsetFraction.animateTo(0f, TabSwitchAnimSpec)
+                                            if (!isDraggingTab) {
+                                                outgoingTab = null
+                                            }
+                                        }
+                                    }
+                                    gestureDirection = 2
+                                    break
+                                }
                                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                                 endTime = change.uptimeMillis
 
@@ -652,10 +669,77 @@ fun MainScreen(
                 val effectiveMountedTabs = remember(mountedTabs, uiState.currentTab) {
                     mountedTabs + uiState.currentTab
                 }
+                val eventViewModel: EventViewModel? = if (MainTab.Event in effectiveMountedTabs) {
+                    viewModel(factory = EventViewModel.Factory)
+                } else {
+                    null
+                }
                 val monitorViewModel: MonitorViewModel? = if (MainTab.Monitor in effectiveMountedTabs) {
                     viewModel(factory = MonitorViewModel.Factory)
                 } else {
                     null
+                }
+
+                var pendingEventNav by remember { mutableStateOf<Triple<TimeFilter, Int?, String?>?>(null) }
+                var pendingMonitorNav by remember { mutableStateOf<CameraQuickFilter?>(null) }
+
+                LaunchedEffect(eventViewModel, pendingEventNav) {
+                    val nav = pendingEventNav
+                    if (eventViewModel != null && nav != null) {
+                        pendingEventNav = null
+                        eventViewModel.applyExternalNavigationFilter(nav.first, nav.second, nav.third)
+                        eventListState.scrollToItem(0)
+                    }
+                }
+
+                LaunchedEffect(monitorViewModel, pendingMonitorNav) {
+                    val nav = pendingMonitorNav
+                    if (monitorViewModel != null && nav != null) {
+                        pendingMonitorNav = null
+                        monitorViewModel.applyExternalQuickFilter(nav)
+                        monitorGridState.scrollToItem(0)
+                    }
+                }
+
+                val currentEventViewModel by rememberUpdatedState(eventViewModel)
+                val currentMonitorViewModel by rememberUpdatedState(monitorViewModel)
+                val canAccessEventsState by rememberUpdatedState(uiState.canAccessEvents)
+                val canAccessLiveStreamState by rememberUpdatedState(uiState.canAccessLiveStream)
+
+                val onHomeNavigateToEvents: (TimeFilter, Int?, String?) -> Unit = remember(switchToTab, scope) {
+                    { timeFilter, serviceId, aiType ->
+                        if (canAccessEventsState) {
+                            if (MainTab.Event !in mountedTabs) {
+                                mountedTabs = mountedTabs + MainTab.Event
+                            }
+                            val evVm = currentEventViewModel
+                            if (evVm != null) {
+                                evVm.applyExternalNavigationFilter(timeFilter, serviceId, aiType)
+                                scope.launch { eventListState.scrollToItem(0) }
+                            } else {
+                                pendingEventNav = Triple(timeFilter, serviceId, aiType)
+                            }
+                            switchToTab(MainTab.Event, true)
+                        }
+                    }
+                }
+
+                val onHomeNavigateToMonitor: (CameraQuickFilter) -> Unit = remember(switchToTab, scope) {
+                    { quickFilter ->
+                        if (canAccessLiveStreamState) {
+                            if (MainTab.Monitor !in mountedTabs) {
+                                mountedTabs = mountedTabs + MainTab.Monitor
+                            }
+                            val monVm = currentMonitorViewModel
+                            if (monVm != null) {
+                                monVm.applyExternalQuickFilter(quickFilter)
+                                scope.launch { monitorGridState.scrollToItem(0) }
+                            } else {
+                                pendingMonitorNav = quickFilter
+                            }
+                            switchToTab(MainTab.Monitor, true)
+                        }
+                    }
                 }
 
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
@@ -706,23 +790,26 @@ fun MainScreen(
                                             viewModel = homeViewModel,
                                             listState = homeListState,
                                             isTabActive = isHomeActive,
-                                            onEventClick = onHomeEventClick
+                                            onEventClick = onHomeEventClick,
+                                            onNavigateToEvents = onHomeNavigateToEvents,
+                                            onNavigateToMonitor = onHomeNavigateToMonitor
                                         )
 
                                         MainTab.Event -> {
-                                            val eventViewModel: EventViewModel = viewModel(factory = EventViewModel.Factory)
-                                            LaunchedEffect(isEventActive) {
-                                                eventViewModel.setEventTabActive(isEventActive)
-                                                if (isEventActive) {
-                                                    eventViewModel.syncViewModeFromPrefs()
+                                            if (eventViewModel != null) {
+                                                LaunchedEffect(isEventActive) {
+                                                    eventViewModel.setEventTabActive(isEventActive)
+                                                    if (isEventActive) {
+                                                        eventViewModel.syncViewModeFromPrefs()
+                                                    }
                                                 }
+                                                EventScreen(
+                                                    viewModel = eventViewModel,
+                                                    listState = eventListState,
+                                                    isTabActive = isEventActive,
+                                                    onEventClick = onEventIdClick
+                                                )
                                             }
-                                            EventScreen(
-                                                viewModel = eventViewModel,
-                                                listState = eventListState,
-                                                isTabActive = isEventActive,
-                                                onEventClick = onEventIdClick
-                                            )
                                         }
 
                                         MainTab.Monitor -> {

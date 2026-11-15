@@ -103,7 +103,7 @@ object AiTypeHelper {
             "sensor-helmet-camera",
             "Không đội mũ bảo hiểm",
             "No helmet violation",
-            listOf("sensor-helmet-camera", "sensor-helmet-violation-camera")
+            listOf("sensor-helmet-violation-camera", "sensor-helmet-camera")
         ),
         AiModuleOption(
             "Parking",
@@ -542,17 +542,23 @@ object AiTypeHelper {
 
     fun getAiEventTypes(aiType: String): List<String> {
         val trimmed = aiType.trim()
+        if (trimmed.isEmpty()) return emptyList()
         val alias = buildAliasLookup(currentModulesConfig)[trimmed.lowercase()] ?: trimmed
-        val matched = activeModules.find {
-            it.key.equals(trimmed, ignoreCase = true) ||
-                it.key.equals(alias, ignoreCase = true) ||
-                it.sensorType.equals(trimmed, ignoreCase = true)
-        } ?: catalogModules.find {
-            it.key.equals(trimmed, ignoreCase = true) ||
-                it.key.equals(alias, ignoreCase = true) ||
-                it.sensorType.equals(trimmed, ignoreCase = true)
+        val matched = activeModules.find { mod ->
+            mod.key.equals(trimmed, ignoreCase = true) ||
+                mod.key.equals(alias, ignoreCase = true) ||
+                mod.sensorType.equals(trimmed, ignoreCase = true) ||
+                mod.eventTypes.any { et -> et.equals(trimmed, ignoreCase = true) }
+        } ?: catalogModules.find { mod ->
+            mod.key.equals(trimmed, ignoreCase = true) ||
+                mod.key.equals(alias, ignoreCase = true) ||
+                mod.sensorType.equals(trimmed, ignoreCase = true) ||
+                mod.eventTypes.any { et -> et.equals(trimmed, ignoreCase = true) }
         }
-        if (matched != null) return matched.eventTypes
+        if (matched != null) {
+            val enabled = matched.eventTypes.filter { isAiTypeEnabled(it) }
+            return (enabled.ifEmpty { matched.eventTypes }).distinct()
+        }
         return when (trimmed) {
             "logic-face", "FaceID", "face" -> listOf("logic-face", "sensor-face-unknown-camera")
             "sensor-fire-camera", "FireSmoke", "fire_smoke" -> listOf("sensor-fire-camera", "sensor-smoke-camera", "logic-fire")

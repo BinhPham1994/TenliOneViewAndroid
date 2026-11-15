@@ -30,11 +30,27 @@ fun List<EventData>.permittedDistinct(
 ): List<EventData> =
     UserPermissionManager.filterEventsByPermissions(this, allCameras).distinctBy { it.uniqueKey() }
 
-/** Map loại AI (bộ lọc UI) sang `type` gửi lên API. */
-fun resolveApiEventType(aiType: String?): String? {
-    if (aiType.isNullOrBlank()) return null
-    return AiTypeHelper.getAiEventTypes(aiType).firstOrNull() ?: aiType
+/**
+ * Map loại AI (bộ lọc UI, ví dụ `sensor-helmet-camera`, `sensor-fire-camera`, `logic-face`)
+ * sang đầy đủ danh sách các `type` cần truy vấn trên API `Data/api/Data`
+ * (khớp cơ chế `fetchDataList` trên Web khi một bài AI gồm nhiều `eventTypes` như
+ * `sensor-helmet-violation-camera` + `sensor-helmet-camera`, `sensor-fire-camera` + `sensor-smoke-camera`,
+ * `logic-face` + `sensor-face-unknown-camera`).
+ * Trả về `emptyList()` khi không lọc theo loại AI (`aiType == null`).
+ */
+fun resolveApiEventTypes(aiType: String?): List<String> {
+    if (aiType.isNullOrBlank()) return emptyList()
+    return AiTypeHelper.getAiEventTypes(aiType)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinct()
+        .ifEmpty { listOf(aiType.trim()) }
 }
+
+/** Sắp xếp danh sách sự kiện mới -> cũ (khớp `(b.time || b.id) - (a.time || a.id)` trên Web). */
+val EventDescendingComparator: Comparator<EventData> =
+    compareByDescending<EventData> { eventTimeToMillis(it.time) }
+        .thenByDescending { it.id }
 
 // ---------------------------------------------------------------------------------------------
 // Thời gian

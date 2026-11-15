@@ -55,7 +55,9 @@ class WebSocketManager(
     // Trạng thái mong muốn (để tự khôi phục khi app quay lại foreground)
     @Volatile private var desiredNotifyBaseUrl: String? = null
     @Volatile private var reportsRequested = false
-    @Volatile private var isReportsTabActive = true
+    private val activeReportConsumers = ConcurrentHashMap.newKeySet<String>().apply { add("home") }
+    private val isReportsTabActive: Boolean
+        get() = activeReportConsumers.isNotEmpty()
     @Volatile private var isAppInForeground = false
     @Volatile private var suspendedForBackground = false
     @Volatile private var backgroundJob: Job? = null
@@ -106,23 +108,27 @@ class WebSocketManager(
     }
 
     /**
-     * Chỉ giữ kết nối các WebSocket Report (trạng thái camera/ghi hình của từng VMS) khi đang ở tab Trang chủ.
-     * Khi rời sang tab khác quá [REPORT_INACTIVE_GRACE_MS], tự ngắt các socket Report để không tốn CPU/mạng/pin
+     * Chỉ giữ kết nối các WebSocket Report (trạng thái camera/ghi hình của từng VMS) khi đang ở tab Trang chủ hoặc Trực tiếp.
+     * Khi rời sang các tab khác quá [REPORT_INACTIVE_GRACE_MS], tự ngắt các socket Report để không tốn CPU/mạng/pin
      * nhận bản tin JSON vài giây/lần và ping 15s/lần.
      */
-    fun setReportsActive(active: Boolean) {
-        isReportsTabActive = active
-        reportInactiveJob?.cancel()
+    fun setReportsActive(active: Boolean, consumer: String = "home") {
         if (active) {
+            activeReportConsumers.add(consumer)
+            reportInactiveJob?.cancel()
             if (reportsRequested && isAppInForeground) {
                 connectAllReports()
             }
         } else {
-            reportInactiveJob = scope.launch {
-                delay(REPORT_INACTIVE_GRACE_MS)
-                if (!isReportsTabActive) {
-                    reportClients.values.forEach { it.disconnect() }
-                    reportClients.clear()
+            activeReportConsumers.remove(consumer)
+            if (activeReportConsumers.isEmpty()) {
+                reportInactiveJob?.cancel()
+                reportInactiveJob = scope.launch {
+                    delay(REPORT_INACTIVE_GRACE_MS)
+                    if (!isReportsTabActive) {
+                        reportClients.values.forEach { it.disconnect() }
+                        reportClients.clear()
+                    }
                 }
             }
         }
