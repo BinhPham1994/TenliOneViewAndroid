@@ -61,6 +61,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -76,6 +77,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -1053,12 +1055,12 @@ fun MobileEventCard(
         colors.isDark -> SelectedCardBgDark
         else -> BrandContainer
     }
-    val cardBgColor by animateColorAsState(
+    val cardBgColorState = animateColorAsState(
         targetValue = targetBgColor,
         animationSpec = tween(durationMillis = if (isActivePress) 35 else 180),
         label = "eventCardBg"
     )
-    val pressScale by animateFloatAsState(
+    val pressScaleState = animateFloatAsState(
         targetValue = if (isActivePress) 0.982f else 1f,
         animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
         label = "eventCardScale"
@@ -1070,8 +1072,8 @@ fun MobileEventCard(
             eventKey = eventKey,
             images = images,
             isEn = isEn,
-            cardBgColor = cardBgColor,
-            pressScale = pressScale,
+            cardBgColorState = cardBgColorState,
+            pressScaleState = pressScaleState,
             interactionSource = interactionSource,
             enableSharedElement = enableSharedElement,
             onClick = handleCardClick
@@ -1082,8 +1084,8 @@ fun MobileEventCard(
             eventKey = eventKey,
             images = images,
             isEn = isEn,
-            cardBgColor = cardBgColor,
-            pressScale = pressScale,
+            cardBgColorState = cardBgColorState,
+            pressScaleState = pressScaleState,
             isActivePress = isActivePress,
             interactionSource = interactionSource,
             enableSharedElement = enableSharedElement,
@@ -1099,8 +1101,8 @@ private fun EventListCard(
     eventKey: String,
     images: EventCardImages,
     isEn: Boolean,
-    cardBgColor: Color,
-    pressScale: Float,
+    cardBgColorState: State<Color>,
+    pressScaleState: State<Float>,
     interactionSource: MutableInteractionSource,
     enableSharedElement: Boolean,
     onClick: () -> Unit
@@ -1145,11 +1147,14 @@ private fun EventListCard(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                val s = pressScaleState.value
+                scaleX = s
+                scaleY = s
             }
             .clip(cardShape)
-            .background(cardBgColor)
+            .drawBehind {
+                drawRect(cardBgColorState.value)
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -1235,8 +1240,8 @@ private fun EventGridCard(
     eventKey: String,
     images: EventCardImages,
     isEn: Boolean,
-    cardBgColor: Color,
-    pressScale: Float,
+    cardBgColorState: State<Color>,
+    pressScaleState: State<Float>,
     isActivePress: Boolean,
     interactionSource: MutableInteractionSource,
     enableSharedElement: Boolean,
@@ -1267,11 +1272,14 @@ private fun EventGridCard(
             .fillMaxWidth()
             .aspectRatio(THUMBNAIL_ASPECT_RATIO)
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                val s = pressScaleState.value
+                scaleX = s
+                scaleY = s
             }
             .clip(cardShape)
-            .background(cardBgColor)
+            .drawBehind {
+                drawRect(cardBgColorState.value)
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,

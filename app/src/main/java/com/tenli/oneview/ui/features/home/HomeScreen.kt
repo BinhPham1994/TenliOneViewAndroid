@@ -8,6 +8,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,22 +17,18 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -40,13 +38,18 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -88,8 +91,6 @@ import com.tenli.oneview.ui.theme.SuccessGreen
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
-import java.text.NumberFormat
-import java.util.Locale
 
 // Gradient stops của 4 thẻ thống kê (đồng bộ với MobileHomePage.vue)
 private val StatBlueGradientStart = Color(0xFF0D8BF2)
@@ -109,7 +110,7 @@ private val StatLabelLetterSpacing = 0.sp
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory),
-    listState: LazyListState = rememberLazyListState(),
+    scrollState: ScrollState = rememberScrollState(),
     isTabActive: Boolean = true,
     onEventClick: (String) -> Unit = {},
     onNavigateToEvents: (TimeFilter, Int?, String?) -> Unit = { _, _, _ -> },
@@ -122,6 +123,12 @@ fun HomeScreen(
     val colors = MaterialTheme.appColors
     var showFilterSheet by remember { mutableStateOf(false) }
     var isAiBreakdownExpanded by remember { mutableStateOf(false) }
+
+    val currentSelectedFilter by rememberUpdatedState(uiState.selectedFilter)
+    val currentSelectedServiceId by rememberUpdatedState(uiState.selectedServiceId)
+    val currentOnNavigateToEvents by rememberUpdatedState(onNavigateToEvents)
+    val currentOnNavigateToMonitor by rememberUpdatedState(onNavigateToMonitor)
+    val currentOnEventClick by rememberUpdatedState(onEventClick)
 
     LaunchedEffect(Unit) {
         viewModel.syncViewModeFromPrefs()
@@ -141,6 +148,19 @@ fun HomeScreen(
     }
 
     val recentFiveEvents = uiState.recentEvents
+
+    val handleSelectAiModule: (String) -> Unit = remember {
+        { sensorType ->
+            currentOnNavigateToEvents(
+                currentSelectedFilter,
+                currentSelectedServiceId,
+                sensorType
+            )
+        }
+    }
+    val handleToggleBreakdown: () -> Unit = remember {
+        { isAiBreakdownExpanded = !isAiBreakdownExpanded }
+    }
 
     Column(
         modifier = Modifier
@@ -166,191 +186,177 @@ fun HomeScreen(
                 .fillMaxWidth()
                 .weight(1f)
         ) {
-            LazyColumn(
-                state = listState,
-                userScrollEnabled = true,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = spacing.space2, bottom = HomeBottomContentPadding)
+            // Dùng Column + verticalScroll thay vì LazyColumn cho Dashboard Trang chủ (luôn cố định 4 thẻ thống kê +
+            // 1 bảng phân bố AI + tối đa đúng 5 sự kiện gần đây). Toàn bộ RenderNode và ảnh thumbnail được giữ ấm trên GPU,
+            // loại bỏ hoàn toàn hiện tượng khựng khung hình do SubcomposeLayout huỷ / dựng lại khối Phân bố AI và Grid thống kê khi cuộn lên xuống.
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(scrollState)
+                    .padding(top = spacing.space2, bottom = HomeBottomContentPadding)
             ) {
                 // 2x2 Stat Grid matching MobileHomePage.vue (số liệu đã tính sẵn trên background thread của ViewModel)
-                item(key = "home_stat_grid", contentType = "stat_grid") {
-                    val totalCameras = uiState.totalCamerasCount
-                    Column(
-                        modifier = Modifier.padding(horizontal = spacing.space10),
-                        verticalArrangement = Arrangement.spacedBy(spacing.space10)
+                val totalCameras = uiState.totalCamerasCount
+                Column(
+                    modifier = Modifier.padding(horizontal = spacing.space10),
+                    verticalArrangement = Arrangement.spacedBy(spacing.space10)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(spacing.space10)
-                        ) {
-                            MobileStatCard(
-                                label = if (isEn) "TOTAL EVENTS" else "TỔNG SỰ KIỆN",
-                                mainValue = uiState.totalDetectionsCount.toString(),
-                                subValue = null,
-                                accentColor = BrandAccent,
-                                iconGradient = StatTotalEventsGradient,
-                                icon = LucideIcons.Shield,
-                                onClick = if (permissionState.canAccessEvents) {
-                                    { onNavigateToEvents(uiState.selectedFilter, uiState.selectedServiceId, null) }
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            MobileStatCard(
-                                label = if (isEn) "ONLINE CAMERAS" else "CAMERA HOẠT ĐỘNG",
-                                mainValue = uiState.onlineCamerasCount.toString(),
-                                subValue = "/$totalCameras",
-                                accentColor = SuccessGreen,
-                                iconGradient = StatOnlineCamerasGradient,
-                                icon = LucideIcons.Video,
-                                onClick = if (permissionState.canAccessLiveStream) {
-                                    {
-                                        val hasOffline = totalCameras > 0 && uiState.onlineCamerasCount < totalCameras
-                                        onNavigateToMonitor(
-                                            if (hasOffline) CameraQuickFilter.OFFLINE else CameraQuickFilter.ALL
-                                        )
-                                    }
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(spacing.space10)
-                        ) {
-                            MobileStatCard(
-                                label = if (isEn) "ACTIVE AI TASKS" else "BÀI AI ĐANG CHẠY",
-                                mainValue = uiState.runningAiTasks.toString(),
-                                subValue = "/${uiState.totalAiTasks}",
-                                accentColor = PurpleAccent,
-                                iconGradient = StatActiveAiTasksGradient,
-                                icon = LucideIcons.Settings,
-                                onClick = if (permissionState.canAccessEvents) {
-                                    { onNavigateToEvents(uiState.selectedFilter, uiState.selectedServiceId, null) }
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                            MobileStatCard(
-                                label = if (isEn) "RECORDING CAMERAS" else "CAMERA GHI HÌNH",
-                                mainValue = uiState.recordingCamerasCount.toString(),
-                                subValue = "/$totalCameras",
-                                accentColor = OrangeUserAccent,
-                                iconGradient = StatRecordingCamerasGradient,
-                                icon = LucideIcons.Disc,
-                                onClick = if (permissionState.canAccessLiveStream) {
-                                    { onNavigateToMonitor(CameraQuickFilter.ALL) }
-                                } else {
-                                    null
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
+                        MobileStatCard(
+                            label = if (isEn) "TOTAL EVENTS" else "TỔNG SỰ KIỆN",
+                            mainValue = uiState.totalDetectionsCount.toString(),
+                            subValue = null,
+                            accentColor = BrandAccent,
+                            iconGradient = StatTotalEventsGradient,
+                            icon = LucideIcons.Shield,
+                            onClick = if (permissionState.canAccessEvents) {
+                                { currentOnNavigateToEvents(currentSelectedFilter, currentSelectedServiceId, null) }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        MobileStatCard(
+                            label = if (isEn) "ONLINE CAMERAS" else "CAMERA HOẠT ĐỘNG",
+                            mainValue = uiState.onlineCamerasCount.toString(),
+                            subValue = "/$totalCameras",
+                            accentColor = SuccessGreen,
+                            iconGradient = StatOnlineCamerasGradient,
+                            icon = LucideIcons.Video,
+                            onClick = if (permissionState.canAccessLiveStream) {
+                                {
+                                    val hasOffline = totalCameras > 0 && uiState.onlineCamerasCount < totalCameras
+                                    currentOnNavigateToMonitor(
+                                        if (hasOffline) CameraQuickFilter.OFFLINE else CameraQuickFilter.ALL
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+                    ) {
+                        MobileStatCard(
+                            label = if (isEn) "ACTIVE AI TASKS" else "BÀI AI ĐANG CHẠY",
+                            mainValue = uiState.runningAiTasks.toString(),
+                            subValue = "/${uiState.totalAiTasks}",
+                            accentColor = PurpleAccent,
+                            iconGradient = StatActiveAiTasksGradient,
+                            icon = LucideIcons.Settings,
+                            onClick = if (permissionState.canAccessEvents) {
+                                { currentOnNavigateToEvents(currentSelectedFilter, currentSelectedServiceId, null) }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        MobileStatCard(
+                            label = if (isEn) "RECORDING CAMERAS" else "CAMERA GHI HÌNH",
+                            mainValue = uiState.recordingCamerasCount.toString(),
+                            subValue = "/$totalCameras",
+                            accentColor = OrangeUserAccent,
+                            iconGradient = StatRecordingCamerasGradient,
+                            icon = LucideIcons.Disc,
+                            onClick = if (permissionState.canAccessLiveStream) {
+                                { currentOnNavigateToMonitor(CameraQuickFilter.ALL) }
+                            } else {
+                                null
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
 
                 // AI Event Breakdown Card ("Phân bố sự kiện AI") — chạm vào bài AI bất kỳ để sang tab Sự kiện đã lọc sẵn
                 if (permissionState.canAccessEvents && uiState.aiDistribution.isNotEmpty()) {
-                    item(key = "home_ai_distribution", contentType = "ai_distribution") {
-                        HomeAiDistributionSection(
-                            items = uiState.aiDistribution,
-                            isExpanded = isAiBreakdownExpanded,
-                            isEn = isEn,
-                            onToggleExpand = { isAiBreakdownExpanded = !isAiBreakdownExpanded },
-                            onSelectModule = { sensorType ->
-                                onNavigateToEvents(
-                                    uiState.selectedFilter,
-                                    uiState.selectedServiceId,
-                                    sensorType
-                                )
-                            }
-                        )
-                    }
+                    HomeAiDistributionSection(
+                        items = uiState.aiDistribution,
+                        isExpanded = isAiBreakdownExpanded,
+                        isEn = isEn,
+                        onToggleExpand = handleToggleBreakdown,
+                        onSelectModule = handleSelectAiModule
+                    )
                 }
 
                 // Section Header: Sự kiện gần đây + View Mode Toggle Button
-                item(key = "home_recent_header", contentType = "header") {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = spacing.space16,
-                                end = spacing.space12,
-                                top = spacing.space20,
-                                bottom = spacing.space4
-                            ),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (isEn) "Recent events" else "Sự kiện gần đây",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        MobileViewToggleButton(
-                            isListView = uiState.isListView,
-                            onToggle = viewModel::toggleViewMode,
-                            size = spacing.iconButtonSmall
-                        )
-                    }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = spacing.space16,
+                            end = spacing.space12,
+                            top = spacing.space20,
+                            bottom = spacing.space4
+                        ),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isEn) "Recent events" else "Sự kiện gần đây",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    MobileViewToggleButton(
+                        isListView = uiState.isListView,
+                        onToggle = viewModel::toggleViewMode,
+                        size = spacing.iconButtonSmall
+                    )
                 }
 
                 // Recent Events List (strictly max 5 events) / Empty / Loading
                 if (uiState.isLoading && recentFiveEvents.isEmpty()) {
-                    item(key = "home_loading", contentType = "loading") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.space10)
-                                .height(HomeEmptyStateHeight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isTabActive) {
-                                WaveDotsLoading()
-                            }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space10)
+                            .height(HomeEmptyStateHeight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isTabActive) {
+                            WaveDotsLoading()
                         }
                     }
                 } else if (recentFiveEvents.isEmpty()) {
-                    item(key = "home_empty", contentType = "empty") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = spacing.space10)
-                                .height(HomeEmptyStateHeight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CommonEmptyState(
-                                text = if (isEn) "No events in this time range" else "Không có sự kiện nào trong khoảng thời gian này"
-                            )
-                        }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space10)
+                            .height(HomeEmptyStateHeight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CommonEmptyState(
+                            text = if (isEn) "No events in this time range" else "Không có sự kiện nào trong khoảng thời gian này"
+                        )
                     }
                 } else {
-                    itemsIndexed(
-                        items = recentFiveEvents,
-                        key = { _, event -> "home_ev_${event.serviceId}_${event.id}_${event.time}" },
-                        contentType = { _, _ -> "event_card" }
-                    ) { index, event ->
-                        val cameraName = event.cameraUuidOrNull?.let { cameraMap[it] }.orEmpty()
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = spacing.space10)
-                                .padding(top = if (index == 0) 0.dp else spacing.space10)
-                        ) {
-                            MobileEventCard(
-                                event = event,
-                                cameraName = cameraName,
-                                isListView = uiState.isListView,
-                                enableSharedElement = false,
-                                onClick = {
-                                    viewModel.onEventSelected(event)
-                                    onEventClick(event.id.toString())
-                                }
-                            )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space10),
+                        verticalArrangement = Arrangement.spacedBy(spacing.space10)
+                    ) {
+                        recentFiveEvents.forEach { event ->
+                            key("${event.serviceId}_${event.id}_${event.time}") {
+                                val cameraName = event.cameraUuidOrNull?.let { cameraMap[it] }.orEmpty()
+                                MobileEventCard(
+                                    event = event,
+                                    cameraName = cameraName,
+                                    isListView = uiState.isListView,
+                                    enableSharedElement = false,
+                                    onClick = {
+                                        viewModel.onEventSelected(event)
+                                        currentOnEventClick(event.id.toString())
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -404,24 +410,20 @@ fun MobileStatCard(
     val fullValue = if (!subValue.isNullOrEmpty()) "$mainValue$subValue" else mainValue
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
+    val pressScaleState = animateFloatAsState(
         targetValue = if (isPressed && onClick != null) 0.97f else 1f,
         animationSpec = tween(durationMillis = if (isPressed) 45 else 150),
         label = "statCardPressScale"
     )
+    val currentOnClick by rememberUpdatedState(onClick)
 
     Column(
         modifier = modifier
             .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
+                val s = pressScaleState.value
+                scaleX = s
+                scaleY = s
             }
-            .shadow(
-                elevation = if (colors.isDark) 0.dp else spacing.space1,
-                shape = cardShape,
-                ambientColor = Color.Black.copy(alpha = 0.03f),
-                spotColor = Color.Black.copy(alpha = 0.04f)
-            )
             .clip(cardShape)
             .background(colors.surface)
             .then(
@@ -434,7 +436,7 @@ fun MobileStatCard(
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             } catch (_: Exception) {
                             }
-                            onClick()
+                            currentOnClick?.invoke()
                         }
                     )
                 } else {
@@ -494,15 +496,13 @@ private fun HomeAiDistributionSection(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val haptic = LocalHapticFeedback.current
+    val currentOnToggleExpand by rememberUpdatedState(onToggleExpand)
+    val currentOnSelectModule by rememberUpdatedState(onSelectModule)
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
-    val segmentShape = remember { RoundedCornerShape(2.dp) }
-    val numberFmt = remember(isEn) {
-        NumberFormat.getIntegerInstance(if (isEn) Locale.US else Locale.forLanguageTag("vi-VN"))
-    }
     val primaryItems = remember(items) { items.take(5) }
     val extraItems = remember(items) { if (items.size > 5) items.drop(5) else emptyList() }
     val canExpand = extraItems.isNotEmpty()
-    val chevronRotation by animateFloatAsState(
+    val chevronRotationState = animateFloatAsState(
         targetValue = if (isExpanded) 180f else 0f,
         animationSpec = tween(durationMillis = 200),
         label = "aiBreakdownChevron"
@@ -533,18 +533,18 @@ private fun HomeAiDistributionSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = spacing.space10)
-                .shadow(
-                    elevation = if (colors.isDark) 0.dp else spacing.space1,
-                    shape = cardShape,
-                    ambientColor = Color.Black.copy(alpha = 0.03f),
-                    spotColor = Color.Black.copy(alpha = 0.04f)
-                )
                 .clip(cardShape)
                 .background(colors.surface)
         ) {
-            // Thanh tỉ trọng đa phân đoạn ở đầu thẻ (hiển thị trực quan tỉ lệ giữa các bài AI)
+            // Thanh tỉ trọng đa phân đoạn ở đầu thẻ — vẽ trên 1 Canvas duy nhất thay vì tạo N Box + clip riêng lẻ
             if (items.size >= 2) {
-                Row(
+                val segmentSpecs = remember(items) {
+                    items.map { seg ->
+                        seg.percentage.coerceAtLeast(3f) to AiTypeHelper.getAiColor(seg.filterSensorType)
+                    }
+                }
+                val gapDp = spacing.space2
+                Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(
@@ -554,20 +554,36 @@ private fun HomeAiDistributionSection(
                             bottom = spacing.space4
                         )
                         .height(spacing.space8)
-                        .clip(CircleShape),
-                    horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                        .clip(CircleShape)
                 ) {
-                    items.forEach { seg ->
-                        val segColor = remember(seg.filterSensorType) {
-                            AiTypeHelper.getAiColor(seg.filterSensorType)
+                    val count = segmentSpecs.size
+                    if (count == 0) return@Canvas
+                    val gapPx = gapDp.toPx()
+                    val cornerPx = 2.dp.toPx()
+                    val cornerRadius = CornerRadius(cornerPx, cornerPx)
+                    val totalGapPx = gapPx * (count - 1)
+                    val availableWidth = (size.width - totalGapPx).coerceAtLeast(0f)
+                    var totalWeight = 0f
+                    for (i in 0 until count) {
+                        totalWeight += segmentSpecs[i].first
+                    }
+                    if (totalWeight <= 0f) return@Canvas
+
+                    var cursorX = 0f
+                    for (i in 0 until count) {
+                        val (weight, segColor) = segmentSpecs[i]
+                        val segW = if (i == count - 1) {
+                            (size.width - cursorX).coerceAtLeast(0f)
+                        } else {
+                            availableWidth * (weight / totalWeight)
                         }
-                        Box(
-                            modifier = Modifier
-                                .weight(seg.percentage.coerceAtLeast(3f))
-                                .fillMaxHeight()
-                                .clip(segmentShape)
-                                .background(segColor)
+                        drawRoundRect(
+                            color = segColor,
+                            topLeft = Offset(cursorX, 0f),
+                            size = Size(segW, size.height),
+                            cornerRadius = cornerRadius
                         )
+                        cursorX += segW + gapPx
                     }
                 }
             } else {
@@ -575,18 +591,13 @@ private fun HomeAiDistributionSection(
             }
 
             primaryItems.forEach { item ->
-                AiDistributionModuleRow(
-                    item = item,
-                    isEn = isEn,
-                    numberFmt = numberFmt,
-                    onClick = {
-                        try {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        } catch (_: Exception) {
-                        }
-                        onSelectModule(item.filterSensorType)
-                    }
-                )
+                key(item.filterSensorType) {
+                    AiDistributionModuleRow(
+                        item = item,
+                        isEn = isEn,
+                        onSelectModule = currentOnSelectModule
+                    )
+                }
             }
 
             if (canExpand) {
@@ -597,18 +608,13 @@ private fun HomeAiDistributionSection(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         extraItems.forEach { item ->
-                            AiDistributionModuleRow(
-                                item = item,
-                                isEn = isEn,
-                                numberFmt = numberFmt,
-                                onClick = {
-                                    try {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    } catch (_: Exception) {
-                                    }
-                                    onSelectModule(item.filterSensorType)
-                                }
-                            )
+                            key(item.filterSensorType) {
+                                AiDistributionModuleRow(
+                                    item = item,
+                                    isEn = isEn,
+                                    onSelectModule = currentOnSelectModule
+                                )
+                            }
                         }
                     }
                 }
@@ -626,7 +632,7 @@ private fun HomeAiDistributionSection(
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             } catch (_: Exception) {
                             }
-                            onToggleExpand()
+                            currentOnToggleExpand()
                         }
                         .padding(horizontal = spacing.space14, vertical = spacing.space12),
                     horizontalArrangement = Arrangement.Center,
@@ -653,7 +659,7 @@ private fun HomeAiDistributionSection(
                         tint = colors.accent,
                         modifier = Modifier
                             .size(spacing.iconSmall)
-                            .graphicsLayer { rotationZ = chevronRotation }
+                            .graphicsLayer { rotationZ = chevronRotationState.value }
                     )
                 }
             } else {
@@ -667,20 +673,24 @@ private fun HomeAiDistributionSection(
 private fun AiDistributionModuleRow(
     item: HomeAiDistributionItem,
     isEn: Boolean,
-    numberFmt: NumberFormat,
-    onClick: () -> Unit
+    onSelectModule: (String) -> Unit
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    val haptic = LocalHapticFeedback.current
+    val currentOnSelectModule by rememberUpdatedState(onSelectModule)
     val moduleColor = remember(item.filterSensorType) {
         AiTypeHelper.getAiColor(item.filterSensorType)
     }
     val moduleIcon = remember(item.filterSensorType) {
         resolveAiModuleIcon(item.filterSensorType)
     }
+    val formattedCount = remember(item.count, isEn) {
+        formatGroupedCount(item.count, isEn)
+    }
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val rowBg by animateColorAsState(
+    val rowBgState = animateColorAsState(
         targetValue = if (isPressed) colors.controlBg else Color.Transparent,
         animationSpec = tween(durationMillis = if (isPressed) 35 else 160),
         label = "aiDistRowBg"
@@ -689,11 +699,22 @@ private fun AiDistributionModuleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(rowBg)
+            .drawBehind {
+                val bg = rowBgState.value
+                if (bg.alpha > 0f) {
+                    drawRect(bg)
+                }
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = {
+                    try {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    } catch (_: Exception) {
+                    }
+                    currentOnSelectModule(item.filterSensorType)
+                }
             )
             .padding(horizontal = spacing.space14, vertical = spacing.space10),
         verticalAlignment = Alignment.CenterVertically
@@ -714,7 +735,7 @@ private fun AiDistributionModuleRow(
         )
         Spacer(modifier = Modifier.width(spacing.space8))
         Text(
-            text = numberFmt.format(item.count),
+            text = formattedCount,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = colors.textStrong,
@@ -728,6 +749,25 @@ private fun AiDistributionModuleRow(
             modifier = Modifier.size(spacing.iconXSmall)
         )
     }
+}
+
+private fun formatGroupedCount(value: Long, isEn: Boolean): String {
+    if (value in -999L..999L) return value.toString()
+    val sep = if (isEn) ',' else '.'
+    val raw = value.toString()
+    val startIdx = if (raw[0] == '-') 1 else 0
+    val digits = raw.length - startIdx
+    if (digits <= 3) return raw
+    val sb = StringBuilder(raw.length + (digits - 1) / 3)
+    if (startIdx == 1) sb.append('-')
+    for (i in startIdx until raw.length) {
+        val posFromStart = i - startIdx
+        if (posFromStart > 0 && (digits - posFromStart) % 3 == 0) {
+            sb.append(sep)
+        }
+        sb.append(raw[i])
+    }
+    return sb.toString()
 }
 
 private fun resolveAiModuleIcon(sensorType: String): ImageVector {

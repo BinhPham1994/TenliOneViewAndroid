@@ -253,17 +253,15 @@ fun MainScreen(
         }
     }
 
-    val homeListState = rememberLazyListState()
+    val homeScrollState = rememberScrollState()
     val monitorGridState: LazyGridState = rememberLazyGridState()
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
-    val homeTopSizes = remember { createTopItemSizeCache() }
     val eventTopSizes = remember { createTopItemSizeCache() }
     val settingTopSizes = remember { createTopItemSizeCache() }
     val monitorTopRowSizes = remember { createTopItemSizeCache() }
 
-    TrackTopItemSizesEffect(homeListState, homeTopSizes)
     TrackTopItemSizesEffect(eventListState, eventTopSizes)
     TrackTopItemSizesEffect(settingListState, settingTopSizes)
     TrackTopRowSizesEffect(monitorGridState, monitorTopRowSizes)
@@ -410,11 +408,21 @@ fun MainScreen(
                         return@launch
                     }
 
+                    if (targetTab == MainTab.Home) {
+                        if (homeScrollState.value > 0) {
+                            try {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } catch (_: Exception) {
+                            }
+                            homeScrollState.smoothScrollToTop()
+                        }
+                        return@launch
+                    }
+
                     val (targetListState, knownSizes) = when (targetTab) {
-                        MainTab.Home -> homeListState to homeTopSizes
                         MainTab.Event -> eventListState to eventTopSizes
                         MainTab.Setting -> settingListState to settingTopSizes
-                        MainTab.Monitor -> homeListState to homeTopSizes
+                        MainTab.Home, MainTab.Monitor -> eventListState to eventTopSizes
                     }
                     if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
                         try {
@@ -836,7 +844,7 @@ fun MainScreen(
                                     when (tab) {
                                         MainTab.Home -> HomeScreen(
                                             viewModel = homeViewModel,
-                                            listState = homeListState,
+                                            scrollState = homeScrollState,
                                             isTabActive = isHomeActive,
                                             onEventClick = onHomeEventClick,
                                             onNavigateToEvents = onHomeNavigateToEvents,

@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -218,6 +219,7 @@ data class HomeUiState(
     val error: String? = null
 )
 
+@Stable
 @OptIn(FlowPreview::class)
 class HomeViewModel(
     application: Application,
@@ -578,25 +580,37 @@ class HomeViewModel(
                         val cur = _uiState.value
                         val allCameras = dashboardRepository.getCamerasInMemory().ifEmpty { cur.cameraList }
                         val inRangeExisting = cur.recentEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
-                        val mergedEvents = if (newEvents.isNotEmpty()) {
+                        val existingByKey = HashMap<String, EventData>(cur.recentEvents.size * 2)
+                        for (ev in cur.recentEvents) {
+                            existingByKey[ev.uniqueKey()] = ev
+                        }
+                        val mergedRaw = if (newEvents.isNotEmpty()) {
                             (newEvents + inRangeExisting)
                                 .permittedDistinct(allCameras)
                                 .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
+                                .map { ev ->
+                                    val prev = existingByKey[ev.uniqueKey()]
+                                    if (prev != null && prev == ev) prev else ev
+                                }
                         } else {
                             inRangeExisting
                                 .permittedDistinct(allCameras)
                                 .distinctBy { it.id }
                                 .take(MAX_RECENT_EVENTS)
                         }
+                        val mergedEvents = if (mergedRaw == cur.recentEvents) cur.recentEvents else mergedRaw
                         cur.copy(
-                            overviewStats = latestOverviewStats,
-                            eventsByType = resolvedByType,
+                            overviewStats = if (latestOverviewStats == cur.overviewStats) cur.overviewStats else latestOverviewStats,
+                            eventsByType = if (resolvedByType == cur.eventsByType) cur.eventsByType else resolvedByType,
                             hasLoadedEventsByType = resolvedHasLoadedByType,
                             recentEvents = mergedEvents
                         ).withRecomputedMetrics()
                     }
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
+                        return@coroutineScope
+                    }
+                    if (nextState == _uiState.value) {
                         return@coroutineScope
                     }
                     _uiState.value = nextState

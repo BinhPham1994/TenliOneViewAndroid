@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
         enableAppEdgeToEdge()
 
         super.onCreate(savedInstanceState)
+        requestHighestRefreshRateMode()
 
         splashScreen.setKeepOnScreenCondition {
             splashViewModel.uiState.value.destination is SplashDestination.Loading
@@ -181,6 +182,29 @@ class MainActivity : ComponentActivity() {
 
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(LocaleManager.updateResources(newBase))
+    }
+
+    /**
+     * Mở khóa tần số quét tối đa (90Hz / 120Hz) trên cùng độ phân giải gốc để các thao tác cuộn & chuyển tab đạt chuẩn 120fps.
+     */
+    private fun requestHighestRefreshRateMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        runCatching {
+            val currentDisplay = display ?: return
+            val activeMode = currentDisplay.mode
+            val bestMode = currentDisplay.supportedModes
+                .filter {
+                    it.physicalWidth == activeMode.physicalWidth &&
+                        it.physicalHeight == activeMode.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate }
+                ?: return
+            if (bestMode.modeId != activeMode.modeId && bestMode.refreshRate > activeMode.refreshRate + 1f) {
+                window.attributes = window.attributes.apply {
+                    preferredDisplayModeId = bestMode.modeId
+                }
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

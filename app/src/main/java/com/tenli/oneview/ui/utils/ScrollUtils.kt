@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.utils
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.runtime.Composable
@@ -31,7 +32,7 @@ fun createTopItemSizeCache(size: Int = DEFAULT_TOP_CACHE_COUNT): IntArray = IntA
 @Composable
 fun TrackTopItemSizesEffect(listState: LazyListState, outSizes: IntArray) {
     LaunchedEffect(listState, outSizes) {
-        snapshotFlow { listState.isScrollInProgress to listState.layoutInfo.totalItemsCount }
+        snapshotFlow { listState.isScrollInProgress }
             .collect {
                 captureVisibleListSizes(listState, outSizes)
             }
@@ -41,7 +42,7 @@ fun TrackTopItemSizesEffect(listState: LazyListState, outSizes: IntArray) {
 @Composable
 fun TrackTopRowSizesEffect(gridState: LazyGridState, outRowSizes: IntArray) {
     LaunchedEffect(gridState, outRowSizes) {
-        snapshotFlow { gridState.isScrollInProgress to gridState.layoutInfo.totalItemsCount }
+        snapshotFlow { gridState.isScrollInProgress }
             .collect {
                 captureVisibleGridRowSizes(gridState, outRowSizes)
             }
@@ -266,4 +267,17 @@ suspend fun LazyGridState.smoothScrollToTop(
     if (firstVisibleItemIndex != 0 || firstVisibleItemScrollOffset != 0) {
         scrollToItem(0, 0)
     }
+}
+
+/**
+ * Cuộn mượt về đầu trang `(0)` cho `Column(Modifier.verticalScroll(scrollState))` theo đúng quãng đường pixel thực tế.
+ */
+suspend fun ScrollState.smoothScrollToTop() {
+    val startValue = value
+    if (startValue <= 0) return
+    val durationMs = computeScrollDurationMs(startValue.toFloat(), viewportSize)
+    animateScrollTo(
+        value = 0,
+        animationSpec = tween(durationMillis = durationMs, easing = SmoothScrollToTopEasing)
+    )
 }
