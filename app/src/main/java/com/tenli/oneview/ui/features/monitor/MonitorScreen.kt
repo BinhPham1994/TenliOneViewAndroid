@@ -168,6 +168,9 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.micro
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.ui.utils.TrackTopItemSizesEffect
+import com.tenli.oneview.ui.utils.createTopItemSizeCache
+import com.tenli.oneview.ui.utils.smoothScrollToTop
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -941,6 +944,10 @@ private fun MobileLiveCameraScreen(
 
     val playbackListState = rememberLazyListState()
     val eventListState = rememberLazyListState()
+    val playbackTopSizes = remember { createTopItemSizeCache() }
+    val eventTopSizes = remember { createTopItemSizeCache() }
+    TrackTopItemSizesEffect(playbackListState, playbackTopSizes)
+    TrackTopItemSizesEffect(eventListState, eventTopSizes)
 
     var showPlaybackFilterSheet by remember { mutableStateOf(false) }
     var showEventFilterSheet by remember { mutableStateOf(false) }
@@ -1482,8 +1489,8 @@ private fun MobileLiveCameraScreen(
                     onScrollToTop = { tab ->
                         scope.launch {
                             when (tab) {
-                                CameraDetailTab.PLAYBACK -> playbackListState.animateScrollToItem(0)
-                                CameraDetailTab.EVENTS -> eventListState.animateScrollToItem(0)
+                                CameraDetailTab.PLAYBACK -> playbackListState.smoothScrollToTop(playbackTopSizes)
+                                CameraDetailTab.EVENTS -> eventListState.smoothScrollToTop(eventTopSizes)
                                 CameraDetailTab.LIVE -> Unit
                             }
                         }

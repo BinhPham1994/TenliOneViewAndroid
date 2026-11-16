@@ -519,11 +519,37 @@ class EventViewModel(
         }
     }
 
+    private data class ExternalFilterRestoreState(
+        val filter: TimeFilter,
+        val serviceId: Int?,
+        val cameraUuid: String?,
+        val aiType: String?
+    )
+
+    /** Lưu lại bộ lọc gốc trước khi điều hướng tạm thời từ Trang chủ (vd. bấm vào 1 bài AI trong Phân bố AI). */
+    private var savedFilterBeforeExternalNav: ExternalFilterRestoreState? = null
+
     fun applyFilters(
         filter: TimeFilter,
         serviceId: Int?,
         aiType: String?,
         cameraUuid: String? = _uiState.value.selectedCameraUuid
+    ) {
+        // Người dùng chủ động chọn lọc trên màn hình Sự kiện → giữ làm bộ lọc chính thức, huỷ cờ lọc tạm thời
+        savedFilterBeforeExternalNav = null
+        applyFiltersInternal(
+            filter = filter,
+            serviceId = serviceId,
+            aiType = aiType,
+            cameraUuid = cameraUuid
+        )
+    }
+
+    private fun applyFiltersInternal(
+        filter: TimeFilter,
+        serviceId: Int?,
+        aiType: String?,
+        cameraUuid: String?
     ) {
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         val current = _uiState.value
@@ -549,7 +575,8 @@ class EventViewModel(
     }
 
     fun resetFilters() {
-        applyFilters(
+        savedFilterBeforeExternalNav = null
+        applyFiltersInternal(
             filter = TimeFilter.TODAY,
             serviceId = null,
             aiType = null,
@@ -562,12 +589,45 @@ class EventViewModel(
         serviceId: Int?,
         aiType: String?
     ) {
-        applyFilters(
+        if (savedFilterBeforeExternalNav == null) {
+            val current = _uiState.value
+            savedFilterBeforeExternalNav = ExternalFilterRestoreState(
+                filter = current.selectedFilter,
+                serviceId = current.selectedServiceId,
+                cameraUuid = current.selectedCameraUuid,
+                aiType = current.selectedAiType
+            )
+        }
+        applyFiltersInternal(
             filter = timeFilter,
             serviceId = serviceId,
             aiType = aiType,
             cameraUuid = null
         )
+    }
+
+    /**
+     * Khôi phục lại bộ lọc trước đó khi người dùng rời khỏi tab Sự kiện sau khi xem nhanh từ Trang chủ.
+     * @return `true` nếu có bộ lọc tạm thời vừa được khôi phục lại.
+     */
+    fun clearTemporaryExternalFilter(): Boolean {
+        val prev = savedFilterBeforeExternalNav ?: return false
+        savedFilterBeforeExternalNav = null
+        val current = _uiState.value
+        if (current.selectedFilter == prev.filter &&
+            current.selectedServiceId == prev.serviceId &&
+            current.selectedCameraUuid == prev.cameraUuid &&
+            current.selectedAiType == prev.aiType
+        ) {
+            return false
+        }
+        applyFiltersInternal(
+            filter = prev.filter,
+            serviceId = prev.serviceId,
+            aiType = prev.aiType,
+            cameraUuid = prev.cameraUuid
+        )
+        return true
     }
 
     /** Kéo để làm mới: tải lại cả sự kiện lẫn danh sách camera / AI service. */

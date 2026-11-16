@@ -153,6 +153,11 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
+import com.tenli.oneview.ui.utils.TrackTopItemSizesEffect
+import com.tenli.oneview.ui.utils.TrackTopRowSizesEffect
+import com.tenli.oneview.ui.utils.createTopItemSizeCache
+import com.tenli.oneview.ui.utils.smoothScrollToTop
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -252,6 +257,16 @@ fun MainScreen(
     val monitorGridState: LazyGridState = rememberLazyGridState()
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
+
+    val homeTopSizes = remember { createTopItemSizeCache() }
+    val eventTopSizes = remember { createTopItemSizeCache() }
+    val settingTopSizes = remember { createTopItemSizeCache() }
+    val monitorTopRowSizes = remember { createTopItemSizeCache() }
+
+    TrackTopItemSizesEffect(homeListState, homeTopSizes)
+    TrackTopItemSizesEffect(eventListState, eventTopSizes)
+    TrackTopItemSizesEffect(settingListState, settingTopSizes)
+    TrackTopRowSizesEffect(monitorGridState, monitorTopRowSizes)
 
     // Keep-Alive (<keep-alive>) state + simultaneous edge-to-edge GPU slide animation.
     // Chỉ khởi tạo tab khi người dùng thực sự chuyển tới tab đó lần đầu (dữ liệu cache đã được pre-warm vào RAM
@@ -373,38 +388,45 @@ fun MainScreen(
     val onOpenAbout: () -> Unit = remember { { showAboutPage = true } }
     val onCloseAbout: () -> Unit = remember { { showAboutPage = false } }
 
+    val activeScrollJobHolder = remember { arrayOfNulls<Job>(1) }
+    val activeScrollTabHolder = remember { arrayOfNulls<MainTab>(1) }
+
     val scrollTabToTop: (MainTab) -> Unit = remember(scope, haptic) {
         { targetTab: MainTab ->
-            scope.launch {
-                if (targetTab == MainTab.Monitor) {
-                    if (monitorGridState.firstVisibleItemIndex > 0 || monitorGridState.firstVisibleItemScrollOffset > 0) {
+            if (activeScrollJobHolder[0]?.isActive != true || activeScrollTabHolder[0] != targetTab) {
+                activeScrollJobHolder[0]?.cancel()
+                activeScrollTabHolder[0] = targetTab
+                activeScrollJobHolder[0] = scope.launch {
+                    if (targetTab == MainTab.Monitor) {
+                        if (monitorGridState.firstVisibleItemIndex > 0 || monitorGridState.firstVisibleItemScrollOffset > 0) {
+                            try {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } catch (_: Exception) {
+                            }
+                            monitorGridState.smoothScrollToTop(
+                                knownTopRowSizes = monitorTopRowSizes
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val (targetListState, knownSizes) = when (targetTab) {
+                        MainTab.Home -> homeListState to homeTopSizes
+                        MainTab.Event -> eventListState to eventTopSizes
+                        MainTab.Setting -> settingListState to settingTopSizes
+                        MainTab.Monitor -> homeListState to homeTopSizes
+                    }
+                    if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
                         try {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         } catch (_: Exception) {
                         }
-                        if (monitorGridState.firstVisibleItemIndex > SCROLL_TO_TOP_JUMP_THRESHOLD) {
-                            monitorGridState.scrollToItem(SCROLL_TO_TOP_JUMP_TARGET)
-                        }
-                        monitorGridState.animateScrollToItem(0, 0)
+                        targetListState.smoothScrollToTop(
+                            knownTopSizes = knownSizes,
+                            jumpThreshold = SCROLL_TO_TOP_JUMP_THRESHOLD,
+                            jumpTarget = SCROLL_TO_TOP_JUMP_TARGET
+                        )
                     }
-                    return@launch
-                }
-
-                val targetListState = when (targetTab) {
-                    MainTab.Home -> homeListState
-                    MainTab.Event -> eventListState
-                    MainTab.Setting -> settingListState
-                    MainTab.Monitor -> homeListState
-                }
-                if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
-                    try {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    } catch (_: Exception) {
-                    }
-                    if (targetListState.firstVisibleItemIndex > SCROLL_TO_TOP_JUMP_THRESHOLD) {
-                        targetListState.scrollToItem(SCROLL_TO_TOP_JUMP_TARGET)
-                    }
-                    targetListState.animateScrollToItem(0, 0)
                 }
             }
         }
@@ -705,6 +727,32 @@ fun MainScreen(
                 val currentMonitorViewModel by rememberUpdatedState(monitorViewModel)
                 val canAccessEventsState by rememberUpdatedState(uiState.canAccessEvents)
                 val canAccessLiveStreamState by rememberUpdatedState(uiState.canAccessLiveStream)
+
+                // Khi người dùng xem nhanh từ Trang chủ (vd. bấm vào 1 bài AI ở Phân bố AI) rồi rời khỏi tab Sự kiện / Trực tiếp,
+                // đợi hiệu ứng trượt thoát hoàn tất (tab khuất hẳn khỏi màn hình) rồi tự động khôi phục bộ lọc gốc.
+                val isEventTabVisible = uiState.currentTab == MainTab.Event ||
+                    activeTab == MainTab.Event ||
+                    outgoingTab == MainTab.Event
+                LaunchedEffect(isEventTabVisible) {
+                    if (!isEventTabVisible) {
+                        val evVm = currentEventViewModel
+                        if (evVm != null && evVm.clearTemporaryExternalFilter()) {
+                            eventListState.scrollToItem(0)
+                        }
+                    }
+                }
+
+                val isMonitorTabVisible = uiState.currentTab == MainTab.Monitor ||
+                    activeTab == MainTab.Monitor ||
+                    outgoingTab == MainTab.Monitor
+                LaunchedEffect(isMonitorTabVisible) {
+                    if (!isMonitorTabVisible) {
+                        val monVm = currentMonitorViewModel
+                        if (monVm != null && monVm.clearTemporaryExternalQuickFilter()) {
+                            monitorGridState.scrollToItem(0)
+                        }
+                    }
+                }
 
                 val onHomeNavigateToEvents: (TimeFilter, Int?, String?) -> Unit = remember(switchToTab, scope) {
                     { timeFilter, serviceId, aiType ->

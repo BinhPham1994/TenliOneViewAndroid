@@ -507,7 +507,6 @@ private fun HomeAiDistributionSection(
         animationSpec = tween(durationMillis = 200),
         label = "aiBreakdownChevron"
     )
-    val dividerStartIndent = spacing.space14 + spacing.avatarSmall + spacing.space12
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -575,17 +574,7 @@ private fun HomeAiDistributionSection(
                 Spacer(modifier = Modifier.height(spacing.space2))
             }
 
-            primaryItems.forEachIndexed { idx, item ->
-                if (idx > 0) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(
-                            start = dividerStartIndent,
-                            end = spacing.space14
-                        ),
-                        thickness = spacing.borderThin,
-                        color = colors.divider
-                    )
-                }
+            primaryItems.forEach { item ->
                 AiDistributionModuleRow(
                     item = item,
                     isEn = isEn,
@@ -608,14 +597,6 @@ private fun HomeAiDistributionSection(
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         extraItems.forEach { item ->
-                            HorizontalDivider(
-                                modifier = Modifier.padding(
-                                    start = dividerStartIndent,
-                                    end = spacing.space14
-                                ),
-                                thickness = spacing.borderThin,
-                                color = colors.divider
-                            )
                             AiDistributionModuleRow(
                                 item = item,
                                 isEn = isEn,

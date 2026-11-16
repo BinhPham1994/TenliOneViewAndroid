@@ -87,6 +87,8 @@ fun VideoPlayer(
     onFullscreenToggle: (() -> Unit)? = null,
     onTimeUpdate: ((Long) -> Unit)? = null,
     enableZoom: Boolean = false,
+    smoothResetTrigger: Int = 0,
+    isExternallyTransformed: Boolean = false,
     onZoomChanged: (Boolean) -> Unit = {}
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
@@ -106,6 +108,7 @@ fun VideoPlayer(
     val savedResumePositionMs = remember(videoUrl) { longArrayOf(C.TIME_UNSET) }
     val wasStoppedForBackground = remember(videoUrl) { booleanArrayOf(false) }
     val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
+    val suppressFullscreenCallback = remember(videoUrl) { booleanArrayOf(false) }
     val colors = MaterialTheme.appColors
     val containerBg = colors.surface
     val stageBg = when {
@@ -114,12 +117,30 @@ fun VideoPlayer(
         else -> Color.Transparent
     }
     val currentPlayWhenReady by rememberUpdatedState(playWhenReady)
+    val currentIsFullscreen by rememberUpdatedState(isFullscreen)
+    val currentIsExternallyTransformed by rememberUpdatedState(isExternallyTransformed)
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnPlayWhenReadyChange by rememberUpdatedState(onPlayWhenReadyChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
     val currentOnControllerVisibilityChange by rememberUpdatedState(onControllerVisibilityChange)
     val currentOnFullscreenToggle by rememberUpdatedState(onFullscreenToggle)
     val currentOnZoomChanged by rememberUpdatedState(onZoomChanged)
+
+    fun syncFullscreenButtonState(view: PlayerView?, targetFullscreen: Boolean) {
+        if (view == null) return
+        suppressFullscreenCallback[0] = true
+        try {
+            view.setFullscreenButtonState(targetFullscreen)
+        } finally {
+            suppressFullscreenCallback[0] = false
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(isFullscreen) {
+        if (currentOnFullscreenToggle != null) {
+            syncFullscreenButtonState(playerViewHolder[0], isFullscreen)
+        }
+    }
 
     fun syncSurfaceZoom(view: PlayerView?, targetScale: Float, ox: Float, oy: Float) {
         val frame = view?.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_content_frame)
@@ -171,6 +192,12 @@ fun VideoPlayer(
                 )
             }
             applyVideoZoom(1f, 0f, 0f)
+        }
+    }
+
+    androidx.compose.runtime.LaunchedEffect(smoothResetTrigger) {
+        if (smoothResetTrigger > 0) {
+            resetVideoZoom()
         }
     }
 
@@ -524,71 +551,190 @@ fun VideoPlayer(
             androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FILL
         }
         AndroidView(factory = { ctx ->
-            android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null).apply {
-                (this as PlayerView).apply {
-                    playerViewHolder[0] = this
-                    clipChildren = true
-                    useController = true
-                    controllerAutoShow = showControllerInitially
-                    controllerHideOnTouch = true
-                    controllerShowTimeoutMs = 3000
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    resizeMode = targetResizeMode
-                    setControllerVisibilityListener(
-                        PlayerView.ControllerVisibilityListener { visibility ->
-                            val visible = visibility == android.view.View.VISIBLE
-                            isControllerShown = visible
-                            currentOnControllerVisibilityChange(visible)
-                        }
-                    )
-                    player = exoPlayer
-                    if (!showControllerInitially) {
-                        hideController()
+            (android.view.LayoutInflater.from(ctx).inflate(R.layout.view_exo_texture, null) as PlayerView).apply {
+                playerViewHolder[0] = this
+                clipChildren = true
+                useController = true
+                controllerAutoShow = showControllerInitially
+                controllerHideOnTouch = true
+                controllerShowTimeoutMs = 3000
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                resizeMode = targetResizeMode
+                setControllerVisibilityListener(
+                    PlayerView.ControllerVisibilityListener { visibility ->
+                        val visible = visibility == android.view.View.VISIBLE
+                        isControllerShown = visible
+                        currentOnControllerVisibilityChange(visible)
                     }
-                    if (currentOnFullscreenToggle != null) {
-                        setFullscreenButtonClickListener(
-                            PlayerView.FullscreenButtonClickListener {
+                )
+                player = exoPlayer
+                if (!showControllerInitially) {
+                    hideController()
+                }
+                if (currentOnFullscreenToggle != null) {
+                    setFullscreenButtonClickListener(
+                        PlayerView.FullscreenButtonClickListener { _ ->
+                            if (!suppressFullscreenCallback[0]) {
+                                val desiredFullscreen = !currentIsFullscreen
+                                syncFullscreenButtonState(this, desiredFullscreen)
                                 currentOnFullscreenToggle?.invoke()
                             }
-                        )
-                        setFullscreenButtonState(isFullscreen)
-                    } else {
-                        setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
-                    }
-                    syncSurfaceZoom(this, zoomScale, zoomOffsetX, zoomOffsetY)
+                        }
+                    )
+                    syncFullscreenButtonState(this, isFullscreen)
+                } else {
+                    setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
                 }
+                syncSurfaceZoom(this, zoomScale, zoomOffsetX, zoomOffsetY)
             }
         }, update = { view ->
-            (view as PlayerView).let {
-                playerViewHolder[0] = it
-                it.controllerAutoShow = showControllerInitially
-                if (it.player !== exoPlayer) {
-                    it.player = exoPlayer
+            (view as PlayerView).let { pv ->
+                playerViewHolder[0] = pv
+                pv.controllerAutoShow = showControllerInitially
+                if (pv.player !== exoPlayer) {
+                    pv.player = exoPlayer
                     if (!showControllerInitially) {
-                        it.hideController()
+                        pv.hideController()
                         isControllerShown = false
                         currentOnControllerVisibilityChange(false)
                     }
                 }
-                if (it.resizeMode != targetResizeMode) {
-                    it.resizeMode = targetResizeMode
+                if (pv.resizeMode != targetResizeMode) {
+                    pv.resizeMode = targetResizeMode
                 }
                 if (currentOnFullscreenToggle != null) {
-                    it.setFullscreenButtonState(isFullscreen)
+                    pv.setFullscreenButtonClickListener(
+                        PlayerView.FullscreenButtonClickListener { _ ->
+                            if (!suppressFullscreenCallback[0]) {
+                                val desiredFullscreen = !currentIsFullscreen
+                                syncFullscreenButtonState(pv, desiredFullscreen)
+                                currentOnFullscreenToggle?.invoke()
+                            }
+                        }
+                    )
+                    syncFullscreenButtonState(pv, isFullscreen)
+                } else {
+                    pv.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
                 }
-                syncSurfaceZoom(it, zoomScale, zoomOffsetX, zoomOffsetY)
+                syncSurfaceZoom(pv, zoomScale, zoomOffsetX, zoomOffsetY)
             }
         }, onRelease = { view ->
-            syncSurfaceZoom(view as? PlayerView, 1f, 0f, 0f)
-            if (playerViewHolder[0] === view) {
+            val pv = view as? PlayerView
+            syncSurfaceZoom(pv, 1f, 0f, 0f)
+            if (playerViewHolder[0] === pv) {
                 playerViewHolder[0] = null
             }
-            (view as? PlayerView)?.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
-            (view as? PlayerView)?.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
-            (view as? PlayerView)?.player = null
+            pv?.setControllerVisibilityListener(null as PlayerView.ControllerVisibilityListener?)
+            pv?.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
+            pv?.player = null
         }, modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = if (isVideoReady && !isError) 1f else 0f })
+            .graphicsLayer { alpha = if (isVideoReady && !isError) 1f else 0f }
+            .pointerInput(videoUrl) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = PointerEventPass.Initial
+                    )
+                    if (!currentIsExternallyTransformed || down.isConsumed) {
+                        return@awaitEachGesture
+                    }
+                    if (playerViewHolder[0] == null) {
+                        return@awaitEachGesture
+                    }
+                    val pointerId = down.id
+                    val downTimeMs = down.uptimeMillis
+                    var lastX = down.position.x
+                    var lastY = down.position.y
+                    var dispatchedDown = false
+
+                    fun sendToPlayerView(action: Int, eventTimeMs: Long, x: Float, y: Float) {
+                        val targetView = playerViewHolder[0] ?: return
+                        val safeEventTime = eventTimeMs.coerceAtLeast(downTimeMs)
+                        val motionEvent = android.view.MotionEvent.obtain(
+                            downTimeMs,
+                            safeEventTime,
+                            action,
+                            x,
+                            y,
+                            0
+                        )
+                        try {
+                            targetView.dispatchTouchEvent(motionEvent)
+                        } finally {
+                            motionEvent.recycle()
+                        }
+                    }
+
+                    sendToPlayerView(android.view.MotionEvent.ACTION_DOWN, downTimeMs, lastX, lastY)
+                    dispatchedDown = true
+                    down.consume()
+
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressedCount = event.changes.count { it.pressed }
+
+                            // Khi chạm ngón thứ 2 (Pinch-to-Zoom) hoặc cử chỉ pan khi đang zoom đã consume
+                            if (pressedCount >= 2 || event.changes.any { it.isConsumed }) {
+                                if (dispatchedDown) {
+                                    val cancelTime = event.changes.firstOrNull()?.uptimeMillis
+                                        ?: android.os.SystemClock.uptimeMillis()
+                                    sendToPlayerView(
+                                        android.view.MotionEvent.ACTION_CANCEL,
+                                        cancelTime,
+                                        lastX,
+                                        lastY
+                                    )
+                                    dispatchedDown = false
+                                }
+                                break
+                            }
+
+                            val change = event.changes.firstOrNull { it.id == pointerId }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+
+                            lastX = change.position.x
+                            lastY = change.position.y
+
+                            if (!change.pressed) {
+                                if (dispatchedDown) {
+                                    sendToPlayerView(
+                                        android.view.MotionEvent.ACTION_UP,
+                                        change.uptimeMillis,
+                                        lastX,
+                                        lastY
+                                    )
+                                    dispatchedDown = false
+                                }
+                                change.consume()
+                                break
+                            } else {
+                                if (dispatchedDown) {
+                                    sendToPlayerView(
+                                        android.view.MotionEvent.ACTION_MOVE,
+                                        change.uptimeMillis,
+                                        lastX,
+                                        lastY
+                                    )
+                                }
+                                change.consume()
+                            }
+                        }
+                    } finally {
+                        if (dispatchedDown) {
+                            sendToPlayerView(
+                                android.view.MotionEvent.ACTION_CANCEL,
+                                android.os.SystemClock.uptimeMillis(),
+                                lastX,
+                                lastY
+                            )
+                            dispatchedDown = false
+                        }
+                    }
+                }
+            })
 
         if (enableZoom) {
             AnimatedVisibility(

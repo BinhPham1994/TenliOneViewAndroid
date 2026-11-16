@@ -1032,18 +1032,36 @@ class MonitorViewModel(
         }
     }
 
+    private data class ExternalMonitorFilterRestoreState(
+        val selectedFilterNodeKey: String,
+        val searchQuery: String,
+        val quickFilter: CameraQuickFilter
+    )
+
+    private var savedMonitorFilterBeforeExternalNav: ExternalMonitorFilterRestoreState? = null
+
     fun setSearchQuery(query: String) {
+        savedMonitorFilterBeforeExternalNav = null
         _uiState.update { it.copy(searchQuery = query, currentCameraPage = 1).withDerivedData() }
         loadVisibleCameraSnapshots()
     }
 
     fun setQuickFilter(filter: CameraQuickFilter) {
+        savedMonitorFilterBeforeExternalNav = null
         if (_uiState.value.quickFilter == filter) return
         _uiState.update { it.copy(quickFilter = filter, currentCameraPage = 1).withDerivedData() }
         loadVisibleCameraSnapshots()
     }
 
     fun applyExternalQuickFilter(filter: CameraQuickFilter) {
+        if (savedMonitorFilterBeforeExternalNav == null) {
+            val current = _uiState.value
+            savedMonitorFilterBeforeExternalNav = ExternalMonitorFilterRestoreState(
+                selectedFilterNodeKey = current.selectedFilterNodeKey,
+                searchQuery = current.searchQuery,
+                quickFilter = current.quickFilter
+            )
+        }
         if (_uiState.value.selectedCameras.getOrNull(0) != null) {
             closeLiveCamera()
         }
@@ -1056,6 +1074,28 @@ class MonitorViewModel(
             ).withDerivedData()
         }
         loadVisibleCameraSnapshots()
+    }
+
+    fun clearTemporaryExternalQuickFilter(): Boolean {
+        val prev = savedMonitorFilterBeforeExternalNav ?: return false
+        savedMonitorFilterBeforeExternalNav = null
+        val current = _uiState.value
+        if (current.selectedFilterNodeKey == prev.selectedFilterNodeKey &&
+            current.searchQuery == prev.searchQuery &&
+            current.quickFilter == prev.quickFilter
+        ) {
+            return false
+        }
+        _uiState.update {
+            it.copy(
+                selectedFilterNodeKey = prev.selectedFilterNodeKey,
+                searchQuery = prev.searchQuery,
+                quickFilter = prev.quickFilter,
+                currentCameraPage = 1
+            ).withDerivedData()
+        }
+        loadVisibleCameraSnapshots()
+        return true
     }
 
     fun toggleFavoriteCamera(cameraId: Int) {
@@ -1121,6 +1161,7 @@ class MonitorViewModel(
     }
 
     fun handleGroupRowClick(groupKey: String) {
+        savedMonitorFilterBeforeExternalNav = null
         _uiState.update { state ->
             val nextFilterKey = if (groupKey == FILTER_ALL || state.selectedFilterNodeKey == groupKey) {
                 FILTER_ALL
