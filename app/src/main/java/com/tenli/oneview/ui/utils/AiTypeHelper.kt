@@ -630,48 +630,11 @@ object AiTypeHelper {
         return v ?: true
     }
 
-    fun getEventBadgeLabel(event: EventData, isEn: Boolean = false): String {
-        val t0 = event.type.lowercase()
-        val d = event.data
-
-        if (isFaceEvent(event)) {
-            val personName = extractFacePersonName(event, isEn)
-            if (personName.isNotEmpty()) return personName
-            if (isStranger(event)) return if (isEn) "Stranger" else "Người lạ"
-            return if (isEn) "Face" else "Khuôn mặt"
-        }
-
-        val plate = d?.plate?.plate ?: d?.plate?.number ?: event.plate
-        if (!plate.isNullOrBlank()) {
-            return plate.trim()
-        }
-
-        if (t0.contains("uniform") || t0.contains("clothing")) {
-            return extractUniformLabel(event, isEn)
-        }
-
-        return when {
-            t0.contains("helmet") -> if (isEn) "No helmet" else "Không đội mũ bảo hiểm"
-            t0.contains("hairnet") -> if (isEn) "No safety cap" else "Không đội mũ bảo hộ"
-            t0.contains("face-masked") || t0.contains("no-mask") || t0.contains("mask") ->
-                if (isEn) "No mask" else "Không đeo khẩu trang"
-            t0.contains("glove") -> if (isEn) "No gloves" else "Không đeo găng tay"
-            t0.contains("crowd") -> if (isEn) "Crowd" else "Đám đông"
-            t0.contains("fire") || t0.contains("smoke") -> if (isEn) "Fire / Smoke" else "Cháy / Khói"
-            t0.contains("parking") -> if (isEn) "Illegal parking" else "Dừng đỗ"
-            t0.contains("lpr") || t0.contains("plate") || t0.contains("license") ->
-                if (isEn) "License plate" else "Biển số"
-            t0.contains("vehicle") || t0.contains("object-end") ->
-                if (isEn) "Vehicle" else "Phương tiện"
-            t0.contains("garbage") || t0.contains("litter") ->
-                if (isEn) "Littering" else "Xả rác"
-            t0.contains("sidewalk") || t0.contains("encroach") ->
-                if (isEn) "Encroachment" else "Lấn chiếm"
-            t0.contains("person") || t0.contains("intrusion") ->
-                if (isEn) "Intrusion" else "Xâm nhập"
-            else -> getTypeName(event.type, isEn)
-        }
-    }
+    /**
+     * Trả về nhãn đối tượng / bài AI đồng bộ 100% giữa chế độ List (`sentenceParts.subject`) và chế độ Grid.
+     */
+    fun getEventBadgeLabel(event: EventData, isEn: Boolean = false): String =
+        getEventSentenceParts(event, "", isEn).subject
 
     fun getEventName(event: EventData): String = getEventBadgeLabel(event, isEn = false)
 
@@ -767,7 +730,6 @@ object AiTypeHelper {
     ): EventSentenceParts {
         val rawType = event.type.lowercase()
         val data = event.data
-        val badgeLabel = getEventBadgeLabel(event, isEn)
         val badgeColor = getAiColor(event)
 
         fun formatPrefix(p: String): String {
@@ -984,7 +946,7 @@ object AiTypeHelper {
             )
         }
 
-        val cleanLabel = badgeLabel
+        val cleanLabel = getTypeName(event.type, isEn)
             .replace(REGEX_PREFIX_VI, "")
             .replace(REGEX_PREFIX_EN, "")
             .trim()

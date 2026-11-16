@@ -1248,8 +1248,11 @@ private fun EventGridCard(
     val typography = MaterialTheme.typography
     val onMedia = colors.onMedia
 
-    val badgeLabel = remember(eventKey, isEn) { AiTypeHelper.getEventBadgeLabel(event, isEn) }
-    val badgeColor = remember(eventKey) { AiTypeHelper.getAiColor(event) }
+    val sentenceParts = remember(eventKey, images.cameraName, isEn) {
+        AiTypeHelper.getEventSentenceParts(event, images.cameraName, isEn)
+    }
+    val badgeLabel = sentenceParts.subject
+    val badgeColor = sentenceParts.color
     val (formattedTime, formattedDate) = remember(event.time, isEn) {
         formatGridEventTimeAndDate(event.time, isEn)
     }
