@@ -30,7 +30,9 @@ import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.features.event.EventDescendingComparator
+import com.tenli.oneview.ui.features.event.eventTimeToSeconds
 import com.tenli.oneview.ui.features.event.formatVideoQueryTime
+import com.tenli.oneview.ui.features.event.isWithinTimeRangeSeconds
 import com.tenli.oneview.ui.features.event.parseVideoQueryTime
 import com.tenli.oneview.ui.features.event.resolveApiEventTypes
 import com.tenli.oneview.ui.features.event.uniqueKey
@@ -50,6 +52,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -424,6 +427,7 @@ class MonitorViewModel(
     private val playbackSessionCache = java.util.concurrent.ConcurrentHashMap<String, CachedPlaybackSession>()
     private var cameraEventFetchJob: Job? = null
     private var cameraEventPaginateJob: Job? = null
+    private val cameraEventRealtimeChannel = Channel<Boolean>(Channel.CONFLATED)
     private var lastCameraEventRawId: Int? = null
     private var lastCameraEventRawIdByType: Map<String, Int?> = emptyMap()
     private var exhaustedCameraEventTypes: Set<String> = emptySet()
@@ -748,6 +752,35 @@ class MonitorViewModel(
                     } else {
                         state
                     }
+                }
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            for (mayLagDbCommit in cameraEventRealtimeChannel) {
+                val state = _uiState.value
+                if (!isMonitorTabActive ||
+                    state.selectedCameras.getOrNull(0) == null ||
+                    state.cameraDetailTab != CameraDetailTab.EVENTS ||
+                    state.cameraEventTimeFilter != TimeFilter.TODAY
+                ) {
+                    continue
+                }
+                processRealtimeCameraEvents(mayLagDbCommit = mayLagDbCommit)
+                delay(350L)
+            }
+        }
+
+        viewModelScope.launch {
+            webSocketManager.notifyEvent.collect { notify ->
+                val state = _uiState.value
+                if (isMonitorTabActive &&
+                    state.selectedCameras.getOrNull(0) != null &&
+                    state.cameraDetailTab == CameraDetailTab.EVENTS &&
+                    state.cameraEventTimeFilter == TimeFilter.TODAY
+                ) {
+                    val mayLag = notify.event != WebSocketManager.TOPIC_APP_RESUMED
+                    cameraEventRealtimeChannel.trySend(mayLag)
                 }
             }
         }
@@ -3048,12 +3081,16 @@ class MonitorViewModel(
         var firstError: Throwable? = null
 
         val allCameras = rawCameraList.ifEmpty { monitorRepository.getCamerasInMemory() }
+        val canUseFastFirstBatch = resolvedType != null ||
+            (!UserPermissionManager.isCustomAiEventPermission() && !AiTypeHelper.isProjectModuleRestricted)
+
         while (attempts < EVENT_MAX_BATCH_ATTEMPTS) {
             attempts++
+            val requestBatchSize = if (attempts == 1 && canUseFastFirstBatch) 25 else EVENT_RAW_BATCH_SIZE
             val result = safeApiCall {
                 monitorRepository.getEventDataList(
                     lastId = currentLastId,
-                    count = EVENT_RAW_BATCH_SIZE,
+                    count = requestBatchSize,
                     from = fromSec,
                     to = toSec,
                     serviceId = null,
@@ -3076,9 +3113,18 @@ class MonitorViewModel(
             }
 
             for (ev in batchData) {
-                if (UserPermissionManager.isEventPermitted(ev, allCameras) && seenKeys.add(ev.uniqueKey())) {
+                if (ev.isWithinTimeRangeSeconds(fromSec, toSec) &&
+                    UserPermissionManager.isEventPermitted(ev, allCameras) &&
+                    seenKeys.add(ev.uniqueKey())
+                ) {
                     validData.add(ev)
                 }
+            }
+
+            val allOlderThanFrom = batchData.all { it.time > 0.0 && eventTimeToSeconds(it.time) < fromSec }
+            if (allOlderThanFrom) {
+                reachedEnd = true
+                break
             }
 
             val lastItem = batchData.lastOrNull()
@@ -3088,7 +3134,7 @@ class MonitorViewModel(
             }
             currentLastId = lastItem.id
 
-            if (batchData.size < EVENT_RAW_BATCH_SIZE) {
+            if (batchData.size < requestBatchSize) {
                 reachedEnd = true
                 break
             }
@@ -3197,5 +3243,72 @@ class MonitorViewModel(
             apiSucceeded = anySucceeded,
             firstError = if (anySucceeded) null else firstError
         )
+    }
+
+    private suspend fun processRealtimeCameraEvents(mayLagDbCommit: Boolean) {
+        try {
+            if (!UserPermissionManager.canAccessEvents()) return
+            val state = _uiState.value
+            val camera = state.selectedCameras.getOrNull(0)?.camera ?: return
+            val cameraUuid = camera.extra?.uuid?.trim().orEmpty()
+            if (cameraUuid.isEmpty() || state.cameraEventTimeFilter != TimeFilter.TODAY) return
+
+            val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(TimeFilter.TODAY)
+            val fromSec = fromMs / 1000
+            val toSec = toMs / 1000
+            val resolvedTypes = resolveApiEventTypes(state.cameraEventAiType)
+            val prevMaxId = state.cameraEvents.maxOfOrNull { it.id } ?: 0
+
+            var batch = fetchPermittedCameraEventBatch(
+                startLastId = null,
+                fromSec = fromSec,
+                toSec = toSec,
+                cameraUuid = cameraUuid,
+                resolvedTypes = resolvedTypes
+            )
+            val firstMaxId = batch.events.maxOfOrNull { it.id } ?: 0
+            if (mayLagDbCommit && firstMaxId <= prevMaxId) {
+                delay(650L)
+                val curAfter = _uiState.value
+                if (!isMonitorTabActive ||
+                    curAfter.selectedCameras.getOrNull(0)?.camera?.id != camera.id ||
+                    curAfter.cameraDetailTab != CameraDetailTab.EVENTS ||
+                    curAfter.cameraEventTimeFilter != TimeFilter.TODAY ||
+                    curAfter.cameraEventAiType != state.cameraEventAiType
+                ) {
+                    return
+                }
+                val retry = fetchPermittedCameraEventBatch(
+                    startLastId = null,
+                    fromSec = fromSec,
+                    toSec = toSec,
+                    cameraUuid = cameraUuid,
+                    resolvedTypes = resolvedTypes
+                )
+                if (retry.apiSucceeded) {
+                    batch = retry
+                }
+            }
+
+            if (batch.events.isNotEmpty()) {
+                val curCheck = _uiState.value
+                if (curCheck.selectedCameras.getOrNull(0)?.camera?.id != camera.id ||
+                    curCheck.cameraEventTimeFilter != state.cameraEventTimeFilter ||
+                    curCheck.cameraEventAiType != state.cameraEventAiType
+                ) {
+                    return
+                }
+                monitorRepository.cacheInMemory(events = batch.events)
+                _uiState.update { cur ->
+                    val merged = (batch.events + cur.cameraEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) })
+                        .distinctBy { it.uniqueKey() }
+                        .sortedWith(EventDescendingComparator)
+                    if (merged == cur.cameraEvents) cur else cur.copy(cameraEvents = merged)
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
     }
 }

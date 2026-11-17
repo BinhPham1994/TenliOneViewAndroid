@@ -29,7 +29,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,8 +110,8 @@ class EventViewModel(
     private var lastFetchedRawIdByType: Map<String, Int?> = emptyMap()
     private var exhaustedEventTypes: Set<String> = emptySet()
     private var initialFetchJob: Job? = null
-    private var recentFetchJob: Job? = null
     private var paginateJob: Job? = null
+    private val realtimeTriggerChannel = Channel<Boolean>(Channel.CONFLATED)
     @Volatile private var isEventTabActive: Boolean = false
     @Volatile private var pendingNotifyRefresh: Boolean = false
 
@@ -122,12 +124,11 @@ class EventViewModel(
         if (isEventTabActive == active) return
         isEventTabActive = active
         if (!active) {
-            recentFetchJob?.cancel()
             return
         }
         if (pendingNotifyRefresh && _uiState.value.selectedFilter == TimeFilter.TODAY) {
             pendingNotifyRefresh = false
-            fetchRecentEvents()
+            realtimeTriggerChannel.trySend(false)
         }
     }
 
@@ -154,18 +155,25 @@ class EventViewModel(
     }
 
     private fun listenToWebSocket() {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (mayLagDbCommit in realtimeTriggerChannel) {
+                if (!isEventTabActive || _uiState.value.selectedFilter != TimeFilter.TODAY) continue
+                processRealtimeRecentEvents(mayLagDbCommit = mayLagDbCommit)
+                delay(REALTIME_MIN_INTERVAL_MS)
+            }
+        }
+
         viewModelScope.launch {
-            webSocketManager.notifyEvent
-                .debounce(600L)
-                .collect {
-                    if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
-                        if (isEventTabActive) {
-                            fetchRecentEvents()
-                        } else {
-                            pendingNotifyRefresh = true
-                        }
+            webSocketManager.notifyEvent.collect { notify ->
+                if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
+                    if (isEventTabActive) {
+                        val mayLag = notify.event != WebSocketManager.TOPIC_APP_RESUMED
+                        realtimeTriggerChannel.trySend(mayLag)
+                    } else {
+                        pendingNotifyRefresh = true
                     }
                 }
+            }
         }
 
         viewModelScope.launch {
@@ -252,12 +260,17 @@ class EventViewModel(
         var anySuccessful = false
         var firstError: Throwable? = null
 
+        val canUseFastFirstBatch = targetCount <= PAGE_TARGET_COUNT &&
+            !UserPermissionManager.isCustomCameraPermission() &&
+            (resolvedType != null || (!UserPermissionManager.isCustomAiEventPermission() && !AiTypeHelper.isProjectModuleRestricted))
+
         while (attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
+            val requestBatchSize = if (attempts == 1 && canUseFastFirstBatch) FIRST_FAST_BATCH_SIZE else RAW_BATCH_SIZE
             val result = safeApiCall {
                 eventRepository.getDataList(
                     lastId = currentLastId,
-                    count = RAW_BATCH_SIZE,
+                    count = requestBatchSize,
                     from = fromSec,
                     to = toSec,
                     serviceId = serviceId,
@@ -302,7 +315,7 @@ class EventViewModel(
             }
             currentLastId = lastItem.id
 
-            if (batchData.size < RAW_BATCH_SIZE) {
+            if (batchData.size < requestBatchSize) {
                 reachedEnd = true
                 break
             }
@@ -430,92 +443,134 @@ class EventViewModel(
         )
     }
 
-    private fun fetchRecentEvents() {
-        recentFetchJob?.cancel()
-        recentFetchJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (!UserPermissionManager.canAccessEvents()) return@launch
-                val state = _uiState.value
-                if (state.selectedFilter != TimeFilter.TODAY) return@launch
-                val (from, to) = getTimeRange(state.selectedFilter)
-                val resolvedTypes = resolveApiEventTypes(state.selectedAiType)
-                val (anySuccessful, rawEvents) = if (resolvedTypes.size <= 1) {
-                    val response = eventRepository.getDataList(
-                        count = PAGE_TARGET_COUNT,
-                        from = from,
-                        to = to,
-                        serviceId = state.selectedServiceId,
-                        cameraUUID = state.selectedCameraUuid,
-                        type = resolvedTypes.firstOrNull()
-                    )
-                    response.isSuccessful to (if (response.isSuccessful) response.body().orEmpty() else emptyList())
-                } else {
-                    coroutineScope {
-                        val responses = resolvedTypes.map { t ->
-                            async {
-                                safeApiCall {
-                                    eventRepository.getDataList(
-                                        count = PAGE_TARGET_COUNT,
-                                        from = from,
-                                        to = to,
-                                        serviceId = state.selectedServiceId,
-                                        cameraUUID = state.selectedCameraUuid,
-                                        type = t
-                                    )
-                                }.getOrNull()
-                            }
-                        }.awaitAll()
-                        val ok = responses.any { it?.isSuccessful == true }
-                        val items = responses
-                            .filter { it?.isSuccessful == true }
-                            .flatMap { it?.body().orEmpty() }
-                            .sortedWith(EventDescendingComparator)
-                        ok to items
+    private suspend fun queryRealtimeRawEvents(
+        from: Long,
+        to: Long,
+        serviceId: Int?,
+        cameraUuid: String?,
+        resolvedTypes: List<String>
+    ): Pair<Boolean, List<EventData>> {
+        return if (resolvedTypes.size <= 1) {
+            val response = safeApiCall {
+                eventRepository.getDataList(
+                    count = PAGE_TARGET_COUNT,
+                    from = from,
+                    to = to,
+                    serviceId = serviceId,
+                    cameraUUID = cameraUuid,
+                    type = resolvedTypes.firstOrNull()
+                )
+            }.getOrNull()
+            val ok = response?.isSuccessful == true
+            ok to (if (ok) response?.body().orEmpty() else emptyList())
+        } else {
+            coroutineScope {
+                val responses = resolvedTypes.map { t ->
+                    async {
+                        safeApiCall {
+                            eventRepository.getDataList(
+                                count = PAGE_TARGET_COUNT,
+                                from = from,
+                                to = to,
+                                serviceId = serviceId,
+                                cameraUUID = cameraUuid,
+                                type = t
+                            )
+                        }.getOrNull()
                     }
-                }
-                if (anySuccessful) {
-                    if (_uiState.value.selectedFilter != state.selectedFilter ||
-                        _uiState.value.selectedServiceId != state.selectedServiceId ||
-                        _uiState.value.selectedCameraUuid != state.selectedCameraUuid ||
-                        _uiState.value.selectedAiType != state.selectedAiType
-                    ) {
-                        return@launch
-                    }
-                    val allCameras = eventRepository.getCamerasInMemory().ifEmpty { state.cameraList }
-                    val permittedNew = UserPermissionManager.filterEventsByPermissions(
-                        events = rawEvents.filter { it.isWithinTimeRangeSeconds(from, to) },
-                        allCameras = allCameras
-                    )
-                    if (permittedNew.isNotEmpty()) {
-                        eventRepository.cacheInMemory(events = permittedNew)
-                        var updatedList: List<EventData> = emptyList()
-                        _uiState.update { s ->
-                            val merged = (permittedNew + s.events.filter { it.isWithinTimeRangeSeconds(from, to) })
-                                .distinctBy { it.uniqueKey() }
-                                .let { list -> if (resolvedTypes.size > 1) list.sortedWith(EventDescendingComparator) else list }
-                            updatedList = merged
-                            s.copy(events = merged)
-                        }
-                        val latestState = _uiState.value
-                        eventRepository.saveEventData(
-                            filter = latestState.selectedFilter,
-                            serviceId = latestState.selectedServiceId,
-                            aiType = latestState.selectedAiType,
-                            data = CachedEventData(
-                                events = updatedList.take(RAW_BATCH_SIZE),
-                                cameraList = eventRepository.getCamerasInMemory().ifEmpty { latestState.cameraList },
-                                aiServices = latestState.aiServices,
-                                updatedAt = System.currentTimeMillis()
-                            ),
-                            cameraUuid = latestState.selectedCameraUuid
-                        )
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Error fetching recent events via WebSocket", e)
+                }.awaitAll()
+                val ok = responses.any { it?.isSuccessful == true }
+                val items = responses
+                    .filter { it?.isSuccessful == true }
+                    .flatMap { it?.body().orEmpty() }
+                    .sortedWith(EventDescendingComparator)
+                ok to items
             }
+        }
+    }
+
+    private suspend fun processRealtimeRecentEvents(mayLagDbCommit: Boolean) {
+        try {
+            if (!UserPermissionManager.canAccessEvents()) return
+            val state = _uiState.value
+            if (state.selectedFilter != TimeFilter.TODAY) return
+            val (from, to) = getTimeRange(state.selectedFilter)
+            val resolvedTypes = resolveApiEventTypes(state.selectedAiType)
+            val prevMaxId = state.events.maxOfOrNull { it.id } ?: 0
+
+            var (anySuccessful, rawEvents) = queryRealtimeRawEvents(
+                from = from,
+                to = to,
+                serviceId = state.selectedServiceId,
+                cameraUuid = state.selectedCameraUuid,
+                resolvedTypes = resolvedTypes
+            )
+            val firstMaxId = rawEvents.maxOfOrNull { it.id } ?: 0
+            if (mayLagDbCommit && firstMaxId <= prevMaxId) {
+                delay(REALTIME_DB_COMMIT_RETRY_MS)
+                if (!isEventTabActive ||
+                    _uiState.value.selectedFilter != state.selectedFilter ||
+                    _uiState.value.selectedServiceId != state.selectedServiceId ||
+                    _uiState.value.selectedCameraUuid != state.selectedCameraUuid ||
+                    _uiState.value.selectedAiType != state.selectedAiType
+                ) {
+                    return
+                }
+                val retry = queryRealtimeRawEvents(
+                    from = from,
+                    to = to,
+                    serviceId = state.selectedServiceId,
+                    cameraUuid = state.selectedCameraUuid,
+                    resolvedTypes = resolvedTypes
+                )
+                if (retry.first) {
+                    anySuccessful = true
+                    rawEvents = retry.second
+                }
+            }
+
+            if (anySuccessful) {
+                if (_uiState.value.selectedFilter != state.selectedFilter ||
+                    _uiState.value.selectedServiceId != state.selectedServiceId ||
+                    _uiState.value.selectedCameraUuid != state.selectedCameraUuid ||
+                    _uiState.value.selectedAiType != state.selectedAiType
+                ) {
+                    return
+                }
+                val allCameras = eventRepository.getCamerasInMemory().ifEmpty { state.cameraList }
+                val permittedNew = UserPermissionManager.filterEventsByPermissions(
+                    events = rawEvents.filter { it.isWithinTimeRangeSeconds(from, to) },
+                    allCameras = allCameras
+                )
+                if (permittedNew.isNotEmpty()) {
+                    eventRepository.cacheInMemory(events = permittedNew)
+                    var updatedList: List<EventData> = emptyList()
+                    _uiState.update { s ->
+                        val merged = (permittedNew + s.events.filter { it.isWithinTimeRangeSeconds(from, to) })
+                            .distinctBy { it.uniqueKey() }
+                            .sortedWith(EventDescendingComparator)
+                        updatedList = merged
+                        s.copy(events = merged)
+                    }
+                    val latestState = _uiState.value
+                    eventRepository.saveEventData(
+                        filter = latestState.selectedFilter,
+                        serviceId = latestState.selectedServiceId,
+                        aiType = latestState.selectedAiType,
+                        data = CachedEventData(
+                            events = updatedList.take(RAW_BATCH_SIZE),
+                            cameraList = eventRepository.getCamerasInMemory().ifEmpty { latestState.cameraList },
+                            aiServices = latestState.aiServices,
+                            updatedAt = System.currentTimeMillis()
+                        ),
+                        cameraUuid = latestState.selectedCameraUuid
+                    )
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching recent events via WebSocket", e)
         }
     }
 
@@ -559,7 +614,6 @@ class EventViewModel(
             current.selectedCameraUuid == cameraUuid &&
             current.selectedAiType == aiType
         ) return
-        recentFetchJob?.cancel()
         pendingNotifyRefresh = false
         _uiState.update {
             it.copy(
@@ -648,7 +702,6 @@ class EventViewModel(
     fun fetchInitialData(reloadMetadata: Boolean = true, isUserRefresh: Boolean = false) {
         initialFetchJob?.cancel()
         paginateJob?.cancel()
-        recentFetchJob?.cancel()
         if (UserSession.accessToken.isEmpty() || UserSession.domain.isEmpty()) return
         initialFetchJob = viewModelScope.launch(Dispatchers.IO) {
             lastFetchedRawId = null
@@ -722,10 +775,12 @@ class EventViewModel(
 
             try {
                 coroutineScope {
+                    val hasWarmCameras = eventRepository.getCamerasInMemory().isNotEmpty()
+                    val hasWarmAiServices = _uiState.value.aiServices.isNotEmpty() ||
+                        eventRepository.getAiServicesInMemory().isNotEmpty()
                     val hasFreshMetadata = !isUserRefresh && eventRepository.hasFreshSessionMetadata()
-                    val needCameras = (reloadMetadata && !hasFreshMetadata) ||
-                        eventRepository.getCamerasInMemory().isEmpty()
-                    val needAiServices = (reloadMetadata && !hasFreshMetadata) || _uiState.value.aiServices.isEmpty()
+                    val needCameras = (reloadMetadata && !hasFreshMetadata) || !hasWarmCameras
+                    val needAiServices = (reloadMetadata && !hasFreshMetadata) || !hasWarmAiServices
                     val cameraDeferred = async {
                         if (needCameras) safeApiCall { eventRepository.getCameraList() } else null
                     }
@@ -735,9 +790,7 @@ class EventViewModel(
 
                     // Nếu tài khoản có phân quyền camera custom và RAM chưa có danh sách camera,
                     // đợi cameraDeferred xong trước khi lọc sự kiện để có map UUID đầy đủ ngay lượt đầu.
-                    if (UserPermissionManager.isCustomCameraPermission() &&
-                        eventRepository.getCamerasInMemory().isEmpty()
-                    ) {
+                    if (UserPermissionManager.isCustomCameraPermission() && !hasWarmCameras) {
                         val preCamResp = cameraDeferred.await()?.getOrNull()
                         if (preCamResp?.isSuccessful == true) {
                             val preCamList = preCamResp.body() ?: emptyList()
@@ -759,46 +812,87 @@ class EventViewModel(
                         )
                     }
 
-                    val cameraResult = cameraDeferred.await()
-                    val aiServiceResult = aiServiceDeferred.await()
+                    // --- GIAI ĐOẠN 1: Trả ngay danh sách sự kiện & tắt vòng xoay refresh mà không chờ tải lại toàn bộ CameraList/AIServiceList ---
                     val batchResult = eventsDeferred.await()
-                    val cameraResponse = cameraResult?.getOrNull()
-                    val aiServiceResponse = aiServiceResult?.getOrNull()
+                    val earlyCameraResult = if (!hasWarmCameras || cameraDeferred.isCompleted) cameraDeferred.await() else null
+                    val earlyAiServiceResult = if (!hasWarmAiServices || aiServiceDeferred.isCompleted) aiServiceDeferred.await() else null
+
+                    val earlyCameraResp = earlyCameraResult?.getOrNull()
+                    val earlyAiServiceResp = earlyAiServiceResult?.getOrNull()
                     val newEvents = batchResult.events
                     val nextLastId = batchResult.lastRawId
                     val hasMore = batchResult.hasMore
 
                     val currentState = _uiState.value
-                    val allCameraList = when {
-                        cameraResponse?.isSuccessful == true -> cameraResponse.body() ?: emptyList()
+                    val stage1AllCameras = when {
+                        earlyCameraResp?.isSuccessful == true -> earlyCameraResp.body() ?: emptyList()
                         eventRepository.getCamerasInMemory().isNotEmpty() -> eventRepository.getCamerasInMemory()
                         else -> currentState.cameraList
                     }
-                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
-
-                    val aiServices = when {
-                        aiServiceResponse?.isSuccessful == true -> aiServiceResponse.body() ?: emptyList()
+                    val stage1PermittedCameras = UserPermissionManager.filterPermittedCameras(stage1AllCameras)
+                    val stage1AiServices = when {
+                        earlyAiServiceResp?.isSuccessful == true -> earlyAiServiceResp.body() ?: emptyList()
                         currentState.aiServices.isNotEmpty() -> currentState.aiServices
                         else -> eventRepository.getAiServicesInMemory()
                     }
 
+                    val fetchedMaxId = newEvents.maxOfOrNull { it.id } ?: 0
                     val rawFinalEvents = if (batchResult.apiSucceeded || newEvents.isNotEmpty() || cachedData == null) {
                         lastFetchedRawId = nextLastId
                         lastFetchedRawIdByType = batchResult.lastRawIdByType
                         exhaustedEventTypes = batchResult.exhaustedTypes
-                        newEvents
+                        val newerRealtime = currentState.events.filter { it.id > fetchedMaxId }
+                        (newerRealtime + newEvents).distinctBy { it.uniqueKey() }.sortedWith(EventDescendingComparator)
                     } else {
                         currentState.events
                     }
-                    val finalEvents = rawFinalEvents
+                    val stage1Events = rawFinalEvents
                         .filter { it.isWithinTimeRangeSeconds(from, to) }
-                        .permittedDistinct(allCameraList)
+                        .permittedDistinct(stage1AllCameras)
 
-                    val failure = batchResult.firstError
-                        ?: cameraResult?.exceptionOrNull()
-                        ?: aiServiceResult?.exceptionOrNull()
+                    val stage1Failure = batchResult.firstError
+                        ?: earlyCameraResult?.exceptionOrNull()
+                        ?: earlyAiServiceResult?.exceptionOrNull()
 
                     if (UserSession.accessToken.isEmpty()) return@coroutineScope
+
+                    val stage1CameraNameMap = withContext(Dispatchers.Default) { buildCameraNameMap(stage1AllCameras) }
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            isRefreshing = false,
+                            cameraList = stage1PermittedCameras,
+                            cameraNameMap = stage1CameraNameMap,
+                            aiServices = stage1AiServices,
+                            events = stage1Events,
+                            hasMore = hasMore,
+                            error = stage1Failure?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() }
+                        )
+                    }
+
+                    // --- GIAI ĐOẠN 2 (chạy nền): Cập nhật bổ sung Camera / AI Services nếu đang làm mới ---
+                    val cameraResult = earlyCameraResult ?: cameraDeferred.await()
+                    val aiServiceResult = earlyAiServiceResult ?: aiServiceDeferred.await()
+                    val cameraResponse = cameraResult?.getOrNull()
+                    val aiServiceResponse = aiServiceResult?.getOrNull()
+
+                    val allCameraList = when {
+                        cameraResponse?.isSuccessful == true -> cameraResponse.body() ?: emptyList()
+                        eventRepository.getCamerasInMemory().isNotEmpty() -> eventRepository.getCamerasInMemory()
+                        else -> _uiState.value.cameraList
+                    }
+                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
+                    val aiServices = when {
+                        aiServiceResponse?.isSuccessful == true -> aiServiceResponse.body() ?: emptyList()
+                        _uiState.value.aiServices.isNotEmpty() -> _uiState.value.aiServices
+                        else -> eventRepository.getAiServicesInMemory()
+                    }
+
+                    if (UserSession.accessToken.isEmpty()) return@coroutineScope
+
+                    val finalEvents = _uiState.value.events
+                        .filter { it.isWithinTimeRangeSeconds(from, to) }
+                        .permittedDistinct(allCameraList)
 
                     eventRepository.cacheInMemory(
                         events = finalEvents,
@@ -807,19 +901,16 @@ class EventViewModel(
                         fromNetwork = cameraResponse?.isSuccessful == true
                     )
 
-                    val cameraNameMap = withContext(Dispatchers.Default) { buildCameraNameMap(allCameraList) }
-
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            cameraList = permittedCameraList,
-                            cameraNameMap = cameraNameMap,
-                            aiServices = aiServices,
-                            events = finalEvents,
-                            hasMore = hasMore,
-                            error = failure?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() }
-                        )
+                    if (cameraResponse?.isSuccessful == true || aiServiceResponse?.isSuccessful == true) {
+                        val cameraNameMap = withContext(Dispatchers.Default) { buildCameraNameMap(allCameraList) }
+                        _uiState.update {
+                            it.copy(
+                                cameraList = permittedCameraList,
+                                cameraNameMap = cameraNameMap,
+                                aiServices = aiServices,
+                                events = finalEvents
+                            )
+                        }
                     }
 
                     if (batchResult.apiSucceeded || newEvents.isNotEmpty()) {
@@ -943,9 +1034,12 @@ class EventViewModel(
 
     companion object {
         private const val TAG = "EventViewModel"
+        private const val FIRST_FAST_BATCH_SIZE = 25
         private const val RAW_BATCH_SIZE = 50
         private const val PAGE_TARGET_COUNT = 20
         private const val MAX_BATCH_ATTEMPTS = 5
+        private const val REALTIME_MIN_INTERVAL_MS = 350L
+        private const val REALTIME_DB_COMMIT_RETRY_MS = 650L
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

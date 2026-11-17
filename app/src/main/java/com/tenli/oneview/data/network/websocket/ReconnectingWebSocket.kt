@@ -1,7 +1,9 @@
 package com.tenli.oneview.data.network.websocket
 
+import android.os.SystemClock
 import android.util.Log
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
@@ -39,6 +41,7 @@ abstract class ReconnectingWebSocket(
     private val logTag: String,
     private val subscribeTopic: String,
     private val preserveExistingUrlToken: Boolean = false,
+    private val enableSilentWatchdog: Boolean = false,
     private val onReconnectRefreshUrl: (suspend () -> String?)? = null
 ) {
     @Volatile private var webSocket: WebSocket? = null
@@ -49,6 +52,7 @@ abstract class ReconnectingWebSocket(
     @Volatile private var isConnecting = false
     @Volatile private var manuallyDisconnected = false
     @Volatile private var hasReceivedMessage = false
+    @Volatile private var lastMessageElapsedMs: Long = SystemClock.elapsedRealtime()
     private val lock = Any()
 
     @Volatile private var heartbeatJob: Job? = null
@@ -130,6 +134,28 @@ abstract class ReconnectingWebSocket(
     /** true khi đang kết nối hoặc đã kết nối */
     fun isConnected(): Boolean = isConnected || isConnecting
 
+    /** Buộc mở lại kết nối ngay lập tức (khi đổi mạng Wi-Fi ↔ 4G, token mới hoặc phát hiện socket treo). */
+    fun forceReconnect(urlOverride: String? = null) {
+        val target = urlOverride?.takeIf { it.isNotBlank() } ?: rawUrl
+        if (target.isEmpty() || UserSession.accessToken.isEmpty()) return
+        synchronized(lock) {
+            isConnected = false
+            isConnecting = false
+            val old = webSocket
+            webSocket = null
+            runCatching { old?.cancel() }
+        }
+        connect(target)
+    }
+
+    /** Kết nối lại nếu token đăng nhập hiện tại khác token đã dùng lúc mở socket */
+    fun reconnectIfTokenChanged(newToken: String) {
+        if (manuallyDisconnected || newToken.isEmpty() || rawUrl.isEmpty() || preserveExistingUrlToken) return
+        if (lastUsedToken != newToken) {
+            forceReconnect()
+        }
+    }
+
     private inner class Listener : WebSocketListener() {
         private fun isCurrent(ws: WebSocket) = ws === this@ReconnectingWebSocket.webSocket
 
@@ -145,6 +171,7 @@ abstract class ReconnectingWebSocket(
                 isConnecting = false
                 isConnected = true
                 hasReceivedMessage = false
+                lastMessageElapsedMs = SystemClock.elapsedRealtime()
                 reconnectDelay = INITIAL_RECONNECT_DELAY_MS
                 reconnectJob?.cancel()
                 reconnectJob = null
@@ -167,6 +194,7 @@ abstract class ReconnectingWebSocket(
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (!isCurrent(webSocket)) return
             hasReceivedMessage = true
+            lastMessageElapsedMs = SystemClock.elapsedRealtime()
             subscribeRetryJob?.cancel()
             subscribeRetryJob = null
             try {
@@ -213,7 +241,18 @@ abstract class ReconnectingWebSocket(
         heartbeatJob = scope.launch {
             while (isActive && isConnected && !manuallyDisconnected) {
                 delay(HEARTBEAT_INTERVAL_MS)
-                if (isConnected && !manuallyDisconnected) send(PING_MESSAGE)
+                if (!isConnected || manuallyDisconnected) break
+                send(PING_MESSAGE)
+                if (enableSilentWatchdog) {
+                    val silenceMs = SystemClock.elapsedRealtime() - lastMessageElapsedMs
+                    if (silenceMs > WATCHDOG_SILENCE_TIMEOUT_MS) {
+                        if (BuildConfig.DEBUG) {
+                            Log.w(logTag, "Heartbeat watchdog timeout (${silenceMs}ms silence), reconnecting...")
+                        }
+                        forceReconnect()
+                        break
+                    }
+                }
             }
         }
     }
@@ -263,7 +302,8 @@ abstract class ReconnectingWebSocket(
         private const val MAX_RECONNECT_DELAY_MS = 30_000L
         private const val RECONNECT_JITTER_MS = 1_000L
         private const val BACKOFF_MULTIPLIER = 1.5
-        private const val HEARTBEAT_INTERVAL_MS = 30_000L
+        private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val WATCHDOG_SILENCE_TIMEOUT_MS = 35_000L
         private const val SUBSCRIBE_RETRY_DELAY_MS = 3_500L
         private val PING_MESSAGE = mapOf("action" to "ping")
         private val TOKEN_PARAM_REGEX = Regex("([?&])token=[^&]*(&|$)")
@@ -326,9 +366,38 @@ class WebSocketNotifyClient(
     gson: Gson,
     scope: CoroutineScope,
     private val onMessageReceived: (com.tenli.oneview.model.network.NotifyData) -> Unit
-) : ReconnectingWebSocket(client, gson, scope, "WebSocketNotify", "notify", preserveExistingUrlToken = false) {
+) : ReconnectingWebSocket(
+    client = client,
+    gson = gson,
+    scope = scope,
+    logTag = "WebSocketNotify",
+    subscribeTopic = "notify",
+    preserveExistingUrlToken = false,
+    enableSilentWatchdog = true
+) {
     override fun onTextMessage(text: String) {
-        gson.fromJson(text, com.tenli.oneview.model.network.NotifyData::class.java)?.let(onMessageReceived)
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        val parsed = runCatching {
+            val element = JsonParser.parseString(trimmed)
+            when {
+                element.isJsonObject -> gson.fromJson(element, com.tenli.oneview.model.network.NotifyData::class.java)
+                element.isJsonArray && element.asJsonArray.size() > 0 -> {
+                    val first = element.asJsonArray.get(0)
+                    if (first.isJsonObject) {
+                        gson.fromJson(first, com.tenli.oneview.model.network.NotifyData::class.java)
+                    } else {
+                        com.tenli.oneview.model.network.NotifyData(event = "ai-data")
+                    }
+                }
+                else -> null
+            }
+        }.getOrNull() ?: if (!trimmed.contains("\"pong\"", ignoreCase = true)) {
+            com.tenli.oneview.model.network.NotifyData(event = "ai-data")
+        } else {
+            null
+        }
+        parsed?.let(onMessageReceived)
     }
 }
 

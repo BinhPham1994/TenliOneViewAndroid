@@ -23,6 +23,7 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
+import com.tenli.oneview.ui.features.event.EventDescendingComparator
 import com.tenli.oneview.ui.features.event.eventTimeToSeconds
 import com.tenli.oneview.ui.features.event.isWithinTimeRangeSeconds
 import com.tenli.oneview.ui.features.event.permittedDistinct
@@ -38,7 +39,9 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +51,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -234,7 +239,8 @@ class HomeViewModel(
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private var dashboardJob: Job? = null
-    private var recentEventsJob: Job? = null
+    private var statsReconcileJob: Job? = null
+    private val realtimeTriggerChannel = Channel<Boolean>(Channel.CONFLATED)
     @Volatile private var isHomeTabActive: Boolean = true
     @Volatile private var pendingNotifyRefresh: Boolean = false
     @Volatile private var pendingCameraStatusRecompute: Boolean = false
@@ -252,7 +258,7 @@ class HomeViewModel(
         isHomeTabActive = active
         webSocketManager.setReportsActive(active, "home")
         if (!active) {
-            recentEventsJob?.cancel()
+            statsReconcileJob?.cancel()
             return
         }
         if (pendingCameraStatusRecompute) {
@@ -265,7 +271,7 @@ class HomeViewModel(
         }
         if (pendingNotifyRefresh && _uiState.value.selectedFilter == TimeFilter.TODAY) {
             pendingNotifyRefresh = false
-            fetchRecentEvents()
+            realtimeTriggerChannel.trySend(false)
         }
     }
 
@@ -329,18 +335,27 @@ class HomeViewModel(
     }
 
     private fun listenToWebSocket() {
+        // Worker đơn luồng dùng Channel.CONFLATED:
+        // - Sự kiện đầu tiên xử lý ngay tức thì (0ms artificial debounce delay).
+        // - Khi sự kiện bắn dồn dập liên tục, không bao giờ tự cancel job đang chạy dở và không bị nghẽn vô hạn như debounce().
+        viewModelScope.launch(Dispatchers.IO) {
+            for (mayLagDbCommit in realtimeTriggerChannel) {
+                if (!isHomeTabActive || _uiState.value.selectedFilter != TimeFilter.TODAY) continue
+                processRealtimeRecentEvents(mayLagDbCommit = mayLagDbCommit)
+                delay(REALTIME_MIN_INTERVAL_MS)
+            }
+        }
         viewModelScope.launch {
-            webSocketManager.notifyEvent
-                .debounce(NOTIFY_DEBOUNCE_MS)
-                .collect { _ ->
-                    if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
-                        if (isHomeTabActive) {
-                            fetchRecentEvents()
-                        } else {
-                            pendingNotifyRefresh = true
-                        }
+            webSocketManager.notifyEvent.collect { notify ->
+                if (_uiState.value.selectedFilter == TimeFilter.TODAY) {
+                    if (isHomeTabActive) {
+                        val mayLag = notify.event != WebSocketManager.TOPIC_APP_RESUMED
+                        realtimeTriggerChannel.trySend(mayLag)
+                    } else {
+                        pendingNotifyRefresh = true
                     }
                 }
+            }
         }
         viewModelScope.launch(Dispatchers.Default) {
             webSocketManager.cameraStatusMap
@@ -414,7 +429,8 @@ class HomeViewModel(
         fromSec: Long,
         toSec: Long,
         serviceId: Int?,
-        allCameras: List<CameraModel> = dashboardRepository.getCamerasInMemory()
+        allCameras: List<CameraModel> = dashboardRepository.getCamerasInMemory(),
+        fastFirstAttempt: Boolean = true
     ): RecentEventsFetchResult {
         if (!UserPermissionManager.canAccessEvents()) {
             return RecentEventsFetchResult(events = emptyList(), anySuccessful = true)
@@ -426,12 +442,20 @@ class HomeViewModel(
         var attempts = 0
         var anySuccessful = false
         var firstError: Throwable? = null
+        val isUnrestricted = !UserPermissionManager.isCustomCameraPermission() &&
+            !UserPermissionManager.isCustomAiEventPermission() &&
+            !AiTypeHelper.isProjectModuleRestricted
 
         while (permitted.size < MAX_RECENT_EVENTS && attempts < MAX_BATCH_ATTEMPTS) {
             attempts++
+            val batchSize = when {
+                attempts == 1 && fastFirstAttempt && isUnrestricted -> FAST_RECENT_BATCH_SIZE
+                attempts == 1 && fastFirstAttempt -> MEDIUM_RECENT_BATCH_SIZE
+                else -> RECENT_BATCH_SIZE
+            }
             val result = safeApiCall {
                 dashboardRepository.getEventDataList(
-                    count = RECENT_BATCH_SIZE,
+                    count = batchSize,
                     lastId = lastId,
                     from = fromSec,
                     to = toSec,
@@ -461,28 +485,152 @@ class HomeViewModel(
 
             // Danh sách trả về theo thứ tự mới -> cũ (order=desc); nếu toàn bộ batch đã cũ hơn fromSec thì dừng phân trang
             val allOlderThanFrom = data.all { it.time > 0.0 && eventTimeToSeconds(it.time) < fromSec }
-            if (allOlderThanFrom || data.size < RECENT_BATCH_SIZE) break
+            if (allOlderThanFrom || data.size < batchSize) break
             lastId = data.lastOrNull()?.id ?: break
         }
 
         return RecentEventsFetchResult(
-            events = permitted.take(MAX_RECENT_EVENTS),
+            events = permitted.sortedWith(EventDescendingComparator).take(MAX_RECENT_EVENTS),
             anySuccessful = anySuccessful,
             firstError = if (anySuccessful) null else firstError
         )
     }
 
-    private fun fetchRecentEvents() {
-        recentEventsJob?.cancel()
-        recentEventsJob = viewModelScope.launch(Dispatchers.IO) {
+    /**
+     * Luồng cập nhật nhanh "Sự kiện gần đây" (~60-90ms):
+     * Tách riêng khỏi các API thống kê `count-overview` để danh sách sự kiện trên Trang chủ hiển thị tức thì như Tab Sự kiện,
+     * đồng thời có nhịp kiểm tra bù sau 650ms nếu bản tin `/Data/ws/Notify` tới sớm hơn thời điểm DB commit `isConfirmed=1`.
+     */
+    private suspend fun processRealtimeRecentEvents(mayLagDbCommit: Boolean) {
+        try {
+            val filter = _uiState.value.selectedFilter
+            if (filter != TimeFilter.TODAY) return
+            val serviceId = _uiState.value.selectedServiceId
+            val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
+            val fromSec = fromTime / 1000
+            val toSec = toTime / 1000
+
+            val prevMaxId = maxOf(
+                lastCountedRealtimeEventId,
+                _uiState.value.recentEvents.maxOfOrNull { it.id } ?: 0
+            )
+
+            var recentResult = fetchPermittedRecentEvents(
+                fromSec = fromSec,
+                toSec = toSec,
+                serviceId = serviceId
+            )
+
+            // Nếu gói WebSocket Notify đến trước lúc bản ghi được đánh dấu isConfirmed=1 khoảng vài trăm ms,
+            // thử lại đúng 1 lần nhẹ sau 650ms để bắt chắc chắn sự kiện vừa phát sinh.
+            val firstMaxId = recentResult.events.maxOfOrNull { it.id } ?: 0
+            if (mayLagDbCommit && firstMaxId <= prevMaxId) {
+                delay(REALTIME_DB_COMMIT_RETRY_MS)
+                if (!isHomeTabActive ||
+                    _uiState.value.selectedFilter != filter ||
+                    _uiState.value.selectedServiceId != serviceId
+                ) {
+                    return
+                }
+                val retryResult = fetchPermittedRecentEvents(
+                    fromSec = fromSec,
+                    toSec = toSec,
+                    serviceId = serviceId
+                )
+                if (retryResult.anySuccessful) {
+                    recentResult = retryResult
+                }
+            }
+
+            val newEvents = recentResult.events
+            if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) return
+
+            if (newEvents.isNotEmpty()) {
+                dashboardRepository.cacheInMemory(events = newEvents)
+            }
+
+            val nextState = withContext(Dispatchers.Default) {
+                val cur = _uiState.value
+                val allCameras = dashboardRepository.getCamerasInMemory().ifEmpty { cur.cameraList }
+                val inRangeExisting = cur.recentEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                val existingByKey = HashMap<String, EventData>(cur.recentEvents.size * 2)
+                for (ev in cur.recentEvents) {
+                    existingByKey[ev.uniqueKey()] = ev
+                }
+                val mergedRaw = (newEvents + inRangeExisting)
+                    .permittedDistinct(allCameras)
+                    .distinctBy { it.id }
+                    .sortedWith(EventDescendingComparator)
+                    .take(MAX_RECENT_EVENTS)
+                    .map { ev ->
+                        val prev = existingByKey[ev.uniqueKey()]
+                        if (prev != null && prev == ev) prev else ev
+                    }
+                val mergedEvents = if (mergedRaw == cur.recentEvents) cur.recentEvents else mergedRaw
+
+                val (updatedByType, nextCountedId) = if (cur.eventsByType.isNotEmpty()) {
+                    mergeRealtimeDeltasIntoByType(
+                        currentByType = cur.eventsByType,
+                        newEvents = newEvents,
+                        baselineMaxId = lastCountedRealtimeEventId
+                    )
+                } else {
+                    cur.eventsByType to maxOf(lastCountedRealtimeEventId, newEvents.maxOfOrNull { it.id } ?: 0)
+                }
+                lastCountedRealtimeEventId = nextCountedId
+
+                cur.copy(
+                    eventsByType = if (updatedByType == cur.eventsByType) cur.eventsByType else updatedByType,
+                    recentEvents = mergedEvents
+                ).withRecomputedMetrics()
+            }
+
+            if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) return
+            if (nextState != _uiState.value) {
+                _uiState.value = nextState
+                dashboardRepository.saveHomeData(
+                    filter = filter,
+                    serviceId = serviceId,
+                    data = CachedHomeData(
+                        overviewStats = nextState.overviewStats,
+                        eventsByType = nextState.eventsByType,
+                        hasLoadedEventsByType = nextState.hasLoadedEventsByType,
+                        cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
+                        aiServices = nextState.aiServices,
+                        recentEvents = nextState.recentEvents,
+                        runningAiTasks = nextState.runningAiTasks,
+                        totalAiTasks = nextState.totalAiTasks,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            // Đồng bộ lại số liệu thống kê tổng / phân bố AI hoàn toàn bất đồng bộ (tối đa 1 lần / 10s), không chặn hiển thị sự kiện mới
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val curAfter = _uiState.value
+            if (statsReconcileJob?.isActive != true &&
+                (curAfter.eventsByType.isEmpty() || nowElapsed - lastByTypeOverviewSyncMs >= BY_TYPE_WS_REFRESH_INTERVAL_MS)
+            ) {
+                reconcileOverviewStatsInBackground(filter, serviceId, newEvents)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.e(TAG, "Error processing realtime recent events", e)
+        }
+    }
+
+    private fun reconcileOverviewStatsInBackground(
+        filter: TimeFilter,
+        serviceId: Int?,
+        seedEvents: List<EventData>
+    ) {
+        statsReconcileJob?.cancel()
+        statsReconcileJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val filter = _uiState.value.selectedFilter
-                if (filter != TimeFilter.TODAY) return@launch
-                val serviceId = _uiState.value.selectedServiceId
+                if (!UserPermissionManager.canAccessEvents() || !NetworkMonitor.isNetworkAvailable()) return@launch
                 val serviceIdStr = serviceId?.toString()
                 val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
-                val fromSec = fromTime / 1000
-                val toSec = toTime / 1000
                 coroutineScope {
                     val overviewDeferred = async {
                         safeApiCall {
@@ -502,25 +650,13 @@ class HomeViewModel(
                             )
                         }.getOrNull()
                     }
-                    val recentDeferred = async {
-                        fetchPermittedRecentEvents(
-                            fromSec = fromSec,
-                            toSec = toSec,
-                            serviceId = serviceId
-                        )
-                    }
                     val overviewResp = overviewDeferred.await()
                     val byTypeResp = byTypeDeferred.await()
-                    val recentResult = recentDeferred.await()
-                    val newEvents = recentResult.events
 
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
                     }
 
-                    if (newEvents.isNotEmpty()) {
-                        dashboardRepository.cacheInMemory(events = newEvents)
-                    }
                     val latestOverviewStats = if (overviewResp?.isSuccessful == true) {
                         overviewResp.body() ?: _uiState.value.overviewStats
                     } else {
@@ -528,48 +664,31 @@ class HomeViewModel(
                     }
                     val byTypeSucceeded = byTypeResp?.isSuccessful == true
                     val byTypeBody = byTypeResp?.body().orEmpty()
-                    val nowElapsed = SystemClock.elapsedRealtime()
-                    val curSnapshot = _uiState.value
+                    val baselineIdBeforeSync = maxOf(
+                        lastCountedRealtimeEventId,
+                        _uiState.value.recentEvents.maxOfOrNull { it.id } ?: 0
+                    )
+
                     val (resolvedByType, resolvedHasLoadedByType) = if (byTypeSucceeded && byTypeBody.isNotEmpty()) {
-                        lastByTypeOverviewSyncMs = nowElapsed
-                        lastCountedRealtimeEventId = maxOf(
-                            lastCountedRealtimeEventId,
-                            newEvents.maxOfOrNull { it.id } ?: 0
-                        )
+                        lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
+                        lastCountedRealtimeEventId = maxOf(lastCountedRealtimeEventId, baselineIdBeforeSync)
                         byTypeBody to true
-                    } else if (
-                        UserPermissionManager.canAccessEvents() &&
-                        NetworkMonitor.isNetworkAvailable() &&
-                        (curSnapshot.eventsByType.isEmpty() || nowElapsed - lastByTypeOverviewSyncMs >= BY_TYPE_WS_REFRESH_INTERVAL_MS)
-                    ) {
+                    } else {
                         val fallback = fetchEventCountsViaOverview(
                             fromTime = fromTime,
                             toTime = toTime,
                             serviceIdStr = serviceIdStr,
                             unfilteredOverviewStats = latestOverviewStats,
-                            seedEvents = newEvents
+                            seedEvents = seedEvents
                         )
                         if (fallback != null) {
                             lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
-                            lastCountedRealtimeEventId = maxOf(
-                                lastCountedRealtimeEventId,
-                                newEvents.maxOfOrNull { it.id } ?: 0
-                            )
+                            lastCountedRealtimeEventId = maxOf(lastCountedRealtimeEventId, baselineIdBeforeSync)
                             fallback to true
                         } else {
-                            curSnapshot.eventsByType to (curSnapshot.hasLoadedEventsByType || byTypeSucceeded)
+                            val cur = _uiState.value
+                            cur.eventsByType to (cur.hasLoadedEventsByType || byTypeSucceeded)
                         }
-                    } else if (curSnapshot.eventsByType.isNotEmpty()) {
-                        val (incremented, nextMaxId) = mergeRealtimeDeltasIntoByType(
-                            currentByType = curSnapshot.eventsByType,
-                            newEvents = newEvents,
-                            baselineMaxId = lastCountedRealtimeEventId
-                        )
-                        lastCountedRealtimeEventId = nextMaxId
-                        incremented to true
-                    } else {
-                        val emptyOrExisting = if (byTypeSucceeded) emptyList() else curSnapshot.eventsByType
-                        emptyOrExisting to (curSnapshot.hasLoadedEventsByType || byTypeSucceeded)
                     }
 
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
@@ -578,62 +697,38 @@ class HomeViewModel(
 
                     val nextState = withContext(Dispatchers.Default) {
                         val cur = _uiState.value
-                        val allCameras = dashboardRepository.getCamerasInMemory().ifEmpty { cur.cameraList }
-                        val inRangeExisting = cur.recentEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
-                        val existingByKey = HashMap<String, EventData>(cur.recentEvents.size * 2)
-                        for (ev in cur.recentEvents) {
-                            existingByKey[ev.uniqueKey()] = ev
-                        }
-                        val mergedRaw = if (newEvents.isNotEmpty()) {
-                            (newEvents + inRangeExisting)
-                                .permittedDistinct(allCameras)
-                                .distinctBy { it.id }
-                                .take(MAX_RECENT_EVENTS)
-                                .map { ev ->
-                                    val prev = existingByKey[ev.uniqueKey()]
-                                    if (prev != null && prev == ev) prev else ev
-                                }
-                        } else {
-                            inRangeExisting
-                                .permittedDistinct(allCameras)
-                                .distinctBy { it.id }
-                                .take(MAX_RECENT_EVENTS)
-                        }
-                        val mergedEvents = if (mergedRaw == cur.recentEvents) cur.recentEvents else mergedRaw
                         cur.copy(
                             overviewStats = if (latestOverviewStats == cur.overviewStats) cur.overviewStats else latestOverviewStats,
                             eventsByType = if (resolvedByType == cur.eventsByType) cur.eventsByType else resolvedByType,
-                            hasLoadedEventsByType = resolvedHasLoadedByType,
-                            recentEvents = mergedEvents
+                            hasLoadedEventsByType = resolvedHasLoadedByType
                         ).withRecomputedMetrics()
                     }
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
                     }
-                    if (nextState == _uiState.value) {
-                        return@coroutineScope
-                    }
-                    _uiState.value = nextState
-                    dashboardRepository.saveHomeData(
-                        filter = filter,
-                        serviceId = serviceId,
-                        data = CachedHomeData(
-                            overviewStats = nextState.overviewStats,
-                            eventsByType = nextState.eventsByType,
-                            hasLoadedEventsByType = nextState.hasLoadedEventsByType,
-                            cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
-                            aiServices = nextState.aiServices,
-                            recentEvents = nextState.recentEvents,
-                            runningAiTasks = nextState.runningAiTasks,
-                            totalAiTasks = nextState.totalAiTasks,
-                            updatedAt = System.currentTimeMillis()
+                    if (nextState != _uiState.value) {
+                        _uiState.value = nextState
+                        dashboardRepository.saveHomeData(
+                            filter = filter,
+                            serviceId = serviceId,
+                            data = CachedHomeData(
+                                overviewStats = nextState.overviewStats,
+                                eventsByType = nextState.eventsByType,
+                                hasLoadedEventsByType = nextState.hasLoadedEventsByType,
+                                cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
+                                aiServices = nextState.aiServices,
+                                recentEvents = nextState.recentEvents,
+                                runningAiTasks = nextState.runningAiTasks,
+                                totalAiTasks = nextState.totalAiTasks,
+                                updatedAt = System.currentTimeMillis()
+                            )
                         )
-                    )
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.e(TAG, "Error fetching recent events via WebSocket", e)
+                if (BuildConfig.DEBUG) Log.w(TAG, "Error reconciling overview stats in background", e)
             }
         }
     }
@@ -641,7 +736,7 @@ class HomeViewModel(
     fun setTimeFilter(filter: TimeFilter) {
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter) return
-        recentEventsJob?.cancel()
+        statsReconcileJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -651,7 +746,7 @@ class HomeViewModel(
 
     fun setServiceFilter(serviceId: Int?) {
         if (_uiState.value.selectedServiceId == serviceId) return
-        recentEventsJob?.cancel()
+        statsReconcileJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -662,7 +757,7 @@ class HomeViewModel(
     fun applyFilters(filter: TimeFilter, serviceId: Int?) {
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
-        recentEventsJob?.cancel()
+        statsReconcileJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -681,7 +776,7 @@ class HomeViewModel(
 
     fun fetchDashboardData(isUserRefresh: Boolean = false) {
         dashboardJob?.cancel()
-        recentEventsJob?.cancel()
+        statsReconcileJob?.cancel()
         if (UserSession.accessToken.isEmpty() || UserSession.domain.isEmpty()) return
         dashboardJob = viewModelScope.launch(Dispatchers.IO) {
             val filter = _uiState.value.selectedFilter
@@ -762,11 +857,8 @@ class HomeViewModel(
                         safeApiCall { dashboardRepository.getAIServiceList() }
                     }
 
-                    // Nếu tài khoản đang áp dụng phân quyền camera custom và RAM chưa có danh sách camera để map UUID,
-                    // đợi cameraDeferred xong trước khi lọc sự kiện để đảm bảo ngay lần tải đầu tiên lọc đúng camera UUID.
-                    if (UserPermissionManager.isCustomCameraPermission() &&
-                        dashboardRepository.getCamerasInMemory().isEmpty()
-                    ) {
+                    val hasWarmCameras = dashboardRepository.getCamerasInMemory().isNotEmpty()
+                    if (UserPermissionManager.isCustomCameraPermission() && !hasWarmCameras) {
                         val preCamResp = cameraDeferred.await().getOrNull()
                         if (preCamResp?.isSuccessful == true) {
                             val preCamList = preCamResp.body() ?: emptyList()
@@ -790,19 +882,18 @@ class HomeViewModel(
                         dashboardRepository.prewarmProfilesIfNeeded()
                     }
 
+                    // --- GIAI ĐOẠN 1: Trả kết quả sự kiện & thống kê chính và tắt vòng xoay refresh ngay tức thì ---
                     val overviewResult = overviewDeferred.await()
                     val byTypeResult = byTypeDeferred.await()
                     val recentResult = recentEventsDeferred.await()
-                    val cameraResult = cameraDeferred.await()
-                    val aiServiceResult = aiServiceDeferred.await()
+                    val earlyCameraResult = if (!hasWarmCameras || cameraDeferred.isCompleted) cameraDeferred.await() else null
 
                     val overviewResponse = overviewResult.getOrNull()
                     val byTypeResponse = byTypeResult.getOrNull()
                     val byTypeSucceeded = byTypeResponse?.isSuccessful == true
                     val recentEvents = recentResult.events
                     val recentEventsSucceeded = recentResult.anySuccessful
-                    val cameraResponse = cameraResult.getOrNull()
-                    val aiServiceResponse = aiServiceResult.getOrNull()
+                    val earlyCameraResponse = earlyCameraResult?.getOrNull()
 
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
@@ -813,136 +904,27 @@ class HomeViewModel(
                     } else _uiState.value.overviewStats
 
                     val byTypeBody = byTypeResponse?.body().orEmpty()
-
-                    val allCameraList = if (cameraResponse?.isSuccessful == true) {
-                        cameraResponse.body() ?: emptyList()
-                    } else {
-                        dashboardRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
-                    }
-                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
-
-                    val aiServices = if (aiServiceResponse?.isSuccessful == true) {
-                        aiServiceResponse.body() ?: emptyList()
-                    } else _uiState.value.aiServices
-
-                    // Compute running AI tasks & total AI tasks matching MobileHomePage.vue (song song trên các AI Service)
-                    // Chỉ gọi Wave 2 khi có kết nối mạng và ít nhất 1 API Wave 1 thành công để tránh treo chờ timeout khi mất mạng/sập backend
-                    var runningTasks = 0
-                    var totalTasks = 0
                     val wave1Alive = NetworkMonitor.isNetworkAvailable() &&
                         (overviewResponse?.isSuccessful == true ||
                             byTypeSucceeded ||
-                            aiServiceResponse?.isSuccessful == true)
-                    val fallbackByTypeDeferred = if (
+                            recentEventsSucceeded)
+
+                    val fallbackByType = if (
                         !(byTypeSucceeded && byTypeBody.isNotEmpty()) &&
                         wave1Alive &&
                         UserPermissionManager.canAccessEvents()
                     ) {
-                        async {
-                            fetchEventCountsViaOverview(
-                                fromTime = fromTime,
-                                toTime = toTime,
-                                serviceIdStr = serviceIdStr,
-                                unfilteredOverviewStats = overviewStats,
-                                seedEvents = recentEvents
-                            )
-                        }
+                        fetchEventCountsViaOverview(
+                            fromTime = fromTime,
+                            toTime = toTime,
+                            serviceIdStr = serviceIdStr,
+                            unfilteredOverviewStats = overviewStats,
+                            seedEvents = recentEvents
+                        )
                     } else {
                         null
                     }
-                    if (wave1Alive && UserPermissionManager.canAccessEvents()) {
-                        try {
-                            val targetServices = if (serviceId != null) {
-                                aiServices.filter { it.id == serviceId }
-                            } else {
-                                aiServices
-                            }
-                            if (targetServices.isEmpty()) {
-                                val monResp = dashboardRepository.getMonitorList()
-                                if (monResp.isSuccessful) {
-                                    val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                                    totalTasks = monitors.size
-                                    runningTasks = monitors.count { it.enabled }
-                                }
-                            } else {
-                                val monitorResults = targetServices.map { srv ->
-                                    async {
-                                        val host = srv.publicHost.ifBlank { srv.privateHost }.trimEnd('/')
-                                        srv.id to safeApiCall {
-                                            if (host.isNotBlank() && srv.id != 0) {
-                                                dashboardRepository.getMonitorListExt(
-                                                    url = "$host/api/Monitor",
-                                                    authHeader = "Bearer ${srv.apiKey}"
-                                                )
-                                            } else {
-                                                dashboardRepository.getMonitorList()
-                                            }
-                                        }.getOrNull()
-                                    }
-                                }.map { it.await() }
 
-                                val isCustomUserAi = UserPermissionManager.isCustomAiEventPermission()
-                                for ((srvId, monResp) in monitorResults) {
-                                    if (monResp != null && monResp.isSuccessful) {
-                                        val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-                                        totalTasks += monitors.size
-                                        runningTasks += monitors.count { it.enabled }
-                                    } else if (!isCustomUserAi) {
-                                        val srvIdStr = srvId.toString()
-                                        val srvTotal = overviewStats
-                                            .find { it.label == "monitor-count" && it.tag == "item" && it.serviceId == srvIdStr }
-                                            ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                                        val srvRunning = overviewStats
-                                            .find { it.label == "monitor-enabled-count" && it.tag == "item" && it.serviceId == srvIdStr }
-                                            ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                                        totalTasks += srvTotal
-                                        runningTasks += srvRunning
-                                    }
-                                }
-                            }
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
-                        }
-                    }
-                    if (totalTasks == 0 && UserPermissionManager.canAccessEvents() && !UserPermissionManager.isCustomAiEventPermission()) {
-                        val srvIdStr = serviceId?.toString()
-                        val overviewMonitorCount = if (srvIdStr != null) {
-                            overviewStats
-                                .find { it.label == "monitor-count" && it.tag == "item" && it.serviceId == srvIdStr }
-                                ?.count?.toString()?.toDoubleOrNull()?.toInt()
-                                ?: overviewStats
-                                    .find { it.label == "monitor-count" && it.tag == "all" }
-                                    ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                        } else {
-                            overviewStats
-                                .find { it.label == "monitor-count" && it.tag == "all" }
-                                ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                        }
-                        val overviewEnabledCount = if (srvIdStr != null) {
-                            overviewStats
-                                .find { it.label == "monitor-enabled-count" && it.tag == "item" && it.serviceId == srvIdStr }
-                                ?.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0
-                        } else {
-                            overviewStats
-                                .filter { it.label == "monitor-enabled-count" }
-                                .sumOf { it.count?.toString()?.toDoubleOrNull()?.toInt() ?: 0 }
-                        }
-                        if (overviewMonitorCount > 0) {
-                            totalTasks = overviewMonitorCount
-                            runningTasks = when {
-                                overviewEnabledCount > 0 -> overviewEnabledCount
-                                _uiState.value.runningAiTasks > 0 -> _uiState.value.runningAiTasks
-                                else -> 0
-                            }
-                        } else {
-                            totalTasks = _uiState.value.totalAiTasks
-                            runningTasks = _uiState.value.runningAiTasks
-                        }
-                    }
-
-                    val fallbackByType = fallbackByTypeDeferred?.await()
                     val (eventsByType, hasLoadedEventsByType) = when {
                         byTypeSucceeded && byTypeBody.isNotEmpty() -> {
                             lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
@@ -965,61 +947,147 @@ class HomeViewModel(
                         }
                     }
 
-                    // Báo lỗi backend kể cả khi đã có dữ liệu cache hiển thị trên màn hình
+                    val initialCameraList = if (earlyCameraResponse?.isSuccessful == true) {
+                        earlyCameraResponse.body() ?: emptyList()
+                    } else {
+                        dashboardRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
+                    }
+                    val initialPermittedCameras = UserPermissionManager.filterPermittedCameras(initialCameraList)
+                    val (preliminaryRunningTasks, preliminaryTotalTasks) = resolveMonitorCountsFromOverview(
+                        overviewStats = overviewStats,
+                        serviceIdStr = serviceIdStr,
+                        fallbackRunning = _uiState.value.runningAiTasks,
+                        fallbackTotal = _uiState.value.totalAiTasks
+                    )
+
                     val primaryFailure = overviewResult.exceptionOrNull()
                         ?: recentResult.firstError
                         ?: byTypeResult.exceptionOrNull()
-                        ?: cameraResult.exceptionOrNull()
+                        ?: earlyCameraResult?.exceptionOrNull()
                     val errorMsg = primaryFailure?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() }
 
                     if (UserSession.accessToken.isEmpty()) return@coroutineScope
 
-                    val rawFinalRecentEvents = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
-                        recentEvents
-                    } else {
-                        _uiState.value.recentEvents
-                    }
-                    val finalRecentEvents = rawFinalRecentEvents
-                        .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
-                        .permittedDistinct(allCameraList)
-                        .distinctBy { it.id }
-                        .take(MAX_RECENT_EVENTS)
+                    val fetchedMaxId = recentEvents.maxOfOrNull { it.id } ?: 0
+                    val stage1State = withContext(Dispatchers.Default) {
+                        val cur = _uiState.value
+                        val newerRealtime = if (recentEventsSucceeded || recentEvents.isNotEmpty() || cachedData == null) {
+                            cur.recentEvents.filter { it.id > fetchedMaxId }
+                        } else {
+                            cur.recentEvents
+                        }
+                        val mergedRecent = (newerRealtime + recentEvents)
+                            .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                            .permittedDistinct(initialCameraList)
+                            .distinctBy { it.id }
+                            .sortedWith(EventDescendingComparator)
+                            .take(MAX_RECENT_EVENTS)
 
-                    dashboardRepository.cacheInMemory(
-                        events = finalRecentEvents,
-                        cameras = allCameraList,
-                        aiServices = aiServices,
-                        fromNetwork = cameraResponse?.isSuccessful == true
-                    )
-
-                    val nextState = withContext(Dispatchers.Default) {
-                        _uiState.value.copy(
+                        cur.copy(
                             isLoading = false,
                             isRefreshing = false,
                             overviewStats = overviewStats,
                             eventsByType = eventsByType,
                             hasLoadedEventsByType = hasLoadedEventsByType,
-                            cameraList = permittedCameraList,
-                            aiServices = aiServices,
-                            recentEvents = finalRecentEvents,
-                            runningAiTasks = runningTasks,
-                            totalAiTasks = totalTasks,
+                            cameraList = initialPermittedCameras,
+                            recentEvents = mergedRecent,
+                            runningAiTasks = preliminaryRunningTasks,
+                            totalAiTasks = preliminaryTotalTasks,
                             error = errorMsg
                         ).withRecomputedMetrics()
                     }
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
                     }
-                    _uiState.value = nextState
+                    _uiState.value = stage1State
+
+                    // --- GIAI ĐOẠN 2 (chạy nền sau khi đã tắt vòng xoay refresh): Đồng bộ Camera, AI Services & số bài AI đang chạy ---
+                    val cameraResult = earlyCameraResult ?: cameraDeferred.await()
+                    val aiServiceResult = aiServiceDeferred.await()
+                    val cameraResponse = cameraResult.getOrNull()
+                    val aiServiceResponse = aiServiceResult.getOrNull()
+
+                    if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
+                        return@coroutineScope
+                    }
+
+                    val allCameraList = if (cameraResponse?.isSuccessful == true) {
+                        cameraResponse.body() ?: emptyList()
+                    } else {
+                        dashboardRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
+                    }
+                    val permittedCameraList = UserPermissionManager.filterPermittedCameras(allCameraList)
+                    val aiServices = if (aiServiceResponse?.isSuccessful == true) {
+                        aiServiceResponse.body() ?: emptyList()
+                    } else {
+                        _uiState.value.aiServices
+                    }
+
+                    var runningTasks = preliminaryRunningTasks
+                    var totalTasks = preliminaryTotalTasks
+                    val canProbeMonitors = NetworkMonitor.isNetworkAvailable() &&
+                        UserPermissionManager.canAccessEvents() &&
+                        (wave1Alive || aiServiceResponse?.isSuccessful == true)
+
+                    if (canProbeMonitors) {
+                        val probedCounts = fetchActiveAiTaskCounts(
+                            serviceId = serviceId,
+                            aiServices = aiServices,
+                            overviewStats = overviewStats
+                        )
+                        if (probedCounts != null && probedCounts.second > 0) {
+                            runningTasks = probedCounts.first
+                            totalTasks = probedCounts.second
+                        }
+                    }
+
+                    if (UserSession.accessToken.isEmpty()) return@coroutineScope
+
+                    val latestRecentForCache = withContext(Dispatchers.Default) {
+                        _uiState.value.recentEvents
+                            .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                            .permittedDistinct(allCameraList)
+                            .distinctBy { it.id }
+                            .sortedWith(EventDescendingComparator)
+                            .take(MAX_RECENT_EVENTS)
+                    }
+
+                    dashboardRepository.cacheInMemory(
+                        events = latestRecentForCache,
+                        cameras = allCameraList,
+                        aiServices = aiServices,
+                        fromNetwork = cameraResponse?.isSuccessful == true
+                    )
+
+                    val stage2State = withContext(Dispatchers.Default) {
+                        val cur = _uiState.value
+                        val cleanedRecent = cur.recentEvents
+                            .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                            .permittedDistinct(allCameraList)
+                            .distinctBy { it.id }
+                            .sortedWith(EventDescendingComparator)
+                            .take(MAX_RECENT_EVENTS)
+                        cur.copy(
+                            cameraList = permittedCameraList,
+                            aiServices = aiServices,
+                            recentEvents = if (cleanedRecent == cur.recentEvents) cur.recentEvents else cleanedRecent,
+                            runningAiTasks = runningTasks,
+                            totalAiTasks = totalTasks
+                        ).withRecomputedMetrics()
+                    }
+                    if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
+                        return@coroutineScope
+                    }
+                    _uiState.value = stage2State
 
                     if (overviewResponse?.isSuccessful == true || byTypeSucceeded || fallbackByType != null || recentEventsSucceeded) {
                         val newCachedData = CachedHomeData(
-                            overviewStats = overviewStats,
-                            eventsByType = eventsByType,
-                            hasLoadedEventsByType = hasLoadedEventsByType,
+                            overviewStats = stage2State.overviewStats,
+                            eventsByType = stage2State.eventsByType,
+                            hasLoadedEventsByType = stage2State.hasLoadedEventsByType,
                             cameraList = allCameraList,
                             aiServices = aiServices,
-                            recentEvents = finalRecentEvents,
+                            recentEvents = stage2State.recentEvents,
                             runningAiTasks = runningTasks,
                             totalAiTasks = totalTasks,
                             updatedAt = System.currentTimeMillis()
@@ -1045,6 +1113,152 @@ class HomeViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private fun isPrivateOrLoopbackHost(host: String): Boolean {
+        val h = host.trim().lowercase()
+        if (h.isEmpty()) return false
+        if (h == "localhost" || h.startsWith("127.") || h.startsWith("10.") || h.startsWith("192.168.")) {
+            return true
+        }
+        if (h.startsWith("172.")) {
+            val second = h.removePrefix("172.").substringBefore('.').toIntOrNull()
+            if (second != null && second in 16..31) return true
+        }
+        return false
+    }
+
+    /**
+     * Khớp hoàn toàn với `fetchMonitorList` trong `web_bundle.js`:
+     * - Tuyệt đối không fallback sang `srv.privateHost` (IP nội bộ của AI Box khiến app treo chờ TCP timeout).
+     * - Nếu domain đang đăng nhập là tên miền Internet công khai mà `srv.publicHost` lại khai báo IP nội bộ LAN/loopback,
+     *   bỏ qua ngay ở 0ms và dùng số liệu từ `overviewStats`.
+     */
+    private fun resolveReachableExternalMonitorUrl(srv: AIServiceModel): String? {
+        val pub = srv.publicHost.trim().trimEnd('/')
+        if (pub.isEmpty()) return null
+        if (pub.startsWith("/")) return "$pub/api/Monitor"
+        val parsedExt = pub.toHttpUrlOrNull() ?: return null
+        val mainDomainHost = UserSession.domain.trim().toHttpUrlOrNull()?.host.orEmpty()
+        if (isPrivateOrLoopbackHost(parsedExt.host) && !isPrivateOrLoopbackHost(mainDomainHost)) {
+            return null
+        }
+        return "$pub/api/Monitor"
+    }
+
+    private fun resolveMonitorCountsFromOverview(
+        overviewStats: List<VmsCountOverviewModel>,
+        serviceIdStr: String?,
+        fallbackRunning: Int,
+        fallbackTotal: Int
+    ): Pair<Int, Int> {
+        if (!UserPermissionManager.canAccessEvents() || UserPermissionManager.isCustomAiEventPermission()) {
+            return fallbackRunning to fallbackTotal
+        }
+        val overviewMonitorCount = if (serviceIdStr != null) {
+            overviewStats
+                .find { it.label == "monitor-count" && it.tag == "item" && it.serviceId == serviceIdStr }
+                ?.count?.toInt()
+                ?: overviewStats
+                    .find { it.label == "monitor-count" && it.tag == "all" }
+                    ?.count?.toInt() ?: 0
+        } else {
+            overviewStats
+                .find { it.label == "monitor-count" && it.tag == "all" }
+                ?.count?.toInt() ?: 0
+        }
+        val overviewEnabledCount = if (serviceIdStr != null) {
+            overviewStats
+                .find { it.label == "monitor-enabled-count" && it.tag == "item" && it.serviceId == serviceIdStr }
+                ?.count?.toInt() ?: 0
+        } else {
+            overviewStats
+                .filter { it.label == "monitor-enabled-count" }
+                .sumOf { it.count.toInt() }
+        }
+        return if (overviewMonitorCount > 0) {
+            val runCnt = when {
+                overviewEnabledCount > 0 -> overviewEnabledCount
+                fallbackRunning > 0 -> fallbackRunning.coerceAtMost(overviewMonitorCount)
+                else -> 0
+            }
+            runCnt to overviewMonitorCount
+        } else {
+            fallbackRunning to fallbackTotal
+        }
+    }
+
+    private suspend fun fetchActiveAiTaskCounts(
+        serviceId: Int?,
+        aiServices: List<AIServiceModel>,
+        overviewStats: List<VmsCountOverviewModel>
+    ): Pair<Int, Int>? = coroutineScope {
+        try {
+            val targetServices = if (serviceId != null) {
+                aiServices.filter { it.id == serviceId }
+            } else {
+                aiServices
+            }
+            if (targetServices.isEmpty()) {
+                val monResp = withTimeoutOrNull(MONITOR_PROBE_TIMEOUT_MS) {
+                    safeApiCall { dashboardRepository.getMonitorList() }.getOrNull()
+                }
+                if (monResp?.isSuccessful == true) {
+                    val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                    return@coroutineScope monitors.count { it.enabled } to monitors.size
+                }
+                return@coroutineScope null
+            }
+
+            val monitorResults = targetServices.map { srv ->
+                async {
+                    srv.id to withTimeoutOrNull(MONITOR_PROBE_TIMEOUT_MS) {
+                        if (srv.id == 0) {
+                            safeApiCall { dashboardRepository.getMonitorList() }.getOrNull()
+                        } else {
+                            val extUrl = resolveReachableExternalMonitorUrl(srv)
+                            if (extUrl != null) {
+                                safeApiCall {
+                                    dashboardRepository.getMonitorListExt(
+                                        url = extUrl,
+                                        authHeader = "Bearer ${srv.apiKey}"
+                                    )
+                                }.getOrNull()
+                            } else {
+                                null
+                            }
+                        }
+                    }
+                }
+            }.awaitAll()
+
+            var runningTasks = 0
+            var totalTasks = 0
+            val isCustomUserAi = UserPermissionManager.isCustomAiEventPermission()
+            for ((srvId, monResp) in monitorResults) {
+                if (monResp != null && monResp.isSuccessful) {
+                    val monitors = (monResp.body() ?: emptyList()).filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                    totalTasks += monitors.size
+                    runningTasks += monitors.count { it.enabled }
+                } else if (!isCustomUserAi) {
+                    val srvIdStr = srvId.toString()
+                    val srvTotal = overviewStats
+                        .find { it.label == "monitor-count" && it.tag == "item" && it.serviceId == srvIdStr }
+                        ?.count?.toInt() ?: 0
+                    val srvRunning = overviewStats
+                        .find { it.label == "monitor-enabled-count" && it.tag == "item" && it.serviceId == srvIdStr }
+                        ?.count?.toInt() ?: 0
+                    totalTasks += srvTotal
+                    runningTasks += srvRunning
+                }
+            }
+            if (totalTasks > 0) runningTasks to totalTasks else null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (BuildConfig.DEBUG) Log.w(TAG, "Fallback monitor count from overviewStats", e)
+            null
+        }
     }
 
     private fun extractOverviewEventCount(
@@ -1364,12 +1578,16 @@ class HomeViewModel(
     companion object {
         private const val TAG = "HomeViewModel"
         private const val MAX_RECENT_EVENTS = 5
+        private const val FAST_RECENT_BATCH_SIZE = 15
+        private const val MEDIUM_RECENT_BATCH_SIZE = 25
         private const val RECENT_BATCH_SIZE = 50
         private const val MAX_BATCH_ATTEMPTS = 3
-        private const val NOTIFY_DEBOUNCE_MS = 600L
+        private const val REALTIME_MIN_INTERVAL_MS = 350L
+        private const val REALTIME_DB_COMMIT_RETRY_MS = 650L
+        private const val MONITOR_PROBE_TIMEOUT_MS = 2_800L
         private const val STATUS_DEBOUNCE_MS = 800L
         private const val BY_TYPE_WS_REFRESH_INTERVAL_MS = 10_000L
-        private const val MAX_OVERVIEW_BY_TYPE_CONCURRENCY = 8
+        private const val MAX_OVERVIEW_BY_TYPE_CONCURRENCY = 16
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

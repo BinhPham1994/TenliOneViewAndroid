@@ -147,6 +147,7 @@ class TokenAuthenticator : Authenticator {
                     Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
                 }
 
+                EventBus.emitTokenRefreshed(tokenModel.token)
                 tokenModel.token
             }
         }

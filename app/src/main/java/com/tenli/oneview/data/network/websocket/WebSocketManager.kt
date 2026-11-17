@@ -8,6 +8,7 @@ import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.CameraInfo
 import com.tenli.oneview.model.network.NotifyData
 import com.tenli.oneview.model.network.ReportPayload
+import com.tenli.oneview.util.EventBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +80,26 @@ class WebSocketManager(
     private val recordStatusLabelMap = HashMap<String, StatusLabel>()
     private val captureRedLatchSet = HashSet<String>()
 
+    init {
+        scope.launch {
+            EventBus.tokenRefreshed.collect { newToken ->
+                if (isAppInForeground && newToken.isNotEmpty()) {
+                    synchronized(notifyLock) {
+                        notifyClient?.reconnectIfTokenChanged(newToken)
+                    }
+                    if (reportsRequested && isReportsTabActive) {
+                        connectAllReports()
+                    }
+                }
+            }
+        }
+        scope.launch {
+            EventBus.realtimeEventHint.collect {
+                _notifyEvent.tryEmit(NotifyData(event = TOPIC_FCM_HINT))
+            }
+        }
+    }
+
     data class StatusLabel(val color: String, val label: String)
 
     /**
@@ -143,6 +164,36 @@ class WebSocketManager(
         synchronized(notifyLock) { notifyClient?.disconnect() }
         reportClients.values.forEach { it.disconnect() }
         reportClients.clear()
+    }
+
+    /**
+     * Gọi khi mạng mặc định của thiết bị chuyển đổi liền mạch (vd. Wi-Fi ↔ 4G/5G):
+     * chủ động đóng socket cũ (gắn với IP cũ đã rớt) và mở lại kết nối ngay lập tức, đồng thời báo UI bù dữ liệu.
+     */
+    fun onActiveNetworkChanged() {
+        if (!isAppInForeground || UserSession.accessToken.isEmpty()) return
+        val gen = sessionGeneration.get()
+        scope.launch {
+            if (gen != sessionGeneration.get() || !isAppInForeground || UserSession.accessToken.isEmpty()) return@launch
+            synchronized(notifyLock) {
+                val baseUrl = (desiredNotifyBaseUrl ?: UserSession.domain).trim()
+                if (baseUrl.isNotEmpty()) {
+                    desiredNotifyBaseUrl = baseUrl
+                    val wsUrl = ReconnectingWebSocket.toWsScheme(ReconnectingWebSocket.stripApiSuffix(baseUrl)) + "/Data/ws/Notify"
+                    val existing = notifyClient
+                    if (existing != null) {
+                        existing.forceReconnect(wsUrl)
+                    } else {
+                        connectNotify(baseUrl)
+                    }
+                }
+            }
+            if (reportsRequested && isReportsTabActive) {
+                reportClients.values.forEach { it.forceReconnect() }
+                connectAllReports()
+            }
+            _notifyEvent.tryEmit(NotifyData(event = TOPIC_APP_RESUMED))
+        }
     }
 
     /**
@@ -360,6 +411,8 @@ class WebSocketManager(
         private const val TOPIC_PONG = "pong"
         /** Sự kiện nội bộ phát khi app quay lại foreground sau khi socket bị tạm ngắt */
         const val TOPIC_APP_RESUMED = "app_resumed"
+        /** Tín hiệu dự phòng từ FCM ở foreground báo có sự kiện mới trên server */
+        const val TOPIC_FCM_HINT = "fcm_hint"
         /** Thời gian chờ trước khi đóng socket khi app vào nền (tránh đóng/mở liên tục khi chuyển app nhanh) */
         private const val BACKGROUND_GRACE_MS = 30_000L
         /** Thời gian chờ trước khi đóng các socket Report khi người dùng rời khỏi tab Trang chủ */

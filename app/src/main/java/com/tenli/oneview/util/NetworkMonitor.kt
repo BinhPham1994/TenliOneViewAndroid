@@ -76,6 +76,36 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
         }
     }.conflate().distinctUntilChanged().flowOn(dispatcherProvider.io)
 
+    /**
+     * Phát tín hiệu khi mạng mặc định của hệ thống đổi sang interface khác (vd. chuyển liền mạch Wi-Fi ↔ 4G/5G
+     * mà [isOnline] vẫn giữ nguyên `true`), để WebSocket chủ động kết nối lại ngay thay vì chờ TCP ping timeout.
+     */
+    val activeNetworkChanged: Flow<Unit> = callbackFlow {
+        var lastHandle: Long? = runCatching { connectivityManager.activeNetwork?.networkHandle }.getOrNull()
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val handle = network.networkHandle
+                val prev = lastHandle
+                lastHandle = handle
+                if (prev != null && prev != handle) {
+                    trySend(Unit)
+                }
+            }
+        }
+
+        val registered = runCatching {
+            connectivityManager.registerDefaultNetworkCallback(callback)
+            true
+        }.getOrDefault(false)
+
+        awaitClose {
+            if (registered) {
+                runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+            }
+        }
+    }.conflate().flowOn(dispatcherProvider.io)
+
     companion object {
         @Volatile
         private var appConnectivityManager: ConnectivityManager? = null

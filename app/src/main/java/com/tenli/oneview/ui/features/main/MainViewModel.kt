@@ -137,6 +137,13 @@ class MainViewModel(
                 }
             }
         }
+        viewModelScope.launch {
+            networkMonitor.activeNetworkChanged.collect {
+                if (UserSession.accessToken.isNotEmpty() && UserSession.domain.isNotBlank()) {
+                    webSocketManager.onActiveNetworkChanged()
+                }
+            }
+        }
     }
 
     private fun refreshPermissionsAndSyncNotifications() {

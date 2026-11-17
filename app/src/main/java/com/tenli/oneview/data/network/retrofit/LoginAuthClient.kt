@@ -42,6 +42,8 @@ object LoginAuthClient {
     private const val READ_TIMEOUT_SEC = 30L
     private const val WRITE_TIMEOUT_SEC = 60L
     private const val IMAGE_TIMEOUT_SEC = 15L
+    private const val FAST_PROBE_TIMEOUT_MS = 2_500L
+    private const val FAST_PROBE_CALL_TIMEOUT_MS = 3_000L
     private const val WS_PING_INTERVAL_SEC = 25L
     private const val MAX_REQUESTS = 64
     private const val MAX_REQUESTS_PER_HOST = 16
@@ -241,7 +243,31 @@ object LoginAuthClient {
             .build()
     }
 
+    /**
+     * Client timeout ngắn (2.5s) cho các API phụ kết nối trực tiếp tới host của từng AI Box (`getMonitorListExt`),
+     * tránh treo vòng xoay refresh 30s khi `publicHost` của AI Box nằm trong dải mạng nội bộ không mở ra ngoài.
+     */
+    private val fastProbeClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .connectTimeout(FAST_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .readTimeout(FAST_PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .callTimeout(FAST_PROBE_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .build()
+    }
+
+    private val fastProbeRetrofit: Retrofit by lazy {
+        Retrofit.Builder()
+            .baseUrl(HostResolver.PLACEHOLDER_BASE_URL)
+            .client(fastProbeClient)
+            .addConverterFactory(GsonConverterFactory.create(gson))
+            .build()
+    }
+
     fun <T> create(service: Class<T>): T {
         return retrofit.create(service)
+    }
+
+    fun <T> createFastProbe(service: Class<T>): T {
+        return fastProbeRetrofit.create(service)
     }
 }

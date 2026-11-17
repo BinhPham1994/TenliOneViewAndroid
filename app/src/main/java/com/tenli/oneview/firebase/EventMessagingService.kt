@@ -34,6 +34,7 @@ import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppState
+import com.tenli.oneview.util.EventBus
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -108,6 +109,9 @@ class EventMessagingService : FirebaseMessagingService() {
             }
             return
         }
+
+        // Phát tín hiệu làm mới danh sách sự kiện trên UI ngay lập tức khi có bản tin FCM (bảo hiểm song song với WebSocket)
+        EventBus.emitRealtimeEventHint()
 
         val prefs = runCatching { GlobalData.preferences }.getOrNull()
         if (prefs != null && !prefs.getBoolean("push_notifications_enabled", true)) {

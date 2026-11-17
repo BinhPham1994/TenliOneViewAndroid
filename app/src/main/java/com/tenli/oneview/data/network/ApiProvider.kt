@@ -16,4 +16,5 @@ object ApiProvider {
     val eventApi: EventApi by lazy { LoginAuthClient.create(EventApi::class.java) }
     val bsApi: BsApi by lazy { LoginAuthClient.create(BsApi::class.java) }
     val aiApi: AiApi by lazy { LoginAuthClient.create(AiApi::class.java) }
+    val fastAiApi: AiApi by lazy { LoginAuthClient.createFastProbe(AiApi::class.java) }
 }

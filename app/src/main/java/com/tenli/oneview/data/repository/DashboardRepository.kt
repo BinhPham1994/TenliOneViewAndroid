@@ -31,7 +31,7 @@ class DashboardRepository(
     private val vmsApi: VmsApi = ApiProvider.vmsApi,
     private val eventApi: EventApi = ApiProvider.eventApi,
     private val bsApi: BsApi = ApiProvider.bsApi,
-    private val aiApi: AiApi = ApiProvider.aiApi
+    private val aiApi: AiApi = ApiProvider.fastAiApi
 ) {
     private val appContext: Context = context.applicationContext
 
