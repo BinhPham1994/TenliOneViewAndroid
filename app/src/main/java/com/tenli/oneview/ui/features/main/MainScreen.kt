@@ -31,18 +31,15 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -79,6 +76,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -97,10 +95,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
@@ -128,6 +123,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
+import com.tenli.oneview.main.CallPermissionStep
+import com.tenli.oneview.main.CallPermissionStepSheet
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LocalMobileOverlayHost
 import com.tenli.oneview.ui.component.MobileNativeBottomSheet
@@ -1416,6 +1413,12 @@ private fun hasOverlayPermission(context: Context): Boolean {
     return com.tenli.oneview.ui.utils.PermissionUtils.isEmergencyCallPermissionGranted(context)
 }
 
+private sealed interface PendingCallActivation {
+    data class SwitchToCall(val moduleKey: String, val moduleEnabled: Boolean) : PendingCallActivation
+    data class EnableCallModule(val moduleKey: String) : PendingCallActivation
+    data object EnableMasterPush : PendingCallActivation
+}
+
 @Composable
 private fun MobileNotificationConfigScreen(
     viewModel: MainViewModel,
@@ -1425,15 +1428,60 @@ private fun MobileNotificationConfigScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val state by viewModel.notificationConfigState.collectAsStateWithLifecycle()
 
+    val scrollState = rememberScrollState()
+    var isAiModulesExpanded by rememberSaveable { mutableStateOf(false) }
+
     var hasOsPermission by remember { mutableStateOf(hasOsNotificationPermission(context)) }
     var hasOverlayPerm by remember { mutableStateOf(hasOverlayPermission(context)) }
-    var showOverlayPermissionPrompt by remember { mutableStateOf(false) }
+    var hasBatteryPerm by remember {
+        mutableStateOf(com.tenli.oneview.ui.utils.PermissionUtils.isIgnoringBattery(context))
+    }
+    var pendingCallActivation by remember { mutableStateOf<PendingCallActivation?>(null) }
+    val isChinesePhone = remember { com.tenli.oneview.ui.utils.PermissionUtils.isChineseOemDevice() }
+
+    val tryCompletePendingCallActivation: () -> Unit = {
+        val osOk = hasOsNotificationPermission(context)
+        val overlayOk = hasOverlayPermission(context)
+        val batteryOk = com.tenli.oneview.ui.utils.PermissionUtils.isIgnoringBattery(context)
+        hasOsPermission = osOk
+        hasOverlayPerm = overlayOk
+        hasBatteryPerm = batteryOk
+
+        when (val pending = pendingCallActivation) {
+            null -> Unit
+            is PendingCallActivation.SwitchToCall -> {
+                if (osOk && overlayOk && batteryOk) {
+                    pendingCallActivation = null
+                    viewModel.updateAiModuleNotifyConfig(
+                        moduleKey = pending.moduleKey,
+                        enabled = pending.moduleEnabled,
+                        alarmMode = AiAlarmMode.Call
+                    )
+                }
+            }
+            is PendingCallActivation.EnableCallModule -> {
+                if (osOk && overlayOk && batteryOk) {
+                    pendingCallActivation = null
+                    viewModel.updateAiModuleNotifyConfig(
+                        moduleKey = pending.moduleKey,
+                        enabled = true,
+                        alarmMode = AiAlarmMode.Call
+                    )
+                }
+            }
+            PendingCallActivation.EnableMasterPush -> {
+                if (osOk && overlayOk && batteryOk) {
+                    pendingCallActivation = null
+                    viewModel.setPushNotificationsEnabled(true, hasOsPermission = true)
+                }
+            }
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                hasOsPermission = hasOsNotificationPermission(context)
-                hasOverlayPerm = hasOverlayPermission(context)
+                tryCompletePendingCallActivation()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1455,15 +1503,15 @@ private fun MobileNotificationConfigScreen(
     val openOverlayPermissionSettings: () -> Unit = {
         com.tenli.oneview.ui.utils.PermissionUtils.openEmergencyCallPermissionSettings(
             context = context,
-            preferManufacturerSettings = false
+            preferManufacturerSettings = isChinesePhone
         )
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
-        hasOsPermission = hasOsNotificationPermission(context)
-        if (!granted && !hasOsPermission) {
+        tryCompletePendingCallActivation()
+        if (!granted && !hasOsPermission && pendingCallActivation == null) {
             openAppNotificationSettings()
         }
     }
@@ -1482,47 +1530,31 @@ private fun MobileNotificationConfigScreen(
     var pendingPushState by remember { mutableStateOf<Boolean?>(null) }
 
     val applyPushNotificationChange: (Boolean) -> Unit = { nextVal ->
-        if (nextVal && !hasOsPermission) {
-            requestOrOpenPermission()
+        val hasAnyCallSelected = state.aiModules.any { it.enabled && it.alarmMode == AiAlarmMode.Call }
+        val allCallPermsGranted = hasOsPermission && hasOverlayPerm && hasBatteryPerm
+        if (nextVal && hasAnyCallSelected && !allCallPermsGranted) {
+            // Không cho phép bật thông báo cho các bài AI đang đặt chế độ Cuộc gọi nếu người dùng chưa cấp đủ quyền
+            pendingCallActivation = PendingCallActivation.EnableMasterPush
+        } else {
+            if (nextVal && !hasOsPermission) {
+                requestOrOpenPermission()
+            }
+            viewModel.setPushNotificationsEnabled(nextVal, hasOsPermission)
         }
-        viewModel.setPushNotificationsEnabled(nextVal, hasOsPermission)
     }
 
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val backgroundColor = colors.pageBg
-    var isSearchExpanded by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-    val searchFocusRequester = remember { FocusRequester() }
-    val currentSearchQuery by rememberUpdatedState(searchQuery)
-    val dismissKeyboard: () -> Unit = remember(focusManager, keyboardController) {
-        {
-            focusManager.clearFocus()
-            keyboardController?.hide()
-            if (currentSearchQuery.isEmpty()) {
-                isSearchExpanded = false
-            }
-        }
-    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { dismissKeyboard() }
-            )
     ) {
         SettingSubPageHeader(
             title = stringResource(id = R.string.setting_notifications),
-            onBackClick = {
-                dismissKeyboard()
-                onBackClick()
-            }
+            onBackClick = onBackClick
         )
 
         if (state.isLoading) {
@@ -1535,14 +1567,11 @@ private fun MobileNotificationConfigScreen(
                 WaveDotsLoading(dotColor = colors.accent)
             }
         } else {
-            val scrollState = rememberScrollState()
-            var aiSectionTopPx by remember { mutableIntStateOf(0) }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .navigationBarsPadding()
-                    .imePadding(),
+                    .navigationBarsPadding(),
                 contentAlignment = Alignment.TopCenter
             ) {
                 Column(
@@ -1554,7 +1583,7 @@ private fun MobileNotificationConfigScreen(
                 ) {
                     val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space6)
 
-                    // 1. Device Permission Status Card (Thông báo + Hiển thị cuộc gọi trên ứng dụng khác)
+                    // 1. Device Permission Status Card (Giữ chiều cao cố định để khi bật/tắt Cuộc gọi không làm nhảy hay cuộn trang lên đầu)
                     SettingsSectionHeader(
                         text = if (isEn) "Device Permissions" else "Quyền trên thiết bị",
                         modifier = sectionHeaderModifier
@@ -1590,46 +1619,6 @@ private fun MobileNotificationConfigScreen(
                                 )
                             }
                         }
-
-                        HorizontalDivider(
-                            color = colors.divider,
-                            thickness = spacing.borderThin
-                        )
-
-                        if (hasOverlayPerm) {
-                            NotificationSettingRow(
-                                icon = LucideIcons.PhoneCall,
-                                iconColor = colors.success,
-                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
-                                subtitle = if (isEn) {
-                                    "Allows incoming call alerts to pop up over other apps."
-                                } else {
-                                    "Cho phép bật màn hình cuộc gọi cảnh báo đè lên ứng dụng khác."
-                                }
-                            ) {
-                                StatusChip(
-                                    text = if (isEn) "Enabled" else "Đang bật",
-                                    color = colors.success
-                                )
-                            }
-                        } else {
-                            NotificationSettingRow(
-                                icon = LucideIcons.PhoneCall,
-                                iconColor = colors.warning,
-                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
-                                subtitle = if (isEn) {
-                                    "Required to pop up the incoming call screen when the app is in background."
-                                } else {
-                                    "Cần cấp quyền hiển thị trên ứng dụng khác để bật màn hình cuộc gọi khi có cảnh báo."
-                                }
-                            ) {
-                                StatusChip(
-                                    text = if (isEn) "Grant now" else "Cấp quyền ngay",
-                                    color = colors.accent,
-                                    onClick = openOverlayPermissionSettings
-                                )
-                            }
-                        }
                     }
 
                     Spacer(modifier = Modifier.height(spacing.space18))
@@ -1656,7 +1645,6 @@ private fun MobileNotificationConfigScreen(
                                 checked = state.pushEnabled,
                                 enabled = !state.isSaving,
                                 onCheckedChange = { nextVal ->
-                                    dismissKeyboard()
                                     pendingPushState = nextVal
                                 },
                                 colors = SwitchDefaults.colors(
@@ -1669,68 +1657,14 @@ private fun MobileNotificationConfigScreen(
 
                     // 3. Cấu hình chi tiết theo từng bài AI (overrides.event_types) - Gom gọn trong 1 Card + Thu gọn/Mở rộng
                     if (state.aiModules.isNotEmpty()) {
-                        var isAiModulesExpanded by remember { mutableStateOf(false) }
-                        var selectedFilter by remember { mutableStateOf<AiNotifyFilter?>(null) }
-
-                        LaunchedEffect(isSearchExpanded) {
-                            if (isSearchExpanded) {
-                                delay(32L)
-                                runCatching { searchFocusRequester.requestFocus() }
-                                keyboardController?.show()
-                                delay(180L)
-                                val targetScroll = aiSectionTopPx.coerceAtMost(scrollState.maxValue)
-                                if (targetScroll > scrollState.value) {
-                                    scrollState.animateScrollTo(targetScroll)
-                                }
-                            } else {
-                                focusManager.clearFocus()
-                                keyboardController?.hide()
-                            }
-                        }
-
-                        BackHandler(enabled = isSearchExpanded) {
-                            searchQuery = ""
-                            isSearchExpanded = false
-                        }
-
                         val previewCount = 3
-                        val normalizedQuery = remember(searchQuery) {
-                            MonitorViewModel.normalizeVietnameseText(searchQuery)
+                        val primaryModules = remember(state.aiModules) {
+                            state.aiModules.take(previewCount)
                         }
-                        val filteredModules = remember(state.aiModules, selectedFilter, normalizedQuery) {
-                            val byStatus = when (selectedFilter) {
-                                null -> state.aiModules
-                                AiNotifyFilter.Call -> state.aiModules.filter { it.enabled && it.alarmMode == AiAlarmMode.Call }
-                                AiNotifyFilter.Push -> state.aiModules.filter { it.enabled && it.alarmMode == AiAlarmMode.Push }
-                                AiNotifyFilter.Off -> state.aiModules.filter { !it.enabled }
-                            }
-                            if (normalizedQuery.isEmpty()) {
-                                byStatus
-                            } else {
-                                byStatus.filter { mod ->
-                                    MonitorViewModel.normalizeVietnameseText(mod.labelVi).contains(normalizedQuery) ||
-                                        MonitorViewModel.normalizeVietnameseText(mod.labelEn).contains(normalizedQuery) ||
-                                        mod.moduleKey.lowercase().contains(normalizedQuery)
-                                }
-                            }
+                        val extraModules = remember(state.aiModules) {
+                            state.aiModules.drop(previewCount)
                         }
-                        val isSearchingByText = normalizedQuery.isNotEmpty()
-                        val primaryModules = remember(filteredModules, isSearchingByText) {
-                            if (isSearchingByText) filteredModules else filteredModules.take(previewCount)
-                        }
-                        val extraModules = remember(filteredModules, isSearchingByText) {
-                            if (isSearchingByText) emptyList() else filteredModules.drop(previewCount)
-                        }
-                        val callCount = remember(state.aiModules) {
-                            state.aiModules.count { it.enabled && it.alarmMode == AiAlarmMode.Call }
-                        }
-                        val pushCount = remember(state.aiModules) {
-                            state.aiModules.count { it.enabled && it.alarmMode == AiAlarmMode.Push }
-                        }
-                        val offCount = remember(state.aiModules) {
-                            state.aiModules.count { !it.enabled }
-                        }
-                        val chevronRotation by animateFloatAsState(
+                        val chevronRotationState = animateFloatAsState(
                             targetValue = if (isAiModulesExpanded) 180f else 0f,
                             animationSpec = tween(220),
                             label = "aiModulesChevron"
@@ -1740,9 +1674,7 @@ private fun MobileNotificationConfigScreen(
 
                         SettingsSectionHeader(
                             text = if (isEn) "AI Event Alert Configuration" else "Cấu hình thông báo theo bài AI",
-                            modifier = sectionHeaderModifier.onGloballyPositioned { coords ->
-                                aiSectionTopPx = coords.positionInParent().y.toInt()
-                            }
+                            modifier = sectionHeaderModifier
                         )
 
                         Box(
@@ -1751,82 +1683,6 @@ private fun MobileNotificationConfigScreen(
                                 .alpha(if (state.pushEnabled) 1f else 0.5f)
                         ) {
                             SettingsGroupCard {
-                                // Thanh tóm tắt trạng thái các bài AI ở đầu thẻ + nút tìm kiếm theo tên bài AI bên phải
-                                AiNotifySummaryBar(
-                                    isEn = isEn,
-                                    pushCount = pushCount,
-                                    callCount = callCount,
-                                    offCount = offCount,
-                                    selectedFilter = selectedFilter,
-                                    onFilterClick = { clickedFilter ->
-                                        dismissKeyboard()
-                                        selectedFilter = if (selectedFilter == clickedFilter) null else clickedFilter
-                                    },
-                                    isSearchExpanded = isSearchExpanded,
-                                    onSearchExpandChange = { expanded ->
-                                        isSearchExpanded = expanded
-                                        if (!expanded) {
-                                            searchQuery = ""
-                                        }
-                                    },
-                                    searchQuery = searchQuery,
-                                    onSearchQueryChange = { searchQuery = it },
-                                    searchFocusRequester = searchFocusRequester,
-                                    onClearOrCloseSearch = {
-                                        if (searchQuery.isNotEmpty()) {
-                                            searchQuery = ""
-                                            runCatching { searchFocusRequester.requestFocus() }
-                                            keyboardController?.show()
-                                        } else {
-                                            isSearchExpanded = false
-                                        }
-                                    },
-                                    onImeSearch = dismissKeyboard
-                                )
-
-                                HorizontalDivider(
-                                    color = colors.divider,
-                                    thickness = spacing.borderThin
-                                )
-
-                                if (filteredModules.isEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = spacing.space14, vertical = spacing.space20),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = when {
-                                                isSearchingByText -> if (isEn) {
-                                                    "No matching AI modules found"
-                                                } else {
-                                                    "Không tìm thấy bài AI phù hợp"
-                                                }
-                                                selectedFilter == AiNotifyFilter.Call -> if (isEn) {
-                                                    "No AI modules are set to Incoming Call"
-                                                } else {
-                                                    "Chưa có bài AI nào đặt chế độ Cuộc gọi"
-                                                }
-                                                selectedFilter == AiNotifyFilter.Push -> if (isEn) {
-                                                    "No AI modules are set to Notification"
-                                                } else {
-                                                    "Chưa có bài AI nào đặt chế độ Thông báo"
-                                                }
-                                                selectedFilter == AiNotifyFilter.Off -> if (isEn) {
-                                                    "No AI modules are turned off"
-                                                } else {
-                                                    "Chưa có bài AI nào đang tắt thông báo"
-                                                }
-                                                else -> ""
-                                            },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = colors.textMuted,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                }
-
                                 // Danh sách các bài AI hiển thị mặc định (giữ nguyên thứ tự gốc)
                                 primaryModules.forEachIndexed { index, moduleConfig ->
                                     androidx.compose.runtime.key(moduleConfig.moduleKey) {
@@ -1841,25 +1697,42 @@ private fun MobileNotificationConfigScreen(
                                             isEn = isEn,
                                             masterEnabled = state.pushEnabled,
                                             hasOverlayPermission = hasOverlayPerm,
+                                            hasBatteryPermission = hasBatteryPerm,
                                             onToggleEnabled = { nextEnabled ->
-                                                dismissKeyboard()
-                                                viewModel.updateAiModuleNotifyConfig(
-                                                    moduleKey = moduleConfig.moduleKey,
-                                                    enabled = nextEnabled,
-                                                    alarmMode = moduleConfig.alarmMode
-                                                )
+                                                val allCallPermsGranted = hasOsPermission && hasOverlayPerm && hasBatteryPerm
+                                                if (nextEnabled &&
+                                                    state.pushEnabled &&
+                                                    moduleConfig.alarmMode == AiAlarmMode.Call &&
+                                                    !allCallPermsGranted
+                                                ) {
+                                                    // Chưa cấp đủ quyền Cuộc gọi -> chưa bật thông báo cho bài AI này; nếu bấm "Để sau" hoặc ẩn đi sẽ giữ nguyên tắt
+                                                    pendingCallActivation = PendingCallActivation.EnableCallModule(moduleConfig.moduleKey)
+                                                } else {
+                                                    viewModel.updateAiModuleNotifyConfig(
+                                                        moduleKey = moduleConfig.moduleKey,
+                                                        enabled = nextEnabled,
+                                                        alarmMode = moduleConfig.alarmMode
+                                                    )
+                                                }
                                             },
                                             onSelectAlarmMode = { nextMode ->
-                                                dismissKeyboard()
-                                                if (nextMode != moduleConfig.alarmMode) {
+                                                val allCallPermsGranted = hasOsPermission && hasOverlayPerm && hasBatteryPerm
+                                                if (nextMode == AiAlarmMode.Call &&
+                                                    state.pushEnabled &&
+                                                    moduleConfig.enabled &&
+                                                    !allCallPermsGranted
+                                                ) {
+                                                    // Chưa cấp đủ quyền Cuộc gọi -> chưa chuyển sang Cuộc gọi; nếu bấm "Để sau" hoặc ẩn đi sẽ giữ nguyên Thông báo
+                                                    pendingCallActivation = PendingCallActivation.SwitchToCall(
+                                                        moduleKey = moduleConfig.moduleKey,
+                                                        moduleEnabled = moduleConfig.enabled
+                                                    )
+                                                } else if (nextMode != moduleConfig.alarmMode) {
                                                     viewModel.updateAiModuleNotifyConfig(
                                                         moduleKey = moduleConfig.moduleKey,
                                                         enabled = moduleConfig.enabled,
                                                         alarmMode = nextMode
                                                     )
-                                                }
-                                                if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
-                                                    showOverlayPermissionPrompt = true
                                                 }
                                             }
                                         )
@@ -1885,25 +1758,40 @@ private fun MobileNotificationConfigScreen(
                                                         isEn = isEn,
                                                         masterEnabled = state.pushEnabled,
                                                         hasOverlayPermission = hasOverlayPerm,
+                                                        hasBatteryPermission = hasBatteryPerm,
                                                         onToggleEnabled = { nextEnabled ->
-                                                            dismissKeyboard()
-                                                            viewModel.updateAiModuleNotifyConfig(
-                                                                moduleKey = moduleConfig.moduleKey,
-                                                                enabled = nextEnabled,
-                                                                alarmMode = moduleConfig.alarmMode
-                                                            )
+                                                            val allCallPermsGranted = hasOsPermission && hasOverlayPerm && hasBatteryPerm
+                                                            if (nextEnabled &&
+                                                                state.pushEnabled &&
+                                                                moduleConfig.alarmMode == AiAlarmMode.Call &&
+                                                                !allCallPermsGranted
+                                                            ) {
+                                                                pendingCallActivation = PendingCallActivation.EnableCallModule(moduleConfig.moduleKey)
+                                                            } else {
+                                                                viewModel.updateAiModuleNotifyConfig(
+                                                                    moduleKey = moduleConfig.moduleKey,
+                                                                    enabled = nextEnabled,
+                                                                    alarmMode = moduleConfig.alarmMode
+                                                                )
+                                                            }
                                                         },
                                                         onSelectAlarmMode = { nextMode ->
-                                                            dismissKeyboard()
-                                                            if (nextMode != moduleConfig.alarmMode) {
+                                                            val allCallPermsGranted = hasOsPermission && hasOverlayPerm && hasBatteryPerm
+                                                            if (nextMode == AiAlarmMode.Call &&
+                                                                state.pushEnabled &&
+                                                                moduleConfig.enabled &&
+                                                                !allCallPermsGranted
+                                                            ) {
+                                                                pendingCallActivation = PendingCallActivation.SwitchToCall(
+                                                                    moduleKey = moduleConfig.moduleKey,
+                                                                    moduleEnabled = moduleConfig.enabled
+                                                                )
+                                                            } else if (nextMode != moduleConfig.alarmMode) {
                                                                 viewModel.updateAiModuleNotifyConfig(
                                                                     moduleKey = moduleConfig.moduleKey,
                                                                     enabled = moduleConfig.enabled,
                                                                     alarmMode = nextMode
                                                                 )
-                                                            }
-                                                            if (nextMode == AiAlarmMode.Call && !hasOverlayPerm) {
-                                                                showOverlayPermissionPrompt = true
                                                             }
                                                         }
                                                     )
@@ -1922,7 +1810,6 @@ private fun MobileNotificationConfigScreen(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable {
-                                                dismissKeyboard()
                                                 isAiModulesExpanded = !isAiModulesExpanded
                                             }
                                             .padding(horizontal = spacing.space14, vertical = spacing.space12),
@@ -1934,9 +1821,9 @@ private fun MobileNotificationConfigScreen(
                                                 if (isEn) "Show less" else "Thu gọn danh sách"
                                             } else {
                                                 if (isEn) {
-                                                    "View all ${filteredModules.size} AI modules (+${extraModules.size})"
+                                                    "View all ${state.aiModules.size} AI modules (+${extraModules.size})"
                                                 } else {
-                                                    "Xem tất cả ${filteredModules.size} bài AI (+${extraModules.size} bài khác)"
+                                                    "Xem tất cả ${state.aiModules.size} bài AI (+${extraModules.size} bài khác)"
                                                 }
                                             },
                                             style = MaterialTheme.typography.labelMedium,
@@ -1950,7 +1837,7 @@ private fun MobileNotificationConfigScreen(
                                             tint = colors.accent,
                                             modifier = Modifier
                                                 .size(spacing.iconSmall)
-                                                .graphicsLayer { rotationZ = chevronRotation }
+                                                .graphicsLayer { rotationZ = chevronRotationState.value }
                                         )
                                     }
                                 }
@@ -2006,238 +1893,34 @@ private fun MobileNotificationConfigScreen(
             }
         }
 
-        // Bottom Sheet nhắc cấp quyền Hiển thị trên ứng dụng khác khi chọn hình thức "Cuộc gọi"
-        if (showOverlayPermissionPrompt) {
-            MobileNativeBottomSheet(
-                title = null,
-                onDismiss = { showOverlayPermissionPrompt = false }
-            ) {
-                ConfirmSheetMessage(
-                    icon = LucideIcons.PhoneCall,
-                    accentColor = colors.accent,
-                    title = if (isEn) {
-                        "Grant call overlay permission?"
-                    } else {
-                        "Cấp quyền hiển thị cuộc gọi?"
-                    },
-                    message = if (isEn) {
-                        "To automatically display the incoming call alert screen when your phone is on another app or locked, please allow Tenli OneView to display over other apps."
-                    } else {
-                        "Để ứng dụng tự động bật màn hình cuộc gọi đến khi phát hiện sự kiện AI (kể cả khi đang mở ứng dụng khác hoặc chạy ngầm), vui lòng cấp quyền \"Hiển thị trên ứng dụng khác\"."
-                    }
-                )
-                Spacer(modifier = Modifier.height(spacing.space14))
-                SheetActionButtons(
-                    cancelText = if (isEn) "Later" else "Để sau",
-                    confirmText = if (isEn) "Grant now" else "Cấp quyền ngay",
-                    onCancel = { showOverlayPermissionPrompt = false },
-                    onConfirm = {
-                        showOverlayPermissionPrompt = false
-                        openOverlayPermissionSettings()
-                    },
-                    confirmColor = colors.accent
-                )
+        // Bottom Sheet cấp quyền (cho phép Để sau / đóng X / vuốt ẩn) khi bật Cuộc gọi từ Cài đặt:
+        // nếu người dùng ấn Để sau hoặc ẩn đi thì hủy pendingCallActivation -> không bật được Cuộc gọi / thông báo bài AI Cuộc gọi
+        val settingsPermissionStep: CallPermissionStep? = if (pendingCallActivation == null) {
+            null
+        } else {
+            when {
+                !hasOsPermission -> CallPermissionStep.NOTIFICATION
+                !hasOverlayPerm -> CallPermissionStep.OVERLAY
+                !hasBatteryPerm -> CallPermissionStep.BATTERY
+                else -> null
             }
         }
-    }
-}
-
-private enum class AiNotifyFilter {
-    Call,
-    Push,
-    Off
-}
-
-@Composable
-private fun AiNotifySummaryBar(
-    isEn: Boolean,
-    pushCount: Int,
-    callCount: Int,
-    offCount: Int,
-    selectedFilter: AiNotifyFilter?,
-    onFilterClick: (AiNotifyFilter) -> Unit,
-    isSearchExpanded: Boolean,
-    onSearchExpandChange: (Boolean) -> Unit,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    searchFocusRequester: FocusRequester,
-    onClearOrCloseSearch: () -> Unit,
-    onImeSearch: () -> Unit
-) {
-    val colors = MaterialTheme.appColors
-    val spacing = MaterialTheme.spacing
-    val expandProgress by animateFloatAsState(
-        targetValue = if (isSearchExpanded) 1f else 0f,
-        animationSpec = tween(
-            durationMillis = 260,
-            easing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
-        ),
-        label = "aiNotifySearchExpand"
-    )
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = spacing.space14, vertical = spacing.space8)
-            .height(spacing.space32)
-    ) {
-        val collapsedWidth = spacing.space32
-        val currentSearchWidth = collapsedWidth + (maxWidth - collapsedWidth) * expandProgress
-        val cardsAlpha = (1f - expandProgress * 1.85f).coerceIn(0f, 1f)
-        val searchContentAlpha = ((expandProgress - 0.15f) / 0.85f).coerceIn(0f, 1f)
-        val searchHorizontalPad = (collapsedWidth - spacing.iconSmall) / 2
-
-        if (cardsAlpha > 0.01f) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxHeight()
-                    .padding(end = collapsedWidth + spacing.space6)
-                    .graphicsLayer {
-                        alpha = cardsAlpha
-                        translationX = -expandProgress * spacing.space16.toPx()
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(spacing.space6)
-            ) {
-                AiSummaryBadge(
-                    icon = LucideIcons.PhoneCall,
-                    text = if (isEn) "$callCount Call" else "$callCount Cuộc gọi",
-                    tint = colors.error,
-                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Call,
-                    onClick = { onFilterClick(AiNotifyFilter.Call) }
-                )
-                AiSummaryBadge(
-                    icon = LucideIcons.Bell,
-                    text = if (isEn) "$pushCount Push" else "$pushCount Thông báo",
-                    tint = colors.accent,
-                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Push,
-                    onClick = { onFilterClick(AiNotifyFilter.Push) }
-                )
-                AiSummaryBadge(
-                    icon = LucideIcons.BellOff,
-                    text = if (isEn) "$offCount Off" else "$offCount Tắt",
-                    tint = if (colors.isDark) colors.textPlaceholder else colors.textMuted,
-                    isHighlighted = selectedFilter == null || selectedFilter == AiNotifyFilter.Off,
-                    onClick = { onFilterClick(AiNotifyFilter.Off) }
-                )
-            }
-        }
-
-        Row(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(currentSearchWidth)
-                .fillMaxHeight()
-                .clip(RoundedCornerShape(spacing.radiusSmall))
-                .background(colors.controlBg)
-                .then(
-                    if (!isSearchExpanded) {
-                        Modifier.clickable { onSearchExpandChange(true) }
-                    } else {
-                        Modifier
+        if (settingsPermissionStep != null) {
+            CallPermissionStepSheet(
+                step = settingsPermissionStep,
+                isMandatory = false,
+                onConfirmStep = { step ->
+                    when (step) {
+                        CallPermissionStep.NOTIFICATION -> requestOrOpenPermission()
+                        CallPermissionStep.OVERLAY -> openOverlayPermissionSettings()
+                        CallPermissionStep.BATTERY -> com.tenli.oneview.ui.utils.PermissionUtils.openAppDetailsSettings(context)
                     }
-                )
-                .padding(horizontal = searchHorizontalPad),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = LucideIcons.Search,
-                contentDescription = if (isEn) "Search AI module" else "Tìm bài AI",
-                tint = if (colors.isDark) colors.accent else colors.textMuted,
-                modifier = Modifier.size(spacing.iconSmall)
-            )
-            if (expandProgress > 0.08f) {
-                Spacer(modifier = Modifier.width(spacing.space6))
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .graphicsLayer { alpha = searchContentAlpha },
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (searchQuery.isEmpty()) {
-                        Text(
-                            text = if (isEn) "Search AI module..." else "Tìm theo tên bài AI...",
-                            color = colors.textPlaceholder,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    BasicTextField(
-                        value = searchQuery,
-                        onValueChange = onSearchQueryChange,
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = { onImeSearch() },
-                            onDone = { onImeSearch() }
-                        ),
-                        textStyle = MaterialTheme.typography.bodySmall.copy(
-                            color = colors.textStrong
-                        ),
-                        cursorBrush = SolidColor(colors.accent),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(searchFocusRequester)
-                    )
+                },
+                onDismiss = {
+                    pendingCallActivation = null
                 }
-                Spacer(modifier = Modifier.width(spacing.space4))
-                Box(
-                    modifier = Modifier
-                        .size(spacing.badgeMinSize)
-                        .graphicsLayer { alpha = searchContentAlpha }
-                        .clip(CircleShape)
-                        .background(colors.textMuted.copy(alpha = 0.2f))
-                        .clickable(onClick = onClearOrCloseSearch),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = LucideIcons.X,
-                        contentDescription = if (isEn) "Clear or close search" else "Xóa hoặc đóng tìm kiếm",
-                        tint = colors.textMuted,
-                        modifier = Modifier.size(spacing.iconTiny)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AiSummaryBadge(
-    icon: ImageVector?,
-    text: String,
-    tint: Color,
-    isHighlighted: Boolean = true,
-    onClick: () -> Unit = {}
-) {
-    val spacing = MaterialTheme.spacing
-    val bgColor = if (isHighlighted) tint else tint.copy(alpha = 0.14f)
-    val contentColor = if (isHighlighted) MaterialTheme.appColors.onAccent else tint
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(spacing.radiusTiny))
-            .background(bgColor)
-            .clickable(onClick = onClick)
-            .padding(horizontal = spacing.space8, vertical = spacing.space4),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = contentColor,
-                modifier = Modifier.size(spacing.iconTiny)
             )
-            Spacer(modifier = Modifier.width(spacing.space4))
         }
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = contentColor
-        )
     }
 }
 
@@ -2247,6 +1930,7 @@ private fun AiModuleNotifyRow(
     isEn: Boolean,
     masterEnabled: Boolean,
     hasOverlayPermission: Boolean,
+    hasBatteryPermission: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onSelectAlarmMode: (AiAlarmMode) -> Unit
 ) {
@@ -2258,6 +1942,8 @@ private fun AiModuleNotifyRow(
         !config.enabled -> if (isEn) "Alerts disabled for this AI module" else "Đang tắt thông báo"
         config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission ->
             if (isEn) "Incoming Call • Grant overlay permission" else "Hình thức: Cuộc gọi • Cần cấp quyền đè"
+        config.alarmMode == AiAlarmMode.Call && !hasBatteryPermission ->
+            if (isEn) "Incoming Call • Enable Keep connection active" else "Hình thức: Cuộc gọi • Cần bật Duy trì kết nối"
         config.alarmMode == AiAlarmMode.Call ->
             if (isEn) "Alert mode: Incoming call" else "Hình thức: Đổ chuông cuộc gọi"
         else ->
@@ -2266,7 +1952,7 @@ private fun AiModuleNotifyRow(
 
     val subtitleColor = when {
         !config.enabled -> colors.textPlaceholder
-        config.alarmMode == AiAlarmMode.Call && !hasOverlayPermission -> colors.warning
+        config.alarmMode == AiAlarmMode.Call && (!hasOverlayPermission || !hasBatteryPermission) -> colors.warning
         config.alarmMode == AiAlarmMode.Call -> colors.error
         else -> colors.textMuted
     }

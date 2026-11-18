@@ -6,7 +6,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,7 +56,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -95,13 +93,6 @@ private val EVENT_ID_EXTRA_KEYS = arrayOf(
     "eventId",
     "event_id",
     "id"
-)
-
-private val CHINESE_OEM_KEYWORDS = listOf(
-    "xiaomi", "redmi", "poco",
-    "oppo", "realme", "oneplus",
-    "vivo", "iqoo",
-    "huawei", "honor"
 )
 
 class MainActivity : ComponentActivity() {
@@ -274,39 +265,47 @@ private fun Intent.cancelOriginNotificationIfPresent(context: Context) {
     }
 }
 
-private enum class StartupPermissionDialog { NONE, NOTIFICATION, OVERLAY, BATTERY }
+enum class CallPermissionStep { NOTIFICATION, OVERLAY, BATTERY }
 
 /**
- * Xin quyền thông báo (Android 13+) và lần lượt nhắc bật: thông báo → hiển thị trên ứng dụng khác → bỏ tối ưu pin.
- * Trạng thái được kiểm tra lại mỗi lần Activity resume (người dùng quay về từ màn Cài đặt).
+ * Xin quyền thông báo (Android 13+) và kiểm tra quyền cuộc gọi:
+ * - Nếu tài khoản đăng nhập / mở ứng dụng mà ĐÃ CÓ bài AI được phân quyền đang bật "Cuộc gọi"
+ *   (`requiresCallPermissions == true`): BẮT BUỘC phải cấp đủ quyền (ẩn nút "Để sau", ẩn dấu X và không cho đóng sheet).
+ * - Nếu chưa có bài AI nào bật "Cuộc gọi": không hỏi quyền Overlay / Duy trì kết nối khi vào app.
  */
 @Composable
 private fun StartupPermissionDialogs() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val isEn = rememberIsEnglish()
     val manufacturer = remember { Build.MANUFACTURER.lowercase() }
-    val isChinesePhone = remember(manufacturer) { CHINESE_OEM_KEYWORDS.any { manufacturer.contains(it) } }
+    val isChinesePhone = remember(manufacturer) { PermissionUtils.isChineseOemDevice(manufacturer) }
+    val requiresCallPermissions by PermissionUtils.requiresCallPermissions.collectAsStateWithLifecycle()
 
-    var activeDialog by remember { mutableStateOf(StartupPermissionDialog.NONE) }
-    var dismissedInSession by remember { mutableStateOf(emptySet<StartupPermissionDialog>()) }
+    var activeStep by remember { mutableStateOf<CallPermissionStep?>(null) }
+    var dismissedInSession by remember { mutableStateOf(emptySet<CallPermissionStep>()) }
     // Không hiện cảnh báo phía sau hộp thoại xin quyền hệ thống đang mở
     var isRequestingNotification by remember { mutableStateOf(false) }
 
-    fun refreshDialogs() {
+    fun refreshDialogs(callRequired: Boolean = requiresCallPermissions) {
         if (isRequestingNotification) return
         val hasNotificationPerm = PermissionUtils.isNotificationEnabled(context)
         if (hasNotificationPerm) {
             FcmTokenManager.registerDevicePushTokenAsync(force = false)
         }
-        activeDialog = when {
-            !hasNotificationPerm && StartupPermissionDialog.NOTIFICATION !in dismissedInSession ->
-                StartupPermissionDialog.NOTIFICATION
-            !PermissionUtils.isEmergencyCallPermissionGranted(context) && StartupPermissionDialog.OVERLAY !in dismissedInSession ->
-                StartupPermissionDialog.OVERLAY
-            !PermissionUtils.isIgnoringBattery(context) && StartupPermissionDialog.BATTERY !in dismissedInSession ->
-                StartupPermissionDialog.BATTERY
-            else -> StartupPermissionDialog.NONE
+        activeStep = if (callRequired) {
+            // Bắt buộc cấp đủ các quyền phục vụ Cuộc gọi khẩn cấp (bỏ qua trạng thái "Để sau")
+            when {
+                !hasNotificationPerm -> CallPermissionStep.NOTIFICATION
+                !PermissionUtils.isEmergencyCallPermissionGranted(context) -> CallPermissionStep.OVERLAY
+                !PermissionUtils.isIgnoringBattery(context) -> CallPermissionStep.BATTERY
+                else -> null
+            }
+        } else {
+            when {
+                !hasNotificationPerm && CallPermissionStep.NOTIFICATION !in dismissedInSession ->
+                    CallPermissionStep.NOTIFICATION
+                else -> null
+            }
         }
     }
 
@@ -329,6 +328,11 @@ private fun StartupPermissionDialogs() {
         }
     }
 
+    // Phản hồi ngay khi đồng bộ cấu hình sau đăng nhập xác nhận tài khoản có bài AI bật "Cuộc gọi"
+    LaunchedEffect(requiresCallPermissions) {
+        refreshDialogs(requiresCallPermissions)
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) refreshDialogs()
@@ -337,34 +341,56 @@ private fun StartupPermissionDialogs() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val closeActive = { activeDialog = StartupPermissionDialog.NONE }
-    val dismissForSession = {
-        if (activeDialog != StartupPermissionDialog.NONE) {
-            dismissedInSession = dismissedInSession + activeDialog
+    val currentStep = activeStep ?: return
+    val isMandatory = requiresCallPermissions
+
+    CallPermissionStepSheet(
+        step = currentStep,
+        isMandatory = isMandatory,
+        onConfirmStep = { step ->
+            if (!isMandatory) {
+                activeStep = null
+            }
+            when (step) {
+                CallPermissionStep.NOTIFICATION -> PermissionUtils.openAppDetailsSettings(context)
+                CallPermissionStep.OVERLAY -> PermissionUtils.openEmergencyCallPermissionSettings(
+                    context = context,
+                    preferManufacturerSettings = isChinesePhone
+                )
+                CallPermissionStep.BATTERY -> PermissionUtils.openAppDetailsSettings(context)
+            }
+        },
+        onDismiss = {
+            if (!isMandatory) {
+                dismissedInSession = dismissedInSession + currentStep
+                activeStep = null
+            }
         }
-        activeDialog = StartupPermissionDialog.NONE
-    }
-    val openAppDetails: () -> Unit = {
-        closeActive()
-        runCatching {
-            context.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
-            )
-        }.onFailure {
-            runCatching { context.startActivity(Intent(Settings.ACTION_SETTINGS)) }
-        }
-    }
+    )
+}
+
+@Composable
+fun CallPermissionStepSheet(
+    step: CallPermissionStep,
+    isMandatory: Boolean,
+    onConfirmStep: (CallPermissionStep) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val isEn = rememberIsEnglish()
+    val manufacturer = remember { Build.MANUFACTURER.lowercase() }
+    val isChinesePhone = remember(manufacturer) { PermissionUtils.isChineseOemDevice(manufacturer) }
     val strongTextColor = MaterialTheme.appColors.textStrong
 
-    when (activeDialog) {
-        StartupPermissionDialog.NOTIFICATION -> PermissionExplanationDialog(
+    when (step) {
+        CallPermissionStep.NOTIFICATION -> PermissionExplanationDialog(
             title = if (isEn) "Enable Alert Notifications" else "Bật thông báo cảnh báo",
             description = remember(isEn, strongTextColor) { notificationDescription(isEn, strongTextColor) },
-            onConfirm = openAppDetails,
-            onDismiss = dismissForSession
+            isMandatory = isMandatory,
+            onConfirm = { onConfirmStep(CallPermissionStep.NOTIFICATION) },
+            onDismiss = onDismiss
         )
 
-        StartupPermissionDialog.OVERLAY -> PermissionExplanationDialog(
+        CallPermissionStep.OVERLAY -> PermissionExplanationDialog(
             title = when {
                 isEn && isChinesePhone -> "Special Background Permissions"
                 isEn -> "Display Over Other Apps"
@@ -374,24 +400,18 @@ private fun StartupPermissionDialogs() {
             description = remember(isEn, isChinesePhone, strongTextColor) {
                 overlayDescription(isEn, isChinesePhone, manufacturer, strongTextColor)
             },
-            onConfirm = {
-                closeActive()
-                PermissionUtils.openEmergencyCallPermissionSettings(
-                    context = context,
-                    preferManufacturerSettings = isChinesePhone
-                )
-            },
-            onDismiss = dismissForSession
+            isMandatory = isMandatory,
+            onConfirm = { onConfirmStep(CallPermissionStep.OVERLAY) },
+            onDismiss = onDismiss
         )
 
-        StartupPermissionDialog.BATTERY -> PermissionExplanationDialog(
+        CallPermissionStep.BATTERY -> PermissionExplanationDialog(
             title = if (isEn) "Keep Connection Active" else "Duy trì kết nối",
             description = remember(isEn, strongTextColor) { batteryDescription(isEn, strongTextColor) },
-            onConfirm = openAppDetails,
-            onDismiss = dismissForSession
+            isMandatory = isMandatory,
+            onConfirm = { onConfirmStep(CallPermissionStep.BATTERY) },
+            onDismiss = onDismiss
         )
-
-        StartupPermissionDialog.NONE -> Unit
     }
 }
 
@@ -491,6 +511,7 @@ fun PermissionExplanationDialog(
     title: String,
     description: AnnotatedString,
     icon: ImageVector = Icons.Default.Notifications,
+    isMandatory: Boolean = false,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -501,11 +522,24 @@ fun PermissionExplanationDialog(
     val sheetInteraction = remember { MutableInteractionSource() }
     val buttonShape = RoundedCornerShape(spacing.radiusCompact)
 
-    MobileFullScreenOverlay(onDismissRequest = onDismiss) {
+    MobileFullScreenOverlay(
+        onDismissRequest = onDismiss,
+        dismissible = !isMandatory
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .clickable(interactionSource = backdropInteraction, indication = null, onClick = onDismiss),
+                .then(
+                    if (!isMandatory) {
+                        Modifier.clickable(
+                            interactionSource = backdropInteraction,
+                            indication = null,
+                            onClick = onDismiss
+                        )
+                    } else {
+                        Modifier
+                    }
+                ),
             contentAlignment = Alignment.BottomCenter
         ) {
             Surface(
@@ -522,19 +556,21 @@ fun PermissionExplanationDialog(
                         .fillMaxWidth()
                         .navigationBarsPadding()
                         .padding(horizontal = spacing.space16)
-                        .padding(top = spacing.space10, bottom = spacing.space20),
+                        .padding(top = if (isMandatory) spacing.space16 else spacing.space10, bottom = spacing.space20),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .width(spacing.sheetHandleWidth)
-                            .height(spacing.sheetHandleHeight)
-                            .clip(CircleShape)
-                            .background(colors.handle)
-                    )
-                    Spacer(modifier = Modifier.height(spacing.space10))
+                    if (!isMandatory) {
+                        Box(
+                            modifier = Modifier
+                                .width(spacing.sheetHandleWidth)
+                                .height(spacing.sheetHandleHeight)
+                                .clip(CircleShape)
+                                .background(colors.handle)
+                        )
+                        Spacer(modifier = Modifier.height(spacing.space10))
+                    }
 
-                    // Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên
+                    // Icon ở giữa trên cùng, nút đóng (X) ở góc phải trên (ẩn dấu X khi bắt buộc cấp quyền)
                     Box(
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -555,21 +591,23 @@ fun PermissionExplanationDialog(
                             )
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .size(spacing.avatarSmall)
-                                .clip(CircleShape)
-                                .background(colors.closeButtonBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = LucideIcons.X,
-                                contentDescription = if (isEn) "Close" else "Đóng",
-                                tint = colors.textSubtle,
-                                modifier = Modifier.size(spacing.iconSmall)
-                            )
+                        if (!isMandatory) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(spacing.avatarSmall)
+                                    .clip(CircleShape)
+                                    .background(colors.closeButtonBg)
+                                    .clickable(onClick = onDismiss),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = LucideIcons.X,
+                                    contentDescription = if (isEn) "Close" else "Đóng",
+                                    tint = colors.textSubtle,
+                                    modifier = Modifier.size(spacing.iconSmall)
+                                )
+                            }
                         }
                     }
 
@@ -602,28 +640,10 @@ fun PermissionExplanationDialog(
 
                     Spacer(modifier = Modifier.height(spacing.space20))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
-                    ) {
+                    if (isMandatory) {
                         Box(
                             modifier = Modifier
-                                .weight(1f)
-                                .height(spacing.buttonHeight)
-                                .clip(buttonShape)
-                                .background(colors.buttonSecondaryBg)
-                                .clickable(onClick = onDismiss),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (isEn) "Later" else "Để sau",
-                                color = colors.textStrong,
-                                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .height(spacing.buttonHeight)
                                 .clip(buttonShape)
                                 .background(colors.accent)
@@ -635,6 +655,42 @@ fun PermissionExplanationDialog(
                                 color = colors.onAccent,
                                 style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
                             )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(spacing.buttonHeight)
+                                    .clip(buttonShape)
+                                    .background(colors.buttonSecondaryBg)
+                                    .clickable(onClick = onDismiss),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (isEn) "Later" else "Để sau",
+                                    color = colors.textStrong,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(spacing.buttonHeight)
+                                    .clip(buttonShape)
+                                    .background(colors.accent)
+                                    .clickable(onClick = onConfirm),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (isEn) "Set up now" else "Thiết lập ngay",
+                                    color = colors.onAccent,
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
                         }
                     }
                 }

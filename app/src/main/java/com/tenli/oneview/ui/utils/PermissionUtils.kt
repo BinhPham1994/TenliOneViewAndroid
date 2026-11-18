@@ -8,8 +8,56 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 object PermissionUtils {
+
+    private val CHINESE_OEM_KEYWORDS = listOf(
+        "xiaomi", "redmi", "poco",
+        "oppo", "realme", "oneplus",
+        "vivo", "iqoo",
+        "huawei", "honor"
+    )
+
+    private val _requiresCallPermissions = MutableStateFlow(false)
+    /**
+     * `true` chỉ khi tài khoản hiện tại có quyền sự kiện AI, đang bật nhận thông báo chung
+     * và đã lưu sẵn ít nhất 1 bài AI được phân quyền đang ở hình thức cảnh báo "Cuộc gọi".
+     */
+    val requiresCallPermissions: StateFlow<Boolean> = _requiresCallPermissions.asStateFlow()
+
+    fun updateCallPermissionRequirement(required: Boolean) {
+        _requiresCallPermissions.value = required
+    }
+
+    fun resetCallPermissionRequirement() {
+        _requiresCallPermissions.value = false
+    }
+
+    fun isChineseOemDevice(manufacturer: String = Build.MANUFACTURER): Boolean {
+        val lower = manufacturer.lowercase()
+        return CHINESE_OEM_KEYWORDS.any { lower.contains(it) }
+    }
+
+    fun openAppDetailsSettings(context: Context) {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        }.onFailure {
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                )
+            }
+        }
+    }
 
     /**
      * Kiểm tra App đã được đưa vào danh sách "Không tối ưu hóa pin" chưa.

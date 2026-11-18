@@ -25,6 +25,7 @@ import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.LocaleManager
+import com.tenli.oneview.ui.utils.PermissionUtils
 import com.tenli.oneview.util.BackendHttpException
 import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.NetworkMonitor
@@ -79,6 +80,39 @@ class MainViewModel(
     @Volatile
     private var cachedNotificationSettings: UserNotificationSettingsModel? = null
 
+    @Volatile
+    private var hasResolvedNotificationSettingsOnce: Boolean = false
+
+    private fun syncCallPermissionRequirement(
+        pushEnabled: Boolean,
+        aiModules: List<AiModuleNotifyConfig>
+    ) {
+        hasResolvedNotificationSettingsOnce = true
+        val required = UserSession.accessToken.isNotEmpty() &&
+            UserPermissionManager.canAccessEvents() &&
+            pushEnabled &&
+            aiModules.any { it.enabled && it.alarmMode == AiAlarmMode.Call }
+        PermissionUtils.updateCallPermissionRequirement(required)
+    }
+
+    private fun syncCallPermissionRequirementFromCacheFallback() {
+        if (UserSession.accessToken.isEmpty() || !UserPermissionManager.canAccessEvents()) {
+            hasResolvedNotificationSettingsOnce = true
+            PermissionUtils.updateCallPermissionRequirement(false)
+            return
+        }
+        val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+        if (snapshot == null) {
+            PermissionUtils.updateCallPermissionRequirement(false)
+            return
+        }
+        val pushEnabled = GlobalData.preferences.getBoolean(
+            PREF_PUSH_NOTIFICATIONS_ENABLED,
+            snapshot.global?.enabled ?: true
+        )
+        syncCallPermissionRequirement(pushEnabled, buildAiModuleConfigs(snapshot))
+    }
+
     /** Ngôn ngữ hiện tại (cùng nguồn với rememberIsEnglish()) – dùng cho thông báo popup phát từ ViewModel */
     private val isEnglish: Boolean
         get() = LocaleManager.languageFlow.value.startsWith("en")
@@ -106,8 +140,17 @@ class MainViewModel(
                 if (permState.version != lastPermVersion) {
                     lastPermVersion = permState.version
                     val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                    val rebuiltModules = buildAiModuleConfigs(snapshot)
                     _notificationConfigState.update { state ->
-                        state.copy(aiModules = buildAiModuleConfigs(snapshot))
+                        state.copy(aiModules = rebuiltModules)
+                    }
+                    if (!permState.canAccessEvents) {
+                        PermissionUtils.updateCallPermissionRequirement(false)
+                    } else if (hasResolvedNotificationSettingsOnce) {
+                        syncCallPermissionRequirement(
+                            pushEnabled = _notificationConfigState.value.pushEnabled,
+                            aiModules = rebuiltModules
+                        )
                     }
                 }
             }
@@ -119,6 +162,9 @@ class MainViewModel(
 
                 if (!isOnline) {
                     wasOffline = true
+                    if (!hasResolvedNotificationSettingsOnce && UserSession.accessToken.isNotEmpty()) {
+                        syncCallPermissionRequirementFromCacheFallback()
+                    }
                     MobileTopPopupManager.error(noNetworkMessage(isEnglish))
                 } else {
                     if (wasOffline) {
@@ -159,6 +205,8 @@ class MainViewModel(
             if (UserPermissionManager.canAccessEvents()) {
                 syncNotificationSettingsAndRegisterToken()
             } else {
+                hasResolvedNotificationSettingsOnce = true
+                PermissionUtils.updateCallPermissionRequirement(false)
                 logInfo { "[SYNC CẤU HÌNH] Tài khoản không có quyền xem sự kiện AI -> hủy đăng ký FCM token nếu có" }
                 runCatching { FcmTokenManager.unregisterDevicePushToken() }.onFailure { e ->
                     if (e is CancellationException) throw e
@@ -213,12 +261,14 @@ class MainViewModel(
                     saveNotificationSettingsCache(mergedModel)
                     shouldRegisterToken = explicitEnabled
                     savePushEnabledPref(explicitEnabled)
+                    val rebuiltModules = buildAiModuleConfigs(mergedModel)
                     _notificationConfigState.update {
                         it.copy(
                             pushEnabled = explicitEnabled,
-                            aiModules = buildAiModuleConfigs(mergedModel)
+                            aiModules = rebuiltModules
                         )
                     }
+                    syncCallPermissionRequirement(explicitEnabled, rebuiltModules)
                 } else {
                     // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
                     val initModel = UserNotificationSettingsModel(
@@ -247,14 +297,17 @@ class MainViewModel(
                     saveNotificationSettingsCache(effectiveModel)
                     shouldRegisterToken = true
                     savePushEnabledPref(true)
+                    val rebuiltModules = buildAiModuleConfigs(effectiveModel)
                     _notificationConfigState.update {
                         it.copy(
                             pushEnabled = true,
-                            aiModules = buildAiModuleConfigs(effectiveModel)
+                            aiModules = rebuiltModules
                         )
                     }
+                    syncCallPermissionRequirement(true, rebuiltModules)
                 }
             } else {
+                syncCallPermissionRequirementFromCacheFallback()
                 logError {
                     val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
                     "❌ [SYNC CẤU HÌNH THẤT BẠI] HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
@@ -262,6 +315,7 @@ class MainViewModel(
             }
         }.onFailure { e ->
             if (e is CancellationException) throw e
+            syncCallPermissionRequirementFromCacheFallback()
             logError(e) { "❌ [EXCEPTION KHI SYNC CẤU HÌNH] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}" }
         }
         if (UserSession.accessToken.isEmpty()) return
@@ -283,6 +337,8 @@ class MainViewModel(
         aiModuleSaveJob?.cancel()
         passwordChangeJob?.cancel()
         cachedNotificationSettings = null
+        hasResolvedNotificationSettingsOnce = false
+        PermissionUtils.resetCallPermissionRequirement()
         webSocketManager.disconnectAll()
         logoutJob = viewModelScope.launch {
             _event.emit(MainEvent.Logout)
@@ -337,13 +393,15 @@ class MainViewModel(
                         val mergedModel = body.copy(overrides = mergedOverrides)
                         saveNotificationSettingsCache(mergedModel)
                         val enabled = mergedModel.global?.enabled ?: true
+                        val rebuiltModules = buildAiModuleConfigs(mergedModel)
                         _notificationConfigState.update {
                             it.copy(
                                 pushEnabled = enabled,
-                                aiModules = buildAiModuleConfigs(mergedModel)
+                                aiModules = rebuiltModules
                             )
                         }
                         savePushEnabledPref(enabled)
+                        syncCallPermissionRequirement(enabled, rebuiltModules)
                     }
                 } else {
                     logError {
@@ -378,6 +436,7 @@ class MainViewModel(
         val previousEnabled = _notificationConfigState.value.pushEnabled
         _notificationConfigState.update { it.copy(pushEnabled = enabled, isSaving = true) }
         savePushEnabledPref(enabled)
+        syncCallPermissionRequirement(enabled, _notificationConfigState.value.aiModules)
         viewModelScope.launch {
             val saveFailedMsg = localized("Failed to save notification settings", "Không thể lưu cấu hình thông báo")
             try {
@@ -419,9 +478,11 @@ class MainViewModel(
                     }
                     // Giữ nguyên updatedModel (không ghi đè bằng resp.body() vì PUT trả về model rỗng overrides)
                     saveNotificationSettingsCache(updatedModel)
+                    val rebuiltModules = buildAiModuleConfigs(updatedModel)
                     _notificationConfigState.update {
-                        it.copy(aiModules = buildAiModuleConfigs(updatedModel))
+                        it.copy(aiModules = rebuiltModules)
                     }
+                    syncCallPermissionRequirement(enabled, rebuiltModules)
                     runCatching {
                         if (enabled) {
                             FcmTokenManager.registerDevicePushToken(force = true)
@@ -440,6 +501,7 @@ class MainViewModel(
                     }
                     _notificationConfigState.update { it.copy(pushEnabled = previousEnabled) }
                     savePushEnabledPref(previousEnabled)
+                    syncCallPermissionRequirement(previousEnabled, _notificationConfigState.value.aiModules)
                 }
                 when {
                     !resp.isSuccessful -> MobileTopPopupManager.error(saveFailedMsg)
@@ -463,6 +525,7 @@ class MainViewModel(
                 }
                 _notificationConfigState.update { it.copy(pushEnabled = previousEnabled) }
                 savePushEnabledPref(previousEnabled)
+                syncCallPermissionRequirement(previousEnabled, _notificationConfigState.value.aiModules)
                 MobileTopPopupManager.error(saveFailedMsg)
             } finally {
                 _notificationConfigState.update { it.copy(isSaving = false) }
@@ -506,11 +569,13 @@ class MainViewModel(
 
         // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread (giữ nguyên vị trí các bài AI)
         saveNotificationSettingsCache(optimisticModel)
+        val optimisticModules = buildAiModuleConfigs(optimisticModel)
         _notificationConfigState.update { state ->
             state.copy(
-                aiModules = buildAiModuleConfigs(optimisticModel)
+                aiModules = optimisticModules
             )
         }
+        syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, optimisticModules)
 
         aiModuleSaveJob?.cancel()
         aiModuleSaveJob = viewModelScope.launch {
@@ -535,6 +600,7 @@ class MainViewModel(
                     }
                     saveNotificationSettingsCache(previousSettings)
                     _notificationConfigState.update { it.copy(aiModules = previousModules) }
+                    syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, previousModules)
                     MobileTopPopupManager.error(saveFailedMsg)
                 }
             } catch (e: Exception) {
@@ -544,6 +610,7 @@ class MainViewModel(
                 }
                 saveNotificationSettingsCache(previousSettings)
                 _notificationConfigState.update { it.copy(aiModules = previousModules) }
+                syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, previousModules)
                 MobileTopPopupManager.error(saveFailedMsg)
             }
         }

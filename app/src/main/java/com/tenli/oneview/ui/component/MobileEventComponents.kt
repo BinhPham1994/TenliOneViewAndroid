@@ -521,6 +521,7 @@ private fun MobileTopPopupFilledIcon(
 
 private class MobileOverlayEntry(
     val key: Any,
+    var dismissible: Boolean,
     var onDismissRequest: () -> Unit,
     var content: @Composable () -> Unit
 ) {
@@ -534,18 +535,20 @@ class MobileOverlayHostState {
 
     fun show(
         key: Any,
+        dismissible: Boolean = true,
         onDismissRequest: () -> Unit = {},
         content: @Composable () -> Unit
     ) {
         val idx = entries.indexOfFirst { it.key == key }
         if (idx >= 0) {
+            entries[idx].dismissible = dismissible
             entries[idx].onDismissRequest = onDismissRequest
             entries[idx].content = content
             entries[idx].isClosing = false
             entries[idx].isScrimVisible = true
             entries[idx].isSheetVisible = true
         } else {
-            entries.add(MobileOverlayEntry(key, onDismissRequest, content))
+            entries.add(MobileOverlayEntry(key, dismissible, onDismissRequest, content))
         }
     }
 
@@ -585,6 +588,7 @@ class MobileOverlayHostState {
                 OverlayLayers(
                     isScrimVisible = entry.isScrimVisible,
                     isSheetVisible = entry.isSheetVisible,
+                    dismissible = entry.dismissible,
                     onDismissRequest = entry.onDismissRequest,
                     content = entry.content
                 )
@@ -594,13 +598,14 @@ class MobileOverlayHostState {
 }
 
 /**
- * Lớp nền mờ (fade) + nội dung sheet (trượt từ dưới lên + hỗ trợ vuốt từ trên xuống để đóng) –
+ * Lớp nền mờ (fade) + nội dung sheet (trượt từ dưới lên + hỗ trợ vuốt từ trên xuống để đóng khi [dismissible] = true) –
  * dùng chung cho host và chế độ fallback.
  */
 @Composable
 private fun OverlayLayers(
     isScrimVisible: Boolean,
     isSheetVisible: Boolean,
+    dismissible: Boolean = true,
     onDismissRequest: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
@@ -697,34 +702,41 @@ private fun OverlayLayers(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .nestedScroll(nestedScrollConnection)
-                .pointerInput(Unit) {
-                    val velocityTracker = VelocityTracker()
-                    detectVerticalDragGestures(
-                        onDragStart = {
-                            velocityTracker.resetTracking()
-                            isDragging = true
-                        },
-                        onVerticalDrag = { change, dragAmount ->
-                            velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            if ((dragAmount > 0f || dragOffsetY > 0f) && !isDismissedBySwipe) {
-                                change.consume()
-                                isDragging = true
-                                dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                .then(
+                    if (dismissible) {
+                        Modifier
+                            .nestedScroll(nestedScrollConnection)
+                            .pointerInput(Unit) {
+                                val velocityTracker = VelocityTracker()
+                                detectVerticalDragGestures(
+                                    onDragStart = {
+                                        velocityTracker.resetTracking()
+                                        isDragging = true
+                                    },
+                                    onVerticalDrag = { change, dragAmount ->
+                                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                        if ((dragAmount > 0f || dragOffsetY > 0f) && !isDismissedBySwipe) {
+                                            change.consume()
+                                            isDragging = true
+                                            dragOffsetY = (dragOffsetY + dragAmount).coerceAtLeast(0f)
+                                        }
+                                    },
+                                    onDragEnd = {
+                                        val velocityY = velocityTracker.calculateVelocity().y
+                                        finishDrag(velocityY)
+                                    },
+                                    onDragCancel = {
+                                        finishDrag(0f)
+                                    }
+                                )
                             }
-                        },
-                        onDragEnd = {
-                            val velocityY = velocityTracker.calculateVelocity().y
-                            finishDrag(velocityY)
-                        },
-                        onDragCancel = {
-                            finishDrag(0f)
-                        }
-                    )
-                }
-                .graphicsLayer {
-                    translationY = dragOffsetY
-                }
+                            .graphicsLayer {
+                                translationY = dragOffsetY
+                            }
+                    } else {
+                        Modifier
+                    }
+                )
         ) {
             content()
         }
@@ -736,22 +748,31 @@ val LocalMobileOverlayHost = staticCompositionLocalOf<MobileOverlayHostState?> {
 @Composable
 fun MobileFullScreenOverlay(
     onDismissRequest: () -> Unit,
+    dismissible: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val host = LocalMobileOverlayHost.current
     val currentOnDismiss by rememberUpdatedState(onDismissRequest)
+    val currentDismissible by rememberUpdatedState(dismissible)
     val currentContentState = rememberUpdatedState(content)
     val key = remember { Any() }
 
     androidx.activity.compose.BackHandler(enabled = true) {
-        currentOnDismiss()
+        if (currentDismissible) {
+            currentOnDismiss()
+        }
     }
 
     if (host != null) {
-        DisposableEffect(host, key) {
+        DisposableEffect(host, key, dismissible) {
             host.show(
                 key = key,
-                onDismissRequest = { currentOnDismiss() },
+                dismissible = dismissible,
+                onDismissRequest = {
+                    if (currentDismissible) {
+                        currentOnDismiss()
+                    }
+                },
                 content = {
                     currentContentState.value.invoke()
                 }
@@ -772,7 +793,12 @@ fun MobileFullScreenOverlay(
             OverlayLayers(
                 isScrimVisible = isScrimVisible,
                 isSheetVisible = isSheetVisible,
-                onDismissRequest = { currentOnDismiss() },
+                dismissible = dismissible,
+                onDismissRequest = {
+                    if (currentDismissible) {
+                        currentOnDismiss()
+                    }
+                },
                 content = content
             )
         }

@@ -21,6 +21,7 @@ import com.tenli.oneview.model.network.UserData
 import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
+import com.tenli.oneview.ui.utils.PermissionUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -135,6 +136,7 @@ class AuthRepository(
             savedUsername = username
             savedPassword = password
         }
+        PermissionUtils.resetCallPermissionRequirement()
         UserPermissionManager.syncFromUserSession()
         withContext(Dispatchers.IO) {
             val userDataJson = GlobalData.gson.toJson(loginData.target)
@@ -178,6 +180,7 @@ class AuthRepository(
         // Xoá ngay UserSession trên RAM trước khi await bất kỳ I/O hay mạng nào để mọi interceptor,
         // TokenAuthenticator, WebSocket và tác vụ ghi cache đang chạy dừng dùng token cũ ngay lập tức.
         UserSession.clear()
+        PermissionUtils.resetCallPermissionRequirement()
         runCatching { NotificationManagerCompat.from(appContext).cancelAll() }
 
         prefs.edit {
