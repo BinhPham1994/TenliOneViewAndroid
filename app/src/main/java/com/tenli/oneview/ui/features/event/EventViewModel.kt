@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 @Immutable
@@ -109,6 +111,7 @@ class EventViewModel(
     private var lastFetchedRawId: Int? = null
     private var lastFetchedRawIdByType: Map<String, Int?> = emptyMap()
     private var exhaustedEventTypes: Set<String> = emptySet()
+    @Volatile private var effectiveUnfilteredTypes: List<String> = emptyList()
     private var initialFetchJob: Job? = null
     private var paginateJob: Job? = null
     private val realtimeTriggerChannel = Channel<Boolean>(Channel.CONFLATED)
@@ -230,9 +233,48 @@ class EventViewModel(
         val lastRawIdByType: Map<String, Int?> = emptyMap(),
         val exhaustedTypes: Set<String> = emptySet(),
         val hasMore: Boolean,
+        val reachedEnd: Boolean = true,
         val apiSucceeded: Boolean,
         val firstError: Throwable? = null
     )
+
+    private suspend fun resolveFallbackEventTypesForAllFilter(
+        filter: TimeFilter,
+        fromSec: Long,
+        toSec: Long,
+        serviceId: Int?,
+        hitUnfilteredCeiling: Boolean
+    ): List<String> {
+        val cachedCounts = eventRepository.getCachedHomeEventsByType(filter, serviceId)
+        val cachedActive = expandPermittedApiEventTypesFromCounts(cachedCounts)
+        if (cachedActive.isNotEmpty()) {
+            return cachedActive
+        }
+
+        val countResp = safeApiCall {
+            eventRepository.getVmsEventCountByType(
+                fromTime = fromSec * 1000L,
+                toTime = toSec * 1000L + 999L,
+                serviceId = serviceId?.toString()
+            )
+        }.getOrNull()
+        if (countResp?.isSuccessful == true) {
+            val body = countResp.body().orEmpty()
+            val apiActive = expandPermittedApiEventTypesFromCounts(body)
+            if (apiActive.isNotEmpty()) {
+                return apiActive
+            }
+            if (body.isNotEmpty()) {
+                return emptyList()
+            }
+        }
+
+        return if (hitUnfilteredCeiling) {
+            resolveAllPermittedApiEventTypes()
+        } else {
+            emptyList()
+        }
+    }
 
     private suspend fun fetchSingleTypeEventBatch(
         startLastId: Int?,
@@ -249,6 +291,7 @@ class EventViewModel(
                 events = emptyList(),
                 lastRawId = startLastId,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
@@ -330,6 +373,7 @@ class EventViewModel(
             events = validData,
             lastRawId = currentLastId,
             hasMore = hasMore,
+            reachedEnd = reachedEnd,
             apiSucceeded = anySuccessful,
             firstError = if (anySuccessful) null else firstError
         )
@@ -359,6 +403,7 @@ class EventViewModel(
                 events = emptyList(),
                 lastRawId = startLastId,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
@@ -387,22 +432,26 @@ class EventViewModel(
                 lastRawIdByType = startLastIdByType,
                 exhaustedTypes = currentExhaustedTypes,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
 
+        val semaphore = Semaphore(MAX_TYPED_QUERY_CONCURRENCY)
         val subResults = typesToQuery.map { type ->
             async {
-                type to fetchSingleTypeEventBatch(
-                    startLastId = if (isLoadMore) startLastIdByType[type] else null,
-                    fromSec = fromSec,
-                    toSec = toSec,
-                    serviceId = serviceId,
-                    cameraUuid = cameraUuid,
-                    resolvedType = type,
-                    targetCount = targetCount,
-                    allCameras = allCameras
-                )
+                semaphore.withPermit {
+                    type to fetchSingleTypeEventBatch(
+                        startLastId = if (isLoadMore) startLastIdByType[type] else null,
+                        fromSec = fromSec,
+                        toSec = toSec,
+                        serviceId = serviceId,
+                        cameraUuid = cameraUuid,
+                        resolvedType = type,
+                        targetCount = targetCount,
+                        allCameras = allCameras
+                    )
+                }
             }
         }.awaitAll()
 
@@ -438,6 +487,7 @@ class EventViewModel(
             lastRawIdByType = nextCursors,
             exhaustedTypes = nextExhausted,
             hasMore = hasMore,
+            reachedEnd = !hasMore,
             apiSucceeded = anySucceeded,
             firstError = if (anySucceeded) null else firstError
         )
@@ -448,9 +498,10 @@ class EventViewModel(
         to: Long,
         serviceId: Int?,
         cameraUuid: String?,
-        resolvedTypes: List<String>
+        resolvedTypes: List<String>,
+        includeUnfilteredHeadProbe: Boolean = false
     ): Pair<Boolean, List<EventData>> {
-        return if (resolvedTypes.size <= 1) {
+        return if (resolvedTypes.size <= 1 && !includeUnfilteredHeadProbe) {
             val response = safeApiCall {
                 eventRepository.getDataList(
                     count = PAGE_TARGET_COUNT,
@@ -465,18 +516,26 @@ class EventViewModel(
             ok to (if (ok) response?.body().orEmpty() else emptyList())
         } else {
             coroutineScope {
-                val responses = resolvedTypes.map { t ->
+                val semaphore = Semaphore(MAX_TYPED_QUERY_CONCURRENCY)
+                val queryTypes: List<String?> = if (includeUnfilteredHeadProbe) {
+                    listOf<String?>(null) + resolvedTypes
+                } else {
+                    resolvedTypes
+                }
+                val responses = queryTypes.map { t ->
                     async {
-                        safeApiCall {
-                            eventRepository.getDataList(
-                                count = PAGE_TARGET_COUNT,
-                                from = from,
-                                to = to,
-                                serviceId = serviceId,
-                                cameraUUID = cameraUuid,
-                                type = t
-                            )
-                        }.getOrNull()
+                        semaphore.withPermit {
+                            safeApiCall {
+                                eventRepository.getDataList(
+                                    count = PAGE_TARGET_COUNT,
+                                    from = from,
+                                    to = to,
+                                    serviceId = serviceId,
+                                    cameraUUID = cameraUuid,
+                                    type = t
+                                )
+                            }.getOrNull()
+                        }
                     }
                 }.awaitAll()
                 val ok = responses.any { it?.isSuccessful == true }
@@ -495,7 +554,9 @@ class EventViewModel(
             val state = _uiState.value
             if (state.selectedFilter != TimeFilter.TODAY) return
             val (from, to) = getTimeRange(state.selectedFilter)
-            val resolvedTypes = resolveApiEventTypes(state.selectedAiType)
+            val fallbackTypes = effectiveUnfilteredTypes
+            val isUsingUnfilteredFallback = state.selectedAiType.isNullOrBlank() && fallbackTypes.isNotEmpty()
+            val resolvedTypes = resolveApiEventTypes(state.selectedAiType).ifEmpty { fallbackTypes }
             val prevMaxId = state.events.maxOfOrNull { it.id } ?: 0
 
             var (anySuccessful, rawEvents) = queryRealtimeRawEvents(
@@ -503,7 +564,8 @@ class EventViewModel(
                 to = to,
                 serviceId = state.selectedServiceId,
                 cameraUuid = state.selectedCameraUuid,
-                resolvedTypes = resolvedTypes
+                resolvedTypes = resolvedTypes,
+                includeUnfilteredHeadProbe = isUsingUnfilteredFallback
             )
             val firstMaxId = rawEvents.maxOfOrNull { it.id } ?: 0
             if (mayLagDbCommit && firstMaxId <= prevMaxId) {
@@ -521,7 +583,8 @@ class EventViewModel(
                     to = to,
                     serviceId = state.selectedServiceId,
                     cameraUuid = state.selectedCameraUuid,
-                    resolvedTypes = resolvedTypes
+                    resolvedTypes = resolvedTypes,
+                    includeUnfilteredHeadProbe = isUsingUnfilteredFallback
                 )
                 if (retry.first) {
                     anySuccessful = true
@@ -707,6 +770,7 @@ class EventViewModel(
             lastFetchedRawId = null
             lastFetchedRawIdByType = emptyMap()
             exhaustedEventTypes = emptySet()
+            effectiveUnfilteredTypes = emptyList()
             _uiState.update { it.copy(isPaginating = false) }
             val startState = _uiState.value
             val filter = startState.selectedFilter
@@ -813,7 +877,38 @@ class EventViewModel(
                     }
 
                     // --- GIAI ĐOẠN 1: Trả ngay danh sách sự kiện & tắt vòng xoay refresh mà không chờ tải lại toàn bộ CameraList/AIServiceList ---
-                    val batchResult = eventsDeferred.await()
+                    var batchResult = eventsDeferred.await()
+                    val hitUnfilteredCeiling = !batchResult.reachedEnd && batchResult.events.size < PAGE_TARGET_COUNT
+                    if (aiType.isNullOrBlank() && (hitUnfilteredCeiling || (batchResult.apiSucceeded && batchResult.events.isEmpty()))) {
+                        val fallbackTypes = resolveFallbackEventTypesForAllFilter(
+                            filter = filter,
+                            fromSec = from,
+                            toSec = to,
+                            serviceId = serviceId,
+                            hitUnfilteredCeiling = hitUnfilteredCeiling
+                        )
+                        if (fallbackTypes.isNotEmpty()) {
+                            effectiveUnfilteredTypes = fallbackTypes
+                            val typedBatch = fetchPermittedEventBatch(
+                                startLastId = null,
+                                fromSec = from,
+                                toSec = to,
+                                serviceId = serviceId,
+                                cameraUuid = cameraUuid,
+                                resolvedTypes = fallbackTypes,
+                                allCameras = eventRepository.getCamerasInMemory()
+                            )
+                            if (typedBatch.apiSucceeded || typedBatch.events.isNotEmpty()) {
+                                val mergedEvents = (batchResult.events + typedBatch.events)
+                                    .distinctBy { it.uniqueKey() }
+                                    .sortedWith(EventDescendingComparator)
+                                batchResult = typedBatch.copy(
+                                    events = mergedEvents,
+                                    lastRawId = if (fallbackTypes.size <= 1) typedBatch.lastRawId else mergedEvents.lastOrNull()?.id
+                                )
+                            }
+                        }
+                    }
                     val earlyCameraResult = if (!hasWarmCameras || cameraDeferred.isCompleted) cameraDeferred.await() else null
                     val earlyAiServiceResult = if (!hasWarmAiServices || aiServiceDeferred.isCompleted) aiServiceDeferred.await() else null
 
@@ -954,7 +1049,8 @@ class EventViewModel(
         paginateJob = viewModelScope.launch {
             _uiState.update { it.copy(isPaginating = true, error = null) }
             try {
-                val resolvedTypes = resolveApiEventTypes(currentState.selectedAiType)
+                var resolvedTypes = resolveApiEventTypes(currentState.selectedAiType)
+                    .ifEmpty { effectiveUnfilteredTypes }
                 val startId: Int? = if (resolvedTypes.size <= 1) {
                     val sid = lastFetchedRawId ?: currentState.events.lastOrNull()?.id
                     if (sid == null) {
@@ -977,7 +1073,7 @@ class EventViewModel(
                     lastFetchedRawIdByType
                 }
                 val (from, to) = getTimeRange(currentState.selectedFilter)
-                val batchResult = fetchPermittedEventBatch(
+                var batchResult = fetchPermittedEventBatch(
                     startLastId = startId,
                     fromSec = from,
                     toSec = to,
@@ -988,6 +1084,37 @@ class EventViewModel(
                     currentExhaustedTypes = exhaustedEventTypes,
                     isLoadMore = true
                 )
+                if (currentState.selectedAiType.isNullOrBlank() &&
+                    resolvedTypes.isEmpty() &&
+                    !batchResult.reachedEnd &&
+                    batchResult.events.isEmpty()
+                ) {
+                    val discoveredTypes = resolveFallbackEventTypesForAllFilter(
+                        filter = currentState.selectedFilter,
+                        fromSec = from,
+                        toSec = to,
+                        serviceId = currentState.selectedServiceId,
+                        hitUnfilteredCeiling = true
+                    )
+                    if (discoveredTypes.isNotEmpty()) {
+                        effectiveUnfilteredTypes = discoveredTypes
+                        resolvedTypes = discoveredTypes
+                        val seededCursors = currentState.events
+                            .groupBy { it.type }
+                            .mapValues { (_, list) -> list.minOfOrNull { it.id } }
+                        batchResult = fetchPermittedEventBatch(
+                            startLastId = if (discoveredTypes.size == 1) seededCursors[discoveredTypes[0]] else null,
+                            fromSec = from,
+                            toSec = to,
+                            serviceId = currentState.selectedServiceId,
+                            cameraUuid = currentState.selectedCameraUuid,
+                            resolvedTypes = discoveredTypes,
+                            startLastIdByType = seededCursors,
+                            currentExhaustedTypes = emptySet(),
+                            isLoadMore = true
+                        )
+                    }
+                }
                 val newEvents = batchResult.events
                 if (batchResult.apiSucceeded) {
                     lastFetchedRawId = batchResult.lastRawId
@@ -1038,6 +1165,7 @@ class EventViewModel(
         private const val RAW_BATCH_SIZE = 50
         private const val PAGE_TARGET_COUNT = 20
         private const val MAX_BATCH_ATTEMPTS = 5
+        private const val MAX_TYPED_QUERY_CONCURRENCY = 10
         private const val REALTIME_MIN_INTERVAL_MS = 350L
         private const val REALTIME_DB_COMMIT_RETRY_MS = 650L
 

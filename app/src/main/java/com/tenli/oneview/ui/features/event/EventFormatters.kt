@@ -5,6 +5,7 @@ import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -45,6 +46,49 @@ fun resolveApiEventTypes(aiType: String?): List<String> {
         .filter { it.isNotEmpty() }
         .distinct()
         .ifEmpty { listOf(aiType.trim()) }
+}
+
+/**
+ * Toàn bộ danh sách các mã `type` được bật & phân quyền cho tài khoản hiện tại.
+ * Dùng làm fallback truy vấn theo từng `type` khi `Data/api/Data` không truyền `type` bị nghẽn bởi
+ * hàng trăm bản ghi thô từ các sensor không thuộc phân quyền / bị tắt (như Heatmap, Counting...).
+ */
+fun resolveAllPermittedApiEventTypes(): List<String> {
+    val result = LinkedHashSet<String>()
+    for (mod in AiTypeHelper.activeModules) {
+        for (et in mod.eventTypes) {
+            val trimmed = et.trim()
+            if (trimmed.isNotEmpty() && AiTypeHelper.isAiTypeEnabled(trimmed)) {
+                result.add(trimmed)
+            }
+        }
+    }
+    return result.toList()
+}
+
+/**
+ * Từ danh sách thống kê số lượng sự kiện theo loại (`vms-event/count-by-type` hoặc `count-overview`),
+ * trích xuất danh sách gọn nhất các mã `type` được phân quyền có `count > 0` (mở rộng đầy đủ `eventTypes` của module tương ứng).
+ */
+fun expandPermittedApiEventTypesFromCounts(counts: List<VmsEventCountByTypeModel>): List<String> {
+    if (counts.isEmpty()) return emptyList()
+    val result = LinkedHashSet<String>()
+    for (item in counts) {
+        if (item.count <= 0.0) continue
+        val raw = item.type.trim()
+        if (raw.isEmpty() || !AiTypeHelper.isAiTypeEnabled(raw)) continue
+        result.add(raw)
+        val mod = AiTypeHelper.findModuleByEventType(raw)
+        if (mod != null) {
+            for (et in mod.eventTypes) {
+                val trimmed = et.trim()
+                if (trimmed.isNotEmpty() && AiTypeHelper.isAiTypeEnabled(trimmed)) {
+                    result.add(trimmed)
+                }
+            }
+        }
+    }
+    return result.toList()
 }
 
 /** Sắp xếp danh sách sự kiện mới -> cũ (khớp `(b.time || b.id) - (a.time || a.id)` trên Web). */

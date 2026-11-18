@@ -20,6 +20,7 @@ import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.VideoModel
+import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.util.EventBus
 import retrofit2.Response
@@ -159,6 +160,16 @@ class EventRepository(
 
     suspend fun getAIServiceList(): Response<List<AIServiceModel>> =
         eventApi.getAIServiceList()
+
+    fun getCachedHomeEventsByType(filter: TimeFilter, serviceId: Int?): List<VmsEventCountByTypeModel> =
+        HomeCacheManager.getHomeDataInMemory(filter, serviceId)?.eventsByType.orEmpty()
+
+    suspend fun getVmsEventCountByType(
+        fromTime: Long,
+        toTime: Long,
+        serviceId: String?
+    ): Response<List<VmsEventCountByTypeModel>> =
+        bsApi.getVmsEventCountByType(fromTime = fromTime, toTime = toTime, serviceId = serviceId)
 
     suspend fun getProfileList(): Response<List<BsProfileModel>> =
         bsApi.getProfileList()

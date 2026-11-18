@@ -34,6 +34,7 @@ import com.tenli.oneview.ui.features.event.eventTimeToSeconds
 import com.tenli.oneview.ui.features.event.formatVideoQueryTime
 import com.tenli.oneview.ui.features.event.isWithinTimeRangeSeconds
 import com.tenli.oneview.ui.features.event.parseVideoQueryTime
+import com.tenli.oneview.ui.features.event.resolveAllPermittedApiEventTypes
 import com.tenli.oneview.ui.features.event.resolveApiEventTypes
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.features.home.TimeFilter
@@ -60,6 +61,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.text.Normalizer
 import java.text.SimpleDateFormat
@@ -431,6 +434,7 @@ class MonitorViewModel(
     private var lastCameraEventRawId: Int? = null
     private var lastCameraEventRawIdByType: Map<String, Int?> = emptyMap()
     private var exhaustedCameraEventTypes: Set<String> = emptySet()
+    @Volatile private var effectiveCameraUnfilteredTypes: List<String> = emptyList()
     private var playbackLoadedForCameraId: Int? = null
     private var eventsLoadedForCameraId: Int? = null
     private var playbackCurrentSearchDayMs: Long? = null
@@ -1702,6 +1706,7 @@ class MonitorViewModel(
         lastCameraEventRawId = null
         lastCameraEventRawIdByType = emptyMap()
         exhaustedCameraEventTypes = emptySet()
+        effectiveCameraUnfilteredTypes = emptyList()
         val preferredPlaybackChan = resolvePreferredPlaybackChannel(camera)
         val cachedPlayback = getPlaybackSessionCache(camera.id, TimeFilter.TODAY, preferredPlaybackChan)
         if (cachedPlayback != null) {
@@ -2871,6 +2876,7 @@ class MonitorViewModel(
         lastCameraEventRawId = null
         lastCameraEventRawIdByType = emptyMap()
         exhaustedCameraEventTypes = emptySet()
+        effectiveCameraUnfilteredTypes = emptyList()
 
         // Nếu camera chưa có UUID thì không gọi API sự kiện (tránh trả về sự kiện của toàn bộ camera)
         if (cameraUuid.isEmpty()) {
@@ -2908,13 +2914,38 @@ class MonitorViewModel(
                 val toSec = toMs / 1000
                 val resolvedTypes = resolveApiEventTypes(aiType)
 
-                val batchResult = fetchPermittedCameraEventBatch(
+                var batchResult = fetchPermittedCameraEventBatch(
                     startLastId = null,
                     fromSec = fromSec,
                     toSec = toSec,
                     cameraUuid = cameraUuid,
                     resolvedTypes = resolvedTypes
                 )
+                if (aiType.isNullOrBlank() &&
+                    !batchResult.reachedEnd &&
+                    batchResult.events.size < EVENT_PAGE_TARGET_COUNT
+                ) {
+                    val fallbackTypes = resolveAllPermittedApiEventTypes()
+                    if (fallbackTypes.isNotEmpty()) {
+                        effectiveCameraUnfilteredTypes = fallbackTypes
+                        val typedBatch = fetchPermittedCameraEventBatch(
+                            startLastId = null,
+                            fromSec = fromSec,
+                            toSec = toSec,
+                            cameraUuid = cameraUuid,
+                            resolvedTypes = fallbackTypes
+                        )
+                        if (typedBatch.apiSucceeded || typedBatch.events.isNotEmpty()) {
+                            val merged = (batchResult.events + typedBatch.events)
+                                .distinctBy { it.uniqueKey() }
+                                .sortedWith(EventDescendingComparator)
+                            batchResult = typedBatch.copy(
+                                events = merged,
+                                lastRawId = if (fallbackTypes.size <= 1) typedBatch.lastRawId else merged.lastOrNull()?.id
+                            )
+                        }
+                    }
+                }
                 val events = batchResult.events
                 val nextLastId = batchResult.lastRawId
                 val hasMore = batchResult.hasMore
@@ -2983,6 +3014,7 @@ class MonitorViewModel(
             _uiState.update { it.copy(isPaginatingCameraEvents = true) }
             try {
                 val resolvedTypes = resolveApiEventTypes(state.cameraEventAiType)
+                    .ifEmpty { effectiveCameraUnfilteredTypes }
                 val startId: Int? = if (resolvedTypes.size <= 1) {
                     val sid = lastCameraEventRawId ?: state.cameraEvents.lastOrNull()?.id
                     if (sid == null) {
@@ -3059,6 +3091,7 @@ class MonitorViewModel(
         val lastRawIdByType: Map<String, Int?> = emptyMap(),
         val exhaustedTypes: Set<String> = emptySet(),
         val hasMore: Boolean,
+        val reachedEnd: Boolean = true,
         val apiSucceeded: Boolean,
         val firstError: Throwable? = null
     )
@@ -3075,6 +3108,7 @@ class MonitorViewModel(
                 events = emptyList(),
                 lastRawId = startLastId,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
@@ -3154,6 +3188,7 @@ class MonitorViewModel(
             events = validData,
             lastRawId = currentLastId,
             hasMore = hasMore,
+            reachedEnd = reachedEnd,
             apiSucceeded = anySuccessful,
             firstError = if (anySuccessful) null else firstError
         )
@@ -3174,6 +3209,7 @@ class MonitorViewModel(
                 events = emptyList(),
                 lastRawId = startLastId,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
@@ -3198,19 +3234,23 @@ class MonitorViewModel(
                 lastRawIdByType = startLastIdByType,
                 exhaustedTypes = currentExhaustedTypes,
                 hasMore = false,
+                reachedEnd = true,
                 apiSucceeded = true
             )
         }
 
+        val semaphore = Semaphore(10)
         val subResults = typesToQuery.map { type ->
             async {
-                type to fetchSingleTypeCameraEventBatch(
-                    startLastId = if (isLoadMore) startLastIdByType[type] else null,
-                    fromSec = fromSec,
-                    toSec = toSec,
-                    cameraUuid = cameraUuid,
-                    resolvedType = type
-                )
+                semaphore.withPermit {
+                    type to fetchSingleTypeCameraEventBatch(
+                        startLastId = if (isLoadMore) startLastIdByType[type] else null,
+                        fromSec = fromSec,
+                        toSec = toSec,
+                        cameraUuid = cameraUuid,
+                        resolvedType = type
+                    )
+                }
             }
         }.awaitAll()
 
@@ -3246,6 +3286,7 @@ class MonitorViewModel(
             lastRawIdByType = nextCursors,
             exhaustedTypes = nextExhausted,
             hasMore = hasMore,
+            reachedEnd = !hasMore,
             apiSucceeded = anySucceeded,
             firstError = if (anySucceeded) null else firstError
         )
@@ -3263,6 +3304,7 @@ class MonitorViewModel(
             val fromSec = fromMs / 1000
             val toSec = toMs / 1000
             val resolvedTypes = resolveApiEventTypes(state.cameraEventAiType)
+                .ifEmpty { effectiveCameraUnfilteredTypes }
             val prevMaxId = state.cameraEvents.maxOfOrNull { it.id } ?: 0
 
             var batch = fetchPermittedCameraEventBatch(

@@ -25,8 +25,10 @@ import com.tenli.oneview.model.network.VmsCountOverviewModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.event.EventDescendingComparator
 import com.tenli.oneview.ui.features.event.eventTimeToSeconds
+import com.tenli.oneview.ui.features.event.expandPermittedApiEventTypesFromCounts
 import com.tenli.oneview.ui.features.event.isWithinTimeRangeSeconds
 import com.tenli.oneview.ui.features.event.permittedDistinct
+import com.tenli.oneview.ui.features.event.resolveAllPermittedApiEventTypes
 import com.tenli.oneview.ui.features.event.uniqueKey
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
@@ -417,8 +419,81 @@ class HomeViewModel(
     private data class RecentEventsFetchResult(
         val events: List<EventData>,
         val anySuccessful: Boolean,
+        val reachedEnd: Boolean = true,
         val firstError: Throwable? = null
     )
+
+    /**
+     * Truy vấn bổ sung theo từng mã `type` được phân quyền khi `Data/api/Data` không truyền `type`
+     * bị nghẽn bởi hàng trăm bản ghi thô từ các sensor bị tắt / không thuộc phân quyền (vd. Heatmap, Counting...).
+     */
+    private suspend fun fetchPermittedRecentEventsByTypes(
+        fromSec: Long,
+        toSec: Long,
+        serviceId: Int?,
+        candidateTypes: List<String>,
+        allCameras: List<CameraModel> = dashboardRepository.getCamerasInMemory()
+    ): RecentEventsFetchResult = coroutineScope {
+        if (!UserPermissionManager.canAccessEvents() || candidateTypes.isEmpty()) {
+            return@coroutineScope RecentEventsFetchResult(events = emptyList(), anySuccessful = true, reachedEnd = true)
+        }
+        val semaphore = Semaphore(MAX_OVERVIEW_BY_TYPE_CONCURRENCY)
+        val perTypeBatchSize = if (UserPermissionManager.isCustomCameraPermission()) {
+            MEDIUM_RECENT_BATCH_SIZE
+        } else {
+            FAST_RECENT_BATCH_SIZE
+        }
+        val camerasForPerm = allCameras.ifEmpty { dashboardRepository.getCamerasInMemory() }
+
+        val results = candidateTypes.map { type ->
+            async {
+                semaphore.withPermit {
+                    safeApiCall {
+                        dashboardRepository.getEventDataList(
+                            count = perTypeBatchSize,
+                            lastId = null,
+                            from = fromSec,
+                            to = toSec,
+                            serviceId = serviceId,
+                            type = type
+                        )
+                    }
+                }
+            }
+        }.awaitAll()
+
+        var anySuccessful = false
+        var firstError: Throwable? = null
+        val permitted = ArrayList<EventData>()
+        val seenIds = HashSet<Int>()
+        val seenKeys = HashSet<String>()
+
+        for (res in results) {
+            val resp = res.getOrNull()
+            if (resp != null) {
+                anySuccessful = true
+                val body = resp.body().orEmpty()
+                for (ev in body) {
+                    if (ev.isWithinTimeRangeSeconds(fromSec, toSec) &&
+                        UserPermissionManager.isEventPermitted(ev, camerasForPerm) &&
+                        seenIds.add(ev.id) &&
+                        seenKeys.add(ev.uniqueKey())
+                    ) {
+                        permitted.add(ev)
+                    }
+                }
+            } else if (firstError == null) {
+                firstError = res.exceptionOrNull()
+            }
+        }
+
+        RecentEventsFetchResult(
+            events = permitted.sortedWith(EventDescendingComparator).take(MAX_RECENT_EVENTS),
+            anySuccessful = anySuccessful,
+            reachedEnd = true,
+            firstError = if (anySuccessful) null else firstError
+        )
+    }
 
     /**
      * Khớp hoàn toàn với MobileHomePage.vue:
@@ -433,7 +508,7 @@ class HomeViewModel(
         fastFirstAttempt: Boolean = true
     ): RecentEventsFetchResult {
         if (!UserPermissionManager.canAccessEvents()) {
-            return RecentEventsFetchResult(events = emptyList(), anySuccessful = true)
+            return RecentEventsFetchResult(events = emptyList(), anySuccessful = true, reachedEnd = true)
         }
         val permitted = mutableListOf<EventData>()
         val seenIds = HashSet<Int>()
@@ -441,6 +516,7 @@ class HomeViewModel(
         var lastId: Int? = null
         var attempts = 0
         var anySuccessful = false
+        var reachedEnd = false
         var firstError: Throwable? = null
         val isUnrestricted = !UserPermissionManager.isCustomCameraPermission() &&
             !UserPermissionManager.isCustomAiEventPermission() &&
@@ -465,11 +541,15 @@ class HomeViewModel(
             val resp = result.getOrNull()
             if (resp == null) {
                 if (firstError == null) firstError = result.exceptionOrNull()
+                reachedEnd = true
                 break
             }
             anySuccessful = true
             val data = resp.body() ?: emptyList()
-            if (data.isEmpty()) break
+            if (data.isEmpty()) {
+                reachedEnd = true
+                break
+            }
 
             val camerasForPerm = allCameras.ifEmpty { dashboardRepository.getCamerasInMemory() }
             for (ev in data) {
@@ -485,13 +565,22 @@ class HomeViewModel(
 
             // Danh sách trả về theo thứ tự mới -> cũ (order=desc); nếu toàn bộ batch đã cũ hơn fromSec thì dừng phân trang
             val allOlderThanFrom = data.all { it.time > 0.0 && eventTimeToSeconds(it.time) < fromSec }
-            if (allOlderThanFrom || data.size < batchSize) break
-            lastId = data.lastOrNull()?.id ?: break
+            if (allOlderThanFrom || data.size < batchSize) {
+                reachedEnd = true
+                break
+            }
+            val nextLastId = data.lastOrNull()?.id
+            if (nextLastId == null || nextLastId <= 0 || nextLastId == lastId) {
+                reachedEnd = true
+                break
+            }
+            lastId = nextLastId
         }
 
         return RecentEventsFetchResult(
             events = permitted.sortedWith(EventDescendingComparator).take(MAX_RECENT_EVENTS),
             anySuccessful = anySuccessful,
+            reachedEnd = reachedEnd,
             firstError = if (anySuccessful) null else firstError
         )
     }
@@ -520,6 +609,29 @@ class HomeViewModel(
                 toSec = toSec,
                 serviceId = serviceId
             )
+            if (!recentResult.reachedEnd && recentResult.events.size < MAX_RECENT_EVENTS) {
+                val targetTypes = expandPermittedApiEventTypesFromCounts(_uiState.value.eventsByType)
+                    .ifEmpty { resolveAllPermittedApiEventTypes() }
+                if (targetTypes.isNotEmpty()) {
+                    val typedFallback = fetchPermittedRecentEventsByTypes(
+                        fromSec = fromSec,
+                        toSec = toSec,
+                        serviceId = serviceId,
+                        candidateTypes = targetTypes
+                    )
+                    if (typedFallback.anySuccessful) {
+                        val merged = (recentResult.events + typedFallback.events)
+                            .distinctBy { it.id }
+                            .sortedWith(EventDescendingComparator)
+                            .take(MAX_RECENT_EVENTS)
+                        recentResult = RecentEventsFetchResult(
+                            events = merged,
+                            anySuccessful = true,
+                            reachedEnd = true
+                        )
+                    }
+                }
+            }
 
             // Nếu gói WebSocket Notify đến trước lúc bản ghi được đánh dấu isConfirmed=1 khoảng vài trăm ms,
             // thử lại đúng 1 lần nhẹ sau 650ms để bắt chắc chắn sự kiện vừa phát sinh.
@@ -532,11 +644,33 @@ class HomeViewModel(
                 ) {
                     return
                 }
-                val retryResult = fetchPermittedRecentEvents(
+                var retryResult = fetchPermittedRecentEvents(
                     fromSec = fromSec,
                     toSec = toSec,
                     serviceId = serviceId
                 )
+                if (!retryResult.reachedEnd && retryResult.events.size < MAX_RECENT_EVENTS) {
+                    val targetTypes = expandPermittedApiEventTypesFromCounts(_uiState.value.eventsByType)
+                        .ifEmpty { resolveAllPermittedApiEventTypes() }
+                    if (targetTypes.isNotEmpty()) {
+                        val typedRetry = fetchPermittedRecentEventsByTypes(
+                            fromSec = fromSec,
+                            toSec = toSec,
+                            serviceId = serviceId,
+                            candidateTypes = targetTypes
+                        )
+                        if (typedRetry.anySuccessful) {
+                            retryResult = RecentEventsFetchResult(
+                                events = (retryResult.events + typedRetry.events)
+                                    .distinctBy { it.id }
+                                    .sortedWith(EventDescendingComparator)
+                                    .take(MAX_RECENT_EVENTS),
+                                anySuccessful = true,
+                                reachedEnd = true
+                            )
+                        }
+                    }
+                }
                 if (retryResult.anySuccessful) {
                     recentResult = retryResult
                 }
@@ -891,8 +1025,8 @@ class HomeViewModel(
                     val overviewResponse = overviewResult.getOrNull()
                     val byTypeResponse = byTypeResult.getOrNull()
                     val byTypeSucceeded = byTypeResponse?.isSuccessful == true
-                    val recentEvents = recentResult.events
-                    val recentEventsSucceeded = recentResult.anySuccessful
+                    var recentEvents = recentResult.events
+                    var recentEventsSucceeded = recentResult.anySuccessful
                     val earlyCameraResponse = earlyCameraResult?.getOrNull()
 
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
@@ -928,18 +1062,10 @@ class HomeViewModel(
                     val (eventsByType, hasLoadedEventsByType) = when {
                         byTypeSucceeded && byTypeBody.isNotEmpty() -> {
                             lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
-                            lastCountedRealtimeEventId = maxOf(
-                                lastCountedRealtimeEventId,
-                                recentEvents.maxOfOrNull { it.id } ?: 0
-                            )
                             byTypeBody to true
                         }
                         fallbackByType != null -> {
                             lastByTypeOverviewSyncMs = SystemClock.elapsedRealtime()
-                            lastCountedRealtimeEventId = maxOf(
-                                lastCountedRealtimeEventId,
-                                recentEvents.maxOfOrNull { it.id } ?: 0
-                            )
                             fallbackByType to true
                         }
                         else -> {
@@ -952,6 +1078,44 @@ class HomeViewModel(
                     } else {
                         dashboardRepository.getCamerasInMemory().ifEmpty { _uiState.value.cameraList }
                     }
+
+                    // Nếu truy vấn không truyền `type` bị nghẽn bởi các bản ghi sensor bị tắt / ngoài phân quyền (vd. Heatmap...)
+                    // hoặc thống kê Phân bố sự kiện AI cho thấy có nhiều sự kiện hơn kết quả thu được, truy vấn bổ sung đúng các `type` đang có sự kiện.
+                    val permittedStatsCount = eventsByType
+                        .filter { AiTypeHelper.isAiTypeEnabled(it.type) }
+                        .sumOf { it.count.toLong() }
+                    if (wave1Alive &&
+                        UserPermissionManager.canAccessEvents() &&
+                        recentEvents.size < MAX_RECENT_EVENTS &&
+                        (!recentResult.reachedEnd || permittedStatsCount > recentEvents.size.toLong())
+                    ) {
+                        val targetTypes = expandPermittedApiEventTypesFromCounts(eventsByType)
+                            .ifEmpty { if (!recentResult.reachedEnd) resolveAllPermittedApiEventTypes() else emptyList() }
+                        if (targetTypes.isNotEmpty()) {
+                            val typedFallback = fetchPermittedRecentEventsByTypes(
+                                fromSec = fromSec,
+                                toSec = toSec,
+                                serviceId = serviceId,
+                                candidateTypes = targetTypes,
+                                allCameras = initialCameraList
+                            )
+                            if (typedFallback.anySuccessful) {
+                                recentEventsSucceeded = true
+                                recentEvents = (recentEvents + typedFallback.events)
+                                    .distinctBy { it.id }
+                                    .sortedWith(EventDescendingComparator)
+                                    .take(MAX_RECENT_EVENTS)
+                            }
+                        }
+                    }
+
+                    if (hasLoadedEventsByType) {
+                        lastCountedRealtimeEventId = maxOf(
+                            lastCountedRealtimeEventId,
+                            recentEvents.maxOfOrNull { it.id } ?: 0
+                        )
+                    }
+
                     val initialPermittedCameras = UserPermissionManager.filterPermittedCameras(initialCameraList)
                     val (preliminaryRunningTasks, preliminaryTotalTasks) = resolveMonitorCountsFromOverview(
                         overviewStats = overviewStats,

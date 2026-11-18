@@ -132,14 +132,16 @@ class DashboardRepository(
         lastId: Int?,
         from: Long,
         to: Long,
-        serviceId: Int?
+        serviceId: Int?,
+        type: String? = null
     ): Response<List<EventData>> =
         eventApi.getDataList(
             count = count,
             lastId = lastId,
             from = from,
             to = to,
-            serviceId = serviceId
+            serviceId = serviceId,
+            type = type
         )
 
     suspend fun getMonitorList(): Response<List<Monitor>> =
