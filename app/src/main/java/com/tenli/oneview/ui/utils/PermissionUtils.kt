@@ -21,19 +21,31 @@ object PermissionUtils {
         "huawei", "honor"
     )
 
-    private val _requiresCallPermissions = MutableStateFlow(false)
+    data class CallPermissionCheckState(
+        val isResolved: Boolean = false,
+        val requiresCallPermissions: Boolean = false
+    )
+
+    private val _callPermissionCheckState = MutableStateFlow(CallPermissionCheckState())
     /**
-     * `true` chỉ khi tài khoản hiện tại có quyền sự kiện AI, đang bật nhận thông báo chung
-     * và đã lưu sẵn ít nhất 1 bài AI được phân quyền đang ở hình thức cảnh báo "Cuộc gọi".
+     * Trạng thái kiểm tra quyền "Cuộc gọi" của phiên đăng nhập hiện tại:
+     * - [CallPermissionCheckState.isResolved]: `true` sau khi đã kiểm tra xong phân quyền & cấu hình bài AI từ API (hoặc cache khi offline).
+     * - [CallPermissionCheckState.requiresCallPermissions]: `true` khi tài khoản có ít nhất 1 bài AI được phân quyền đang bật "Cuộc gọi".
      */
-    val requiresCallPermissions: StateFlow<Boolean> = _requiresCallPermissions.asStateFlow()
+    val callPermissionCheckState: StateFlow<CallPermissionCheckState> = _callPermissionCheckState.asStateFlow()
 
     fun updateCallPermissionRequirement(required: Boolean) {
-        _requiresCallPermissions.value = required
+        _callPermissionCheckState.value = CallPermissionCheckState(
+            isResolved = true,
+            requiresCallPermissions = required
+        )
     }
 
     fun resetCallPermissionRequirement() {
-        _requiresCallPermissions.value = false
+        _callPermissionCheckState.value = CallPermissionCheckState(
+            isResolved = false,
+            requiresCallPermissions = false
+        )
     }
 
     fun isChineseOemDevice(manufacturer: String = Build.MANUFACTURER): Boolean {

@@ -543,7 +543,7 @@ fun MonitorScreen(
                                 .width(currentSearchWidth)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(spacing.radiusSmall))
-                                .background(controlBg)
+                                .background(controlBg.copy(alpha = expandProgress))
                                 .then(
                                     if (!isSearchExpanded) {
                                         Modifier.clickable {

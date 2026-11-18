@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -82,6 +83,7 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.ui.utils.PermissionUtils
+import kotlinx.coroutines.delay
 
 private const val TAG = "MainActivity"
 
@@ -279,20 +281,39 @@ private fun StartupPermissionDialogs() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val manufacturer = remember { Build.MANUFACTURER.lowercase() }
     val isChinesePhone = remember(manufacturer) { PermissionUtils.isChineseOemDevice(manufacturer) }
-    val requiresCallPermissions by PermissionUtils.requiresCallPermissions.collectAsStateWithLifecycle()
+    val callCheckState by PermissionUtils.callPermissionCheckState.collectAsStateWithLifecycle()
+
+    val needsInitialRuntimeNotificationRequest = remember {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+    }
 
     var activeStep by remember { mutableStateOf<CallPermissionStep?>(null) }
     var dismissedInSession by remember { mutableStateOf(emptySet<CallPermissionStep>()) }
-    // Không hiện cảnh báo phía sau hộp thoại xin quyền hệ thống đang mở
-    var isRequestingNotification by remember { mutableStateOf(false) }
+    // Khởi tạo đồng bộ = true ngay từ frame đầu trên máy mới cài để tuyệt đối không bật bottom sheet phía sau hộp thoại xin quyền hệ thống
+    var isRequestingNotification by remember { mutableStateOf(needsInitialRuntimeNotificationRequest) }
+    var grantedNotificationInLauncher by remember { mutableStateOf(false) }
 
-    fun refreshDialogs(callRequired: Boolean = requiresCallPermissions) {
-        if (isRequestingNotification) return
-        val hasNotificationPerm = PermissionUtils.isNotificationEnabled(context)
+    fun refreshDialogs(
+        checkState: PermissionUtils.CallPermissionCheckState = PermissionUtils.callPermissionCheckState.value
+    ) {
+        val osEnabled = PermissionUtils.isNotificationEnabled(context)
+        if (osEnabled) {
+            grantedNotificationInLauncher = false
+        }
+        val hasNotificationPerm = osEnabled || grantedNotificationInLauncher
         if (hasNotificationPerm) {
             FcmTokenManager.registerDevicePushTokenAsync(force = false)
         }
-        activeStep = if (callRequired) {
+
+        // Chờ đóng xong hộp thoại xin quyền hệ thống VÀ chờ API kiểm tra xong xem tài khoản có bài AI bật "Cuộc gọi" hay không
+        // mới quyết định hiển thị hoặc ẩn bottom sheet cấp quyền.
+        if (isRequestingNotification || !checkState.isResolved) {
+            activeStep = null
+            return
+        }
+
+        activeStep = if (checkState.requiresCallPermissions) {
             // Bắt buộc cấp đủ các quyền phục vụ Cuộc gọi khẩn cấp (bỏ qua trạng thái "Để sau")
             when {
                 !hasNotificationPerm -> CallPermissionStep.NOTIFICATION
@@ -314,35 +335,59 @@ private fun StartupPermissionDialogs() {
     ) { granted ->
         isRequestingNotification = false
         if (granted) {
+            grantedNotificationInLauncher = true
             FcmTokenManager.registerDevicePushTokenAsync(force = false)
+        } else {
+            dismissedInSession = dismissedInSession + CallPermissionStep.NOTIFICATION
         }
         refreshDialogs()
     }
 
     LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (needsInitialRuntimeNotificationRequest) {
             isRequestingNotification = true
+            activeStep = null
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 
-    // Phản hồi ngay khi đồng bộ cấu hình sau đăng nhập xác nhận tài khoản có bài AI bật "Cuộc gọi"
-    LaunchedEffect(requiresCallPermissions) {
-        refreshDialogs(requiresCallPermissions)
+    var resumeTick by remember { mutableIntStateOf(0) }
+
+    // Phản hồi ngay khi đồng bộ cấu hình từ API hoàn tất
+    LaunchedEffect(callCheckState) {
+        refreshDialogs(callCheckState)
     }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) refreshDialogs()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                resumeTick++
+                refreshDialogs()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Trên Android, khi bật "Không hạn chế pin" (Unrestricted) hoặc "Hiển thị trên ứng dụng khác" rồi bấm Back ngay,
+    // Settings của hệ thống ghi whitelist bất đồng bộ trong onStop() (trễ ~150ms - 1500ms sau khi MainActivity.onResume chạy).
+    // Kiểm tra lặp ngắn sau khi quay lại app và trong lúc sheet đang mở để tự động ẩn ngay khi hệ thống cập nhật xong.
+    LaunchedEffect(resumeTick, activeStep, callCheckState) {
+        if (isRequestingNotification || !callCheckState.isResolved) return@LaunchedEffect
+        for (i in 0 until 20) {
+            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+            if (activeStep == null && PermissionUtils.isCallReady(context)) return@LaunchedEffect
+            delay(125L)
+            refreshDialogs()
+        }
+        while (activeStep != null && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            delay(250L)
+            refreshDialogs()
+        }
+    }
+
     val currentStep = activeStep ?: return
-    val isMandatory = requiresCallPermissions
+    val isMandatory = callCheckState.requiresCallPermissions
 
     CallPermissionStepSheet(
         step = currentStep,

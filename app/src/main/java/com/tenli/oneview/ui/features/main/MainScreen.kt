@@ -79,6 +79,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -1417,6 +1418,7 @@ private sealed interface PendingCallActivation {
     data class SwitchToCall(val moduleKey: String, val moduleEnabled: Boolean) : PendingCallActivation
     data class EnableCallModule(val moduleKey: String) : PendingCallActivation
     data object EnableMasterPush : PendingCallActivation
+    data class ManualStep(val step: CallPermissionStep) : PendingCallActivation
 }
 
 @Composable
@@ -1430,6 +1432,12 @@ private fun MobileNotificationConfigScreen(
 
     val scrollState = rememberScrollState()
     var isAiModulesExpanded by rememberSaveable { mutableStateOf(false) }
+
+    // Neo vị trí cuộn: khi khối quyền Cuộc gọi & Pin ở đầu trang thêm/bớt chiều cao, bù đúng deltaPx vào scrollState
+    // ngay trong cùng frame layout để phần Cài đặt chung & Cấu hình thông báo theo bài AI giữ nguyên vị trí trên màn hình.
+    val currentCallPermsHeightPx = remember { IntArray(1) }
+    val prevCallPermsHeightPx = remember { IntArray(1) }
+    val isScrollAnchorInitialized = remember { BooleanArray(1) }
 
     var hasOsPermission by remember { mutableStateOf(hasOsNotificationPermission(context)) }
     var hasOverlayPerm by remember { mutableStateOf(hasOverlayPermission(context)) }
@@ -1449,6 +1457,16 @@ private fun MobileNotificationConfigScreen(
 
         when (val pending = pendingCallActivation) {
             null -> Unit
+            is PendingCallActivation.ManualStep -> {
+                val granted = when (pending.step) {
+                    CallPermissionStep.NOTIFICATION -> osOk
+                    CallPermissionStep.OVERLAY -> overlayOk
+                    CallPermissionStep.BATTERY -> batteryOk
+                }
+                if (granted) {
+                    pendingCallActivation = null
+                }
+            }
             is PendingCallActivation.SwitchToCall -> {
                 if (osOk && overlayOk && batteryOk) {
                     pendingCallActivation = null
@@ -1478,15 +1496,35 @@ private fun MobileNotificationConfigScreen(
         }
     }
 
+    var resumeTick by remember { mutableIntStateOf(0) }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                resumeTick++
                 tryCompletePendingCallActivation()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Bắt kịp trường hợp Android Settings lưu trạng thái "Không hạn chế pin" / "Hiển thị trên ứng dụng khác"
+    // bất đồng bộ vài trăm ms sau khi quay lại app, giúp tự động ẩn sheet và cập nhật trạng thái ngay lập tức.
+    LaunchedEffect(resumeTick, pendingCallActivation) {
+        for (i in 0 until 20) {
+            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+            if (hasOsPermission && hasOverlayPerm && hasBatteryPerm && pendingCallActivation == null) {
+                return@LaunchedEffect
+            }
+            delay(125L)
+            tryCompletePendingCallActivation()
+        }
+        while (pendingCallActivation != null && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            delay(250L)
+            tryCompletePendingCallActivation()
         }
     }
 
@@ -1578,12 +1616,40 @@ private fun MobileNotificationConfigScreen(
                     modifier = Modifier
                         .widthIn(max = spacing.contentMaxWidth)
                         .fillMaxWidth()
+                        .layout { measurable, constraints ->
+                            val scrollBefore = Snapshot.withoutReadObservation { scrollState.value }
+                            val placeable = measurable.measure(constraints)
+                            val measuredCallPermsHeight = currentCallPermsHeightPx[0]
+                            if (!isScrollAnchorInitialized[0]) {
+                                isScrollAnchorInitialized[0] = true
+                                prevCallPermsHeightPx[0] = measuredCallPermsHeight
+                            } else {
+                                val deltaPx = measuredCallPermsHeight - prevCallPermsHeightPx[0]
+                                if (deltaPx != 0) {
+                                    prevCallPermsHeightPx[0] = measuredCallPermsHeight
+                                    Snapshot.withoutReadObservation {
+                                        val newMax = scrollState.maxValue
+                                        val desiredScroll = (scrollBefore + deltaPx).coerceIn(0, newMax)
+                                        val correction = desiredScroll - scrollState.value
+                                        if (correction != 0) {
+                                            scrollState.dispatchRawDelta(correction.toFloat())
+                                        }
+                                    }
+                                }
+                            }
+                            layout(placeable.width, placeable.height) {
+                                placeable.placeRelative(0, 0)
+                            }
+                        }
                         .verticalScroll(scrollState)
                         .padding(spacing.space10)
                 ) {
                     val sectionHeaderModifier = Modifier.padding(start = spacing.space4, bottom = spacing.space6)
+                    val hasAnyCallModuleSelected = remember(state.aiModules) {
+                        state.aiModules.any { it.enabled && it.alarmMode == AiAlarmMode.Call }
+                    }
 
-                    // 1. Device Permission Status Card (Giữ chiều cao cố định để khi bật/tắt Cuộc gọi không làm nhảy hay cuộn trang lên đầu)
+                    // 1. Device Permission Status Card (Thông báo + Quyền Cuộc gọi & Duy trì kết nối khi có bài AI chọn Cuộc gọi)
                     SettingsSectionHeader(
                         text = if (isEn) "Device Permissions" else "Quyền trên thiết bị",
                         modifier = sectionHeaderModifier
@@ -1617,6 +1683,111 @@ private fun MobileNotificationConfigScreen(
                                     color = colors.accent,
                                     onClick = requestOrOpenPermission
                                 )
+                            }
+                        }
+
+                        val showOverlayRow = hasOverlayPerm || hasAnyCallModuleSelected
+                        val showBatteryRow = hasBatteryPerm || hasAnyCallModuleSelected
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .layout { measurable, constraints ->
+                                    val placeable = measurable.measure(constraints)
+                                    currentCallPermsHeightPx[0] = placeable.height
+                                    layout(placeable.width, placeable.height) {
+                                        placeable.placeRelative(0, 0)
+                                    }
+                                }
+                        ) {
+                            if (showOverlayRow || showBatteryRow) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    if (showOverlayRow) {
+                                        HorizontalDivider(
+                                            color = colors.divider,
+                                            thickness = spacing.borderThin
+                                        )
+
+                                        if (hasOverlayPerm) {
+                                            NotificationSettingRow(
+                                                icon = LucideIcons.PhoneCall,
+                                                iconColor = colors.success,
+                                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
+                                                subtitle = if (isEn) {
+                                                    "Allows incoming call alerts to pop up over other apps."
+                                                } else {
+                                                    "Cho phép bật màn hình cuộc gọi cảnh báo đè lên ứng dụng khác."
+                                                }
+                                            ) {
+                                                StatusChip(
+                                                    text = if (isEn) "Enabled" else "Đang bật",
+                                                    color = colors.success
+                                                )
+                                            }
+                                        } else {
+                                            NotificationSettingRow(
+                                                icon = LucideIcons.PhoneCall,
+                                                iconColor = colors.warning,
+                                                title = if (isEn) "Emergency call" else "Cuộc gọi khẩn cấp",
+                                                subtitle = if (isEn) {
+                                                    "Required to pop up the incoming call screen when the app is in background."
+                                                } else {
+                                                    "Cần cấp quyền hiển thị trên ứng dụng khác để bật màn hình cuộc gọi khi có cảnh báo."
+                                                }
+                                            ) {
+                                                StatusChip(
+                                                    text = if (isEn) "Grant now" else "Cấp quyền ngay",
+                                                    color = colors.accent,
+                                                    onClick = openOverlayPermissionSettings
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    if (showBatteryRow) {
+                                        HorizontalDivider(
+                                            color = colors.divider,
+                                            thickness = spacing.borderThin
+                                        )
+
+                                        if (hasBatteryPerm) {
+                                            NotificationSettingRow(
+                                                icon = LucideIcons.CheckCircle,
+                                                iconColor = colors.success,
+                                                title = if (isEn) "Keep connection active" else "Duy trì kết nối",
+                                                subtitle = if (isEn) {
+                                                    "Unrestricted battery enabled so incoming alert calls are never missed."
+                                                } else {
+                                                    "Đã bật pin Không hạn chế để không bỏ lỡ cuộc gọi cảnh báo khi máy ngủ."
+                                                }
+                                            ) {
+                                                StatusChip(
+                                                    text = if (isEn) "Enabled" else "Đang bật",
+                                                    color = colors.success
+                                                )
+                                            }
+                                        } else {
+                                            NotificationSettingRow(
+                                                icon = LucideIcons.Bell,
+                                                iconColor = colors.warning,
+                                                title = if (isEn) "Keep connection active" else "Duy trì kết nối",
+                                                subtitle = if (isEn) {
+                                                    "Set battery usage to Unrestricted to receive alert calls while asleep."
+                                                } else {
+                                                    "Cần chọn mức sử dụng Pin Không hạn chế để nhận cuộc gọi khi máy ở chế độ ngủ."
+                                                }
+                                            ) {
+                                                StatusChip(
+                                                    text = if (isEn) "Grant now" else "Cấp quyền ngay",
+                                                    color = colors.accent,
+                                                    onClick = {
+                                                        pendingCallActivation = PendingCallActivation.ManualStep(CallPermissionStep.BATTERY)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1895,10 +2066,11 @@ private fun MobileNotificationConfigScreen(
 
         // Bottom Sheet cấp quyền (cho phép Để sau / đóng X / vuốt ẩn) khi bật Cuộc gọi từ Cài đặt:
         // nếu người dùng ấn Để sau hoặc ẩn đi thì hủy pendingCallActivation -> không bật được Cuộc gọi / thông báo bài AI Cuộc gọi
-        val settingsPermissionStep: CallPermissionStep? = if (pendingCallActivation == null) {
-            null
-        } else {
-            when {
+        val activePendingCall = pendingCallActivation
+        val settingsPermissionStep: CallPermissionStep? = when (activePendingCall) {
+            null -> null
+            is PendingCallActivation.ManualStep -> activePendingCall.step
+            else -> when {
                 !hasOsPermission -> CallPermissionStep.NOTIFICATION
                 !hasOverlayPerm -> CallPermissionStep.OVERLAY
                 !hasBatteryPerm -> CallPermissionStep.BATTERY

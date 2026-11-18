@@ -1081,8 +1081,14 @@ class MonitorViewModel(
 
     fun setQuickFilter(filter: CameraQuickFilter) {
         savedMonitorFilterBeforeExternalNav = null
-        if (_uiState.value.quickFilter == filter) return
-        _uiState.update { it.copy(quickFilter = filter, currentCameraPage = 1).withDerivedData() }
+        val currentFilter = _uiState.value.quickFilter
+        val nextFilter = if (currentFilter == filter && filter != CameraQuickFilter.ALL) {
+            CameraQuickFilter.ALL
+        } else {
+            filter
+        }
+        if (currentFilter == nextFilter) return
+        _uiState.update { it.copy(quickFilter = nextFilter, currentCameraPage = 1).withDerivedData() }
         loadVisibleCameraSnapshots()
     }
 
