@@ -214,6 +214,18 @@ private fun resolvePwaAiTaskTitle(event: EventData, isEn: Boolean): String {
     if (tStr.contains("wrong_way") || tStr.contains("crossing")) {
         return if (isEn) "Wrong-way driving" else "Đi ngược chiều"
     }
+    if (tStr.contains("person-in")) {
+        return if (isEn) "Person entry detection" else "Phát hiện người vào"
+    }
+    if (tStr.contains("person-out")) {
+        return if (isEn) "Person exit detection" else "Phát hiện người ra"
+    }
+    if (tStr.contains("absence")) {
+        return if (isEn) "Absence detection" else "Phát hiện rời vị trí"
+    }
+    if (tStr.contains("fall")) {
+        return if (isEn) "Fall detection" else "Phát hiện té ngã"
+    }
     if (tStr.contains("person") || tStr.contains("intrusion")) {
         return if (isEn) "Intrusion detection" else "Phát hiện xâm nhập"
     }
@@ -222,9 +234,6 @@ private fun resolvePwaAiTaskTitle(event: EventData, isEn: Boolean): String {
     }
     if (tStr.contains("garbage") || tStr.contains("littering")) {
         return if (isEn) "Littering detection" else "Phát hiện xả rác"
-    }
-    if (tStr.contains("fall")) {
-        return if (isEn) "Fall detection" else "Phát hiện té ngã"
     }
     if (tStr.contains("smoking") || tStr.contains("pose")) {
         return if (isEn) "Smoking detection" else "Phát hiện hút thuốc"

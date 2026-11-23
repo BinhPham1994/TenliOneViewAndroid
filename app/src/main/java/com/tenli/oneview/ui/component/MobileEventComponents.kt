@@ -23,8 +23,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -969,6 +971,121 @@ private fun TopBarIconBox(
     )
 }
 
+/**
+ * Một mục chip hiển thị bộ lọc đang bật (bấm dấu × để gỡ ngay trong 1 chạm).
+ */
+@Immutable
+data class ActiveFilterChipItem(
+    val key: String,
+    val label: String,
+    val onRemove: () -> Unit
+)
+
+/**
+ * Dải chip nằm ngang gọn gàng dưới TopBar hiển thị trực quan các bộ lọc đang áp dụng.
+ * Tự ẩn mượt mà khi không có bộ lọc nào bật; hiển thị thêm nút "Xóa tất cả" khi có từ 2 điều kiện trở lên.
+ */
+@Composable
+fun ActiveFilterChipsRow(
+    chips: List<ActiveFilterChipItem>,
+    onClearAll: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val isEn = rememberIsEnglish()
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val pillShape = remember { RoundedCornerShape(50) }
+
+    AnimatedVisibility(
+        visible = chips.isNotEmpty(),
+        enter = fadeIn(animationSpec = tween(160)) + slideInVertically(
+            initialOffsetY = { -it / 3 },
+            animationSpec = tween(180)
+        ),
+        exit = fadeOut(animationSpec = tween(130)),
+        modifier = modifier
+    ) {
+        val scrollState = androidx.compose.foundation.rememberScrollState()
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState)
+                .padding(
+                    start = spacing.space10,
+                    end = spacing.space10,
+                    top = spacing.space2,
+                    bottom = spacing.space8
+                ),
+            horizontalArrangement = Arrangement.spacedBy(spacing.space6),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            chips.forEach { chip ->
+                androidx.compose.runtime.key(chip.key) {
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = spacing.space32)
+                            .clip(pillShape)
+                            .background(colors.accent.copy(alpha = if (colors.isDark) 0.18f else 0.11f))
+                            .clickable(onClick = chip.onRemove)
+                            .padding(
+                                start = spacing.space10,
+                                end = spacing.space6,
+                                top = spacing.space4,
+                                bottom = spacing.space4
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space4)
+                    ) {
+                        Text(
+                            text = chip.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.activeContent,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 180.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(spacing.space20)
+                                .clip(CircleShape)
+                                .background(colors.accent.copy(alpha = if (colors.isDark) 0.24f else 0.14f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = LucideIcons.X,
+                                contentDescription = if (isEn) "Remove filter ${chip.label}" else "Bỏ lọc ${chip.label}",
+                                tint = colors.activeContent,
+                                modifier = Modifier.size(spacing.iconTiny)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (chips.size >= 2 && onClearAll != null) {
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = spacing.space32)
+                        .clip(pillShape)
+                        .background(colors.surface)
+                        .clickable(onClick = onClearAll)
+                        .padding(horizontal = spacing.space10, vertical = spacing.space4),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isEn) "Clear all" else "Xóa tất cả",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.textSubtle,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
 // =====================================================================================
 // Thẻ sự kiện (dùng trong list dài: Home, Event, EventDetail) – giữ thật nhẹ
 // =====================================================================================
@@ -1688,8 +1805,10 @@ fun MobileFilterBottomSheet(
 
                         // 4. AI Event Type
                         if (showEventType) {
-                            val moduleLabel = activeModules.find { it.sensorType == draftAiType }?.let {
-                                if (isEn) it.labelEn else it.labelVi
+                            val moduleLabel = draftAiType?.let { selected ->
+                                activeModules.find { it.sensorType == selected }?.let {
+                                    if (isEn) it.labelEn else it.labelVi
+                                } ?: AiTypeHelper.getTypeName(selected, isEn)
                             } ?: allEventsLabel
                             FilterCellRow(
                                 icon = LucideIcons.ListFilter,
@@ -1821,11 +1940,36 @@ fun MobileFilterBottomSheet(
                         )
                     }
                     FilterPicker.EVENT -> {
-                        val options = remember(activeModules, isEn) {
+                        val options = remember(activeModules, draftAiType, isEn) {
                             buildList<Pair<String?, String>> {
+                                val addedKeys = HashSet<String>()
                                 add(null to allEventsLabel)
                                 activeModules.forEach { mod ->
-                                    add(mod.sensorType to (if (isEn) mod.labelEn else mod.labelVi))
+                                    if (addedKeys.add(mod.sensorType.lowercase())) {
+                                        add(mod.sensorType to (if (isEn) mod.labelEn else mod.labelVi))
+                                    }
+                                }
+                                // Bổ sung các eventType riêng bật theo cấu hình dự án (vd. sensor-absence-tracking-camera, sensor-person-in, sensor-person-out, sensor-gesture-camera),
+                                // loại trừ các type chỉ là bài AI chứ không phải type sự kiện (vd. sensor-person-in-out)
+                                val coveredEventTypes = activeModules.flatMap { it.eventTypes }.map { it.lowercase() }.toSet()
+                                AiTypeHelper.currentModulesConfig?.enabledSensorTypes?.forEach { rawType ->
+                                    val clean = rawType.trim()
+                                    val lower = clean.lowercase()
+                                    if (clean.isNotEmpty() &&
+                                        AiTypeHelper.isAiTypeEnabled(clean) &&
+                                        !AiTypeHelper.isNonEventTaskType(clean) &&
+                                        lower !in coveredEventTypes &&
+                                        addedKeys.add(lower)
+                                    ) {
+                                        add(clean to AiTypeHelper.getTypeName(clean, isEn))
+                                    }
+                                }
+                                val selectedExtra = draftAiType?.trim()
+                                if (!selectedExtra.isNullOrEmpty() &&
+                                    !AiTypeHelper.isNonEventTaskType(selectedExtra) &&
+                                    addedKeys.add(selectedExtra.lowercase())
+                                ) {
+                                    add(selectedExtra to AiTypeHelper.getTypeName(selectedExtra, isEn))
                                 }
                             }
                         }

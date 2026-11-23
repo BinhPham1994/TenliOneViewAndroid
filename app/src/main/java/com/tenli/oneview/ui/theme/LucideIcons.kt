@@ -511,6 +511,32 @@ object LucideIcons {
         }
     }
 
+    val LogIn: ImageVector by lazy {
+        lucideVector("LucideLogIn") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4
+                moveTo(15f, 3f)
+                horizontalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, true, 21f, 5f)
+                verticalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, true, 19f, 21f)
+                horizontalLineTo(15f)
+                // m10 17 5-5-5-5
+                moveTo(10f, 17f)
+                lineTo(15f, 12f)
+                lineTo(10f, 7f)
+                // M15 12H3
+                moveTo(15f, 12f)
+                horizontalLineTo(3f)
+            }
+        }
+    }
+
     val LogOut: ImageVector by lazy {
         lucideVector("LucideLogOut") {
             path(
@@ -1664,6 +1690,106 @@ object LucideIcons {
                 moveTo(5f, 18f)
                 verticalLineTo(20f)
                 moveTo(19f, 18f)
+                verticalLineTo(20f)
+            }
+        }
+    }
+
+    val Inbox: ImageVector by lazy {
+        lucideVector("LucideInbox") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 1.85f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M22 12h-6l-2 3h-4l-2-3H2
+                moveTo(22f, 12f)
+                horizontalLineTo(16f)
+                lineTo(14f, 15f)
+                horizontalLineTo(10f)
+                lineTo(8f, 12f)
+                horizontalLineTo(2f)
+                // M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z
+                moveTo(5.45f, 5.11f)
+                lineTo(2f, 12f)
+                verticalLineTo(18f)
+                arcTo(2f, 2f, 0f, false, false, 4f, 20f)
+                horizontalLineTo(20f)
+                arcTo(2f, 2f, 0f, false, false, 22f, 18f)
+                verticalLineTo(12f)
+                lineTo(18.55f, 5.11f)
+                arcTo(2f, 2f, 0f, false, false, 16.76f, 4f)
+                horizontalLineTo(7.24f)
+                arcTo(2f, 2f, 0f, false, false, 5.45f, 5.11f)
+                close()
+            }
+        }
+    }
+
+    val QrCode: ImageVector by lazy {
+        lucideVector("LucideQrCode") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // Top-left square (3,3 -> 8,8)
+                moveTo(4f, 3f)
+                horizontalLineTo(7f)
+                arcTo(1f, 1f, 0f, false, true, 8f, 4f)
+                verticalLineTo(7f)
+                arcTo(1f, 1f, 0f, false, true, 7f, 8f)
+                horizontalLineTo(4f)
+                arcTo(1f, 1f, 0f, false, true, 3f, 7f)
+                verticalLineTo(4f)
+                arcTo(1f, 1f, 0f, false, true, 4f, 3f)
+                close()
+                // Top-right square (16,3 -> 21,8)
+                moveTo(17f, 3f)
+                horizontalLineTo(20f)
+                arcTo(1f, 1f, 0f, false, true, 21f, 4f)
+                verticalLineTo(7f)
+                arcTo(1f, 1f, 0f, false, true, 20f, 8f)
+                horizontalLineTo(17f)
+                arcTo(1f, 1f, 0f, false, true, 16f, 7f)
+                verticalLineTo(4f)
+                arcTo(1f, 1f, 0f, false, true, 17f, 3f)
+                close()
+                // Bottom-left square (3,16 -> 8,21)
+                moveTo(4f, 16f)
+                horizontalLineTo(7f)
+                arcTo(1f, 1f, 0f, false, true, 8f, 17f)
+                verticalLineTo(20f)
+                arcTo(1f, 1f, 0f, false, true, 7f, 21f)
+                horizontalLineTo(4f)
+                arcTo(1f, 1f, 0f, false, true, 3f, 20f)
+                verticalLineTo(17f)
+                arcTo(1f, 1f, 0f, false, true, 4f, 16f)
+                close()
+                // Inner pattern
+                moveTo(21f, 16f)
+                horizontalLineTo(18f)
+                arcTo(2f, 2f, 0f, false, false, 16f, 18f)
+                verticalLineTo(21f)
+                moveTo(21f, 21f)
+                verticalLineTo(20.99f)
+                moveTo(12f, 7f)
+                verticalLineTo(10f)
+                arcTo(2f, 2f, 0f, false, true, 10f, 12f)
+                horizontalLineTo(7f)
+                moveTo(3f, 12f)
+                horizontalLineTo(3.01f)
+                moveTo(12f, 3f)
+                horizontalLineTo(12.01f)
+                moveTo(12f, 16f)
+                verticalLineTo(16.01f)
+                moveTo(16f, 12f)
+                horizontalLineTo(17f)
+                moveTo(21f, 12f)
+                verticalLineTo(12.01f)
+                moveTo(12f, 21f)
                 verticalLineTo(20f)
             }
         }

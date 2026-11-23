@@ -26,6 +26,8 @@ private val AiColorHelmet = Color(0xFF198D0A)
 private val AiColorParking = Color(0xFFA50F69)
 private val AiColorGarbage = Color(0xFF9E8609)
 private val AiColorIntrusion = Color(0xFF0A9C47)
+private val AiColorPersonIn = Color(0xFF0D9488)
+private val AiColorPersonOut = Color(0xFFD97706)
 private val AiColorEncroachment = Color(0xFFA78F08)
 private val AiColorConstruction = Color(0xFFB97B0F)
 private val AiColorWrongWay = Color(0xFFE11D48)
@@ -255,9 +257,25 @@ object AiTypeHelper {
         "flooding" to "FloodingDetection"
     )
 
-    private val defaultEnabledAiTypes: Set<String> = defaultModules
-        .flatMap { it.eventTypes }
-        .toSet()
+    private val defaultEnabledAiTypes: Set<String> = (
+        defaultModules.flatMap { it.eventTypes } +
+            listOf(
+                "sensor-absence-tracking-camera",
+                "sensor-person-in-out",
+                "sensor-person-in",
+                "sensor-person-out"
+            )
+        ).toSet()
+
+    /**
+     * Các mã là type bài AI (monitor/task type) dùng cho đếm/cấu hình bài AI đang chạy,
+     * KHÔNG phải type sự kiện (event type) — không đưa vào danh sách lọc loại sự kiện.
+     * Ví dụ: bài AI `sensor-person-in-out` phát sinh 2 type sự kiện riêng là `sensor-person-in` và `sensor-person-out`.
+     */
+    private val NON_EVENT_AI_TASK_TYPES: Set<String> = setOf(
+        "sensor-person-in-out",
+        "sensor-person-in-out-camera"
+    )
 
     @Volatile
     var currentModulesConfig: ModulesConfigModel? = null
@@ -453,6 +471,15 @@ object AiTypeHelper {
     private val TYPE_NAME_EN_MAP = mapOf(
         "logic-person" to "Intrusion detection",
         "sensor-person-camera" to "Intrusion detection",
+        "sensor-person-in" to "Person entry detection",
+        "sensor-person-in-camera" to "Person entry detection",
+        "sensor-person-out" to "Person exit detection",
+        "sensor-person-out-camera" to "Person exit detection",
+        "sensor-absence-tracking-camera" to "Absence detection",
+        "sensor-person-entry-exit-camera" to "People entry & exit counting",
+        "sensor-person-dwell-camera" to "Dwell time detection",
+        "sensor-gesture-camera" to "Gesture recognition",
+        "sensor-heatmap-camera" to "Heatmap analysis",
         "logic-fire" to "Fire & smoke detection",
         "sensor-fire-camera" to "Fire & smoke detection",
         "sensor-smoke-camera" to "Smoke detection",
@@ -480,12 +507,18 @@ object AiTypeHelper {
         "sensor-crossing-tracking" to "Wrong-way driving",
         "sensor-gloves" to "No gloves violation",
         "sensor-hairnet" to "No safety cap",
-        "sensor-face-masked" to "No mask violation"
+        "sensor-face-masked" to "No mask violation",
+        "flooding" to "Flooding detection",
+        "sensor-flooding-camera" to "Flooding detection"
     )
 
     private val TYPE_NAME_VI_MAP = mapOf(
         "logic-person" to "Phát hiện xâm nhập",
         "sensor-person-camera" to "Phát hiện xâm nhập",
+        "sensor-person-in" to "Phát hiện người vào",
+        "sensor-person-in-camera" to "Phát hiện người vào",
+        "sensor-person-out" to "Phát hiện người ra",
+        "sensor-person-out-camera" to "Phát hiện người ra",
         "logic-fish-out" to "Phát hiện cá koi nhảy lên bờ",
         "sensor-fish-out-camera" to "Phát hiện cá koi nhảy lên bờ",
         "logic-person-pond" to "Phát hiện người ngã xuống Hồ Koi",
@@ -540,6 +573,32 @@ object AiTypeHelper {
         return enabledAiTypes.contains(t)
     }
 
+    /**
+     * Kiểm tra một sensorType có phải chỉ là type bài AI (không phải type sự kiện thực tế) hay không:
+     * - Khớp danh sách task-only đã biết (vd. `sensor-person-in-out`), HOẶC
+     * - Trong `modules-config.json`, bài AI khai báo `sensorType` riêng nhưng `eventTypes` khác rỗng và không chứa `sensorType` đó.
+     */
+    fun isNonEventTaskType(type: String?, config: ModulesConfigModel? = currentModulesConfig): Boolean {
+        val lower = type?.trim()?.lowercase().orEmpty()
+        if (lower.isEmpty()) return false
+        if (lower in NON_EVENT_AI_TASK_TYPES) return true
+
+        val moduleItems = buildList {
+            config?.tabs?.business?.modules?.values?.let { addAll(it) }
+            config?.aiModules?.values?.let { addAll(it) }
+        }
+        val declaredAsEventType = moduleItems.any { item ->
+            item.eventTypes?.any { it.trim().equals(lower, ignoreCase = true) } == true
+        }
+        if (declaredAsEventType) return false
+
+        return moduleItems.any { item ->
+            val st = item.sensorType?.trim()?.lowercase()
+            val ets = item.eventTypes?.map { it.trim().lowercase() }?.filter { it.isNotEmpty() }.orEmpty()
+            st == lower && ets.isNotEmpty() && lower !in ets
+        }
+    }
+
     fun getAiEventTypes(aiType: String): List<String> {
         val trimmed = aiType.trim()
         if (trimmed.isEmpty()) return emptyList()
@@ -564,6 +623,10 @@ object AiTypeHelper {
             "sensor-fire-camera", "FireSmoke", "fire_smoke" -> listOf("sensor-fire-camera", "sensor-smoke-camera", "logic-fire")
             "sensor-helmet-camera", "Helmet", "helmet" -> listOf("sensor-helmet-violation-camera", "sensor-helmet-camera")
             "sensor-person-camera", "Intrusion", "intrusion" -> listOf("sensor-person-camera", "logic-person")
+            "sensor-person-in-out", "sensor-person-in-out-camera" ->
+                listOf("sensor-person-in", "sensor-person-out")
+                    .filter { isAiTypeEnabled(it) }
+                    .ifEmpty { listOf("sensor-person-in", "sensor-person-out") }
             else -> listOf(trimmed)
         }
     }
@@ -704,6 +767,10 @@ object AiTypeHelper {
             t.contains("helmet") -> AiColorHelmet
             t.contains("parking") -> AiColorParking
             t.contains("garbage") || t.contains("dumping") || t.contains("litter") -> AiColorGarbage
+            t.contains("person-in") -> AiColorPersonIn
+            t.contains("person-out") -> AiColorPersonOut
+            t.contains("fall") -> AiColorFall
+            t.contains("absence") -> BrandActiveNavDark
             t.contains("person") || t.contains("intrusion") -> AiColorIntrusion
             t.contains("vehicle") -> InfoSkyDeep
             t.contains("sidewalk") || t.contains("encroach") -> AiColorEncroachment
@@ -712,7 +779,6 @@ object AiTypeHelper {
             t.contains("violence") || t.contains("fight") -> AiColorViolence
             t.contains("smoking") || t.contains("pose") -> AiColorSmoking
             t.contains("phone") || t.contains("calling") -> AiColorPhone
-            t.contains("fall") -> AiColorFall
             t.contains("glove") -> AiColorGloves
             t.contains("hairnet") -> AiColorHairnet
             t.contains("object") || t.contains("tracking") -> BrandActiveNavDark
@@ -872,6 +938,27 @@ object AiTypeHelper {
             return createPart(
                 if (isEn) "Detected" else "Phát hiện",
                 if (isEn) "Intrusion" else "Xâm nhập"
+            )
+        }
+
+        if (rawType.contains("person-in")) {
+            return createPart(
+                if (isEn) "Detected" else "Phát hiện",
+                if (isEn) "Person entering" else "Người vào"
+            )
+        }
+
+        if (rawType.contains("person-out")) {
+            return createPart(
+                if (isEn) "Detected" else "Phát hiện",
+                if (isEn) "Person leaving" else "Người ra"
+            )
+        }
+
+        if (rawType.contains("absence")) {
+            return createPart(
+                if (isEn) "Detected" else "Phát hiện",
+                if (isEn) "Absence from post" else "Rời vị trí"
             )
         }
 
@@ -1195,6 +1282,9 @@ object AiTypeHelper {
             combined.contains("cháy") || combined.contains("khói") -> "sensor-fire-camera"
             combined.contains("đông người") || combined.contains("đám đông") -> "sensor-crowd-camera"
             combined.contains("trang phục") || combined.contains("đồng phục") -> "sensor-uniform-camera"
+            combined.contains("người vào") || combined.contains("person entering") || combined.contains("person entry") -> "sensor-person-in"
+            combined.contains("người ra") || combined.contains("person leaving") || combined.contains("person exit") -> "sensor-person-out"
+            combined.contains("rời vị trí") || combined.contains("absence") -> "sensor-absence-tracking-camera"
             combined.contains("xâm nhập") -> "sensor-person-camera"
             combined.contains("đỗ xe") -> "sensor-parking-camera"
             combined.contains("xả rác") -> "sensor-littering-camera"

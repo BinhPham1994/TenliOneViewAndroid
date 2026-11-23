@@ -30,6 +30,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -142,7 +143,11 @@ import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.VideoModel
+import com.tenli.oneview.ui.component.ActiveFilterChipItem
+import com.tenli.oneview.ui.component.ActiveFilterChipsRow
+import com.tenli.oneview.ui.component.CameraGridSkeleton
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.EventCardSkeletonList
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LiveStreamPlayer
 import com.tenli.oneview.ui.component.MobileEventCard
@@ -168,6 +173,7 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.micro
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.TrackTopItemSizesEffect
 import com.tenli.oneview.ui.utils.createTopItemSizeCache
 import com.tenli.oneview.ui.utils.smoothScrollToTop
@@ -428,11 +434,10 @@ fun MonitorScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(bottom = bottomClearance),
-                    contentAlignment = Alignment.Center
+                        .padding(bottom = bottomClearance)
                 ) {
                     if (isTabActive && !isLiveScreenOpen) {
-                        WaveDotsLoading()
+                        CameraGridSkeleton(rowCount = 3)
                     }
                 }
             } else if (!hasAvailableCameras) {
@@ -597,13 +602,12 @@ fun MonitorScreen(
                                             .focusRequester(searchFocusRequester)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(spacing.space4))
+                                Spacer(modifier = Modifier.width(spacing.space2))
                                 Box(
                                     modifier = Modifier
-                                        .size(spacing.badgeMinSize)
+                                        .size(spacing.buttonHeightSmall)
                                         .graphicsLayer { alpha = searchContentAlpha }
                                         .clip(CircleShape)
-                                        .background(colors.textMuted.copy(alpha = 0.2f))
                                         .clickable {
                                             if (uiState.searchQuery.isNotEmpty()) {
                                                 viewModel.setSearchQuery("")
@@ -615,12 +619,20 @@ fun MonitorScreen(
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = LucideIcons.X,
-                                        contentDescription = if (isEn) "Clear or close search" else "Xóa hoặc đóng tìm kiếm",
-                                        tint = colors.textMuted,
-                                        modifier = Modifier.size(spacing.iconTiny)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(spacing.badgeMinSize)
+                                            .clip(CircleShape)
+                                            .background(colors.textMuted.copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = LucideIcons.X,
+                                            contentDescription = if (isEn) "Clear or close search" else "Xóa hoặc đóng tìm kiếm",
+                                            tint = colors.textMuted,
+                                            modifier = Modifier.size(spacing.iconTiny)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -649,6 +661,22 @@ fun MonitorScreen(
                             else ->
                                 if (isEn) "No matching cameras found" else "Không tìm thấy camera phù hợp"
                         }
+                        val emptyActionLabel = when {
+                            uiState.searchQuery.isNotBlank() ->
+                                if (isEn) "Clear search" else "Xóa tìm kiếm"
+                            uiState.quickFilter != CameraQuickFilter.ALL ->
+                                if (isEn) "Show all cameras" else "Xem tất cả camera"
+                            else -> null
+                        }
+                        val emptyAction: (() -> Unit)? = when {
+                            uiState.searchQuery.isNotBlank() -> {
+                                { viewModel.setSearchQuery("") }
+                            }
+                            uiState.quickFilter != CameraQuickFilter.ALL -> {
+                                { viewModel.setQuickFilter(CameraQuickFilter.ALL) }
+                            }
+                            else -> null
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -657,7 +685,11 @@ fun MonitorScreen(
                                 .padding(bottom = bottomClearance),
                             contentAlignment = Alignment.Center
                         ) {
-                            CommonEmptyState(text = emptyText)
+                            CommonEmptyState(
+                                text = emptyText,
+                                actionLabel = emptyActionLabel,
+                                onAction = emptyAction
+                            )
                         }
                     } else {
                         LazyVerticalGrid(
@@ -1438,7 +1470,20 @@ private fun MobileLiveCameraScreen(
                             ) {
                                 when (tab) {
                                     CameraDetailTab.LIVE -> {
-                                        Spacer(modifier = Modifier.fillMaxSize())
+                                        CameraLiveTabInfoContent(
+                                            uiState = uiState,
+                                            selectedCamera = selectedCamera,
+                                            canAccessPlayback = permissionState.canAccessPlayback,
+                                            canAccessEvents = permissionState.canAccessEvents,
+                                            bottomClearance = bottomClearance,
+                                            onSwitchChannel = onSwitchChannel,
+                                            onReloadClick = onReloadClick,
+                                            onToggleFullscreen = onToggleFullscreen,
+                                            onOpenPlaybackTab = { onBottomDetailTabClick(CameraDetailTab.PLAYBACK) },
+                                            onOpenEventsTab = { onBottomDetailTabClick(CameraDetailTab.EVENTS) },
+                                            onEventClick = onEventItemClick,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
                                     }
 
                                     CameraDetailTab.PLAYBACK -> {
@@ -1464,6 +1509,8 @@ private fun MobileLiveCameraScreen(
                                             isTabVisible = isTabActive && uiState.cameraDetailTab == CameraDetailTab.EVENTS,
                                             listState = eventListState,
                                             bottomClearance = bottomClearance,
+                                            onApplyEventFilters = onApplyEventFilters,
+                                            onResetEventFilters = onResetEventFilters,
                                             onRefresh = onRefreshEvents,
                                             onLoadMore = onLoadMoreEvents,
                                             onEventClick = onEventItemClick,
@@ -2227,6 +2274,373 @@ private fun LoadMoreDaysButton(
     }
 }
 
+@Composable
+private fun CameraLiveTabInfoContent(
+    uiState: MonitorUiState,
+    selectedCamera: SelectedCamera,
+    canAccessPlayback: Boolean,
+    canAccessEvents: Boolean,
+    bottomClearance: androidx.compose.ui.unit.Dp,
+    onSwitchChannel: (Int) -> Unit,
+    onReloadClick: () -> Unit,
+    onToggleFullscreen: () -> Unit,
+    onOpenPlaybackTab: () -> Unit,
+    onOpenEventsTab: () -> Unit,
+    onEventClick: (EventData) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isEn = rememberIsEnglish()
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val haptic = LocalHapticFeedback.current
+    val camera = selectedCamera.camera
+    val isOffline = camera.id in uiState.offlineCameraIds
+    val isRecording = remember(camera) {
+        val mainSched = camera.recordSchedule?.repeat?.any { day -> day.any { it.to > it.from } } == true
+        val subSched = camera.subRecordSchedule?.repeat?.any { day -> day.any { it.to > it.from } } == true
+        camera.enableRecord || camera.enableSubRecord || mainSched || subSched || camera.extra?.recording == true
+    }
+    val hasSubStream = camera.sub.isNotBlank()
+    val isHdStream = selectedCamera.channel == 0
+    val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
+    val pillShape = remember { RoundedCornerShape(50) }
+    val scrollState = rememberScrollState()
+    val recentCameraEvents = remember(uiState.cameraEvents) { uiState.cameraEvents.take(3) }
+    val isTodayEventFilter = uiState.cameraEventTimeFilter == TimeFilter.TODAY && uiState.cameraEventAiType == null
+
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .padding(top = spacing.space12, bottom = bottomClearance),
+        verticalArrangement = Arrangement.spacedBy(spacing.space14)
+    ) {
+        // 1. Thẻ trạng thái camera & thanh thao tác nhanh (lấp đầy hợp lý khoảng trống bên dưới luồng trực tiếp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.space10)
+                .clip(cardShape)
+                .background(colors.surface)
+                .padding(spacing.space14),
+            verticalArrangement = Arrangement.spacedBy(spacing.space12)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing.space8),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val statusColor = if (isOffline) colors.error else colors.success
+                Row(
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(statusColor)
+                        .padding(horizontal = spacing.space10, vertical = spacing.space5),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(spacing.statusDot)
+                            .clip(CircleShape)
+                            .background(colors.onAccent)
+                    )
+                    Text(
+                        text = if (isOffline) {
+                            if (isEn) "Offline" else "Mất kết nối"
+                        } else {
+                            if (isEn) "Online" else "Trực tuyến"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onAccent,
+                        maxLines = 1
+                    )
+                }
+
+                val recBg = if (isRecording) colors.orange else colors.controlBg
+                val recFg = if (isRecording) colors.onAccent else colors.textMuted
+                Row(
+                    modifier = Modifier
+                        .clip(pillShape)
+                        .background(recBg)
+                        .padding(horizontal = spacing.space10, vertical = spacing.space5),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(spacing.space5)
+                ) {
+                    Icon(
+                        imageVector = LucideIcons.Disc,
+                        contentDescription = null,
+                        tint = recFg,
+                        modifier = Modifier.size(spacing.iconXSmall)
+                    )
+                    Text(
+                        text = if (isRecording) {
+                            if (isEn) "Recording" else "Đang ghi hình"
+                        } else {
+                            if (isEn) "No recording" else "Không ghi hình"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (isRecording) FontWeight.SemiBold else FontWeight.Medium,
+                        color = recFg,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                        .background(colors.controlBg)
+                        .padding(horizontal = spacing.space8, vertical = spacing.space4),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isHdStream) "HD" else "SD",
+                        style = MaterialTheme.typography.caption,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isHdStream) colors.activeContent else colors.textSubtle
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                thickness = spacing.borderThin,
+                color = colors.divider
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+            ) {
+                if (hasSubStream) {
+                    CameraLiveQuickActionTile(
+                        icon = LucideIcons.Layers,
+                        label = if (isHdStream) {
+                            if (isEn) "Quality: HD" else "Luồng HD"
+                        } else {
+                            if (isEn) "Quality: SD" else "Luồng SD"
+                        },
+                        tint = colors.activeContent,
+                        onClick = {
+                            try {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } catch (_: Exception) {
+                            }
+                            onSwitchChannel(if (isHdStream) 1 else 0)
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                CameraLiveQuickActionTile(
+                    icon = LucideIcons.RefreshCw,
+                    label = if (isEn) "Reload" else "Tải lại",
+                    tint = colors.iconDefault,
+                    onClick = {
+                        try {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } catch (_: Exception) {
+                        }
+                        onReloadClick()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                CameraLiveQuickActionTile(
+                    icon = LucideIcons.Maximize,
+                    label = if (isEn) "Fullscreen" else "Phóng to",
+                    tint = colors.iconDefault,
+                    onClick = {
+                        try {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } catch (_: Exception) {
+                        }
+                        onToggleFullscreen()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                if (canAccessPlayback) {
+                    CameraLiveQuickActionTile(
+                        icon = LucideIcons.History,
+                        label = if (isEn) "Playback" else "Xem lại",
+                        tint = colors.iconDefault,
+                        onClick = {
+                            try {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            } catch (_: Exception) {
+                            }
+                            onOpenPlaybackTab()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        // 2. Danh sách sự kiện gần đây của camera này (tận dụng dữ liệu đã pre-warm sẵn 0ms)
+        if (canAccessEvents) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(spacing.space8)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = spacing.space16),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (isTodayEventFilter) {
+                            if (isEn) "Today's events" else "Sự kiện hôm nay"
+                        } else {
+                            if (isEn) "Recent events" else "Sự kiện gần đây"
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = spacing.space32)
+                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                            .clickable(onClick = onOpenEventsTab)
+                            .padding(horizontal = spacing.space6, vertical = spacing.space4),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+                    ) {
+                        Text(
+                            text = if (isEn) "View all" else "Xem tất cả",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.activeContent
+                        )
+                        Icon(
+                            imageVector = LucideIcons.ChevronRight,
+                            contentDescription = null,
+                            tint = colors.activeContent,
+                            modifier = Modifier.size(spacing.iconXSmall)
+                        )
+                    }
+                }
+
+                if (uiState.isLoadingCameraEvents && recentCameraEvents.isEmpty()) {
+                    EventCardSkeletonList(
+                        isListView = true,
+                        count = 2
+                    )
+                } else if (recentCameraEvents.isEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space10)
+                            .clip(cardShape)
+                            .background(colors.surface)
+                            .padding(horizontal = spacing.space14, vertical = spacing.space14),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(spacing.space12)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(spacing.avatarMedium)
+                                .clip(CircleShape)
+                                .background(colors.success.copy(alpha = if (colors.isDark) 0.16f else 0.11f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = LucideIcons.CheckCircle,
+                                contentDescription = null,
+                                tint = colors.success,
+                                modifier = Modifier.size(spacing.iconRegular)
+                            )
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(spacing.space2)
+                        ) {
+                            Text(
+                                text = if (isEn) "No events detected today" else "Chưa ghi nhận sự kiện nào hôm nay",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textTitle
+                            )
+                            Text(
+                                text = if (isEn) {
+                                    "New AI alerts for this camera will appear here"
+                                } else {
+                                    "Các cảnh báo AI mới của camera này sẽ hiển thị tại đây"
+                                },
+                                style = MaterialTheme.typography.caption,
+                                color = colors.textMuted
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = spacing.space10),
+                        verticalArrangement = Arrangement.spacedBy(spacing.space10)
+                    ) {
+                        recentCameraEvents.forEach { event ->
+                            androidx.compose.runtime.key("live_cam_ev_${event.uniqueKey()}") {
+                                MobileEventCard(
+                                    event = event,
+                                    cameraName = camera.name,
+                                    isListView = true,
+                                    enableSharedElement = false,
+                                    onClick = { onEventClick(event) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraLiveQuickActionTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val shape = remember(spacing.radiusSmallMedium) { RoundedCornerShape(spacing.radiusSmallMedium) }
+
+    Column(
+        modifier = modifier
+            .heightIn(min = spacing.space56)
+            .clip(shape)
+            .background(colors.controlBg)
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space6, vertical = spacing.space8),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(spacing.iconSmallMedium)
+        )
+        Spacer(modifier = Modifier.height(spacing.space5))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.caption,
+            fontWeight = FontWeight.Medium,
+            color = colors.textTitle,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CameraEventsTabContent(
@@ -2235,12 +2649,45 @@ private fun CameraEventsTabContent(
     isTabVisible: Boolean,
     listState: LazyListState,
     bottomClearance: androidx.compose.ui.unit.Dp,
+    onApplyEventFilters: (TimeFilter, String?) -> Unit,
+    onResetEventFilters: () -> Unit,
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onEventClick: (EventData) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isEn = rememberIsEnglish()
     val spacing = MaterialTheme.spacing
+
+    val cameraEventFilterChips = remember(
+        uiState.cameraEventTimeFilter,
+        uiState.cameraEventAiType,
+        isEn
+    ) {
+        buildList {
+            if (uiState.cameraEventTimeFilter != TimeFilter.TODAY) {
+                add(
+                    ActiveFilterChipItem(
+                        key = "cam_time_${uiState.cameraEventTimeFilter.name}",
+                        label = TimeFilter.formatDisplayLabel(uiState.cameraEventTimeFilter, isEn),
+                        onRemove = { onApplyEventFilters(TimeFilter.TODAY, uiState.cameraEventAiType) }
+                    )
+                )
+            }
+            uiState.cameraEventAiType?.let { aiType ->
+                val aiLabel = AiTypeHelper.activeModules.find { it.sensorType == aiType }?.let {
+                    if (isEn) it.labelEn else it.labelVi
+                } ?: AiTypeHelper.getTypeName(aiType, isEn)
+                add(
+                    ActiveFilterChipItem(
+                        key = "cam_ai_$aiType",
+                        label = aiLabel,
+                        onRemove = { onApplyEventFilters(uiState.cameraEventTimeFilter, null) }
+                    )
+                )
+            }
+        }
+    }
 
     val shouldLoadMore by remember(listState) {
         derivedStateOf {
@@ -2262,68 +2709,89 @@ private fun CameraEventsTabContent(
         }
     }
 
-    PullToRefreshBox(
-        isRefreshing = uiState.isRefreshingCameraEvents,
-        onRefresh = onRefresh,
-        modifier = modifier
-    ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = spacing.space8, bottom = bottomClearance),
-            verticalArrangement = Arrangement.spacedBy(spacing.space10)
+    Column(modifier = modifier) {
+        ActiveFilterChipsRow(
+            chips = cameraEventFilterChips,
+            onClearAll = onResetEventFilters,
+            modifier = Modifier.padding(top = spacing.space6)
+        )
+
+        PullToRefreshBox(
+            isRefreshing = uiState.isRefreshingCameraEvents,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
         ) {
-            if (uiState.isLoadingCameraEvents && uiState.cameraEvents.isEmpty()) {
-                item(key = "cam_event_loading", contentType = "state") {
-                    Box(
-                        modifier = Modifier.fillParentMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = spacing.space8, bottom = bottomClearance),
+                verticalArrangement = Arrangement.spacedBy(spacing.space10)
+            ) {
+                if (uiState.isLoadingCameraEvents && uiState.cameraEvents.isEmpty()) {
+                    item(key = "cam_event_loading", contentType = "state") {
                         if (isTabVisible) {
-                            WaveDotsLoading()
+                            EventCardSkeletonList(
+                                isListView = true,
+                                count = 4
+                            )
                         }
                     }
-                }
-            } else if (uiState.cameraEvents.isEmpty()) {
-                item(key = "cam_event_empty", contentType = "state") {
-                    Box(
-                        modifier = Modifier.fillParentMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CommonEmptyState(text = stringResource(id = R.string.event_empty_state))
-                    }
-                }
-            } else {
-                items(
-                    items = uiState.cameraEvents,
-                    key = { event -> "cam_ev_${event.uniqueKey()}" },
-                    contentType = { "cam_event_card" }
-                ) { event ->
-                    Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
-                        MobileEventCard(
-                            event = event,
-                            cameraName = cameraName,
-                            isListView = true,
-                            enableSharedElement = false,
-                            onClick = { onEventClick(event) }
-                        )
-                    }
-                }
-
-                if (uiState.isPaginatingCameraEvents) {
-                    item(key = "cam_event_paging", contentType = "paging") {
+                } else if (uiState.cameraEvents.isEmpty()) {
+                    item(key = "cam_event_empty", contentType = "state") {
                         Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(spacing.space16),
+                            modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isTabVisible) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(spacing.space28),
-                                    strokeWidth = spacing.space3
-                                )
+                            CommonEmptyState(
+                                text = stringResource(id = R.string.event_empty_state),
+                                subtitle = if (uiState.hasActiveCameraEventFilter) {
+                                    if (isEn) "Try clearing the active filters" else "Thử xóa bộ lọc đang áp dụng"
+                                } else {
+                                    null
+                                },
+                                actionLabel = if (uiState.hasActiveCameraEventFilter) {
+                                    if (isEn) "Clear filters" else "Xóa bộ lọc"
+                                } else {
+                                    null
+                                },
+                                onAction = if (uiState.hasActiveCameraEventFilter) onResetEventFilters else null
+                            )
+                        }
+                    }
+                } else {
+                    items(
+                        items = uiState.cameraEvents,
+                        key = { event -> "cam_ev_${event.uniqueKey()}" },
+                        contentType = { "cam_event_card" }
+                    ) { event ->
+                        Box(modifier = Modifier.padding(horizontal = spacing.space10)) {
+                            MobileEventCard(
+                                event = event,
+                                cameraName = cameraName,
+                                isListView = true,
+                                enableSharedElement = false,
+                                onClick = { onEventClick(event) }
+                            )
+                        }
+                    }
+
+                    if (uiState.isPaginatingCameraEvents) {
+                        item(key = "cam_event_paging", contentType = "paging") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(spacing.space16),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isTabVisible) {
+                                    WaveDotsLoading(
+                                        dotSize = spacing.space6,
+                                        dotColor = MaterialTheme.appColors.accent,
+                                        maxOffset = spacing.space6
+                                    )
+                                }
                             }
                         }
                     }

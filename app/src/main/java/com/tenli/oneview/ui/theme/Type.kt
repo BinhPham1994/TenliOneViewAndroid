@@ -39,7 +39,7 @@ val AppTypography = Typography(
         fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     bodySmall = TextStyle(
-        fontWeight = FontWeight.Medium, fontSize = 13.5.sp, lineHeight = 18.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+        fontWeight = FontWeight.Normal, fontSize = 13.5.sp, lineHeight = 19.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
     ),
     labelLarge = TextStyle(
         fontWeight = FontWeight.Medium, fontSize = 15.sp, lineHeight = 20.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
@@ -54,7 +54,7 @@ val AppTypography = Typography(
 
 // --- Kiểu chữ mở rộng (ngoài bộ Material 3) – dùng qua MaterialTheme.typography.caption / .micro ---
 private val CaptionTextStyle = TextStyle(
-    fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
+    fontWeight = FontWeight.Normal, fontSize = 11.5.sp, lineHeight = 15.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle
 )
 private val MicroTextStyle = TextStyle(
     fontWeight = FontWeight.SemiBold, fontSize = 10.sp, lineHeight = 12.sp, letterSpacing = 0.sp, platformStyle = defaultPlatformStyle, lineHeightStyle = compactLineHeightStyle

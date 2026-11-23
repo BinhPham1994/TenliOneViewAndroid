@@ -23,11 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cancel
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.outlined.Visibility
-import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import com.tenli.oneview.ui.theme.LucideIcons
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
@@ -168,10 +164,10 @@ fun LoginInputField(
                             focusRequester.requestFocus()
                             keyboardController?.show()
                         },
-                        modifier = Modifier.size(spacing.space32)
+                        modifier = Modifier.size(spacing.space40)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Cancel,
+                            imageVector = LucideIcons.XCircle,
                             contentDescription = "Clear",
                             modifier = Modifier.size(spacing.iconSmall),
                             tint = colors.textSubtle.copy(alpha = CLEAR_ICON_ALPHA)
@@ -181,10 +177,10 @@ fun LoginInputField(
                 if (isPassword && onPasswordToggle != null) {
                     IconButton(
                         onClick = onPasswordToggle,
-                        modifier = Modifier.size(spacing.iconButton)
+                        modifier = Modifier.size(spacing.space40)
                     ) {
                         Icon(
-                            imageVector = if (showPassword) Icons.Outlined.Visibility else Icons.Outlined.VisibilityOff,
+                            imageVector = if (showPassword) LucideIcons.Eye else LucideIcons.EyeOff,
                             contentDescription = "Toggle Password",
                             modifier = Modifier.size(spacing.iconRegular),
                             tint = colors.textSubtle
@@ -324,7 +320,7 @@ internal fun LoginCheckbox(
     ) {
         if (checked) {
             Icon(
-                imageVector = Icons.Default.Check,
+                imageVector = LucideIcons.Check,
                 contentDescription = null,
                 tint = colors.onAccent,
                 modifier = Modifier.size(checkIconSize)

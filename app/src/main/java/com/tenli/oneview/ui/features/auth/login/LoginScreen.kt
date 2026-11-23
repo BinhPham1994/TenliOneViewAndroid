@@ -38,11 +38,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Person
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -327,7 +322,7 @@ private fun LoginContent(
                                     value = uiState.domain,
                                     onValueChange = onDomainChange,
                                     label = if (isVietnamese) "Nhập domain dự án" else "Enter project domain",
-                                    leadingIcon = Icons.Outlined.Public,
+                                    leadingIcon = LucideIcons.Globe,
                                     onClear = { onDomainChange("") },
                                     keyboardOptions = KeyboardOptions(
                                         keyboardType = KeyboardType.Uri,
@@ -348,7 +343,7 @@ private fun LoginContent(
                                 Spacer(modifier = Modifier.height(spacing.space12))
                                 LoginSecondaryButton(
                                     text = if (isVietnamese) "Quét mã QR" else "Scan QR Code",
-                                    icon = Icons.Outlined.QrCodeScanner,
+                                    icon = LucideIcons.QrCode,
                                     onClick = {
                                         focusManager.clearFocus()
                                         keyboardController?.hide()
@@ -658,7 +653,7 @@ private fun CredentialsStep(
         value = uiState.email,
         onValueChange = onEmailChange,
         label = if (isVietnamese) "Nhập tên đăng nhập" else "Enter username",
-        leadingIcon = Icons.Outlined.Person,
+        leadingIcon = LucideIcons.User,
         onClear = { onEmailChange("") },
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.Text,
@@ -674,7 +669,7 @@ private fun CredentialsStep(
         value = uiState.password,
         onValueChange = onPasswordChange,
         label = if (isVietnamese) "Nhập mật khẩu" else "Enter password",
-        leadingIcon = Icons.Outlined.Lock,
+        leadingIcon = LucideIcons.Lock,
         isPassword = true,
         showPassword = uiState.showPassword,
         onPasswordToggle = onTogglePassword,

@@ -57,9 +57,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,7 +71,10 @@ import com.tenli.oneview.R
 import com.tenli.oneview.data.local.UserPermissionManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
+import com.tenli.oneview.ui.component.ActiveFilterChipItem
+import com.tenli.oneview.ui.component.ActiveFilterChipsRow
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.EventCardSkeletonList
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
@@ -76,7 +82,6 @@ import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.MobileViewToggleButton
-import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.features.event.buildCameraNameMap
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
@@ -143,6 +148,37 @@ fun HomeScreen(
 
     val hasActiveFilter = uiState.selectedServiceId != null || uiState.selectedFilter != TimeFilter.TODAY
 
+    val activeFilterChips = remember(
+        uiState.selectedServiceId,
+        uiState.selectedFilter,
+        uiState.aiServices,
+        isEn
+    ) {
+        buildList {
+            uiState.selectedServiceId?.let { srvId ->
+                val srvName = uiState.aiServices.find { it.id == srvId }?.name
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "AI #$srvId"
+                add(
+                    ActiveFilterChipItem(
+                        key = "home_srv_$srvId",
+                        label = srvName,
+                        onRemove = { viewModel.applyFilters(uiState.selectedFilter, null) }
+                    )
+                )
+            }
+            if (uiState.selectedFilter != TimeFilter.TODAY) {
+                add(
+                    ActiveFilterChipItem(
+                        key = "home_time_${uiState.selectedFilter.name}",
+                        label = TimeFilter.formatDisplayLabel(uiState.selectedFilter, isEn),
+                        onRemove = { viewModel.applyFilters(TimeFilter.TODAY, uiState.selectedServiceId) }
+                    )
+                )
+            }
+        }
+    }
+
     val cameraMap = remember(uiState.cameraList) {
         buildCameraNameMap(uiState.cameraList)
     }
@@ -179,6 +215,11 @@ fun HomeScreen(
             }
         )
 
+        ActiveFilterChipsRow(
+            chips = activeFilterChips,
+            onClearAll = viewModel::resetFilters
+        )
+
         PullToRefreshBox(
             isRefreshing = uiState.isRefreshing,
             onRefresh = viewModel::refresh,
@@ -207,7 +248,7 @@ fun HomeScreen(
                     ) {
                         MobileStatCard(
                             label = if (isEn) "TOTAL EVENTS" else "TỔNG SỰ KIỆN",
-                            mainValue = uiState.totalDetectionsCount.toString(),
+                            mainValue = formatGroupedCount(uiState.totalDetectionsCount, isEn),
                             subValue = null,
                             accentColor = BrandAccent,
                             iconGradient = StatTotalEventsGradient,
@@ -291,9 +332,9 @@ fun HomeScreen(
                         .fillMaxWidth()
                         .padding(
                             start = spacing.space16,
-                            end = spacing.space12,
-                            top = spacing.space20,
-                            bottom = spacing.space4
+                            end = spacing.space6,
+                            top = spacing.space16,
+                            bottom = spacing.space2
                         ),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
@@ -307,22 +348,17 @@ fun HomeScreen(
                     MobileViewToggleButton(
                         isListView = uiState.isListView,
                         onToggle = viewModel::toggleViewMode,
-                        size = spacing.iconButtonSmall
+                        size = spacing.iconButtonLarge
                     )
                 }
 
                 // Recent Events List (strictly max 5 events) / Empty / Loading
                 if (uiState.isLoading && recentFiveEvents.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = spacing.space10)
-                            .height(HomeEmptyStateHeight),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isTabActive) {
-                            WaveDotsLoading()
-                        }
+                    if (isTabActive) {
+                        EventCardSkeletonList(
+                            isListView = uiState.isListView,
+                            count = 3
+                        )
                     }
                 } else if (recentFiveEvents.isEmpty()) {
                     Box(
@@ -333,7 +369,18 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         CommonEmptyState(
-                            text = if (isEn) "No events in this time range" else "Không có sự kiện nào trong khoảng thời gian này"
+                            text = if (isEn) "No events in this time range" else "Không có sự kiện nào trong khoảng thời gian này",
+                            subtitle = if (hasActiveFilter) {
+                                if (isEn) "Reset filters to view today's events" else "Đặt lại bộ lọc để xem sự kiện hôm nay"
+                            } else {
+                                null
+                            },
+                            actionLabel = if (hasActiveFilter) {
+                                if (isEn) "Clear filters" else "Xóa bộ lọc"
+                            } else {
+                                null
+                            },
+                            onAction = if (hasActiveFilter) viewModel::resetFilters else null
                         )
                     }
                 } else {
@@ -407,7 +454,31 @@ fun MobileStatCard(
     val haptic = LocalHapticFeedback.current
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     val gradientBrush = remember(iconGradient) { Brush.linearGradient(iconGradient) }
-    val fullValue = if (!subValue.isNullOrEmpty()) "$mainValue$subValue" else mainValue
+    val valueText = remember(mainValue, subValue, accentColor) {
+        buildAnnotatedString {
+            withStyle(
+                SpanStyle(
+                    color = accentColor,
+                    fontWeight = FontWeight.ExtraBold,
+                    fontFeatureSettings = "tnum"
+                )
+            ) {
+                append(mainValue)
+            }
+            if (!subValue.isNullOrEmpty()) {
+                withStyle(
+                    SpanStyle(
+                        color = accentColor.copy(alpha = 0.52f),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFeatureSettings = "tnum"
+                    )
+                ) {
+                    append(subValue)
+                }
+            }
+        }
+    }
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val pressScaleState = animateFloatAsState(
@@ -474,10 +545,8 @@ fun MobileStatCard(
         )
         Spacer(modifier = Modifier.height(spacing.space4))
         Text(
-            text = fullValue,
-            color = accentColor,
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.ExtraBold,
+            text = valueText,
+            style = MaterialTheme.typography.headlineLarge.copy(fontFeatureSettings = "tnum"),
             textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -736,7 +805,7 @@ private fun AiDistributionModuleRow(
         Spacer(modifier = Modifier.width(spacing.space8))
         Text(
             text = formattedCount,
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
             fontWeight = FontWeight.Bold,
             color = colors.textStrong,
             maxLines = 1
@@ -778,6 +847,9 @@ private fun resolveAiModuleIcon(sensorType: String): ImageVector {
         t.contains("crowd") -> LucideIcons.Users
         t.contains("lpr") || t.contains("plate") || t.contains("license") -> LucideIcons.Barcode
         t.contains("parking") || t.contains("vehicle") || t.contains("crossing") || t.contains("wrong") -> LucideIcons.Car
+        t.contains("person-in") -> LucideIcons.LogIn
+        t.contains("person-out") -> LucideIcons.LogOut
+        t.contains("absence") -> LucideIcons.Eye
         t.contains("person") || t.contains("intrusion") -> LucideIcons.ShieldAlert
         t.contains("helmet") || t.contains("uniform") || t.contains("clothing") ||
             t.contains("glove") || t.contains("hairnet") -> LucideIcons.Shield

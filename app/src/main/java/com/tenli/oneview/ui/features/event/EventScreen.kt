@@ -30,7 +30,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
+import com.tenli.oneview.ui.component.ActiveFilterChipItem
+import com.tenli.oneview.ui.component.ActiveFilterChipsRow
 import com.tenli.oneview.ui.component.CommonEmptyState
+import com.tenli.oneview.ui.component.EventCardSkeletonList
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileTopActionButton
@@ -38,9 +41,12 @@ import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.MobileViewToggleButton
 import com.tenli.oneview.ui.component.WaveDotsLoading
+import com.tenli.oneview.ui.component.rememberIsEnglish
+import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
+import com.tenli.oneview.ui.utils.AiTypeHelper
 
 /** Khoảng trống cuối danh sách để item cuối không bị bottom navigation (nổi) che khuất */
 private val ListBottomClearance = 130.dp
@@ -64,8 +70,95 @@ fun EventScreen(
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isEn = rememberIsEnglish()
     var showFilterSheet by remember { mutableStateOf(false) }
     val spacing = MaterialTheme.spacing
+
+    val activeFilterChips = remember(
+        uiState.selectedServiceId,
+        uiState.selectedFilter,
+        uiState.selectedCameraUuid,
+        uiState.selectedAiType,
+        uiState.aiServices,
+        uiState.cameraNameMap,
+        isEn
+    ) {
+        buildList {
+            uiState.selectedServiceId?.let { srvId ->
+                val srvName = uiState.aiServices.find { it.id == srvId }?.name
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "AI #$srvId"
+                add(
+                    ActiveFilterChipItem(
+                        key = "srv_$srvId",
+                        label = srvName,
+                        onRemove = {
+                            viewModel.applyFilters(
+                                filter = uiState.selectedFilter,
+                                serviceId = null,
+                                aiType = uiState.selectedAiType,
+                                cameraUuid = uiState.selectedCameraUuid
+                            )
+                        }
+                    )
+                )
+            }
+            if (uiState.selectedFilter != TimeFilter.TODAY) {
+                add(
+                    ActiveFilterChipItem(
+                        key = "time_${uiState.selectedFilter.name}",
+                        label = TimeFilter.formatDisplayLabel(uiState.selectedFilter, isEn),
+                        onRemove = {
+                            viewModel.applyFilters(
+                                filter = TimeFilter.TODAY,
+                                serviceId = uiState.selectedServiceId,
+                                aiType = uiState.selectedAiType,
+                                cameraUuid = uiState.selectedCameraUuid
+                            )
+                        }
+                    )
+                )
+            }
+            uiState.selectedCameraUuid?.let { camUuid ->
+                val camLabel = uiState.cameraNameMap[camUuid]?.takeIf { it.isNotBlank() }
+                    ?: uiState.cameraList.find { it.extra?.uuid == camUuid }?.name
+                    ?: camUuid
+                add(
+                    ActiveFilterChipItem(
+                        key = "cam_$camUuid",
+                        label = camLabel,
+                        onRemove = {
+                            viewModel.applyFilters(
+                                filter = uiState.selectedFilter,
+                                serviceId = uiState.selectedServiceId,
+                                aiType = uiState.selectedAiType,
+                                cameraUuid = null
+                            )
+                        }
+                    )
+                )
+            }
+            uiState.selectedAiType?.let { aiType ->
+                val aiLabel = AiTypeHelper.activeModules.find { it.sensorType == aiType }?.let {
+                    if (isEn) it.labelEn else it.labelVi
+                } ?: AiTypeHelper.getTypeName(aiType, isEn)
+                add(
+                    ActiveFilterChipItem(
+                        key = "ai_$aiType",
+                        label = aiLabel,
+                        onRemove = {
+                            viewModel.applyFilters(
+                                filter = uiState.selectedFilter,
+                                serviceId = uiState.selectedServiceId,
+                                aiType = null,
+                                cameraUuid = uiState.selectedCameraUuid
+                            )
+                        }
+                    )
+                )
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.syncViewModeFromPrefs()
@@ -124,6 +217,11 @@ fun EventScreen(
             }
         )
 
+        ActiveFilterChipsRow(
+            chips = activeFilterChips,
+            onClearAll = viewModel::resetFilters
+        )
+
         PullToRefreshBox(
             isRefreshing = uiState.isRefreshing,
             onRefresh = viewModel::refresh,
@@ -139,13 +237,11 @@ fun EventScreen(
             ) {
                 if (uiState.isLoading && uiState.events.isEmpty()) {
                     item(key = "state_loading", contentType = CONTENT_TYPE_STATE) {
-                        Box(
-                            modifier = Modifier.fillParentMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isTabActive) {
-                                WaveDotsLoading()
-                            }
+                        if (isTabActive) {
+                            EventCardSkeletonList(
+                                isListView = uiState.isListView,
+                                count = 5
+                            )
                         }
                     }
                 } else if (uiState.events.isEmpty()) {
@@ -154,7 +250,21 @@ fun EventScreen(
                             modifier = Modifier.fillParentMaxSize(),
                             contentAlignment = Alignment.Center
                         ) {
-                            CommonEmptyState(text = stringResource(id = R.string.event_empty_state))
+                            CommonEmptyState(
+                                text = stringResource(id = R.string.event_empty_state),
+                                subtitle = if (uiState.hasActiveFilter) {
+                                    if (isEn) "Try removing or adjusting the active filters"
+                                    else "Thử bỏ bớt hoặc đổi điều kiện lọc đang bật"
+                                } else {
+                                    null
+                                },
+                                actionLabel = if (uiState.hasActiveFilter) {
+                                    if (isEn) "Clear filters" else "Xóa bộ lọc"
+                                } else {
+                                    null
+                                },
+                                onAction = if (uiState.hasActiveFilter) viewModel::resetFilters else null
+                            )
                         }
                     }
                 } else {
