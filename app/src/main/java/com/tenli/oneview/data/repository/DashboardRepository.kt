@@ -6,12 +6,15 @@ import com.tenli.oneview.data.local.CachedHomeData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
+import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.api.AiApi
 import com.tenli.oneview.data.network.api.BsApi
 import com.tenli.oneview.data.network.api.EventApi
 import com.tenli.oneview.data.network.api.VmsApi
 import com.tenli.oneview.model.network.AIServiceModel
+import com.tenli.oneview.model.network.CameraImageLinkModel
 import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.Monitor
@@ -20,6 +23,8 @@ import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.safeApiCall
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import retrofit2.Response
 
 /**
@@ -150,7 +155,39 @@ class DashboardRepository(
     suspend fun getMonitorListExt(url: String, authHeader: String): Response<List<Monitor>> =
         aiApi.getMonitorListExt(url = url, authHeader = authHeader)
 
+    private fun favoritePrefKey(): String {
+        val domainKey = UserSession.domain.trim().lowercase().ifEmpty { "default" }
+        return "$PREF_FAVORITE_CAMERAS_PREFIX$domainKey"
+    }
+
+    fun getFavoriteCameraIds(): Set<Int> {
+        val raw = GlobalData.preferences.getStringSet(favoritePrefKey(), emptySet()) ?: emptySet()
+        val parsed = if (raw.isEmpty()) emptySet() else raw.mapNotNull { it.toIntOrNull() }.toSet()
+        MonitorCacheManager.notifyFavoritesUpdated(parsed)
+        return parsed
+    }
+
+    val favoriteCameraIdsFlow: StateFlow<Set<Int>>
+        get() = MonitorCacheManager.favoriteCameraIdsFlow
+
+    val snapshotUpdatesFlow: SharedFlow<Pair<Int, String>>
+        get() = MonitorCacheManager.snapshotUpdates
+
+    fun getCachedCameraImageLinkInMemory(cameraId: Int): String? =
+        MonitorCacheManager.getCachedCameraImageLinkInMemory(cameraId)
+
+    suspend fun getCachedCameraImageLink(cameraId: Int): String? =
+        MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+
+    fun setCachedCameraImageLink(cameraId: Int, link: String) {
+        MonitorCacheManager.setCachedCameraImageLink(appContext, cameraId, link)
+    }
+
+    suspend fun getCameraImageLink(cameraId: Int): Response<CameraImageLinkModel> =
+        vmsApi.getCameraImageLink(cameraId)
+
     companion object {
         private const val PREF_VIEW_MODE = "mobile_event_view_mode"
+        private const val PREF_FAVORITE_CAMERAS_PREFIX = "saved_favorite_cameras_"
     }
 }

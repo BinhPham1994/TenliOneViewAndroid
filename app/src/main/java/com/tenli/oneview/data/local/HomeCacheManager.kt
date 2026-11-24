@@ -22,6 +22,7 @@ data class CachedHomeData(
     val cameraList: List<CameraModel> = emptyList(),
     val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
+    val aiModuleEvents: Map<String, List<EventData>> = emptyMap(),
     val runningAiTasks: Int = 0,
     val totalAiTasks: Int = 0,
     val updatedAt: Long = 0L
@@ -71,9 +72,17 @@ object HomeCacheManager {
     suspend fun removeEvent(context: Context, eventId: Int) {
         val updatedEntries = mutableListOf<Pair<String, CachedHomeData>>()
         for ((key, cached) in inMemoryHomeCache.entries) {
-            if (cached.recentEvents.any { it.id == eventId }) {
+            val moduleMap = cached.aiModuleEvents.orEmpty()
+            val hasInRecent = cached.recentEvents.any { it.id == eventId }
+            val hasInModules = moduleMap.values.any { list -> list.any { it.id == eventId } }
+            if (hasInRecent || hasInModules) {
                 val updated = cached.copy(
-                    recentEvents = cached.recentEvents.filter { it.id != eventId }
+                    recentEvents = if (hasInRecent) cached.recentEvents.filter { it.id != eventId } else cached.recentEvents,
+                    aiModuleEvents = if (hasInModules) {
+                        moduleMap.mapValues { (_, list) -> list.filter { it.id != eventId } }
+                    } else {
+                        moduleMap
+                    }
                 )
                 inMemoryHomeCache[key] = updated
                 updatedEntries.add(key to updated)

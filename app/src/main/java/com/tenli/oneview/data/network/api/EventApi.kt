@@ -2,6 +2,7 @@ package com.tenli.oneview.data.network.api
 
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.Confirm
+import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
 import retrofit2.Response
 import retrofit2.http.Body
@@ -56,7 +57,7 @@ interface EventApi {
         @Query("serviceId") serviceId: Int? = null,
         @Query("count") count: Int? = null,
         @Query("fast") fast: String = "no",
-        @Body searchItems: List<Any>
+        @Body searchItems: List<DataSearchPlateModel>
     ): Response<List<EventData>>
 
     // ==================== Verify Event ====================

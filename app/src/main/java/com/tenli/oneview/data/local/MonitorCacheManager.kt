@@ -16,8 +16,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -80,6 +83,15 @@ object MonitorCacheManager {
 
     private val _snapshotUpdates = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 32)
     val snapshotUpdates: SharedFlow<Pair<Int, String>> = _snapshotUpdates.asSharedFlow()
+
+    private val _favoriteCameraIds = MutableStateFlow<Set<Int>>(emptySet())
+    val favoriteCameraIdsFlow: StateFlow<Set<Int>> = _favoriteCameraIds.asStateFlow()
+
+    fun notifyFavoritesUpdated(ids: Set<Int>) {
+        if (_favoriteCameraIds.value != ids) {
+            _favoriteCameraIds.value = ids
+        }
+    }
 
     fun getMonitorDataInMemory(): CachedMonitorData? = inMemoryMonitorData
 
@@ -380,6 +392,7 @@ object MonitorCacheManager {
             snapshotMap.clear()
             sessionRefreshedAtMap.clear()
             failedPlaybackThumbUrls.clear()
+            _favoriteCameraIds.value = emptySet()
             runCatching {
                 appContext.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE).edit().clear().apply()
             }

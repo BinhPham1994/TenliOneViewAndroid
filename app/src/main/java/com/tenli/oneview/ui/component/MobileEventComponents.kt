@@ -6,10 +6,11 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,13 +20,15 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,6 +86,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
@@ -92,9 +96,14 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -1134,6 +1143,87 @@ private fun Modifier.eventImageSharedElement(enabled: Boolean, eventId: Any?): M
 }
 
 /**
+ * Hiệu ứng nhấn gọn nhẹ chạy trong `Modifier.Node` / pha draw:
+ * - Khi cuộn danh sách: 0 `Animatable`, 0 `Channel`, 0 `LaunchedEffect`, 0 recomposition trên mỗi thẻ.
+ * - Khi người dùng thực sự chạm xuống: khởi tạo `Animatable` lười biếng và thu nhẹ + phủ sáng mượt 120Hz trực tiếp trên draw pass.
+ */
+data class CardPressIndication(
+    val pressedScale: Float = 0.982f,
+    val pressOverlayColor: Color = Color.Transparent,
+    val cornerRadius: Dp = 0.dp,
+    val pressDownDurationMs: Int = 45,
+    val releaseDurationMs: Int = 160
+) : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode =
+        CardPressIndicationNode(
+            interactionSource = interactionSource,
+            pressedScale = pressedScale,
+            pressOverlayColor = pressOverlayColor,
+            cornerRadius = cornerRadius,
+            pressDownDurationMs = pressDownDurationMs,
+            releaseDurationMs = releaseDurationMs
+        )
+}
+
+private class CardPressIndicationNode(
+    private val interactionSource: InteractionSource,
+    private val pressedScale: Float,
+    private val pressOverlayColor: Color,
+    private val cornerRadius: Dp,
+    private val pressDownDurationMs: Int,
+    private val releaseDurationMs: Int
+) : Modifier.Node(), DrawModifierNode {
+    private var pressAnim: Animatable<Float, AnimationVector1D>? = null
+    private var animJob: kotlinx.coroutines.Job? = null
+
+    override fun onAttach() {
+        coroutineScope.launch {
+            interactionSource.interactions.collect { interaction ->
+                when (interaction) {
+                    is PressInteraction.Press -> animatePress(1f, pressDownDurationMs)
+                    is PressInteraction.Release, is PressInteraction.Cancel -> animatePress(0f, releaseDurationMs)
+                }
+            }
+        }
+    }
+
+    private fun animatePress(target: Float, durationMs: Int) {
+        val anim = pressAnim ?: Animatable(0f).also {
+            pressAnim = it
+            invalidateDraw()
+        }
+        animJob?.cancel()
+        animJob = coroutineScope.launch {
+            anim.animateTo(targetValue = target, animationSpec = tween(durationMillis = durationMs))
+        }
+    }
+
+    override fun ContentDrawScope.draw() {
+        val progress = pressAnim?.value ?: 0f
+        if (progress <= 0.001f) {
+            drawContent()
+            return
+        }
+        val s = 1f - (1f - pressedScale) * progress
+        scale(scaleX = s, scaleY = s) {
+            this@draw.drawContent()
+            if (pressOverlayColor.alpha > 0f) {
+                val radiusPx = if (cornerRadius > 0.dp) cornerRadius.toPx() else 0f
+                val tint = pressOverlayColor.copy(alpha = pressOverlayColor.alpha * progress)
+                if (radiusPx > 0f) {
+                    drawRoundRect(
+                        color = tint,
+                        cornerRadius = CornerRadius(radiusPx, radiusPx)
+                    )
+                } else {
+                    drawRect(color = tint)
+                }
+            }
+        }
+    }
+}
+
+/**
  * Cloned from `MobileEventCard.vue` supporting both List View (`isListView = true`) and Grid/Card View (`isListView = false`).
  */
 @Composable
@@ -1143,6 +1233,9 @@ fun MobileEventCard(
     isListView: Boolean = true,
     isSelected: Boolean = false,
     enableSharedElement: Boolean = false,
+    showGridBadge: Boolean = true,
+    imageWidthPx: Int = GRID_IMAGE_WIDTH_PX,
+    imageHeightPx: Int = GRID_IMAGE_HEIGHT_PX,
     onClick: () -> Unit
 ) {
     val isEn = rememberIsEnglish()
@@ -1155,69 +1248,39 @@ fun MobileEventCard(
     }
 
     val context = LocalContext.current
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    var isTapFlashing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val currentOnClick by rememberUpdatedState(onClick)
-
-    // Pre-warm ảnh toàn cảnh 16:9 ngay khi chạm xuống (dành cho thẻ List dùng ảnh crop mặt/biển số)
     val fullPrewarmUrl = images.fullImageUrl?.takeIf { isListView && it.isNotEmpty() && it != images.snapshotUrl }
-    LaunchedEffect(isPressed, fullPrewarmUrl) {
-        if (isPressed && fullPrewarmUrl != null) {
-            coil.Coil.imageLoader(context).enqueue(
-                ImageRequest.Builder(context)
-                    .data(fullPrewarmUrl)
-                    .size(1280, 720)
-                    .precision(Precision.INEXACT)
-                    .allowHardware(true)
-                    .memoryCacheKey("${fullPrewarmUrl}_1280x720")
-                    .diskCacheKey(fullPrewarmUrl.substringBefore('?'))
-                    .build()
-            )
-        }
-    }
 
-    val handleCardClick: () -> Unit = remember(scope) {
+    val handleCardClick: () -> Unit = remember(context, fullPrewarmUrl) {
         {
-            // Điều hướng ngay tức thì (0ms delay), đồng thời giữ hiệu ứng nhấn sáng trên thẻ bên dưới khi màn chi tiết trượt lên
-            isTapFlashing = true
-            currentOnClick()
-            scope.launch {
-                delay(160L)
-                isTapFlashing = false
+            if (fullPrewarmUrl != null) {
+                coil.Coil.imageLoader(context).enqueue(
+                    ImageRequest.Builder(context)
+                        .data(fullPrewarmUrl)
+                        .size(1280, 720)
+                        .precision(Precision.INEXACT)
+                        .allowHardware(true)
+                        .memoryCacheKey("${fullPrewarmUrl}_1280x720")
+                        .diskCacheKey(fullPrewarmUrl.substringBefore('?'))
+                        .build()
+                )
             }
+            currentOnClick()
         }
     }
-
-    val isActivePress = isPressed || isTapFlashing
-    val targetBgColor = when {
-        isActivePress && colors.isDark -> Color(0xFF28374E)
-        isActivePress -> colors.thumbnailBg
-        !isSelected -> colors.surface
-        colors.isDark -> SelectedCardBgDark
-        else -> BrandContainer
-    }
-    val cardBgColorState = animateColorAsState(
-        targetValue = targetBgColor,
-        animationSpec = tween(durationMillis = if (isActivePress) 35 else 180),
-        label = "eventCardBg"
-    )
-    val pressScaleState = animateFloatAsState(
-        targetValue = if (isActivePress) 0.982f else 1f,
-        animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
-        label = "eventCardScale"
-    )
 
     if (isListView) {
+        val baseBgColor = when {
+            !isSelected -> colors.surface
+            colors.isDark -> SelectedCardBgDark
+            else -> BrandContainer
+        }
         EventListCard(
             event = event,
             eventKey = eventKey,
             images = images,
             isEn = isEn,
-            cardBgColorState = cardBgColorState,
-            pressScaleState = pressScaleState,
-            interactionSource = interactionSource,
+            baseBgColor = baseBgColor,
             enableSharedElement = enableSharedElement,
             onClick = handleCardClick
         )
@@ -1227,11 +1290,10 @@ fun MobileEventCard(
             eventKey = eventKey,
             images = images,
             isEn = isEn,
-            cardBgColorState = cardBgColorState,
-            pressScaleState = pressScaleState,
-            isActivePress = isActivePress,
-            interactionSource = interactionSource,
             enableSharedElement = enableSharedElement,
+            showBadge = showGridBadge,
+            imageWidthPx = imageWidthPx,
+            imageHeightPx = imageHeightPx,
             onClick = handleCardClick
         )
     }
@@ -1244,9 +1306,7 @@ private fun EventListCard(
     eventKey: String,
     images: EventCardImages,
     isEn: Boolean,
-    cardBgColorState: State<Color>,
-    pressScaleState: State<Float>,
-    interactionSource: MutableInteractionSource,
+    baseBgColor: Color,
     enableSharedElement: Boolean,
     onClick: () -> Unit
 ) {
@@ -1285,24 +1345,24 @@ private fun EventListCard(
     val thumbShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmall) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
     val thumbWidth = ListThumbnailBaseWidth * spacing.scaleFactor
+    val pressIndication = remember(spacing.radiusCompact, colors.isDark) {
+        CardPressIndication(
+            pressedScale = 0.982f,
+            pressOverlayColor = if (colors.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+            cornerRadius = spacing.radiusCompact
+        )
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                val s = pressScaleState.value
-                scaleX = s
-                scaleY = s
-            }
-            .clip(cardShape)
-            .drawBehind {
-                drawRect(cardBgColorState.value)
-            }
             .clickable(
-                interactionSource = interactionSource,
-                indication = null,
+                interactionSource = null,
+                indication = pressIndication,
                 onClick = onClick
             )
+            .clip(cardShape)
+            .background(baseBgColor)
             .padding(start = spacing.space8, top = spacing.space8, bottom = spacing.space8, end = spacing.space12),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1383,11 +1443,10 @@ private fun EventGridCard(
     eventKey: String,
     images: EventCardImages,
     isEn: Boolean,
-    cardBgColorState: State<Color>,
-    pressScaleState: State<Float>,
-    isActivePress: Boolean,
-    interactionSource: MutableInteractionSource,
     enableSharedElement: Boolean,
+    showBadge: Boolean = true,
+    imageWidthPx: Int = GRID_IMAGE_WIDTH_PX,
+    imageHeightPx: Int = GRID_IMAGE_HEIGHT_PX,
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1409,25 +1468,25 @@ private fun EventGridCard(
     val cardShape = remember(spacing) { RoundedCornerShape(spacing.radiusCompact) }
     val faceShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmall) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
+    val pressIndication = remember(spacing.radiusCompact) {
+        CardPressIndication(
+            pressedScale = 0.982f,
+            pressOverlayColor = Color.White.copy(alpha = 0.14f),
+            cornerRadius = spacing.radiusCompact
+        )
+    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(THUMBNAIL_ASPECT_RATIO)
-            .graphicsLayer {
-                val s = pressScaleState.value
-                scaleX = s
-                scaleY = s
-            }
-            .clip(cardShape)
-            .drawBehind {
-                drawRect(cardBgColorState.value)
-            }
             .clickable(
-                interactionSource = interactionSource,
-                indication = null,
+                interactionSource = null,
+                indication = pressIndication,
                 onClick = onClick
             )
+            .clip(cardShape)
+            .background(colors.surface)
             .eventImageSharedElement(enableSharedElement, event.id)
     ) {
         VideoFrameImage(
@@ -1436,17 +1495,9 @@ private fun EventGridCard(
                 .fillMaxSize()
                 .then(if (boxes.isEmpty()) Modifier else Modifier.boundingBoxes(boxes)),
             contentScale = ContentScale.Crop,
-            targetWidthPx = GRID_IMAGE_WIDTH_PX,
-            targetHeightPx = GRID_IMAGE_HEIGHT_PX
+            targetWidthPx = imageWidthPx,
+            targetHeightPx = imageHeightPx
         )
-
-        if (isActivePress) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.White.copy(alpha = 0.14f))
-            )
-        }
 
         // Face crop overlay on TopEnd (72x90dp)
         val faceCropUrl = images.faceCropUrl
@@ -1491,22 +1542,25 @@ private fun EventGridCard(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(spacing.space3)
             ) {
-                Text(
-                    text = badgeLabel,
-                    color = onMedia,
-                    style = typography.labelSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .clip(pillShape)
-                        .background(badgeColor)
-                        .padding(horizontal = spacing.space8, vertical = spacing.space2)
-                )
+                if (showBadge && badgeLabel.isNotBlank()) {
+                    Text(
+                        text = badgeLabel,
+                        color = onMedia,
+                        style = typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .clip(pillShape)
+                            .background(badgeColor)
+                            .padding(horizontal = spacing.space8, vertical = spacing.space2)
+                    )
+                }
                 if (images.cameraName.isNotEmpty()) {
                     Text(
                         text = images.cameraName,
                         color = onMedia,
                         style = typography.bodySmall,
+                        fontWeight = if (showBadge) FontWeight.Normal else FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )

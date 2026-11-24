@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.features.monitor
 import android.app.Activity
 import android.content.Context
 import android.content.pm.ActivityInfo
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -10,16 +11,17 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,6 +50,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -87,7 +92,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -95,6 +100,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -106,6 +112,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -187,10 +194,20 @@ private const val SNAPSHOT_CARD_WIDTH_PX = 420
 private const val SNAPSHOT_CARD_HEIGHT_PX = 236
 private const val LIVE_STAGE_SNAPSHOT_WIDTH_PX = 1280
 private const val LIVE_STAGE_SNAPSHOT_HEIGHT_PX = 720
-private const val LIVE_PAGE_ENTER_DURATION_MS = 280
-private const val LIVE_PAGE_EXIT_DURATION_MS = 240
+private const val LIVE_PAGE_ENTER_DURATION_MS = 260
+private const val LIVE_PAGE_EXIT_DURATION_MS = 230
 private val LivePageEnterEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 private val LivePageExitEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
+private val LiveSheetDismissTravelDistance = 950.dp
+private val LiveSheetPreConsumeVerticalSlop = 5.dp
+private val LiveSheetVerticalLockSlop = 14.dp
+private const val LIVE_SHEET_DRAG_RESISTANCE = 0.9f
+private const val LIVE_SHEET_DRAGGED_THRESHOLD_PX = 2f
+private const val LIVE_SHEET_DISMISS_DISTANCE_DP = 85f
+private const val LIVE_SHEET_DISMISS_FLICK_DISTANCE_DP = 42f
+private const val LIVE_SHEET_DISMISS_FLICK_VELOCITY_DP_PER_MS = 0.45f
+private const val LIVE_SHEET_DISMISS_FLICK_MAX_MS = 400L
+private const val LIVE_SHEET_SCRIM_MAX_ALPHA = 0.45f
 private val GroupFilterSheetMaxHeight = 520.dp
 private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
@@ -203,6 +220,7 @@ fun MonitorScreen(
     viewModel: MonitorViewModel = viewModel(factory = MonitorViewModel.Factory),
     gridState: LazyGridState = rememberLazyGridState(),
     isTabActive: Boolean = true,
+    isLiveOverlayRevealing: Boolean = false,
     onEventClick: (Int) -> Unit = {},
     onFullscreenChange: (Boolean) -> Unit = {}
 ) {
@@ -371,7 +389,8 @@ fun MonitorScreen(
 
     // Khi màn hình Live đã trượt vào che kín 100% màn hình (sau 280ms), tạm ngưng place lưới camera bên dưới
     // để GPU không phải vẽ đè (overdraw) danh sách thẻ camera ở mỗi frame phát video 30/60fps.
-    // Ngay ở Frame 1 khi bấm Back (isLiveScreenOpen = false), lưới camera được place lại tức thì (0ms, không cần measure lại).
+    // Ngay ở Frame 0 khi bắt đầu vuốt xuống ẩn (isLiveOverlayRevealing = true) hoặc bấm Back (isLiveScreenOpen = false),
+    // lưới camera được place lại tức thì (0ms, không cần measure lại) để nội dung bên dưới hiện rõ xuyên suốt lúc kéo.
     var isCoveredByLiveOverlay by remember { mutableStateOf(false) }
     LaunchedEffect(isLiveScreenOpen) {
         if (isLiveScreenOpen) {
@@ -388,7 +407,7 @@ fun MonitorScreen(
             .layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints)
                 layout(placeable.width, placeable.height) {
-                    if (!isCoveredByLiveOverlay || !isLiveScreenOpen) {
+                    if (!isCoveredByLiveOverlay || !isLiveScreenOpen || isLiveOverlayRevealing) {
                         placeable.placeRelative(0, 0)
                     }
                 }
@@ -762,6 +781,7 @@ fun MonitorLiveCameraOverlay(
     modifier: Modifier = Modifier,
     onFullscreenChange: (Boolean) -> Unit = {},
     onLiveScreenOpenChange: (Boolean) -> Unit = {},
+    onSheetRevealingChange: (Boolean) -> Unit = {},
     onEventClick: (Int) -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -779,10 +799,64 @@ fun MonitorLiveCameraOverlay(
     val activeLiveCamera = uiState.selectedCameras.getOrNull(0)
     val isLiveScreenOpen = activeLiveCamera != null
 
-    // Giữ lại thông tin camera cuối cùng trong lúc hiệu ứng trượt đóng màn hình Live đang chạy
-    var displayedLiveCamera by remember { mutableStateOf<SelectedCamera?>(null) }
+    // Giữ lại thông tin camera cuối cùng trong lúc hiệu ứng trượt đóng từ trên xuống dưới đang chạy
+    var displayedLiveCamera by remember { mutableStateOf<SelectedCamera?>(activeLiveCamera) }
+    var skipExitAnimation by remember { mutableStateOf(false) }
+    var isSlideAnimating by remember { mutableStateOf(false) }
+    var animatedForCamId by remember { mutableStateOf(activeLiveCamera?.camera?.id) }
+    // Trượt mở/đóng từ dưới lên trên trực tiếp trên GPU RenderThread (khớp 100% với EventDetailScreen)
+    val slideFraction = remember { Animatable(if (isLiveScreenOpen) 0f else 1f) }
+
     if (activeLiveCamera != null) {
         displayedLiveCamera = activeLiveCamera
+    }
+
+    LaunchedEffect(isLiveScreenOpen, activeLiveCamera?.camera?.id) {
+        val targetCam = activeLiveCamera
+        if (targetCam != null) {
+            skipExitAnimation = false
+            displayedLiveCamera = targetCam
+            if (animatedForCamId != targetCam.camera.id) {
+                animatedForCamId = targetCam.camera.id
+                slideFraction.snapTo(1f)
+            }
+            if (slideFraction.value > 0f) {
+                isSlideAnimating = true
+                try {
+                    slideFraction.animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(
+                            durationMillis = LIVE_PAGE_ENTER_DURATION_MS,
+                            easing = LivePageEnterEasing
+                        )
+                    )
+                } finally {
+                    isSlideAnimating = false
+                }
+            }
+        } else if (displayedLiveCamera != null) {
+            animatedForCamId = null
+            if (skipExitAnimation) {
+                slideFraction.snapTo(1f)
+                isSlideAnimating = false
+            } else {
+                isSlideAnimating = true
+                try {
+                    slideFraction.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(
+                            durationMillis = LIVE_PAGE_EXIT_DURATION_MS,
+                            easing = LivePageExitEasing
+                        )
+                    )
+                } finally {
+                    isSlideAnimating = false
+                }
+            }
+            if (uiState.selectedCameras.getOrNull(0) == null) {
+                displayedLiveCamera = null
+            }
+        }
     }
 
     val canUseDetailFullscreen = uiState.cameraStageMode != CameraDetailTab.PLAYBACK ||
@@ -819,9 +893,19 @@ fun MonitorLiveCameraOverlay(
                 viewModel.selectCameraDetailTab(CameraDetailTab.LIVE)
             }
             else -> {
+                skipExitAnimation = false
                 viewModel.closeLiveCamera()
             }
         }
+    }
+
+    val handleSwipeDismissed: () -> Unit = {
+        skipExitAnimation = true
+        if (isSingleFullscreen) {
+            restoreSystemOrientationAndBars(activity)
+            fullscreenIndex = null
+        }
+        viewModel.closeLiveCamera()
     }
 
     if (isSingleFullscreen) {
@@ -836,22 +920,15 @@ fun MonitorLiveCameraOverlay(
         BackHandler(onBack = handleCameraDetailBack)
     }
 
-    AnimatedVisibility(
-        visible = isLiveScreenOpen,
-        modifier = modifier.fillMaxSize(),
-        enter = slideInHorizontally(
-            initialOffsetX = { fullWidth -> fullWidth },
-            animationSpec = tween(durationMillis = LIVE_PAGE_ENTER_DURATION_MS, easing = LivePageEnterEasing)
-        ),
-        exit = slideOutHorizontally(
-            targetOffsetX = { fullWidth -> fullWidth },
-            animationSpec = tween(durationMillis = LIVE_PAGE_EXIT_DURATION_MS, easing = LivePageExitEasing)
-        )
-    ) {
-        val isSliding = transition.isRunning
-        val isClosing = !isLiveScreenOpen
-        val currentCam = activeLiveCamera ?: displayedLiveCamera
-        if (currentCam != null) {
+    val currentCam = activeLiveCamera ?: displayedLiveCamera
+    if (currentCam != null) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = slideFraction.value * size.height
+                }
+        ) {
             MobileLiveCameraScreen(
                 uiState = uiState,
                 activePlaybackVideo = activePlaybackVideo,
@@ -861,9 +938,11 @@ fun MonitorLiveCameraOverlay(
                 onToggleFavorite = { viewModel.toggleFavoriteCamera(currentCam.camera.id) },
                 isTabActive = isTabActive && isLiveScreenOpen,
                 isFullscreen = isSingleFullscreen,
-                isSliding = isSliding,
-                isClosing = isClosing,
+                isSliding = isSlideAnimating,
+                isClosing = !isLiveScreenOpen,
                 onBackClick = handleCameraDetailBack,
+                onSwipeDismissed = handleSwipeDismissed,
+                onSheetRevealingChange = onSheetRevealingChange,
                 onToggleFullscreen = {
                     if (isSingleFullscreen) {
                         restoreSystemOrientationAndBars(activity)
@@ -932,6 +1011,8 @@ private fun MobileLiveCameraScreen(
     isSliding: Boolean = false,
     isClosing: Boolean = false,
     onBackClick: () -> Unit,
+    onSwipeDismissed: () -> Unit = onBackClick,
+    onSheetRevealingChange: (Boolean) -> Unit = {},
     onToggleFullscreen: () -> Unit,
     onRetryClick: () -> Unit,
     onSuccess: () -> Unit,
@@ -954,7 +1035,7 @@ private fun MobileLiveCameraScreen(
     val isEn = rememberIsEnglish()
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val edgeBorderColor = colors.border
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val permissionState by UserPermissionManager.permissionState.collectAsStateWithLifecycle()
@@ -974,12 +1055,59 @@ private fun MobileLiveCameraScreen(
         }
     }
 
+    val liveInfoScrollState = rememberScrollState()
     val playbackListState = rememberLazyListState()
     val eventListState = rememberLazyListState()
     val playbackTopSizes = remember { createTopItemSizeCache() }
     val eventTopSizes = remember { createTopItemSizeCache() }
     TrackTopItemSizesEffect(playbackListState, playbackTopSizes)
     TrackTopItemSizesEffect(eventListState, eventTopSizes)
+
+    // Drag-down-to-dismiss giống hệt màn hình Chi tiết sự kiện (EventDetailScreen)
+    val sheetOffsetY = remember(selectedCamera.camera.id) { Animatable(0f) }
+    var isDismissing by remember(selectedCamera.camera.id) { mutableStateOf(false) }
+    LaunchedEffect(isClosing) {
+        if (!isClosing && (isDismissing || sheetOffsetY.value > 0f)) {
+            isDismissing = false
+            sheetOffsetY.snapTo(0f)
+        }
+    }
+    val dismissTravelPx = remember(density) { with(density) { LiveSheetDismissTravelDistance.toPx() } }
+    val preConsumeVerticalSlopPx = remember(density) { with(density) { LiveSheetPreConsumeVerticalSlop.toPx() } }
+    val verticalLockSlopPx = remember(density) { with(density) { LiveSheetVerticalLockSlop.toPx() } }
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val statusBarTopPxState by rememberUpdatedState(statusBarTopPx)
+    val currentOnSwipeDismissed by rememberUpdatedState(onSwipeDismissed)
+    val currentOnSheetRevealingChange by rememberUpdatedState(onSheetRevealingChange)
+    val isClosingState by rememberUpdatedState(isClosing || isDismissing)
+    val isSheetDragged by remember(sheetOffsetY) {
+        derivedStateOf { sheetOffsetY.value > LIVE_SHEET_DRAGGED_THRESHOLD_PX }
+    }
+    LaunchedEffect(isSheetDragged, isDismissing) {
+        currentOnSheetRevealingChange(isSheetDragged || isDismissing)
+    }
+    DisposableEffect(Unit) {
+        onDispose { currentOnSheetRevealingChange(false) }
+    }
+    val sheetShape = if (!isFullscreen && isSheetDragged) {
+        RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge)
+    } else {
+        RectangleShape
+    }
+
+    fun triggerSmoothDismiss() {
+        if (isDismissing) return
+        isDismissing = true
+        scope.launch {
+            sheetOffsetY.animateTo(
+                targetValue = dismissTravelPx,
+                animationSpec = tween(durationMillis = 300, easing = LivePageExitEasing)
+            )
+            currentOnSwipeDismissed()
+        }
+    }
+
+    val effectiveClosing = isClosing || isDismissing
 
     var showPlaybackFilterSheet by remember { mutableStateOf(false) }
     var showEventFilterSheet by remember { mutableStateOf(false) }
@@ -1084,18 +1212,22 @@ private fun MobileLiveCameraScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
-            .drawWithContent {
-                drawContent()
-                if (isSliding && !isFullscreen) {
-                    drawRect(
-                        color = edgeBorderColor,
-                        topLeft = Offset.Zero,
-                        size = Size(spacing.borderThin.toPx(), size.height)
-                    )
+            .drawBehind {
+                if (!isFullscreen && (sheetOffsetY.value > 0f || isDismissing)) {
+                    val dragProgress = (sheetOffsetY.value / dismissTravelPx).coerceIn(0f, 1f)
+                    drawRect(Color.Black, alpha = LIVE_SHEET_SCRIM_MAX_ALPHA * (1f - dragProgress))
                 }
             }
-            .pointerInput(Unit) {
+    ) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                translationY = if (isFullscreen) 0f else sheetOffsetY.value
+            }
+            .clip(sheetShape)
+            .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
+            .pointerInput(selectedCamera.camera.id) {
                 val edgeBufferPx = DetailSwipeEdgeBuffer.toPx()
                 val bottomNavExclusionPx = DetailSwipeBottomNavExclusion.toPx()
                 val lockThresholdPx = DetailSwipeDirectionLockThreshold.toPx()
@@ -1110,7 +1242,8 @@ private fun MobileLiveCameraScreen(
                     val startX = down.position.x
                     val startY = down.position.y
 
-                    val playerStageBottomY = topBarHeightPx + (widthPx / LIVE_STAGE_ASPECT_RATIO)
+                    val topHeaderBottomY = statusBarTopPxState + topBarHeightPx
+                    val playerStageBottomY = topHeaderBottomY + (widthPx / LIVE_STAGE_ASPECT_RATIO)
                     val isTouchInPlaybackSeekbar =
                         isPlaybackStageState &&
                             hasActivePlaybackVideoState &&
@@ -1118,23 +1251,37 @@ private fun MobileLiveCameraScreen(
                             startY <= playerStageBottomY
                     val isTouchInZoomedStage =
                         isStageZoomedState &&
-                            startY >= topBarHeightPx &&
+                            startY >= topHeaderBottomY &&
                             startY <= playerStageBottomY
 
                     if (isFullscreenState ||
                         isFilterSheetOpenState ||
+                        isClosingState ||
                         isTouchInPlaybackSeekbar ||
-                        isTouchInZoomedStage ||
-                        startX < edgeBufferPx ||
-                        startX > widthPx - edgeBufferPx ||
-                        startY > heightPx - bottomNavExclusionPx
+                        isTouchInZoomedStage
                     ) {
                         return@awaitEachGesture
                     }
 
+                    val isInsideBottomNav = startY > heightPx - bottomNavExclusionPx
+                    val isInsideEdgeBuffer = startX < edgeBufferPx || startX > widthPx - edgeBufferPx
+                    val canSwipeHorizontal = !isInsideEdgeBuffer && !isInsideBottomNav && visibleDetailTabsState.size > 1
+                    val isInsidePinnedTop = startY <= playerStageBottomY
+                    val isLiveBodyAtTop = activeDetailTab == CameraDetailTab.LIVE &&
+                        liveInfoScrollState.value == 0 &&
+                        startY > playerStageBottomY &&
+                        !isInsideBottomNav
+                    var canSwipeDismiss = isInsidePinnedTop || isLiveBodyAtTop
+
+                    if (!canSwipeHorizontal && !canSwipeDismiss) {
+                        return@awaitEachGesture
+                    }
+
                     val startTime = down.uptimeMillis
+                    val startUptimeMs = SystemClock.uptimeMillis()
                     var endTime = startTime
-                    var gestureDirection = 0 // 0 = undecided, 1 = horizontal, 2 = vertical
+                    var gestureDirection = 0 // 0 = undecided, 1 = horizontal tab, 2 = vertical child scroll, 3 = vertical dismiss
+                    var didRevealForCurrentGesture = false
                     var lastX = startX
                     var lastY = startY
                     var dragAnchorX = startX
@@ -1157,6 +1304,17 @@ private fun MobileLiveCameraScreen(
                                     }
                                 }
                             }
+                            if (sheetOffsetY.value > 0f) {
+                                scope.launch {
+                                    sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                    if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                        currentOnSheetRevealingChange(false)
+                                    }
+                                }
+                            } else if (didRevealForCurrentGesture && !isDismissing) {
+                                currentOnSheetRevealingChange(false)
+                            }
+                            didRevealForCurrentGesture = false
                             gestureDirection = 2
                             break
                         }
@@ -1166,7 +1324,7 @@ private fun MobileLiveCameraScreen(
                         if (change.changedToUpIgnoreConsumed()) {
                             lastX = change.position.x
                             lastY = change.position.y
-                            if (gestureDirection == 1) {
+                            if (gestureDirection == 1 || gestureDirection == 3) {
                                 change.consume()
                             }
                             break
@@ -1185,36 +1343,61 @@ private fun MobileLiveCameraScreen(
                         lastY = change.position.y
                         val dx = lastX - startX
                         val dy = lastY - startY
+                        val absX = abs(dx)
+                        val absY = abs(dy)
+
+                        // Nếu người dùng kéo ngón tay đi lên (cuộn xuống trang), hủy quyền kéo đóng để danh sách bên dưới cuộn bình thường
+                        if (gestureDirection == 0 && dy < -preConsumeVerticalSlopPx) {
+                            canSwipeDismiss = false
+                        }
 
                         if (gestureDirection == 0) {
-                            if (abs(dx) >= lockThresholdPx || abs(dy) >= lockThresholdPx) {
-                                if (abs(dy) >= abs(dx) || abs(dx) < abs(dy) * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
-                                    gestureDirection = 2
-                                } else {
-                                    gestureDirection = 1
-                                    val currentVisibleTabs = visibleDetailTabsState
-                                    val currIdx = currentVisibleTabs.indexOf(activeDetailTab)
-                                    val inFlightOffset =
-                                        if (!isDraggingDetailTab && outgoingDetailTab != null) detailActiveOffsetFraction.value else 0f
-                                    val canCatchInFlight =
-                                        (inFlightOffset > 0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx - 1)) ||
-                                            (inFlightOffset < -0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx + 1))
-                                    dragAnchorX = if (canCatchInFlight) lastX - inFlightOffset * widthPx else lastX
-                                    if (canCatchInFlight) {
-                                        detailDragOffsetFraction = inFlightOffset
-                                        isDraggingDetailTab = true
-                                        scope.launch { detailActiveOffsetFraction.stop() }
-                                    }
-                                    recentX = lastX
-                                    recentTime = endTime
-                                    prevRecentX = lastX
-                                    prevRecentTime = endTime
+                            if (canSwipeHorizontal && absX >= lockThresholdPx && absX > absY * DETAIL_SWIPE_HORIZONTAL_DOMINANCE) {
+                                gestureDirection = 1
+                                canSwipeDismiss = false
+                                val currentVisibleTabs = visibleDetailTabsState
+                                val currIdx = currentVisibleTabs.indexOf(activeDetailTab)
+                                val inFlightOffset =
+                                    if (!isDraggingDetailTab && outgoingDetailTab != null) detailActiveOffsetFraction.value else 0f
+                                val canCatchInFlight =
+                                    (inFlightOffset > 0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx - 1)) ||
+                                        (inFlightOffset < -0.002f && outgoingDetailTab == currentVisibleTabs.getOrNull(currIdx + 1))
+                                dragAnchorX = if (canCatchInFlight) lastX - inFlightOffset * widthPx else lastX
+                                if (canCatchInFlight) {
+                                    detailDragOffsetFraction = inFlightOffset
+                                    isDraggingDetailTab = true
+                                    scope.launch { detailActiveOffsetFraction.stop() }
                                 }
+                                recentX = lastX
+                                recentTime = endTime
+                                prevRecentX = lastX
+                                prevRecentTime = endTime
+                            } else if (canSwipeDismiss && dy > verticalLockSlopPx && dy > absX * 1.35f) {
+                                gestureDirection = 3
+                                if (!didRevealForCurrentGesture) {
+                                    didRevealForCurrentGesture = true
+                                    currentOnSheetRevealingChange(true)
+                                }
+                                change.consume()
+                                val dragOffset = ((dy - verticalLockSlopPx) * LIVE_SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
+                                scope.launch { sheetOffsetY.snapTo(dragOffset) }
+                            } else if (canSwipeDismiss && dy > preConsumeVerticalSlopPx && dy > absX * 1.25f) {
+                                if (!didRevealForCurrentGesture) {
+                                    didRevealForCurrentGesture = true
+                                    currentOnSheetRevealingChange(true)
+                                }
+                                change.consume()
+                            } else if (absY >= lockThresholdPx && (!canSwipeDismiss || dy < 0f)) {
+                                gestureDirection = 2
                             }
                         }
 
                         if (gestureDirection == 2) {
                             break
+                        } else if (gestureDirection == 3) {
+                            change.consume()
+                            val dragOffset = ((dy - verticalLockSlopPx) * LIVE_SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
+                            scope.launch { sheetOffsetY.snapTo(dragOffset) }
                         } else if (gestureDirection == 1) {
                             change.consume()
                             val currentVisibleTabs = visibleDetailTabsState
@@ -1254,7 +1437,26 @@ private fun MobileLiveCameraScreen(
                         }
                     }
 
-                    if (gestureDirection == 1 && isDraggingDetailTab) {
+                    if (gestureDirection == 3) {
+                        val elapsedMs = (SystemClock.uptimeMillis() - startUptimeMs).coerceAtLeast(1L)
+                        val pulledDp = sheetOffsetY.value.toDp().value
+                        val totalDyDp = (lastY - startY).toDp().value
+                        val velocityDpPerMs = totalDyDp / elapsedMs.toFloat()
+                        val shouldDismiss = pulledDp >= LIVE_SHEET_DISMISS_DISTANCE_DP ||
+                            (pulledDp >= LIVE_SHEET_DISMISS_FLICK_DISTANCE_DP &&
+                                velocityDpPerMs >= LIVE_SHEET_DISMISS_FLICK_VELOCITY_DP_PER_MS &&
+                                elapsedMs < LIVE_SHEET_DISMISS_FLICK_MAX_MS)
+                        if (shouldDismiss) {
+                            triggerSmoothDismiss()
+                        } else {
+                            scope.launch {
+                                sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                    currentOnSheetRevealingChange(false)
+                                }
+                            }
+                        }
+                    } else if (gestureDirection == 1 && isDraggingDetailTab) {
                         val neighborTab = outgoingDetailTab
                         val side = detailPartnerSide
                         val draggedProgress = (-detailDragOffsetFraction * side).coerceIn(0f, 1f)
@@ -1322,6 +1524,21 @@ private fun MobileLiveCameraScreen(
                                 }
                             }
                         }
+                    } else if (sheetOffsetY.value > 0f) {
+                        scope.launch {
+                            sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                            if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                currentOnSheetRevealingChange(false)
+                            }
+                        }
+                    }
+
+                    if (didRevealForCurrentGesture &&
+                        gestureDirection != 3 &&
+                        !isDismissing &&
+                        sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX
+                    ) {
+                        currentOnSheetRevealingChange(false)
                     }
                 }
             }
@@ -1333,52 +1550,59 @@ private fun MobileLiveCameraScreen(
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             if (!isFullscreen) {
-                MobileTopBar(
-                    title = selectedCamera.camera.name,
-                    leftAction = {
-                        com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackClick)
-                    },
-                    rightAction = {
-                        when (activeDetailTab) {
-                            CameraDetailTab.LIVE -> {
-                                MobileTopActionButton(
-                                    icon = if (isFavorite) LucideIcons.StarFilled else LucideIcons.Star,
-                                    contentDescription = if (isEn) "Favorite camera" else "Camera yêu thích",
-                                    iconTint = if (isFavorite) Color(0xFFF59E0B) else colors.iconDefault,
-                                    onClick = {
-                                        try {
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        } catch (_: Exception) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(colors.pageBg)
+                        .statusBarsPadding()
+                ) {
+                    MobileTopBar(
+                        title = selectedCamera.camera.name,
+                        leftAction = {
+                            com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackClick)
+                        },
+                        rightAction = {
+                            when (activeDetailTab) {
+                                CameraDetailTab.LIVE -> {
+                                    MobileTopActionButton(
+                                        icon = if (isFavorite) LucideIcons.StarFilled else LucideIcons.Star,
+                                        contentDescription = if (isEn) "Favorite camera" else "Camera yêu thích",
+                                        iconTint = if (isFavorite) Color(0xFFF59E0B) else colors.iconDefault,
+                                        onClick = {
+                                            try {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            } catch (_: Exception) {
+                                            }
+                                            onToggleFavorite()
                                         }
-                                        onToggleFavorite()
-                                    }
-                                )
-                            }
-                            CameraDetailTab.PLAYBACK -> {
-                                MobileTopActionButton(
-                                    icon = LucideIcons.ListFilter,
-                                    contentDescription = stringResource(id = R.string.filter_title),
-                                    hasActiveDot = uiState.hasActivePlaybackFilter,
-                                    onClick = { showPlaybackFilterSheet = true }
-                                )
-                            }
-                            CameraDetailTab.EVENTS -> {
-                                MobileTopActionButton(
-                                    icon = LucideIcons.ListFilter,
-                                    contentDescription = stringResource(id = R.string.filter_title),
-                                    hasActiveDot = uiState.hasActiveCameraEventFilter,
-                                    onClick = { showEventFilterSheet = true }
-                                )
+                                    )
+                                }
+                                CameraDetailTab.PLAYBACK -> {
+                                    MobileTopActionButton(
+                                        icon = LucideIcons.ListFilter,
+                                        contentDescription = stringResource(id = R.string.filter_title),
+                                        hasActiveDot = uiState.hasActivePlaybackFilter,
+                                        onClick = { showPlaybackFilterSheet = true }
+                                    )
+                                }
+                                CameraDetailTab.EVENTS -> {
+                                    MobileTopActionButton(
+                                        icon = LucideIcons.ListFilter,
+                                        contentDescription = stringResource(id = R.string.filter_title),
+                                        hasActiveDot = uiState.hasActiveCameraEventFilter,
+                                        onClick = { showEventFilterSheet = true }
+                                    )
+                                }
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
 
             val effectiveMountedDetailTabs = remember(mountedDetailTabs, uiState.cameraDetailTab) {
                 mountedDetailTabs + uiState.cameraDetailTab
             }
-            val isEnteringLivePage = isSliding && !isClosing
+            val isEnteringLivePage = isSliding && !effectiveClosing
             val isLiveStageMode = uiState.cameraStageMode == CameraDetailTab.LIVE
 
             // 1. Khung trình phát 16:9 cố định ở đầu màn hình (giữ nguyên vị trí khi chuyển giữa Trực tiếp / Xem lại / Sự kiện)
@@ -1399,7 +1623,7 @@ private fun MobileLiveCameraScreen(
                         selectedCamera = selectedCamera,
                         isTabActive = isTabActive && isLiveStageMode,
                         isEntering = isEnteringLivePage,
-                        isClosing = isClosing,
+                        isClosing = effectiveClosing,
                         onClick = {},
                         onRetryClick = onRetryClick,
                         onSuccess = onSuccess,
@@ -1411,7 +1635,8 @@ private fun MobileLiveCameraScreen(
                         onZoomChanged = { isStageZoomed = it },
                         isFullscreen = isFullscreen,
                         isCompact = false,
-                        showFullscreenButton = true,
+                        showOverlayControls = isFullscreen,
+                        showFullscreenButton = isFullscreen,
                         showCloseButton = false
                     )
                 } else {
@@ -1482,6 +1707,7 @@ private fun MobileLiveCameraScreen(
                                             onOpenPlaybackTab = { onBottomDetailTabClick(CameraDetailTab.PLAYBACK) },
                                             onOpenEventsTab = { onBottomDetailTabClick(CameraDetailTab.EVENTS) },
                                             onEventClick = onEventItemClick,
+                                            scrollState = liveInfoScrollState,
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     }
@@ -1580,6 +1806,7 @@ private fun MobileLiveCameraScreen(
                 onDismiss = { showEventFilterSheet = false }
             )
         }
+    }
     }
 }
 
@@ -2287,6 +2514,7 @@ private fun CameraLiveTabInfoContent(
     onOpenPlaybackTab: () -> Unit,
     onOpenEventsTab: () -> Unit,
     onEventClick: (EventData) -> Unit,
+    scrollState: ScrollState = rememberScrollState(),
     modifier: Modifier = Modifier
 ) {
     val isEn = rememberIsEnglish()
@@ -2304,7 +2532,6 @@ private fun CameraLiveTabInfoContent(
     val isHdStream = selectedCamera.channel == 0
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     val pillShape = remember { RoundedCornerShape(50) }
-    val scrollState = rememberScrollState()
     val recentCameraEvents = remember(uiState.cameraEvents) { uiState.cameraEvents.take(3) }
     val isTodayEventFilter = uiState.cameraEventTimeFilter == TimeFilter.TODAY && uiState.cameraEventAiType == null
 
@@ -2486,7 +2713,7 @@ private fun CameraLiveTabInfoContent(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = spacing.space16),
+                        .padding(start = spacing.space12, end = spacing.space6),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -2506,7 +2733,7 @@ private fun CameraLiveTabInfoContent(
                             .heightIn(min = spacing.space32)
                             .clip(RoundedCornerShape(spacing.radiusSmall))
                             .clickable(onClick = onOpenEventsTab)
-                            .padding(horizontal = spacing.space6, vertical = spacing.space4),
+                            .padding(start = spacing.space6, top = spacing.space4, bottom = spacing.space4),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(spacing.space2)
                     ) {
@@ -3528,6 +3755,7 @@ fun CameraGridItem(
     onZoomChanged: (Boolean) -> Unit = {},
     isFullscreen: Boolean = false,
     isCompact: Boolean = false,
+    showOverlayControls: Boolean = true,
     showFullscreenButton: Boolean = true,
     showCloseButton: Boolean = true
 ) {
@@ -3565,13 +3793,20 @@ fun CameraGridItem(
         }
     }
 
-    // Mặc định ẩn toàn bộ overlay (tên camera, các nút action, nút phóng to).
-    // Chạm vào màn hình live: đang ẩn -> hiện lên và tự ẩn sau 3 giây; đang hiện -> chạm vùng trống sẽ ẩn ngay.
+    // Khi showOverlayControls = false (ô live inline trong tab Trực tiếp): không hiển thị tên cam,
+    // các nút điều khiển hay nút phóng to, và chạm vào ô live sẽ không bật overlay.
+    // Khi showOverlayControls = true (chế độ toàn màn hình): chạm để bật/tắt overlay và tự ẩn sau 3 giây.
     var showInfo by remember(selectedCamera.camera.id) { mutableStateOf(false) }
     var showChannelDropdown by remember(selectedCamera.camera.id) { mutableStateOf(false) }
     var autoHideToken by remember(selectedCamera.camera.id) { mutableIntStateOf(0) }
-    LaunchedEffect(showInfo, autoHideToken) {
-        if (showInfo) {
+    LaunchedEffect(showOverlayControls) {
+        if (!showOverlayControls) {
+            showInfo = false
+            showChannelDropdown = false
+        }
+    }
+    LaunchedEffect(showInfo, autoHideToken, showOverlayControls) {
+        if (showOverlayControls && showInfo) {
             delay(3000L)
             showInfo = false
             showChannelDropdown = false
@@ -3600,27 +3835,31 @@ fun CameraGridItem(
         showZoomBadge = !isCompact,
         badgeAlignment = Alignment.BottomStart,
         badgePadding = PaddingValues(if (isCompact) spacing.space4 else spacing.space8),
-        onTap = {
-            onClick()
-            if (showInfo) {
-                showInfo = false
-                showChannelDropdown = false
-            } else {
-                showInfo = true
-                autoHideToken++
-            }
-        },
-        onDoubleTap = {
-            if (!isCompact && showFullscreenButton) {
-                showInfo = false
-                showChannelDropdown = false
-                onFullscreenClick()
-            } else {
+        onTap = if (showOverlayControls) {
+            {
                 onClick()
-                showInfo = !showInfo
-                if (showInfo) autoHideToken++ else showChannelDropdown = false
+                if (showInfo) {
+                    showInfo = false
+                    showChannelDropdown = false
+                } else {
+                    showInfo = true
+                    autoHideToken++
+                }
             }
-        },
+        } else null,
+        onDoubleTap = if (showOverlayControls) {
+            {
+                if (!isCompact && showFullscreenButton) {
+                    showInfo = false
+                    showChannelDropdown = false
+                    onFullscreenClick()
+                } else {
+                    onClick()
+                    showInfo = !showInfo
+                    if (showInfo) autoHideToken++ else showChannelDropdown = false
+                }
+            }
+        } else null,
         onZoomChanged = onZoomChanged,
         overlay = { _, _ ->
             // Error Overlay (chạm để tải lại luồng live giống reloadStream trong LiveVideoView.vue)
@@ -3631,9 +3870,11 @@ fun CameraGridItem(
                         .background(stateOverlayBg)
                         .clickable {
                             onClick()
-                            showInfo = true
+                            if (showOverlayControls) {
+                                showInfo = true
+                                autoHideToken++
+                            }
                             showChannelDropdown = false
-                            autoHideToken++
                             onBackToLiveClick()
                         },
                     contentAlignment = Alignment.Center
@@ -3648,7 +3889,8 @@ fun CameraGridItem(
             }
 
             // Top-Left Camera Name Pill (.info-name), Top-Right Action Pill (.info-action),
-            // & Bottom-Right Fullscreen Button (.fullscreen-btn) — đồng bộ Web PC (LiveVideoView.vue)
+            // & Bottom-Right Fullscreen Button (.fullscreen-btn) — chỉ hiển thị khi showOverlayControls = true
+            if (showOverlayControls) {
             AnimatedVisibility(
                 visible = showInfo,
                 enter = fadeIn(animationSpec = tween(200)),
@@ -3901,6 +4143,7 @@ fun CameraGridItem(
                         }
                     }
                 }
+            }
             }
         }
     ) {

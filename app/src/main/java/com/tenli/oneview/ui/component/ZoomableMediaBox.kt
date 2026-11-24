@@ -239,12 +239,12 @@ fun ZoomableMediaBox(
                         }
                     }
                 }
-                .pointerInput(Unit) {
+                .pointerInput(onDoubleTap != null, enableDoubleTapZoom) {
                     detectTapGestures(
                         onTap = {
                             currentOnTap?.invoke()
                         },
-                        onDoubleTap = if (currentOnDoubleTap != null || currentEnableDoubleTapZoom) {
+                        onDoubleTap = if (onDoubleTap != null || enableDoubleTapZoom) {
                             { tapOffset ->
                                 val customDoubleTap = currentOnDoubleTap
                                 if (customDoubleTap != null) {

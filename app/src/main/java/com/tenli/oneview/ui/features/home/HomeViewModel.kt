@@ -29,7 +29,9 @@ import com.tenli.oneview.ui.features.event.expandPermittedApiEventTypesFromCount
 import com.tenli.oneview.ui.features.event.isWithinTimeRangeSeconds
 import com.tenli.oneview.ui.features.event.permittedDistinct
 import com.tenli.oneview.ui.features.event.resolveAllPermittedApiEventTypes
+import com.tenli.oneview.ui.features.event.resolveApiEventTypes
 import com.tenli.oneview.ui.features.event.uniqueKey
+import java.util.concurrent.ConcurrentHashMap
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.EventBus
 import com.tenli.oneview.util.NetworkMonitor
@@ -213,7 +215,12 @@ data class HomeUiState(
     val eventsByType: List<VmsEventCountByTypeModel> = emptyList(),
     val hasLoadedEventsByType: Boolean = false,
     val aiDistribution: List<HomeAiDistributionItem> = emptyList(),
+    val aiModuleEvents: Map<String, List<EventData>> = emptyMap(),
+    val loadingAiModuleTypes: Set<String> = emptySet(),
     val cameraList: List<CameraModel> = emptyList(),
+    val offlineCameraIds: Set<Int> = emptySet(),
+    val favoriteCameraIds: Set<Int> = emptySet(),
+    val cameraSnapshots: Map<Int, String> = emptyMap(),
     val aiServices: List<AIServiceModel> = emptyList(),
     val recentEvents: List<EventData> = emptyList(),
     val totalDetectionsCount: Long = 0L,
@@ -236,12 +243,15 @@ class HomeViewModel(
 
     @Volatile private var latestCameraStatusMap: Map<String, String> = webSocketManager.cameraStatusMap.value
     @Volatile private var latestRecordStatusMap: Map<String, String> = webSocketManager.recordStatusMap.value
+    private val moduleEventsRamCache = ConcurrentHashMap<String, Map<String, List<EventData>>>()
 
     private val _uiState = MutableStateFlow(buildInitialState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private var dashboardJob: Job? = null
     private var statsReconcileJob: Job? = null
+    private var moduleEventsJob: Job? = null
+    private var favoriteSnapshotsJob: Job? = null
     private val realtimeTriggerChannel = Channel<Boolean>(Channel.CONFLATED)
     @Volatile private var isHomeTabActive: Boolean = true
     @Volatile private var pendingNotifyRefresh: Boolean = false
@@ -253,6 +263,7 @@ class HomeViewModel(
         fetchDashboardData()
         listenToWebSocket()
         webSocketManager.connectAllReports()
+        refreshFavoriteCameraSnapshots(_uiState.value.favoriteCameraIds)
     }
 
     fun setHomeTabActive(active: Boolean) {
@@ -275,10 +286,107 @@ class HomeViewModel(
             pendingNotifyRefresh = false
             realtimeTriggerChannel.trySend(false)
         }
+        val favIds = dashboardRepository.getFavoriteCameraIds()
+        if (favIds != _uiState.value.favoriteCameraIds) {
+            _uiState.update { it.copy(favoriteCameraIds = favIds) }
+        }
+        if (favIds.isNotEmpty()) {
+            refreshFavoriteCameraSnapshots(favIds)
+        }
+    }
+
+    private fun resolveFullCameraSnapshotUrl(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty() || trimmed == "NO_IMAGE") return ""
+        if (trimmed.startsWith("http://") ||
+            trimmed.startsWith("https://") ||
+            trimmed.startsWith("file://") ||
+            trimmed.startsWith("data:")
+        ) {
+            return trimmed
+        }
+        val base = UserSession.domain.trim().trimEnd('/').removeSuffix("/api/v1")
+        return if (trimmed.startsWith("/")) "$base$trimmed" else "$base/$trimmed"
+    }
+
+    private fun collectInMemoryFavoriteSnapshots(favIds: Set<Int>): Map<Int, String> {
+        if (favIds.isEmpty()) return emptyMap()
+        val map = LinkedHashMap<Int, String>(favIds.size)
+        for (camId in favIds) {
+            val raw = dashboardRepository.getCachedCameraImageLinkInMemory(camId) ?: continue
+            val resolved = resolveFullCameraSnapshotUrl(raw)
+            if (resolved.isNotEmpty()) {
+                map[camId] = resolved
+            }
+        }
+        return map
+    }
+
+    private fun refreshFavoriteCameraSnapshots(favIds: Set<Int>) {
+        if (favIds.isEmpty() || !UserPermissionManager.canAccessLiveStream()) return
+        favoriteSnapshotsJob?.cancel()
+        favoriteSnapshotsJob = viewModelScope.launch(Dispatchers.IO) {
+            val resolvedMap = LinkedHashMap<Int, String>(_uiState.value.cameraSnapshots)
+            val missingIds = ArrayList<Int>()
+            for (camId in favIds) {
+                val cached = dashboardRepository.getCachedCameraImageLink(camId)
+                val full = cached?.let(::resolveFullCameraSnapshotUrl).orEmpty()
+                if (full.isNotEmpty()) {
+                    resolvedMap[camId] = full
+                } else {
+                    missingIds.add(camId)
+                }
+            }
+            if (resolvedMap != _uiState.value.cameraSnapshots) {
+                _uiState.update { it.copy(cameraSnapshots = resolvedMap.toMap()) }
+            }
+            if (missingIds.isEmpty() || !NetworkMonitor.isNetworkAvailable()) return@launch
+
+            val updated = LinkedHashMap(resolvedMap)
+            var changed = false
+            for (camId in missingIds.take(6)) {
+                val resp = safeApiCall { dashboardRepository.getCameraImageLink(camId) }.getOrNull()
+                val link = resp?.body()?.link?.trim().orEmpty()
+                if (link.isNotEmpty() && link != "NO_IMAGE") {
+                    dashboardRepository.setCachedCameraImageLink(camId, link)
+                    val full = resolveFullCameraSnapshotUrl(link)
+                    if (full.isNotEmpty()) {
+                        updated[camId] = full
+                        changed = true
+                    }
+                }
+            }
+            if (changed) {
+                _uiState.update { it.copy(cameraSnapshots = updated.toMap()) }
+            }
+        }
+    }
+
+    private fun filterCachedModuleEvents(
+        rawMap: Map<String, List<EventData>>?,
+        fromSec: Long,
+        toSec: Long,
+        allCameras: List<CameraModel>
+    ): Map<String, List<EventData>> {
+        if (rawMap.isNullOrEmpty()) return emptyMap()
+        val result = LinkedHashMap<String, List<EventData>>(rawMap.size)
+        for ((key, list) in rawMap) {
+            if (key.isBlank() || list.isNullOrEmpty()) continue
+            val filtered = list
+                .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                .permittedDistinct(allCameras)
+                .take(MAX_RECENT_EVENTS)
+            if (filtered.isNotEmpty()) {
+                result[key] = filtered
+            }
+        }
+        return result
     }
 
     private fun buildInitialState(): HomeUiState {
         val isList = dashboardRepository.isListViewMode()
+        val savedFavorites = dashboardRepository.getFavoriteCameraIds()
+        val initialFavSnapshots = collectInMemoryFavoriteSnapshots(savedFavorites)
         val memCached = dashboardRepository.getHomeDataInMemory(TimeFilter.TODAY, null)
         return if (memCached != null) {
             val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(TimeFilter.TODAY)
@@ -287,13 +395,25 @@ class HomeViewModel(
             val rawCameras = memCached.cameraList.ifEmpty { dashboardRepository.getCamerasInMemory() }
             val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCameras)
             val services = memCached.aiServices.ifEmpty { dashboardRepository.getAiServicesInMemory() }
+            val initialShelves = filterCachedModuleEvents(
+                rawMap = memCached.aiModuleEvents,
+                fromSec = fromSec,
+                toSec = toSec,
+                allCameras = rawCameras
+            )
+            if (initialShelves.isNotEmpty()) {
+                moduleEventsRamCache[moduleEventsCacheKey(TimeFilter.TODAY, null)] = initialShelves
+            }
             HomeUiState(
                 isLoading = false,
                 isListView = isList,
                 overviewStats = memCached.overviewStats,
                 eventsByType = memCached.eventsByType,
                 hasLoadedEventsByType = memCached.hasLoadedEventsByType || memCached.eventsByType.isNotEmpty(),
+                aiModuleEvents = initialShelves,
                 cameraList = permittedCameras,
+                favoriteCameraIds = savedFavorites,
+                cameraSnapshots = initialFavSnapshots,
                 aiServices = services,
                 recentEvents = memCached.recentEvents
                     .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
@@ -309,6 +429,8 @@ class HomeViewModel(
                 isLoading = true,
                 isListView = isList,
                 cameraList = permittedCameras,
+                favoriteCameraIds = savedFavorites,
+                cameraSnapshots = initialFavSnapshots,
                 aiServices = dashboardRepository.getAiServicesInMemory()
             ).withRecomputedMetrics()
         }
@@ -386,13 +508,50 @@ class HomeViewModel(
         viewModelScope.launch {
             EventBus.eventReportedFalse.collect { eventId ->
                 _uiState.update { state ->
-                    state.copy(recentEvents = state.recentEvents.filter { it.id != eventId })
+                    val prunedModuleEvents = if (state.aiModuleEvents.isEmpty()) {
+                        state.aiModuleEvents
+                    } else {
+                        state.aiModuleEvents.mapValues { (_, list) ->
+                            list.filter { it.id != eventId }
+                        }
+                    }
+                    moduleEventsRamCache[moduleEventsCacheKey(state.selectedFilter, state.selectedServiceId)] = prunedModuleEvents
+                    state.copy(
+                        recentEvents = state.recentEvents.filter { it.id != eventId },
+                        aiModuleEvents = prunedModuleEvents
+                    )
                 }
             }
         }
         viewModelScope.launch {
             EventBus.networkRestored.collect {
                 fetchDashboardData()
+            }
+        }
+        viewModelScope.launch {
+            dashboardRepository.favoriteCameraIdsFlow.collect { favIds ->
+                if (favIds != _uiState.value.favoriteCameraIds) {
+                    _uiState.update { state ->
+                        val memSnaps = collectInMemoryFavoriteSnapshots(favIds)
+                        state.copy(
+                            favoriteCameraIds = favIds,
+                            cameraSnapshots = if (memSnaps.isEmpty()) state.cameraSnapshots else state.cameraSnapshots + memSnaps
+                        )
+                    }
+                    refreshFavoriteCameraSnapshots(favIds)
+                }
+            }
+        }
+        viewModelScope.launch {
+            dashboardRepository.snapshotUpdatesFlow.collect { (camId, rawLink) ->
+                if (camId in _uiState.value.favoriteCameraIds) {
+                    val resolved = resolveFullCameraSnapshotUrl(rawLink)
+                    if (resolved.isNotEmpty() && _uiState.value.cameraSnapshots[camId] != resolved) {
+                        _uiState.update { state ->
+                            state.copy(cameraSnapshots = state.cameraSnapshots + (camId to resolved))
+                        }
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -713,9 +872,21 @@ class HomeViewModel(
                 }
                 lastCountedRealtimeEventId = nextCountedId
 
+                val updatedModuleEvents = mergeRealtimeEventsIntoModuleShelves(
+                    currentMap = cur.aiModuleEvents,
+                    newEvents = newEvents,
+                    fromSec = fromSec,
+                    toSec = toSec,
+                    allCameras = allCameras
+                )
+                if (updatedModuleEvents.isNotEmpty()) {
+                    moduleEventsRamCache[moduleEventsCacheKey(filter, serviceId)] = updatedModuleEvents
+                }
+
                 cur.copy(
                     eventsByType = if (updatedByType == cur.eventsByType) cur.eventsByType else updatedByType,
-                    recentEvents = mergedEvents
+                    recentEvents = mergedEvents,
+                    aiModuleEvents = if (updatedModuleEvents == cur.aiModuleEvents) cur.aiModuleEvents else updatedModuleEvents
                 ).withRecomputedMetrics()
             }
 
@@ -732,6 +903,7 @@ class HomeViewModel(
                         cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
                         aiServices = nextState.aiServices,
                         recentEvents = nextState.recentEvents,
+                        aiModuleEvents = nextState.aiModuleEvents,
                         runningAiTasks = nextState.runningAiTasks,
                         totalAiTasks = nextState.totalAiTasks,
                         updatedAt = System.currentTimeMillis()
@@ -852,6 +1024,7 @@ class HomeViewModel(
                                 cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { nextState.cameraList },
                                 aiServices = nextState.aiServices,
                                 recentEvents = nextState.recentEvents,
+                                aiModuleEvents = nextState.aiModuleEvents,
                                 runningAiTasks = nextState.runningAiTasks,
                                 totalAiTasks = nextState.totalAiTasks,
                                 updatedAt = System.currentTimeMillis()
@@ -871,6 +1044,7 @@ class HomeViewModel(
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter) return
         statsReconcileJob?.cancel()
+        moduleEventsJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -881,6 +1055,7 @@ class HomeViewModel(
     fun setServiceFilter(serviceId: Int?) {
         if (_uiState.value.selectedServiceId == serviceId) return
         statsReconcileJob?.cancel()
+        moduleEventsJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -892,6 +1067,7 @@ class HomeViewModel(
         val isCustom = filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
         if (!isCustom && _uiState.value.selectedFilter == filter && _uiState.value.selectedServiceId == serviceId) return
         statsReconcileJob?.cancel()
+        moduleEventsJob?.cancel()
         pendingNotifyRefresh = false
         lastByTypeOverviewSyncMs = 0L
         lastCountedRealtimeEventId = 0
@@ -911,6 +1087,7 @@ class HomeViewModel(
     fun fetchDashboardData(isUserRefresh: Boolean = false) {
         dashboardJob?.cancel()
         statsReconcileJob?.cancel()
+        moduleEventsJob?.cancel()
         if (UserSession.accessToken.isEmpty() || UserSession.domain.isEmpty()) return
         dashboardJob = viewModelScope.launch(Dispatchers.IO) {
             val filter = _uiState.value.selectedFilter
@@ -918,9 +1095,11 @@ class HomeViewModel(
             val (fromTime, toTime) = TimeFilter.resolveTimeRangeMillis(filter)
             val fromSec = fromTime / 1000
             val toSec = toTime / 1000
+            val shelfCacheKey = moduleEventsCacheKey(filter, serviceId)
 
             // 1. Ưu tiên đọc ngay dữ liệu từ RAM / Disk Cache (Stale-While-Revalidate) khi chưa phải thao tác kéo refresh
             val cachedData = dashboardRepository.getHomeData(filter, serviceId)
+            val cachedShelves = moduleEventsRamCache[shelfCacheKey].orEmpty()
             if (!isUserRefresh) {
                 if (cachedData != null) {
                     val updatedFromCache = withContext(Dispatchers.Default) {
@@ -929,12 +1108,26 @@ class HomeViewModel(
                             .ifEmpty { dashboardRepository.getCamerasInMemory() }
                             .ifEmpty { cur.cameraList }
                         val permittedCameras = UserPermissionManager.filterPermittedCameras(rawCachedCameras)
+                        val restoredShelves = cachedShelves.ifEmpty {
+                            filterCachedModuleEvents(
+                                rawMap = cachedData.aiModuleEvents,
+                                fromSec = fromSec,
+                                toSec = toSec,
+                                allCameras = rawCachedCameras
+                            ).also {
+                                if (it.isNotEmpty()) {
+                                    moduleEventsRamCache[shelfCacheKey] = it
+                                }
+                            }
+                        }
                         cur.copy(
                             isLoading = false,
                             error = null,
                             overviewStats = cachedData.overviewStats,
                             eventsByType = cachedData.eventsByType,
                             hasLoadedEventsByType = cachedData.hasLoadedEventsByType || cachedData.eventsByType.isNotEmpty(),
+                            aiModuleEvents = if (restoredShelves == cur.aiModuleEvents) cur.aiModuleEvents else restoredShelves,
+                            loadingAiModuleTypes = emptySet(),
                             cameraList = permittedCameras,
                             aiServices = cachedData.aiServices.ifEmpty { cur.aiServices },
                             recentEvents = cachedData.recentEvents
@@ -945,7 +1138,9 @@ class HomeViewModel(
                             totalAiTasks = if (cachedData.totalAiTasks > 0) cachedData.totalAiTasks else cur.totalAiTasks
                         ).withRecomputedMetrics()
                     }
-                    _uiState.value = updatedFromCache
+                    if (updatedFromCache != _uiState.value) {
+                        _uiState.value = updatedFromCache
+                    }
                 } else {
                     // Chưa có cache cho bộ lọc mới: xóa ngay dữ liệu sự kiện/thống kê của bộ lọc cũ để tránh hiển thị nhầm số liệu
                     _uiState.update {
@@ -955,6 +1150,9 @@ class HomeViewModel(
                             overviewStats = emptyList(),
                             eventsByType = emptyList(),
                             hasLoadedEventsByType = false,
+                            aiDistribution = emptyList(),
+                            aiModuleEvents = cachedShelves,
+                            loadingAiModuleTypes = emptySet(),
                             recentEvents = emptyList(),
                             totalDetectionsCount = 0L
                         )
@@ -1163,7 +1361,22 @@ class HomeViewModel(
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
                     }
-                    _uiState.value = stage1State
+                    if (stage1State != _uiState.value) {
+                        _uiState.value = stage1State
+                    }
+
+                    // Nạp song song tối đa 5 sự kiện gần nhất cho từng bài AI trong Phân bố AI (chạy nền, không chặn tắt refresh)
+                    if (UserPermissionManager.canAccessEvents()) {
+                        launchAiModuleShelvesFetch(
+                            filter = filter,
+                            serviceId = serviceId,
+                            fromSec = fromSec,
+                            toSec = toSec,
+                            distribution = stage1State.aiDistribution,
+                            seedEvents = stage1State.recentEvents,
+                            allCameras = initialCameraList
+                        )
+                    }
 
                     // --- GIAI ĐOẠN 2 (chạy nền sau khi đã tắt vòng xoay refresh): Đồng bộ Camera, AI Services & số bài AI đang chạy ---
                     val cameraResult = earlyCameraResult ?: cameraDeferred.await()
@@ -1242,16 +1455,20 @@ class HomeViewModel(
                     if (_uiState.value.selectedFilter != filter || _uiState.value.selectedServiceId != serviceId) {
                         return@coroutineScope
                     }
-                    _uiState.value = stage2State
+                    if (stage2State != _uiState.value) {
+                        _uiState.value = stage2State
+                    }
 
                     if (overviewResponse?.isSuccessful == true || byTypeSucceeded || fallbackByType != null || recentEventsSucceeded) {
+                        val latestState = _uiState.value
                         val newCachedData = CachedHomeData(
-                            overviewStats = stage2State.overviewStats,
-                            eventsByType = stage2State.eventsByType,
-                            hasLoadedEventsByType = stage2State.hasLoadedEventsByType,
+                            overviewStats = latestState.overviewStats,
+                            eventsByType = latestState.eventsByType,
+                            hasLoadedEventsByType = latestState.hasLoadedEventsByType,
                             cameraList = allCameraList,
                             aiServices = aiServices,
-                            recentEvents = stage2State.recentEvents,
+                            recentEvents = latestState.recentEvents,
+                            aiModuleEvents = latestState.aiModuleEvents,
                             runningAiTasks = runningTasks,
                             totalAiTasks = totalTasks,
                             updatedAt = System.currentTimeMillis()
@@ -1277,6 +1494,238 @@ class HomeViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private fun moduleEventsCacheKey(filter: TimeFilter, serviceId: Int?): String =
+        "${TimeFilter.cacheKeyToken(filter)}_${serviceId ?: -1}"
+
+    private fun resolveDistributionBucketKey(rawType: String): String {
+        val mod = AiTypeHelper.findModuleByEventType(rawType)
+        return mod?.sensorType ?: rawType.trim()
+    }
+
+    private fun mergeRealtimeEventsIntoModuleShelves(
+        currentMap: Map<String, List<EventData>>,
+        newEvents: List<EventData>,
+        fromSec: Long,
+        toSec: Long,
+        allCameras: List<CameraModel>
+    ): Map<String, List<EventData>> {
+        if (newEvents.isEmpty()) return currentMap
+        val permittedFresh = newEvents
+            .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+            .permittedDistinct(allCameras)
+        if (permittedFresh.isEmpty()) return currentMap
+
+        val updated = LinkedHashMap<String, List<EventData>>(currentMap)
+        val grouped = permittedFresh.groupBy { resolveDistributionBucketKey(it.type) }
+        for ((bucketKey, freshForBucket) in grouped) {
+            if (bucketKey.isEmpty()) continue
+            val existing = updated[bucketKey].orEmpty()
+                .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+            val merged = (freshForBucket + existing)
+                .distinctBy { it.id }
+                .sortedWith(EventDescendingComparator)
+                .take(MAX_RECENT_EVENTS)
+            updated[bucketKey] = merged
+        }
+        return updated
+    }
+
+    /**
+     * Tải song song tối đa 5 sự kiện mới nhất cho từng bài AI theo đúng thứ tự `distribution` từ trên xuống.
+     * Cập nhật tiến dần (progressive update) ngay khi từng bài AI trả dữ liệu về để các hàng trên cùng hiển thị tức thì.
+     */
+    private fun launchAiModuleShelvesFetch(
+        filter: TimeFilter,
+        serviceId: Int?,
+        fromSec: Long,
+        toSec: Long,
+        distribution: List<HomeAiDistributionItem>,
+        seedEvents: List<EventData>,
+        allCameras: List<CameraModel>
+    ) {
+        moduleEventsJob?.cancel()
+        val cacheKey = moduleEventsCacheKey(filter, serviceId)
+        if (distribution.isEmpty()) {
+            moduleEventsRamCache.remove(cacheKey)
+            _uiState.update { cur ->
+                if (cur.selectedFilter == filter && cur.selectedServiceId == serviceId) {
+                    cur.copy(aiModuleEvents = emptyMap(), loadingAiModuleTypes = emptySet())
+                } else {
+                    cur
+                }
+            }
+            return
+        }
+
+        val activeKeys = distribution.map { it.filterSensorType }.toSet()
+        val seededFromRecent = seedEvents
+            .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+            .groupBy { resolveDistributionBucketKey(it.type) }
+
+        // Hiển thị ngay dữ liệu cache/seed sẵn nếu có, đồng thời bật skeleton cho các bài AI chưa có đủ dữ liệu
+        _uiState.update { cur ->
+            if (cur.selectedFilter != filter || cur.selectedServiceId != serviceId) return@update cur
+            val nextMap = LinkedHashMap<String, List<EventData>>()
+            val loadingSet = LinkedHashSet<String>()
+            for (item in distribution) {
+                val key = item.filterSensorType
+                val existing = cur.aiModuleEvents[key].orEmpty()
+                    .filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+                val seed = seededFromRecent[key].orEmpty()
+                val combined = (seed + existing)
+                    .distinctBy { it.id }
+                    .sortedWith(EventDescendingComparator)
+                    .take(MAX_RECENT_EVENTS)
+                if (combined.isNotEmpty()) {
+                    nextMap[key] = combined
+                }
+                if (combined.isEmpty()) {
+                    loadingSet.add(key)
+                }
+            }
+            cur.copy(
+                aiModuleEvents = nextMap,
+                loadingAiModuleTypes = loadingSet
+            )
+        }
+
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            _uiState.update { cur ->
+                if (cur.selectedFilter == filter && cur.selectedServiceId == serviceId) {
+                    cur.copy(loadingAiModuleTypes = emptySet())
+                } else {
+                    cur
+                }
+            }
+            return
+        }
+
+        moduleEventsJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val semaphore = Semaphore(MAX_OVERVIEW_BY_TYPE_CONCURRENCY)
+                val perTypeCount = if (UserPermissionManager.isCustomCameraPermission()) {
+                    MEDIUM_RECENT_BATCH_SIZE
+                } else {
+                    FAST_RECENT_BATCH_SIZE
+                }
+                val camerasForPerm = allCameras.ifEmpty { dashboardRepository.getCamerasInMemory() }
+
+                val moduleResults = coroutineScope {
+                    distribution.map { item ->
+                        async {
+                            val bucketKey = item.filterSensorType
+                            val apiTypes = resolveApiEventTypes(bucketKey)
+                                .ifEmpty { listOf(bucketKey) }
+                            val fetchedForModule = ArrayList<EventData>(MAX_RECENT_EVENTS * 2)
+                            var anySuccess = false
+
+                            for (apiType in apiTypes) {
+                                val res = semaphore.withPermit {
+                                    safeApiCall {
+                                        dashboardRepository.getEventDataList(
+                                            count = perTypeCount,
+                                            lastId = null,
+                                            from = fromSec,
+                                            to = toSec,
+                                            serviceId = serviceId,
+                                            type = apiType
+                                        )
+                                    }
+                                }
+                                val resp = res.getOrNull()
+                                if (resp != null && resp.isSuccessful) {
+                                    anySuccess = true
+                                    val body = resp.body().orEmpty()
+                                    for (ev in body) {
+                                        if (ev.isWithinTimeRangeSeconds(fromSec, toSec) &&
+                                            UserPermissionManager.isEventPermitted(ev, camerasForPerm)
+                                        ) {
+                                            fetchedForModule.add(ev)
+                                        }
+                                    }
+                                }
+                            }
+
+                            val topEvents = fetchedForModule
+                                .distinctBy { it.id }
+                                .sortedWith(EventDescendingComparator)
+                                .take(MAX_RECENT_EVENTS)
+
+                            if (topEvents.isNotEmpty()) {
+                                dashboardRepository.cacheInMemory(events = topEvents)
+                            }
+                            Triple(bucketKey, anySuccess, topEvents)
+                        }
+                    }.awaitAll()
+                }
+
+                // Gộp cập nhật 1 lần duy nhất sau khi tải song song tất cả bài AI để tránh chuỗi 6-10 lần recompose + nhảy layout lúc mở app
+                var didChangeShelves = false
+                _uiState.update { cur ->
+                    if (cur.selectedFilter != filter || cur.selectedServiceId != serviceId) {
+                        return@update cur
+                    }
+                    val nextMap = LinkedHashMap<String, List<EventData>>(cur.aiModuleEvents)
+                    for ((bucketKey, anySuccess, topEvents) in moduleResults) {
+                        if (anySuccess) {
+                            val existing = cur.aiModuleEvents[bucketKey]
+                            nextMap[bucketKey] = if (existing == topEvents) existing else topEvents
+                        }
+                    }
+                    // Dọn các key không còn thuộc aiDistribution hiện tại
+                    nextMap.keys.retainAll(activeKeys)
+                    val finalMap = if (nextMap == cur.aiModuleEvents) cur.aiModuleEvents else nextMap.toMap()
+                    moduleEventsRamCache[cacheKey] = finalMap
+                    if (finalMap === cur.aiModuleEvents && cur.loadingAiModuleTypes.isEmpty()) {
+                        cur
+                    } else {
+                        didChangeShelves = finalMap !== cur.aiModuleEvents
+                        cur.copy(
+                            aiModuleEvents = finalMap,
+                            loadingAiModuleTypes = emptySet()
+                        )
+                    }
+                }
+
+                // Lưu kèm các hàng bài AI vào disk cache để lần mở app tiếp theo hiển thị tức thì 0ms
+                if (didChangeShelves) {
+                    val latest = _uiState.value
+                    if (latest.selectedFilter == filter &&
+                        latest.selectedServiceId == serviceId &&
+                        UserSession.accessToken.isNotEmpty()
+                    ) {
+                        dashboardRepository.saveHomeData(
+                            filter = filter,
+                            serviceId = serviceId,
+                            data = CachedHomeData(
+                                overviewStats = latest.overviewStats,
+                                eventsByType = latest.eventsByType,
+                                hasLoadedEventsByType = latest.hasLoadedEventsByType,
+                                cameraList = dashboardRepository.getCamerasInMemory().ifEmpty { latest.cameraList },
+                                aiServices = latest.aiServices,
+                                recentEvents = latest.recentEvents,
+                                aiModuleEvents = latest.aiModuleEvents,
+                                runningAiTasks = latest.runningAiTasks,
+                                totalAiTasks = latest.totalAiTasks,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _uiState.update { cur ->
+                    if (cur.selectedFilter == filter && cur.selectedServiceId == serviceId) {
+                        cur.copy(loadingAiModuleTypes = emptySet())
+                    } else {
+                        cur
+                    }
+                }
+            }
+        }
     }
 
     private fun isPrivateOrLoopbackHost(host: String): Boolean {
@@ -1694,6 +2143,7 @@ class HomeViewModel(
             if (cameraList.isNotEmpty()) cameraList.size else totalFromOverview
         }
 
+        val offlineIds = HashSet<Int>()
         val onlineCams = if (cameraList.isEmpty()) {
             totalCams
         } else {
@@ -1709,6 +2159,7 @@ class HomeViewModel(
                         isOffline = true
                     }
                 }
+                if (isOffline) offlineIds.add(cam.id)
                 !isOffline
             }
         }
@@ -1725,9 +2176,11 @@ class HomeViewModel(
             }
         }
 
+        val resolvedOfflineIds = if (offlineIds.isEmpty()) emptySet() else offlineIds.toSet()
         if (totalCamerasCount == totalCams &&
             onlineCamerasCount == onlineCams &&
-            recordingCamerasCount == recordingCams
+            recordingCamerasCount == recordingCams &&
+            offlineCameraIds == resolvedOfflineIds
         ) {
             return this
         }
@@ -1735,7 +2188,8 @@ class HomeViewModel(
         return copy(
             totalCamerasCount = totalCams,
             onlineCamerasCount = onlineCams,
-            recordingCamerasCount = recordingCams
+            recordingCamerasCount = recordingCams,
+            offlineCameraIds = resolvedOfflineIds
         )
     }
 

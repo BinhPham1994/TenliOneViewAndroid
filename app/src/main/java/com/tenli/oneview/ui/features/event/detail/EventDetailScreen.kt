@@ -54,7 +54,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -62,12 +61,10 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -106,7 +103,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
@@ -136,14 +132,9 @@ import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.EventData
-import com.tenli.oneview.ui.component.AnchoredFilterDropdownMenu
 import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
-import com.tenli.oneview.ui.component.CustomDatePickerDialogModal
-import com.tenli.oneview.ui.component.CustomRangePickerDialogModal
-import com.tenli.oneview.ui.component.FilterCellRow
 import com.tenli.oneview.ui.component.LiveStreamPlayer
-import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.SheetCloseButton
 import com.tenli.oneview.ui.component.VideoFrameImage
@@ -151,12 +142,8 @@ import com.tenli.oneview.ui.component.VideoPlayer
 import com.tenli.oneview.ui.component.WaveDotsLoading
 import com.tenli.oneview.ui.component.ZoomableMediaBox
 import com.tenli.oneview.ui.component.rememberIsEnglish
-import com.tenli.oneview.ui.features.event.buildCameraNameMap
-import com.tenli.oneview.ui.features.event.cameraUuidOrNull
 import com.tenli.oneview.ui.features.event.formatEventTimeOnly
 import com.tenli.oneview.ui.features.event.isPlateBlacklisted
-import com.tenli.oneview.ui.features.event.uniqueKey
-import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.theme.BrandActiveNavDark
 import com.tenli.oneview.ui.theme.BrandLight
 import com.tenli.oneview.ui.theme.BrandPrimary
@@ -167,7 +154,6 @@ import com.tenli.oneview.ui.theme.Slate900
 import com.tenli.oneview.ui.theme.SurfaceVariant
 import com.tenli.oneview.ui.theme.SurfaceVariantDark
 import com.tenli.oneview.ui.theme.WarningAmberDeep
-import com.tenli.oneview.ui.theme.WarningOrange
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.spacing
@@ -239,8 +225,6 @@ private val CropPopupMaxHeight = 180.dp
 private val CropPopupFallbackSize = 156.dp
 private val RelatedPlateCardWidth = 148.dp
 private val PlatesLoadingHeight = 110.dp
-private val HistoryLoadingHeight = 180.dp
-private val HistoryEmptyHeight = 160.dp
 
 private val SectionLetterSpacing = 0.6.sp
 private val PlateLetterSpacing = 0.8.sp
@@ -263,8 +247,6 @@ private class GestureBounds {
     var lastRootHeightPx = 0
     var lastFittedLandWidthPx = 0
     var lastFittedLandHeightPx = 0
-    var sheetRootCoords: LayoutCoordinates? = null
-    var periodRowCoords: LayoutCoordinates? = null
 }
 
 @Composable
@@ -326,11 +308,6 @@ fun EventDetailScreen(
     var isMediaZoomed by remember(eventId) { mutableStateOf(false) }
     var expandedCropUrl by remember(eventId) { mutableStateOf<String?>(null) }
     var showConfirmReportDialog by remember(eventId) { mutableStateOf(false) }
-    var showCustomDateModal by remember(eventId) { mutableStateOf(false) }
-    var showCustomRangeModal by remember(eventId) { mutableStateOf(false) }
-    var customPickerVersion by remember(eventId) { mutableIntStateOf(0) }
-    var showPeriodMenu by remember(eventId) { mutableStateOf(false) }
-    var periodAnchorRect by remember(eventId) { mutableStateOf<Rect?>(null) }
 
     val currentIsMediaFullscreen by rememberUpdatedState(isVideoOverlayActive || isImageOverlayActive)
     val currentIsMediaZoomed by rememberUpdatedState(isMediaZoomed)
@@ -415,16 +392,7 @@ fun EventDetailScreen(
         }
     }
 
-    BackHandler(enabled = showPeriodMenu) {
-        showPeriodMenu = false
-    }
-
     val listState = rememberLazyListState()
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress && showPeriodMenu) {
-            showPeriodMenu = false
-        }
-    }
 
     // Drag-to-dismiss vertical offset (matching PWA bottom-sheet swipe down to dismiss)
     val sheetOffsetY = remember(eventId) { Animatable(0f) }
@@ -499,7 +467,6 @@ fun EventDetailScreen(
         isImageFullscreenOpen = false
         isVideoFullscreenOpen = false
         expandedCropUrl = null
-        showPeriodMenu = false
     }
 
     Box(
@@ -514,7 +481,6 @@ fun EventDetailScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .onGloballyPositioned { bounds.sheetRootCoords = it }
                 .graphicsLayer {
                     translationY = if (isVideoOverlayActive || isImageOverlayActive) 0f else sheetOffsetY.value
                 }
@@ -554,11 +520,6 @@ fun EventDetailScreen(
                         groups = uiState.profileGroupList,
                         isEn = isEn
                     )
-                }
-                val cameraMap = if (uiState.cameraNameMap.isNotEmpty()) {
-                    uiState.cameraNameMap
-                } else {
-                    remember(uiState.cameraList) { buildCameraNameMap(uiState.cameraList) }
                 }
 
                 Box(
@@ -609,12 +570,13 @@ fun EventDetailScreen(
 
                                 // Vertical swipe-down to dismiss:
                                 // - Allowed on Pinned Top Section (Header + Tabs + 16:9 Media area) unless zoomed in
-                                // - Allowed on THÔNG TIN SỰ KIỆN section (header + .event-data-board card)
-                                // - NEVER allowed when touching inside LỊCH SỬ XUẤT HIỆN (related events list)
+                                // - Allowed on THÔNG TIN SỰ KIỆN section or anywhere when the list is at top
+                                val isListAtTop =
+                                    listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
                                 var canSwipeDismiss =
                                     !isInsideVideoSeekbarZone &&
                                         !isBlockedByMediaZoom &&
-                                        (isInsidePinnedTop || isInsideDataBoard)
+                                        (isInsidePinnedTop || isInsideDataBoard || isListAtTop)
 
                                 var lockedMode = 0 // 0 = NONE, 1 = HORIZONTAL_TAB, 2 = VERTICAL_DISMISS
                                 var lastDx = 0f
@@ -837,106 +799,6 @@ fun EventDetailScreen(
                                 )
                             }
                         }
-
-                        // =====================================================================
-                        // 3. LỊCH SỬ XUẤT HIỆN (.mobile-history-sidebar in PWA)
-                        // =====================================================================
-                        item(key = KEY_HISTORY_HEADER) {
-                            val periodDisplayLabel = remember(uiState.selectedJourneyPeriod, customPickerVersion, isEn) {
-                                uiState.selectedJourneyPeriod.formatDisplayLabel(isEn)
-                            }
-                            HistoryHeader(
-                                periodLabel = periodDisplayLabel,
-                                isExpanded = showPeriodMenu,
-                                isEn = isEn,
-                                anchorModifier = Modifier.onGloballyPositioned { coords ->
-                                    bounds.periodRowCoords = coords
-                                    if (showPeriodMenu) {
-                                        val root = bounds.sheetRootCoords
-                                        if (root != null && root.isAttached && coords.isAttached) {
-                                            val rect = root.localBoundingBoxOf(coords, clipBounds = false)
-                                            if (periodAnchorRect != rect) periodAnchorRect = rect
-                                        }
-                                    }
-                                },
-                                onToggleMenu = {
-                                    val nextOpen = !showPeriodMenu
-                                    if (nextOpen) {
-                                        val root = bounds.sheetRootCoords
-                                        val row = bounds.periodRowCoords
-                                        periodAnchorRect = if (root != null && row != null && root.isAttached && row.isAttached) {
-                                            root.localBoundingBoxOf(row, clipBounds = false)
-                                        } else {
-                                            null
-                                        }
-                                    }
-                                    showPeriodMenu = nextOpen && periodAnchorRect != null
-                                }
-                            )
-                        }
-
-                        // History List Content
-                        if (uiState.isJourneyLoading) {
-                            item(key = KEY_HISTORY_LOADING, contentType = CONTENT_TYPE_STATE) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(HistoryLoadingHeight)
-                                        .padding(horizontal = spacing.space10),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    WaveDotsLoading()
-                                }
-                            }
-                        } else if (uiState.relatedEvents.isEmpty()) {
-                            item(key = KEY_HISTORY_EMPTY, contentType = CONTENT_TYPE_STATE) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = spacing.space10)
-                                        .height(HistoryEmptyHeight),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CommonEmptyState(text = if (isEn) "No related events" else "Không có dữ liệu")
-                                }
-                            }
-                        } else {
-                            // Danh sách đã được ViewModel loại trùng → key ổn định theo sự kiện (không phụ thuộc vị trí)
-                            items(
-                                items = uiState.relatedEvents,
-                                key = { relEv -> "hist_${relEv.uniqueKey()}" },
-                                contentType = { CONTENT_TYPE_HISTORY_CARD }
-                            ) { relEv ->
-                                val relCamName = relEv.cameraUuidOrNull?.let { cameraMap[it] }
-                                    ?: camera?.name
-                                    ?: "Camera"
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = spacing.space10, vertical = spacing.space5)
-                                ) {
-                                    MobileEventCard(
-                                        event = relEv,
-                                        cameraName = relCamName,
-                                        isListView = true,
-                                        isSelected = relEv.id == event.id,
-                                        enableSharedElement = false,
-                                        onClick = {
-                                            viewModel.selectBaseEvent(relEv)
-                                            resetMediaState()
-                                        }
-                                    )
-                                }
-                            }
-
-                            // End of history message (.mobile-history-end-message in PWA)
-                            item(key = KEY_HISTORY_END, contentType = CONTENT_TYPE_STATE) {
-                                HistoryEndMessage(
-                                    text = if (isEn) "All events displayed" else "Đã hiển thị tất cả sự kiện"
-                                )
-                            }
-                        }
                         }
                             }
                         },
@@ -1007,42 +869,6 @@ fun EventDetailScreen(
                     )
                 }
 
-                // Anchored Period Dropdown Menu dùng chung chính hàm AnchoredFilterDropdownMenu với MobileFilterBottomSheet
-                // (kế thừa đúng responsiveDensity, tự mở lên trên khi ở sát đáy màn hình, không bao giờ đè lên ô chọn)
-                val currentAnchorRect = periodAnchorRect
-                val rawRootHeightPx = bounds.sheetRootCoords?.size?.height?.toFloat() ?: 0f
-                val navBarBottomPx = WindowInsets.navigationBars.getBottom(density).toFloat()
-                val usableRootHeightPx = (rawRootHeightPx - navBarBottomPx).coerceAtLeast(0f)
-                if (showPeriodMenu && currentAnchorRect != null && usableRootHeightPx > 0f) {
-                    val periodOptions = remember(isEn) {
-                        JourneyPeriod.entries.map { period -> period to period.label(isEn) }
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = { showPeriodMenu = false }
-                            )
-                    ) {
-                        AnchoredFilterDropdownMenu(
-                            anchorRect = currentAnchorRect,
-                            rootHeightPx = usableRootHeightPx,
-                            options = periodOptions,
-                            selectedKey = uiState.selectedJourneyPeriod,
-                            onSelect = { period ->
-                                showPeriodMenu = false
-                                when (period) {
-                                    JourneyPeriod.CUSTOM_DATE -> showCustomDateModal = true
-                                    JourneyPeriod.CUSTOM_RANGE -> showCustomRangeModal = true
-                                    else -> viewModel.setJourneyPeriod(period)
-                                }
-                            }
-                        )
-                    }
-                }
-
                 // Lớp phủ phóng to ngang mượt 120Hz cho Ảnh sự kiện (xoay trực tiếp từ khung 16:9 và thu thẳng về chỗ cũ)
                 if (isImageOverlayActive && !display.imageUrl.isNullOrEmpty()) {
                     FullscreenEventImageOverlay(
@@ -1058,37 +884,6 @@ fun EventDetailScreen(
                 }
             }
         }
-    }
-
-    if (showCustomDateModal) {
-        CustomDatePickerDialogModal(
-            initialMillis = TimeFilter.customDateStartMs,
-            isEn = isEn,
-            isDark = colors.isDark,
-            onDismiss = { showCustomDateModal = false },
-            onConfirm = { pickedMillis ->
-                TimeFilter.setCustomDate(pickedMillis)
-                customPickerVersion++
-                showCustomDateModal = false
-                viewModel.setJourneyPeriod(JourneyPeriod.CUSTOM_DATE)
-            }
-        )
-    }
-
-    if (showCustomRangeModal) {
-        CustomRangePickerDialogModal(
-            initialFromMillis = TimeFilter.customRangeFromMs,
-            initialToMillis = TimeFilter.customRangeToMs,
-            isEn = isEn,
-            isDark = colors.isDark,
-            onDismiss = { showCustomRangeModal = false },
-            onConfirm = { fromMillis, toMillis ->
-                TimeFilter.setCustomRange(fromMillis, toMillis)
-                customPickerVersion++
-                showCustomRangeModal = false
-                viewModel.setJourneyPeriod(JourneyPeriod.CUSTOM_RANGE)
-            }
-        )
     }
 
     if (showConfirmReportDialog) {
@@ -1121,13 +916,7 @@ fun EventDetailScreen(
 private const val KEY_INFO_HEADER = "section_event_info_header"
 private const val KEY_DATA_BOARD = "section_event_data_board"
 private const val KEY_RELATED_PLATES = "section_related_plates"
-private const val KEY_HISTORY_HEADER = "section_history_header_and_filter"
-private const val KEY_HISTORY_LOADING = "section_history_loading"
-private const val KEY_HISTORY_EMPTY = "section_history_empty"
-private const val KEY_HISTORY_END = "section_history_end_msg"
 private const val CONTENT_TYPE_SECTION_HEADER = "section_header"
-private const val CONTENT_TYPE_STATE = "state"
-private const val CONTENT_TYPE_HISTORY_CARD = "history_event_card"
 
 // =============================================================================================
 // Pinned top section
@@ -2958,90 +2747,10 @@ private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: 
 }
 
 // =============================================================================================
-// Appearance history (.mobile-history-sidebar)
-// =============================================================================================
-
-@Composable
-private fun HistoryHeader(
-    periodLabel: String,
-    isExpanded: Boolean,
-    isEn: Boolean,
-    anchorModifier: Modifier = Modifier,
-    onToggleMenu: () -> Unit
-) {
-    val spacing = MaterialTheme.spacing
-    val colors = MaterialTheme.appColors
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = spacing.space10)
-    ) {
-        SectionHeaderText(
-            text = if (isEn) "APPEARANCE HISTORY" else "LỊCH SỬ XUẤT HIỆN",
-            modifier = Modifier.padding(start = spacing.space14, top = spacing.space6, bottom = spacing.space8)
-        )
-
-        // Period Filter Row dùng chung chính hàm FilterCellRow với MobileFilterBottomSheet
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = spacing.space6)
-                .then(anchorModifier)
-                .clip(RoundedCornerShape(spacing.radiusMedium))
-                .background(colors.surface)
-        ) {
-            FilterCellRow(
-                icon = LucideIcons.Clock,
-                badgeColor = WarningOrange,
-                label = periodLabel,
-                textColor = colors.textTitle,
-                secondaryColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                isExpanded = isExpanded,
-                onClick = onToggleMenu
-            )
-        }
-    }
-}
-
-@Composable
-private fun HistoryEndMessage(text: String) {
-    val spacing = MaterialTheme.spacing
-    val lineColor = MaterialTheme.appColors.textMuted.copy(alpha = 0.25f)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = spacing.space28 + spacing.space2, vertical = spacing.space18),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        HorizontalDivider(
-            modifier = Modifier.width(spacing.space48),
-            thickness = spacing.borderMedium,
-            color = lineColor
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.appColors.textMuted.copy(alpha = 0.75f),
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .padding(horizontal = spacing.space12)
-        )
-        HorizontalDivider(
-            modifier = Modifier.width(spacing.space48),
-            thickness = spacing.borderMedium,
-            color = lineColor
-        )
-    }
-}
-
-// =============================================================================================
 // Building blocks dùng chung trong màn
 // =============================================================================================
 
-/** Tiêu đề mục in hoa (THÔNG TIN SỰ KIỆN / BIỂN SỐ LIÊN QUAN / LỊCH SỬ XUẤT HIỆN) */
+/** Tiêu đề mục in hoa (THÔNG TIN SỰ KIỆN / BIỂN SỐ LIÊN QUAN) */
 @Composable
 private fun SectionHeaderText(text: String, modifier: Modifier = Modifier) {
     Text(

@@ -69,13 +69,15 @@ class MonitorRepository(
 
     fun getFavoriteCameraIds(): Set<Int> {
         val raw = GlobalData.preferences.getStringSet(favoritePrefKey(), emptySet()) ?: emptySet()
-        if (raw.isEmpty()) return emptySet()
-        return raw.mapNotNull { it.toIntOrNull() }.toSet()
+        val parsed = if (raw.isEmpty()) emptySet() else raw.mapNotNull { it.toIntOrNull() }.toSet()
+        MonitorCacheManager.notifyFavoritesUpdated(parsed)
+        return parsed
     }
 
     fun saveFavoriteCameraIds(ids: Set<Int>) {
         val strSet = ids.mapTo(HashSet(ids.size)) { it.toString() }
         GlobalData.preferences.edit { putStringSet(favoritePrefKey(), strSet) }
+        MonitorCacheManager.notifyFavoritesUpdated(ids)
     }
 
     fun getMonitorDataInMemory(): CachedMonitorData? =

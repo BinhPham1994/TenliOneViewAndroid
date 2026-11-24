@@ -17,23 +17,14 @@ import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.BsProfileGroupModel
 import com.tenli.oneview.model.network.BsProfileModel
 import com.tenli.oneview.model.network.CameraModel
-import com.tenli.oneview.model.network.DataSearchPlateModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.LiveStreamModel
-import com.tenli.oneview.model.network.ParamPlateModel
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
-import com.tenli.oneview.ui.features.event.directProfileId
-import com.tenli.oneview.ui.features.event.directProfileUuid
 import com.tenli.oneview.ui.features.event.eventTimeToSeconds
-import com.tenli.oneview.ui.features.event.moveToStartOfDay
 import com.tenli.oneview.ui.features.event.resolveCameraForEvent
 import com.tenli.oneview.ui.features.event.uniqueKey
-import com.tenli.oneview.ui.features.home.TimeFilter
-import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.LocaleManager
-import com.tenli.oneview.util.safeApiCall
-import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,34 +37,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Calendar
-
-/**
- * Khoảng thời gian của "Lịch sử xuất hiện". Nhãn hiển thị dùng chung với [TimeFilter] để không lặp chuỗi.
- */
-enum class JourneyPeriod(val code: String, private val timeFilter: TimeFilter) {
-    TODAY("1d", TimeFilter.TODAY),
-    YESTERDAY("2d", TimeFilter.YESTERDAY),
-    LAST_7_DAYS("7d", TimeFilter.LAST_7_DAYS),
-    CUSTOM_DATE("custom_date", TimeFilter.CUSTOM_DATE),
-    CUSTOM_RANGE("custom_range", TimeFilter.CUSTOM_RANGE);
-
-    /** Nhãn ngắn dùng trong menu chọn */
-    fun label(isEn: Boolean): String = if (isEn) timeFilter.titleEn else timeFilter.title
-
-    /** Nhãn đầy đủ (kèm ngày / khoảng ngày tùy chọn) hiển thị trên nút chọn */
-    fun formatDisplayLabel(isEn: Boolean): String = TimeFilter.formatDisplayLabel(timeFilter, isEn)
-
-    fun cacheCode(): String {
-        return when (this) {
-            CUSTOM_DATE -> "${code}_${TimeFilter.customDateStartMs}"
-            CUSTOM_RANGE -> "${code}_${TimeFilter.customRangeFromMs}_${TimeFilter.customRangeToMs}"
-            else -> code
-        }
-    }
-
-    val isCustom: Boolean get() = this == CUSTOM_DATE || this == CUSTOM_RANGE
-}
 
 @Immutable
 data class EventDetailUiState(
@@ -81,10 +44,6 @@ data class EventDetailUiState(
     val event: EventData? = null,
     val camera: CameraModel? = null,
     val cameraList: List<CameraModel> = emptyList(),
-    val cameraNameMap: Map<String, String> = emptyMap(),
-    val relatedEvents: List<EventData> = emptyList(),
-    val isJourneyLoading: Boolean = false,
-    val selectedJourneyPeriod: JourneyPeriod = JourneyPeriod.TODAY,
     val showRelatedPlates: Boolean = false,
     val relatedPlatesLoading: Boolean = false,
     val licensePlateEvents: List<EventData> = emptyList(),
@@ -113,7 +72,6 @@ class EventDetailViewModel(
         val initialSnap = initialCamera?.id?.let { camId ->
             eventRepository.getCachedCameraImageLinkInMemory(camId)
         }
-        val initialRelated = eventRepository.getRelatedEventsInMemory(eventId, JourneyPeriod.TODAY.code)
 
         MutableStateFlow(
             EventDetailUiState(
@@ -121,7 +79,6 @@ class EventDetailViewModel(
                 event = initialEvent,
                 camera = initialCamera,
                 cameraList = initialCameras,
-                cameraNameMap = eventRepository.getCameraNameMapInMemory(),
                 liveCameraSnapshotUrl = initialSnap?.let { raw ->
                     val trimmed = raw.trim()
                     if (trimmed.isEmpty() || trimmed == "NO_IMAGE") null
@@ -134,15 +91,12 @@ class EventDetailViewModel(
                 aiServices = eventRepository.getAiServicesInMemory(),
                 profileList = eventRepository.getProfilesInMemory(),
                 profileGroupList = eventRepository.getProfileGroupsInMemory(),
-                relatedEvents = initialRelated ?: emptyList(),
-                isLoading = initialEvent == null,
-                isJourneyLoading = initialRelated == null
+                isLoading = initialEvent == null
             )
         )
     }
     val uiState: StateFlow<EventDetailUiState> = _uiState.asStateFlow()
 
-    private var relatedEventsJob: Job? = null
     private var licensePlateJob: Job? = null
     private var liveStreamJob: Job? = null
     private var liveRetryCount: Int = 0
@@ -156,7 +110,7 @@ class EventDetailViewModel(
         loadEventDetails()
     }
 
-    /** Khuôn mặt / Đồng phục cần đối chiếu danh sách profile (tên, nhóm, UUID cho lịch sử xuất hiện). */
+    /** Khuôn mặt / Đồng phục cần đối chiếu danh sách profile (tên, nhóm). */
     private fun eventNeedsProfiles(event: EventData): Boolean =
         AiTypeHelper.isFaceEvent(event) || event.type.lowercase().contains("uniform")
 
@@ -164,7 +118,6 @@ class EventDetailViewModel(
         viewModelScope.launch {
             try {
                 var foundEvent = _uiState.value.event
-                val hadInitialEvent = foundEvent != null
                 var cameraList = _uiState.value.cameraList
 
                 if (foundEvent == null) {
@@ -192,7 +145,6 @@ class EventDetailViewModel(
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                isJourneyLoading = false,
                                 error = if (isEnglishLocale) "Event not found" else "Không tìm thấy sự kiện"
                             )
                         }
@@ -207,31 +159,18 @@ class EventDetailViewModel(
                             event = foundEvent,
                             camera = resolvedCam,
                             cameraList = cameraList,
-                            cameraNameMap = eventRepository.getCameraNameMapInMemory(),
-                            isLoading = false,
-                            isJourneyLoading = true
+                            isLoading = false
                         )
                     }
                 } else {
                     // Khi sự kiện đã có sẵn trong RAM, nhường 100% CPU/GPU cho hiệu ứng trượt mở màn hình
-                    // trước khi khởi chạy các API phụ trợ & parse JSON danh sách Lịch sử xuất hiện.
+                    // trước khi khởi chạy các API phụ trợ.
                     delay(200L)
-                }
-
-                // Gọi API lấy danh sách Lịch sử xuất hiện (Sự kiện liên quan) ở phần dưới màn hình
-                // Nếu là sự kiện Khuôn mặt / Đồng phục cần đối chiếu profileList mà chưa có trong RAM thì tải profileList trước
-                val needProfiles = eventNeedsProfiles(foundEvent)
-                val needProfilesForRelated = needProfiles && _uiState.value.profileList.isEmpty()
-
-                if (!needProfilesForRelated && (!hadInitialEvent || _uiState.value.relatedEvents.isEmpty())) {
-                    loadRelatedEvents()
-                } else if (!needProfilesForRelated) {
-                    // Đã có sẵn relatedEvents trong RAM, vẫn làm mới ngầm nhẹ nhàng
-                    loadRelatedEvents()
                 }
 
                 // Tải ngầm các metadata phụ trợ CHƯA có sẵn trong bộ nhớ (không bật isLoading toàn màn hình).
                 // Danh sách profile / nhóm chỉ cần cho sự kiện Khuôn mặt / Đồng phục.
+                val needProfiles = eventNeedsProfiles(foundEvent)
                 val current = _uiState.value
                 val fetchCameras = cameraList.isEmpty()
                 val fetchAiServices = current.aiServices.isEmpty()
@@ -289,7 +228,6 @@ class EventDetailViewModel(
                             it.copy(
                                 camera = camera ?: it.camera,
                                 cameraList = finalCameras,
-                                cameraNameMap = eventRepository.getCameraNameMapInMemory(),
                                 liveCameraSnapshotUrl = resolvedSnap ?: it.liveCameraSnapshotUrl,
                                 aiServices = finalAiServices,
                                 profileList = finalProfiles,
@@ -312,19 +250,15 @@ class EventDetailViewModel(
                         _uiState.update { it.copy(isLoading = false) }
                     }
                 }
-
-                if (needProfilesForRelated) {
-                    loadRelatedEvents()
-                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading event", e)
                 _uiState.update { state ->
                     if (state.event != null) {
-                        state.copy(isLoading = false, isJourneyLoading = false)
+                        state.copy(isLoading = false)
                     } else {
-                        state.copy(isLoading = false, isJourneyLoading = false, error = e.localizedMessage)
+                        state.copy(isLoading = false, error = e.localizedMessage)
                     }
                 }
             }
@@ -355,222 +289,6 @@ class EventDetailViewModel(
 
     fun selectEvent(event: EventData) {
         showEvent(event)
-    }
-
-    fun selectBaseEvent(event: EventData) {
-        showEvent(event)
-        // Only refetch if event is not already inside current relatedEvents list
-        val alreadyInHistory = _uiState.value.relatedEvents.any { it.id == event.id }
-        if (!alreadyInHistory) {
-            _uiState.update { it.copy(baseEvent = event) }
-            loadRelatedEvents()
-        }
-    }
-
-    fun setJourneyPeriod(period: JourneyPeriod) {
-        if (!period.isCustom && _uiState.value.selectedJourneyPeriod == period) return
-        _uiState.update { it.copy(selectedJourneyPeriod = period) }
-        loadRelatedEvents()
-    }
-
-    private fun getJourneyTimeRange(period: JourneyPeriod): Pair<Long, Long> {
-        val cal = Calendar.getInstance()
-        val nowSec = cal.timeInMillis / 1000
-        return when (period) {
-            JourneyPeriod.TODAY -> Pair(cal.moveToStartOfDay() / 1000, nowSec)
-            JourneyPeriod.YESTERDAY -> {
-                val endYesterday = (cal.moveToStartOfDay() / 1000) - 1
-                cal.add(Calendar.DAY_OF_YEAR, -1)
-                Pair(cal.timeInMillis / 1000, endYesterday)
-            }
-            JourneyPeriod.LAST_7_DAYS -> {
-                cal.add(Calendar.DAY_OF_YEAR, -6)
-                Pair(cal.moveToStartOfDay() / 1000, nowSec)
-            }
-            JourneyPeriod.CUSTOM_DATE -> Pair(TimeFilter.customDateStartMs / 1000, TimeFilter.customDateEndMs / 1000)
-            JourneyPeriod.CUSTOM_RANGE -> Pair(TimeFilter.customRangeFromMs / 1000, TimeFilter.customRangeToMs / 1000)
-        }
-    }
-
-    private fun isPlateType(typeLower: String): Boolean = typeLower.contains("plate") || typeLower.contains("lpr")
-
-    /** UUID profile của sự kiện; nếu thiếu thì tra theo profileId trong danh sách profile đã tải. */
-    private fun resolveProfileUuid(event: EventData, profiles: List<BsProfileModel>): String {
-        val direct = event.directProfileUuid()
-        if (direct.isNotEmpty()) return direct
-        val profileId = event.directProfileId ?: return ""
-        return profiles.find { it.id == profileId }?.uuid?.trim().orEmpty()
-    }
-
-    /**
-     * Gọi API lấy dữ liệu thô của "Lịch sử xuất hiện" theo loại sự kiện (khớp useRelatedEvents.ts trong PWA):
-     * 1. LPR / Plate -> gọi searchAIData (/Data/api/DataSearch)
-     * 2. Face -> gọi getFaceDataByProfileUUID (/Data/api/FaceData/{uuid}) hoặc getDataList nếu stranger
-     * 3. Uniform -> gọi bsApi.getUniformData (/ts/api/v1/e/uniform/get-data)
-     * 4. Các module AI khác -> gọi getDataList (/Data/api/Data) theo cameraUUID & type
-     */
-    private suspend fun fetchRelatedRaw(
-        targetEvent: EventData,
-        fromTime: Long,
-        toTime: Long,
-        profiles: List<BsProfileModel>
-    ): Result<List<EventData>> {
-        val typeLower = targetEvent.type.lowercase()
-        val evData = targetEvent.data
-        val serviceId = targetEvent.serviceId.takeIf { it > 0 }
-        val cameraUUID = targetEvent.cameraUuidOrNull
-
-        val result = when {
-            typeLower == "sensor-license-plate" || isPlateType(typeLower) || !evData?.plate?.plate.isNullOrBlank() -> {
-                val plate = (evData?.plate?.plate ?: evData?.plate?.number ?: targetEvent.plate)?.trim()
-                if (plate.isNullOrBlank()) return Result.success(emptyList())
-                val searchItems = listOf(
-                    DataSearchPlateModel(
-                        type = "plate",
-                        confidence = 0.5,
-                        param = ParamPlateModel(value = plate)
-                    )
-                )
-                safeApiCall {
-                    eventRepository.searchAIData(
-                        from = fromTime,
-                        to = toTime,
-                        serviceId = serviceId,
-                        count = 100,
-                        fast = "yes",
-                        searchItems = searchItems
-                    )
-                }
-            }
-
-            AiTypeHelper.isFaceEvent(targetEvent) -> {
-                var profileUuid = resolveProfileUuid(targetEvent, profiles)
-                if (profileUuid.isEmpty() && !AiTypeHelper.isStranger(targetEvent)) {
-                    val rawName = evData?.face?.name ?: evData?.name ?: targetEvent.name
-                    if (!rawName.isNullOrBlank()) {
-                        profileUuid = profiles.find {
-                            it.name.trim().equals(rawName.trim(), ignoreCase = true)
-                        }?.uuid?.trim().orEmpty()
-                    }
-                }
-
-                if (profileUuid.isNotEmpty()) {
-                    safeApiCall {
-                        eventRepository.getFaceDataByProfileUUID(
-                            profileUUID = profileUuid,
-                            count = 50,
-                            from = fromTime,
-                            to = toTime,
-                            serviceId = serviceId
-                        )
-                    }
-                } else {
-                    safeApiCall {
-                        eventRepository.getDataList(
-                            count = 50,
-                            serviceId = serviceId,
-                            type = targetEvent.type.ifBlank { "sensor-face-unknown-camera" },
-                            from = fromTime,
-                            to = toTime,
-                            cameraUUID = cameraUUID
-                        )
-                    }
-                }
-            }
-
-            typeLower.contains("uniform") -> {
-                val profileUuid = resolveProfileUuid(targetEvent, profiles)
-                val params = mutableMapOf(
-                    "isConfirmed" to "1",
-                    "order" to "desc",
-                    "count" to "50",
-                    "eventType" to "sensor-uniform-camera",
-                    "from" to fromTime.toString(),
-                    "to" to toTime.toString()
-                )
-                if (profileUuid.isNotEmpty()) {
-                    params["profileUUID"] = profileUuid
-                    params["onlyProfileUnknown"] = "0"
-                } else {
-                    params["onlyProfileUnknown"] = "1"
-                }
-                safeApiCall { eventRepository.getUniformData(params) }
-            }
-
-            else -> safeApiCall {
-                eventRepository.getDataList(
-                    count = 50,
-                    serviceId = serviceId,
-                    type = targetEvent.type,
-                    from = fromTime,
-                    to = toTime,
-                    cameraUUID = cameraUUID
-                )
-            }
-        }
-
-        return result.map { it.body() ?: emptyList() }
-    }
-
-    fun loadRelatedEvents() {
-        val state = _uiState.value
-        val targetEvent = state.event ?: state.baseEvent ?: return
-        val period = state.selectedJourneyPeriod
-        val cacheCode = period.cacheCode()
-        val cachedRelated = eventRepository.getRelatedEventsInMemory(targetEvent.id, cacheCode)
-
-        relatedEventsJob?.cancel()
-        relatedEventsJob = viewModelScope.launch {
-            if (cachedRelated != null) {
-                _uiState.update { it.copy(relatedEvents = cachedRelated, isJourneyLoading = false) }
-            } else {
-                _uiState.update { it.copy(isJourneyLoading = true) }
-            }
-            try {
-                val (fromTime, toTime) = getJourneyTimeRange(period)
-                val fetchedResult = fetchRelatedRaw(targetEvent, fromTime, toTime, _uiState.value.profileList)
-                val fetched = fetchedResult.getOrElse { err ->
-                    MobileTopPopupManager.error(err.toUserFriendlyMessage())
-                    _uiState.update { it.copy(isJourneyLoading = false) }
-                    return@launch
-                }
-
-                // Lọc / sắp xếp trên Dispatchers.Default để không chiếm Main thread
-                val sorted = withContext(Dispatchers.Default) {
-                    val typeLower = targetEvent.type.lowercase()
-                    val cameraUUID = targetEvent.cameraUuidOrNull
-                    // Lọc theo cameraUUID đối với các module AI thông thường (như useRelatedEvents.ts dòng 278-292)
-                    val filterByCamera = !isPlateType(typeLower) &&
-                        !AiTypeHelper.isFaceEvent(targetEvent) &&
-                        !typeLower.contains("uniform") &&
-                        !cameraUUID.isNullOrBlank()
-
-                    val camerasForPerm = _uiState.value.cameraList.ifEmpty { eventRepository.getCamerasInMemory() }
-                    fetched
-                        .asSequence()
-                        .filter { item ->
-                            item.id == targetEvent.id || UserPermissionManager.isEventPermitted(item, camerasForPerm)
-                        }
-                        .filter { item ->
-                            if (!filterByCamera) return@filter true
-                            val cId = item.cameraUuidOrNull
-                            cId.isNullOrBlank() || cId == cameraUUID
-                        }
-                        // Loại bản ghi trùng để key của LazyColumn luôn duy nhất
-                        .distinctBy { it.uniqueKey() }
-                        .sortedByDescending { it.time }
-                        .toList()
-                }
-                eventRepository.cacheRelatedEventsInMemory(targetEvent.id, cacheCode, sorted)
-                _uiState.update { it.copy(relatedEvents = sorted, isJourneyLoading = false) }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Error fetching related events", e)
-                MobileTopPopupManager.error(e.toUserFriendlyMessage())
-                _uiState.update { it.copy(isJourneyLoading = false) }
-            }
-        }
     }
 
     fun toggleRelatedLicensePlates() {

@@ -22,6 +22,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -43,12 +44,14 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -79,6 +82,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,6 +91,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -95,7 +101,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -126,6 +136,7 @@ import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.R
 import com.tenli.oneview.main.CallPermissionStep
 import com.tenli.oneview.main.CallPermissionStepSheet
+import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LocalMobileOverlayHost
 import com.tenli.oneview.ui.component.MobileNativeBottomSheet
@@ -157,7 +168,9 @@ import com.tenli.oneview.ui.utils.createTopItemSizeCache
 import com.tenli.oneview.ui.utils.smoothScrollToTop
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 
 private val OrderedMainTabs = listOf(
@@ -217,6 +230,7 @@ private fun themeModeLabel(mode: Int, isEn: Boolean): String = when (mode) {
     else -> if (isEn) "System" else "Hệ thống"
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
@@ -243,6 +257,7 @@ fun MainScreen(
     var showNotificationConfigPage by remember { mutableStateOf(false) }
     var showAboutPage by remember { mutableStateOf(false) }
     var isLiveCameraPageOpen by remember { mutableStateOf(false) }
+    var isLiveCameraSheetRevealing by remember { mutableStateOf(false) }
     val overlayHostState = remember { MobileOverlayHostState() }
 
     LaunchedEffect(visibleMainTabs, uiState.currentTab) {
@@ -251,15 +266,20 @@ fun MainScreen(
         }
     }
 
-    val homeScrollState = rememberScrollState()
+    // Cache window ahead/behind cho Trang chủ: prefetch dần các hàng bài AI phía dưới trong khoảng nghỉ giữa các frame
+    // và giữ lại Hero Carousel / Stat Grid / các hàng phía trên khi cuộn qua để kéo lên xuống đạt 0ms re-subcompose.
+    val homeCacheWindow = remember { LazyLayoutCacheWindow(aheadFraction = 0.75f, behindFraction = 1.25f) }
+    val homeListState = rememberLazyListState(cacheWindow = homeCacheWindow)
     val monitorGridState: LazyGridState = rememberLazyGridState()
     val eventListState = rememberLazyListState()
     val settingListState = rememberLazyListState()
 
+    val homeTopSizes = remember { createTopItemSizeCache() }
     val eventTopSizes = remember { createTopItemSizeCache() }
     val settingTopSizes = remember { createTopItemSizeCache() }
     val monitorTopRowSizes = remember { createTopItemSizeCache() }
 
+    TrackTopItemSizesEffect(homeListState, homeTopSizes)
     TrackTopItemSizesEffect(eventListState, eventTopSizes)
     TrackTopItemSizesEffect(settingListState, settingTopSizes)
     TrackTopRowSizesEffect(monitorGridState, monitorTopRowSizes)
@@ -310,8 +330,29 @@ fun MainScreen(
             }
         }
 
-        // Pre-mount & pre-measure toàn bộ các tab được phép truy cập theo 2 nhịp ngắn khi màn hình đang nghỉ,
-        // đảm bảo khi người dùng vuốt ngang qua lại giữa bất kỳ tab nào đều đạt 0ms measure hitch & 0 recomposition.
+        // Chỉ pre-mount các tab lân cận khi người dùng thực sự đứng yên liên tục ít nhất 2.5s (không đang cuộn / vuốt),
+        // tuyệt đối không dựng EventScreen / MonitorScreen chen ngang vào thao tác cuộn Trang chủ ngay lúc mới mở app.
+        // Nếu người dùng bấm hoặc vuốt ngang sớm hơn, switchToTab / pointerInput tự mount tab đích ngay ở Frame 0.
+        suspend fun awaitUserIdle(idleMs: Long) {
+            while (true) {
+                snapshotFlow {
+                    !homeListState.isScrollInProgress &&
+                        !eventListState.isScrollInProgress &&
+                        !monitorGridState.isScrollInProgress &&
+                        !isDraggingTab
+                }.first { it }
+                val resumedScrolling = withTimeoutOrNull(idleMs) {
+                    snapshotFlow {
+                        homeListState.isScrollInProgress ||
+                            eventListState.isScrollInProgress ||
+                            monitorGridState.isScrollInProgress ||
+                            isDraggingTab
+                    }.first { it }
+                } != null
+                if (!resumedScrolling) return
+            }
+        }
+
         val currIdx = visibleMainTabs.indexOf(targetTab)
         if (currIdx != -1) {
             val neighbors = buildSet {
@@ -319,12 +360,12 @@ fun MainScreen(
                 visibleMainTabs.getOrNull(currIdx + 1)?.let { add(it) }
             }
             if (!mountedTabs.containsAll(neighbors)) {
-                delay(100L)
+                awaitUserIdle(2500L)
                 mountedTabs = mountedTabs + neighbors
             }
         }
         if (!mountedTabs.containsAll(visibleMainTabs)) {
-            delay(140L)
+            awaitUserIdle(2500L)
             mountedTabs = mountedTabs + visibleMainTabs
         }
     }
@@ -372,7 +413,17 @@ fun MainScreen(
         { eventId: String -> eventId.toIntOrNull()?.let { currentOnNavigateToEventDetail(it) } }
     }
     val onMonitorFullscreenChange: (Boolean) -> Unit = remember { { isFullscreen: Boolean -> showBottomBar = !isFullscreen } }
-    val onLiveCameraPageOpenChange: (Boolean) -> Unit = remember { { isOpen: Boolean -> isLiveCameraPageOpen = isOpen } }
+    val onLiveCameraPageOpenChange: (Boolean) -> Unit = remember {
+        { isOpen: Boolean ->
+            isLiveCameraPageOpen = isOpen
+            if (!isOpen) {
+                isLiveCameraSheetRevealing = false
+            }
+        }
+    }
+    val onLiveCameraSheetRevealingChange: (Boolean) -> Unit = remember {
+        { revealing: Boolean -> isLiveCameraSheetRevealing = revealing }
+    }
     val onLogoutClick: () -> Unit = remember(viewModel) { { viewModel.logout() } }
     val onOpenNotificationConfig: () -> Unit = remember(viewModel) {
         {
@@ -406,21 +457,11 @@ fun MainScreen(
                         return@launch
                     }
 
-                    if (targetTab == MainTab.Home) {
-                        if (homeScrollState.value > 0) {
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            } catch (_: Exception) {
-                            }
-                            homeScrollState.smoothScrollToTop()
-                        }
-                        return@launch
-                    }
-
                     val (targetListState, knownSizes) = when (targetTab) {
+                        MainTab.Home -> homeListState to homeTopSizes
                         MainTab.Event -> eventListState to eventTopSizes
                         MainTab.Setting -> settingListState to settingTopSizes
-                        MainTab.Home, MainTab.Monitor -> eventListState to eventTopSizes
+                        MainTab.Monitor -> eventListState to eventTopSizes
                     }
                     if (targetListState.firstVisibleItemIndex > 0 || targetListState.firstVisibleItemScrollOffset > 0) {
                         try {
@@ -477,6 +518,19 @@ fun MainScreen(
 
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    // Các vùng cuộn ngang riêng trên Trang chủ (Carousel sự kiện gần đây & từng hàng bài AI) — lưu LayoutCoordinates
+    // qua onPlaced (0 boundsInRoot() khi đang cuộn) và chỉ tính boundsInRoot() duy nhất 1 lần lúc chạm ngón tay xuống.
+    val mainRootTopLeftHolder = remember { arrayOf(Offset.Zero) }
+    val homeHorizontalExclusionCoords = remember { HashMap<String, LayoutCoordinates>() }
+    val onHomeHorizontalSwipeZoneChanged: (String, LayoutCoordinates?) -> Unit = remember {
+        { zoneKey, coords ->
+            if (coords != null && coords.isAttached) {
+                homeHorizontalExclusionCoords[zoneKey] = coords
+            } else {
+                homeHorizontalExclusionCoords.remove(zoneKey)
+            }
+        }
+    }
 
     CompositionLocalProvider(LocalMobileOverlayHost provides overlayHostState) {
         Scaffold { innerPadding ->
@@ -484,6 +538,9 @@ fun MainScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(MaterialTheme.colorScheme.background)
+                    .onPlaced { coords ->
+                        mainRootTopLeftHolder[0] = coords.positionInRoot()
+                    }
                     .pointerInput(Unit) {
                         val edgeBufferPx = SwipeEdgeBuffer.toPx()
                         val bottomNavExclusionPx = SwipeBottomNavExclusion.toPx()
@@ -496,14 +553,23 @@ fun MainScreen(
                             val heightPx = size.height.toFloat()
                             val startX = down.position.x
                             val startY = down.position.y
+                            val rootOffset = mainRootTopLeftHolder[0]
+                            val touchInRoot = Offset(startX + rootOffset.x, startY + rootOffset.y)
+                            val isInHomeCarousel =
+                                activeTab == MainTab.Home &&
+                                    homeHorizontalExclusionCoords.values.any { coords ->
+                                        coords.isAttached && coords.boundsInRoot().contains(touchInRoot)
+                                    }
 
                             // Ignore touches near screen left/right edges for system back gesture,
-                            // or in the bottom navigation bar zone, or when video is in fullscreen
+                            // or in the bottom navigation bar zone, or in Home's horizontal events carousel,
+                            // or when video is in fullscreen
                             if (!showBottomBarState ||
                                 showNotificationConfigPageState ||
                                 showAboutPageState ||
                                 isLiveCameraPageOpenState ||
                                 overlayHostState.hasOverlays ||
+                                isInHomeCarousel ||
                                 startX < edgeBufferPx ||
                                 startX > widthPx - edgeBufferPx ||
                                 startY > heightPx - bottomNavExclusionPx
@@ -710,6 +776,7 @@ fun MainScreen(
 
                 var pendingEventNav by remember { mutableStateOf<Triple<TimeFilter, Int?, String?>?>(null) }
                 var pendingMonitorNav by remember { mutableStateOf<CameraQuickFilter?>(null) }
+                var pendingMonitorCamera by remember { mutableStateOf<CameraModel?>(null) }
 
                 LaunchedEffect(eventViewModel, pendingEventNav) {
                     val nav = pendingEventNav
@@ -726,6 +793,15 @@ fun MainScreen(
                         pendingMonitorNav = null
                         monitorViewModel.applyExternalQuickFilter(nav)
                         monitorGridState.scrollToItem(0)
+                    }
+                }
+
+                LaunchedEffect(monitorViewModel, pendingMonitorCamera) {
+                    val cam = pendingMonitorCamera
+                    if (monitorViewModel != null && cam != null) {
+                        pendingMonitorCamera = null
+                        monitorViewModel.setMonitorTabActive(true)
+                        monitorViewModel.openLiveCamera(cam)
                     }
                 }
 
@@ -796,6 +872,24 @@ fun MainScreen(
                     }
                 }
 
+                val onHomeOpenCamera: (CameraModel) -> Unit = remember(switchToTab) {
+                    { camera ->
+                        if (canAccessLiveStreamState) {
+                            if (MainTab.Monitor !in mountedTabs) {
+                                mountedTabs = mountedTabs + MainTab.Monitor
+                            }
+                            switchToTab(MainTab.Monitor, false)
+                            val monVm = currentMonitorViewModel
+                            if (monVm != null) {
+                                monVm.setMonitorTabActive(true)
+                                monVm.openLiveCamera(camera)
+                            } else {
+                                pendingMonitorCamera = camera
+                            }
+                        }
+                    }
+                }
+
                 // Keep-Alive (<keep-alive>) Tab Container + Simultaneous Edge-to-Edge Slide Transition
                 // Tất cả các tab được pre-measure sẵn 1 lần khi màn hình nghỉ; trong suốt lúc kéo tay và trượt:
                 // - 0 recomposition
@@ -842,11 +936,13 @@ fun MainScreen(
                                     when (tab) {
                                         MainTab.Home -> HomeScreen(
                                             viewModel = homeViewModel,
-                                            scrollState = homeScrollState,
+                                            listState = homeListState,
                                             isTabActive = isHomeActive,
                                             onEventClick = onHomeEventClick,
                                             onNavigateToEvents = onHomeNavigateToEvents,
-                                            onNavigateToMonitor = onHomeNavigateToMonitor
+                                            onNavigateToMonitor = onHomeNavigateToMonitor,
+                                            onOpenCamera = onHomeOpenCamera,
+                                            onHorizontalSwipeZoneChanged = onHomeHorizontalSwipeZoneChanged
                                         )
 
                                         MainTab.Event -> {
@@ -872,6 +968,7 @@ fun MainScreen(
                                                     viewModel = monitorViewModel,
                                                     gridState = monitorGridState,
                                                     isTabActive = isMonitorActive,
+                                                    isLiveOverlayRevealing = isLiveCameraSheetRevealing,
                                                     onEventClick = onEventIdClick,
                                                     onFullscreenChange = onMonitorFullscreenChange
                                                 )
@@ -907,18 +1004,18 @@ fun MainScreen(
                     }
                 }
 
-                // Full-screen Live Camera Page sliding in from right & sliding out to right at zIndex(30f)
-                // (above MainBottomNavigation at zIndex(10f), identical to MobileNotificationConfigScreen)
+                // Full-screen Live Camera Sheet sliding up from bottom & supporting drag-down to dismiss at zIndex(30f)
+                // (above MainBottomNavigation at zIndex(10f), matching EventDetailScreen)
                 if (monitorViewModel != null) {
                     MonitorLiveCameraOverlay(
                         viewModel = monitorViewModel,
                         isTabActive = isMonitorActive,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(top = innerPadding.calculateTopPadding())
                             .zIndex(30f),
                         onFullscreenChange = onMonitorFullscreenChange,
                         onLiveScreenOpenChange = onLiveCameraPageOpenChange,
+                        onSheetRevealingChange = onLiveCameraSheetRevealingChange,
                         onEventClick = onEventIdClick
                     )
                 }
@@ -950,7 +1047,6 @@ fun MainScreen(
                     visible = showAboutPage,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = innerPadding.calculateTopPadding())
                         .zIndex(30f),
                     enter = slideInHorizontally(
                         initialOffsetX = { fullWidth -> fullWidth },
@@ -2255,10 +2351,10 @@ private fun AlarmModeOptionButton(
 @Composable
 private fun SettingSubPageHeader(
     title: String,
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    backgroundColor: Color = MaterialTheme.colorScheme.background
 ) {
     val spacing = MaterialTheme.spacing
-    val backgroundColor = MaterialTheme.colorScheme.background
     val titleColor = MaterialTheme.colorScheme.onBackground
 
     Row(
@@ -2290,7 +2386,8 @@ private fun MobileAboutScreen(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val backgroundColor = MaterialTheme.colorScheme.background
+    // Nền trắng tinh (surface = #FFFFFF) ở Light Mode và phủ kín cả vùng status bar; giữ nền tối chuẩn ở Dark Mode
+    val backgroundColor = if (colors.isDark) colors.pageBg else colors.surface
     val brandTitle = remember(colors.textTitle, colors.accent) {
         buildAnnotatedString {
             withStyle(SpanStyle(color = colors.textTitle)) { append("Tenli ") }
@@ -2302,6 +2399,7 @@ private fun MobileAboutScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
+            .statusBarsPadding()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -2310,7 +2408,8 @@ private fun MobileAboutScreen(
     ) {
         SettingSubPageHeader(
             title = stringResource(id = R.string.setting_introduce),
-            onBackClick = onBackClick
+            onBackClick = onBackClick,
+            backgroundColor = backgroundColor
         )
 
         Column(

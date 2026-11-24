@@ -20,11 +20,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -40,13 +42,12 @@ private val ListSkeletonThumbBaseWidth = 156.dp
 private const val SKELETON_ASPECT_RATIO = 16f / 9f
 
 /**
- * Brush ánh sáng quét ngang nhẹ nhàng cho trạng thái Skeleton Loading (tự đổi màu theo Light/Dark).
+ * Trả về [State] tiến độ shimmer (0 recomposition khi dùng với [Modifier.shimmerBackground] đọc trong pha draw).
  */
 @Composable
-fun rememberShimmerBrush(): Brush {
-    val isDark = MaterialTheme.appColors.isDark
+fun rememberShimmerProgressState(): State<Float> {
     val transition = rememberInfiniteTransition(label = "shimmerTransition")
-    val progress by transition.animateFloat(
+    return transition.animateFloat(
         initialValue = -0.6f,
         targetValue = 1.6f,
         animationSpec = infiniteRepeatable(
@@ -55,6 +56,34 @@ fun rememberShimmerBrush(): Brush {
         ),
         label = "shimmerProgress"
     )
+}
+
+/**
+ * Vẽ hiệu ứng shimmer hoàn toàn trong pha draw (`drawBehind`) — 0 recomposition trên mỗi frame 60/120fps.
+ */
+fun Modifier.shimmerBackground(
+    progressState: State<Float>,
+    isDark: Boolean
+): Modifier = drawBehind {
+    val baseColor = if (isDark) ShimmerDarkBase else Slate200
+    val highlightColor = if (isDark) ShimmerDarkHighlight else Slate100
+    val startX = progressState.value * 900f
+    drawRect(
+        brush = Brush.linearGradient(
+            colors = listOf(baseColor, highlightColor, baseColor),
+            start = Offset(startX, 0f),
+            end = Offset(startX + 380f, 180f)
+        )
+    )
+}
+
+/**
+ * Brush ánh sáng quét ngang nhẹ nhàng cho trạng thái Skeleton Loading (tự đổi màu theo Light/Dark).
+ */
+@Composable
+fun rememberShimmerBrush(): Brush {
+    val isDark = MaterialTheme.appColors.isDark
+    val progress by rememberShimmerProgressState()
     val baseColor = if (isDark) ShimmerDarkBase else Slate200
     val highlightColor = if (isDark) ShimmerDarkHighlight else Slate100
     val startX = progress * 900f
