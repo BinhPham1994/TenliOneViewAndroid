@@ -20,17 +20,28 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.tenli.oneview.ui.theme.Slate100
 import com.tenli.oneview.ui.theme.Slate200
 import com.tenli.oneview.ui.theme.appColors
@@ -43,38 +54,72 @@ private const val SKELETON_ASPECT_RATIO = 16f / 9f
 
 /**
  * Trả về [State] tiến độ shimmer (0 recomposition khi dùng với [Modifier.shimmerBackground] đọc trong pha draw).
+ * Tự động dừng hoàn toàn khi [enabled] = false hoặc Lifecycle < STARTED (0 Choreographer ticks khi ẩn/nền).
  */
 @Composable
-fun rememberShimmerProgressState(): State<Float> {
-    val transition = rememberInfiniteTransition(label = "shimmerTransition")
-    return transition.animateFloat(
-        initialValue = -0.6f,
-        targetValue = 1.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1250, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmerProgress"
-    )
+fun rememberShimmerProgressState(enabled: Boolean = true): State<Float> {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val staticState = remember { mutableFloatStateOf(-1f) }
+    return if (enabled && isStarted) {
+        val transition = rememberInfiniteTransition(label = "shimmerTransition")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1250, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "shimmerProgress"
+        )
+    } else {
+        staticState
+    }
 }
 
 /**
- * Vẽ hiệu ứng shimmer hoàn toàn trong pha draw (`drawBehind`) — 0 recomposition trên mỗi frame 60/120fps.
+ * Vẽ hiệu ứng shimmer hoàn toàn trong pha draw (`drawWithCache`) —
+ * cache Brush 1 lần theo kích thước/theme, 0 cấp phát đối tượng và 0 recomposition trên mỗi frame 60/120fps.
  */
 fun Modifier.shimmerBackground(
     progressState: State<Float>,
     isDark: Boolean
-): Modifier = drawBehind {
+): Modifier = drawWithCache {
     val baseColor = if (isDark) ShimmerDarkBase else Slate200
     val highlightColor = if (isDark) ShimmerDarkHighlight else Slate100
-    val startX = progressState.value * 900f
-    drawRect(
-        brush = Brush.linearGradient(
-            colors = listOf(baseColor, highlightColor, baseColor),
-            start = Offset(startX, 0f),
-            end = Offset(startX + 380f, 180f)
-        )
+    val bandWidth = maxOf(size.width * 0.6f, 380f)
+    val tiltY = minOf(size.height * 0.45f, bandWidth * 0.47f)
+    val skewLeft = if (bandWidth > 0f) size.height * (tiltY / bandWidth) else 0f
+    val rectWidth = skewLeft + bandWidth + if (bandWidth > 0f) (tiltY * tiltY) / bandWidth else 0f
+    val highlightSize = Size(rectWidth, size.height)
+    val cachedBrush = Brush.linearGradient(
+        colors = listOf(highlightColor.copy(alpha = 0f), highlightColor, highlightColor.copy(alpha = 0f)),
+        start = Offset(skewLeft, 0f),
+        end = Offset(skewLeft + bandWidth, tiltY)
     )
+
+    onDrawBehind {
+        drawRect(color = baseColor)
+        val progress = progressState.value
+        if (progress >= 0f && size.width > 0f && size.height > 0f) {
+            val translateX = -rectWidth + progress * (size.width + rectWidth)
+            clipRect {
+                translate(left = translateX) {
+                    drawRect(brush = cachedBrush, size = highlightSize)
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -85,8 +130,9 @@ fun rememberShimmerBrush(): Brush {
     val isDark = MaterialTheme.appColors.isDark
     val progress by rememberShimmerProgressState()
     val baseColor = if (isDark) ShimmerDarkBase else Slate200
+    if (progress < 0f) return SolidColor(baseColor)
     val highlightColor = if (isDark) ShimmerDarkHighlight else Slate100
-    val startX = progress * 900f
+    val startX = (-0.6f + progress * 2.2f) * 900f
     return Brush.linearGradient(
         colors = listOf(baseColor, highlightColor, baseColor),
         start = Offset(startX, 0f),
@@ -102,10 +148,12 @@ fun rememberShimmerBrush(): Brush {
 fun EventCardSkeletonList(
     isListView: Boolean,
     count: Int = 5,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    animate: Boolean = true
 ) {
     val spacing = MaterialTheme.spacing
-    val brush = rememberShimmerBrush()
+    val isDark = MaterialTheme.appColors.isDark
+    val progressState = rememberShimmerProgressState(enabled = animate)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -114,16 +162,19 @@ fun EventCardSkeletonList(
     ) {
         repeat(count) {
             if (isListView) {
-                EventListCardSkeleton(brush = brush)
+                EventListCardSkeleton(progressState = progressState, isDark = isDark)
             } else {
-                EventGridCardSkeleton(brush = brush)
+                EventGridCardSkeleton(progressState = progressState, isDark = isDark)
             }
         }
     }
 }
 
 @Composable
-private fun EventListCardSkeleton(brush: Brush) {
+private fun EventListCardSkeleton(
+    progressState: State<Float>,
+    isDark: Boolean
+) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
@@ -144,7 +195,7 @@ private fun EventListCardSkeleton(brush: Brush) {
                 .width(thumbWidth)
                 .aspectRatio(SKELETON_ASPECT_RATIO)
                 .clip(thumbShape)
-                .background(brush)
+                .shimmerBackground(progressState, isDark)
         )
         Spacer(modifier = Modifier.width(spacing.space12))
         Column(
@@ -156,21 +207,21 @@ private fun EventListCardSkeleton(brush: Brush) {
                     .fillMaxWidth(0.45f)
                     .height(spacing.space12)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.82f)
                     .height(spacing.space20)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.68f)
                     .height(spacing.space12)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
             Spacer(modifier = Modifier.height(spacing.space2))
             Box(
@@ -178,14 +229,17 @@ private fun EventListCardSkeleton(brush: Brush) {
                     .fillMaxWidth(0.42f)
                     .height(spacing.space10)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
         }
     }
 }
 
 @Composable
-private fun EventGridCardSkeleton(brush: Brush) {
+private fun EventGridCardSkeleton(
+    progressState: State<Float>,
+    isDark: Boolean
+) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
@@ -201,7 +255,7 @@ private fun EventGridCardSkeleton(brush: Brush) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(SKELETON_ASPECT_RATIO)
-                .background(brush)
+                .shimmerBackground(progressState, isDark)
         )
         Column(
             modifier = Modifier
@@ -214,14 +268,14 @@ private fun EventGridCardSkeleton(brush: Brush) {
                     .fillMaxWidth(0.62f)
                     .height(spacing.space14)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth(0.4f)
                     .height(spacing.space10)
                     .clip(pillShape)
-                    .background(brush)
+                    .shimmerBackground(progressState, isDark)
             )
         }
     }
@@ -233,13 +287,16 @@ private fun EventGridCardSkeleton(brush: Brush) {
 @Composable
 fun CameraGridSkeleton(
     rowCount: Int = 3,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    animate: Boolean = true
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val brush = rememberShimmerBrush()
+    val isDark = colors.isDark
+    val progressState = rememberShimmerProgressState(enabled = animate)
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     val pillShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
+    val chipShape = remember { RoundedCornerShape(50) }
 
     Column(
         modifier = modifier
@@ -258,22 +315,22 @@ fun CameraGridSkeleton(
                 modifier = Modifier
                     .width(72.dp * spacing.scaleFactor)
                     .height(spacing.space28)
-                    .clip(RoundedCornerShape(50))
-                    .background(brush)
+                    .clip(chipShape)
+                    .shimmerBackground(progressState, isDark)
             )
             Box(
                 modifier = Modifier
                     .width(92.dp * spacing.scaleFactor)
                     .height(spacing.space28)
-                    .clip(RoundedCornerShape(50))
-                    .background(brush)
+                    .clip(chipShape)
+                    .shimmerBackground(progressState, isDark)
             )
             Box(
                 modifier = Modifier
                     .width(108.dp * spacing.scaleFactor)
                     .height(spacing.space28)
-                    .clip(RoundedCornerShape(50))
-                    .background(brush)
+                    .clip(chipShape)
+                    .shimmerBackground(progressState, isDark)
             )
         }
 
@@ -293,7 +350,7 @@ fun CameraGridSkeleton(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(SKELETON_ASPECT_RATIO)
-                                .background(brush)
+                                .shimmerBackground(progressState, isDark)
                         )
                         Row(
                             modifier = Modifier
@@ -306,7 +363,7 @@ fun CameraGridSkeleton(
                                     .fillMaxWidth(0.72f)
                                     .height(spacing.space12)
                                     .clip(pillShape)
-                                    .background(brush)
+                                    .shimmerBackground(progressState, isDark)
                             )
                         }
                     }

@@ -1,43 +1,51 @@
 package com.tenli.oneview.model.network
 
+import androidx.compose.runtime.Immutable
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 
 // ==================== Plate & Plate Group ====================
 
+@Immutable
 data class PlateConfigUi(
     val color: String? = null,
     val background: String? = null,
     val icon: String? = null
 )
 
+@Immutable
 data class PlateConfig(
     val ui: PlateConfigUi? = null
 )
 
+@Immutable
 data class PlateGroupConfigUi(
     val background: String? = null,
     val icon: String? = null,
     val color: String? = null
 )
 
+@Immutable
 data class PlateGroupConfig(
     val ui: PlateGroupConfigUi? = null
 )
 
 // ==================== BS Profile Group ====================
 
+@Immutable
 data class BsProfileGroupConfigUi(
     val background: String? = null,
     val icon: String? = null,
     val color: String? = null
 )
 
+@Immutable
 data class BsProfileGroupConfig(
     val ui: BsProfileGroupConfigUi? = null
 )
 
+@Immutable
 data class BsProfileGroupModel(
     val id: Int? = null,
     val uuid: String? = null,
@@ -56,14 +64,17 @@ data class BsProfileGroupModel(
 
 // ==================== BS Profile ====================
 
+@Immutable
 data class BsProfileConfigUi(
     val color: String? = null
 )
 
+@Immutable
 data class BsProfileConfig(
     val ui: BsProfileConfigUi? = null
 )
 
+@Immutable
 data class BsProfileModel(
     val id: Int? = null,
     val uuid: String? = null,
@@ -93,10 +104,12 @@ data class BsProfileModel(
 
 // ==================== Task ====================
 
+@Immutable
 data class TaskVariablesModel(
     val cameraIds: List<String>? = null
 )
 
+@Immutable
 data class TaskConfigModel(
     val timezone: String? = null,
     val locale: String? = null,
@@ -109,6 +122,7 @@ data class TaskConfigModel(
 
 // ==================== VMS Event Statistics ====================
 
+@Immutable
 data class VmsCountOverviewModel(
     val label: String = "",
     val tag: String = "",
@@ -119,6 +133,7 @@ data class VmsCountOverviewModel(
     val eventType: String? = null
 )
 
+@Immutable
 data class VmsEventCountByTypeModel(
     @SerializedName("type", alternate = ["event_type", "eventType"])
     val type: String = "",
@@ -151,6 +166,7 @@ data class UserNotificationSettingsModel(
     }
 }
 
+@Immutable
 data class NotificationTokenRegisterModel(
     val token: String,
     val type: String = "firebase",
@@ -159,6 +175,7 @@ data class NotificationTokenRegisterModel(
     val clientId: String = "oneview-android"
 )
 
+@Immutable
 data class FirebaseConfigModel(
     @SerializedName("apiKey", alternate = ["api_key"])
     val apiKey: String? = null,
@@ -178,16 +195,19 @@ data class FirebaseConfigModel(
     val vapidKey: String? = null
 )
 
+@Immutable
 data class PublicConfigModel(
     val firebase: FirebaseConfigModel? = null
 )
 
 // ==================== Uniform Config & Labels ====================
 
+@Immutable
 data class UniformLabelUiConfig(
     val color: String? = null
 )
 
+@Immutable
 data class UniformLabelExtraConfig(
     val ui: UniformLabelUiConfig? = null,
     @SerializedName("gallery_images")

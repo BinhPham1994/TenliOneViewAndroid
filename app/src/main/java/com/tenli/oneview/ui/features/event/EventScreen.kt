@@ -77,9 +77,14 @@ fun EventScreen(
     val activeFilterChips = remember(
         uiState.selectedServiceId,
         uiState.selectedFilter,
+        uiState.customDateStartMs,
+        uiState.customDateEndMs,
+        uiState.customRangeFromMs,
+        uiState.customRangeToMs,
         uiState.selectedCameraUuid,
         uiState.selectedAiType,
         uiState.aiServices,
+        uiState.cameraList,
         uiState.cameraNameMap,
         isEn
     ) {
@@ -97,17 +102,34 @@ fun EventScreen(
                                 filter = uiState.selectedFilter,
                                 serviceId = null,
                                 aiType = uiState.selectedAiType,
-                                cameraUuid = uiState.selectedCameraUuid
+                                cameraUuid = uiState.selectedCameraUuid,
+                                customDateStartMs = uiState.customDateStartMs,
+                                customDateEndMs = uiState.customDateEndMs,
+                                customRangeFromMs = uiState.customRangeFromMs,
+                                customRangeToMs = uiState.customRangeToMs
                             )
                         }
                     )
                 )
             }
             if (uiState.selectedFilter != TimeFilter.TODAY) {
+                val timeToken = TimeFilter.cacheKeyToken(
+                    filter = uiState.selectedFilter,
+                    customDateStartMs = uiState.customDateStartMs,
+                    customDateEndMs = uiState.customDateEndMs,
+                    customRangeFromMs = uiState.customRangeFromMs,
+                    customRangeToMs = uiState.customRangeToMs
+                )
                 add(
                     ActiveFilterChipItem(
-                        key = "time_${uiState.selectedFilter.name}",
-                        label = TimeFilter.formatDisplayLabel(uiState.selectedFilter, isEn),
+                        key = "time_$timeToken",
+                        label = TimeFilter.formatDisplayLabel(
+                            filter = uiState.selectedFilter,
+                            isEn = isEn,
+                            customDateStartMs = uiState.customDateStartMs,
+                            customRangeFromMs = uiState.customRangeFromMs,
+                            customRangeToMs = uiState.customRangeToMs
+                        ),
                         onRemove = {
                             viewModel.applyFilters(
                                 filter = TimeFilter.TODAY,
@@ -132,7 +154,11 @@ fun EventScreen(
                                 filter = uiState.selectedFilter,
                                 serviceId = uiState.selectedServiceId,
                                 aiType = uiState.selectedAiType,
-                                cameraUuid = null
+                                cameraUuid = null,
+                                customDateStartMs = uiState.customDateStartMs,
+                                customDateEndMs = uiState.customDateEndMs,
+                                customRangeFromMs = uiState.customRangeFromMs,
+                                customRangeToMs = uiState.customRangeToMs
                             )
                         }
                     )
@@ -151,7 +177,11 @@ fun EventScreen(
                                 filter = uiState.selectedFilter,
                                 serviceId = uiState.selectedServiceId,
                                 aiType = null,
-                                cameraUuid = uiState.selectedCameraUuid
+                                cameraUuid = uiState.selectedCameraUuid,
+                                customDateStartMs = uiState.customDateStartMs,
+                                customDateEndMs = uiState.customDateEndMs,
+                                customRangeFromMs = uiState.customRangeFromMs,
+                                customRangeToMs = uiState.customRangeToMs
                             )
                         }
                     )
@@ -212,7 +242,17 @@ fun EventScreen(
                     icon = LucideIcons.ListFilter,
                     contentDescription = stringResource(id = R.string.filter_title),
                     hasActiveDot = uiState.hasActiveFilter,
-                    onClick = { showFilterSheet = true }
+                    onClick = {
+                        when (uiState.selectedFilter) {
+                            TimeFilter.CUSTOM_DATE -> TimeFilter.setCustomDate(uiState.customDateStartMs)
+                            TimeFilter.CUSTOM_RANGE -> TimeFilter.setCustomRange(
+                                uiState.customRangeFromMs,
+                                uiState.customRangeToMs
+                            )
+                            else -> Unit
+                        }
+                        showFilterSheet = true
+                    }
                 )
             }
         )
@@ -237,12 +277,11 @@ fun EventScreen(
             ) {
                 if (uiState.isLoading && uiState.events.isEmpty()) {
                     item(key = "state_loading", contentType = CONTENT_TYPE_STATE) {
-                        if (isTabActive) {
-                            EventCardSkeletonList(
-                                isListView = uiState.isListView,
-                                count = 5
-                            )
-                        }
+                        EventCardSkeletonList(
+                            isListView = uiState.isListView,
+                            count = 6,
+                            animate = isTabActive
+                        )
                     }
                 } else if (uiState.events.isEmpty()) {
                     item(key = "state_empty", contentType = CONTENT_TYPE_STATE) {

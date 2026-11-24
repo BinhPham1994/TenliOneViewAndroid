@@ -7,21 +7,20 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.Lifecycle
@@ -61,7 +60,22 @@ fun WaveDotsLoading(
     val orbitRadiusPx = remember(density, dotSize) {
         with(density) { (dotSize * CLUSTER_RADIUS_FACTOR).toPx() }
     }
+    val baseDotRadiusPx = remember(density, dotSize) {
+        with(density) { (dotSize / 2f).toPx() }
+    }
     val containerSize = remember(dotSize) { dotSize * CLUSTER_CONTAINER_FACTOR }
+    val dotOffsets = remember(orbitRadiusPx) {
+        Array(DOT_COUNT) { index ->
+            val angleRad = (-PI / 2.0) + index * (2.0 * PI / DOT_COUNT)
+            Offset(
+                x = (orbitRadiusPx * cos(angleRad)).toFloat(),
+                y = (orbitRadiusPx * sin(angleRad)).toFloat()
+            )
+        }
+    }
+    val resolvedColors = remember(dotColors, dotColor) {
+        Array(DOT_COUNT) { index -> dotColors.getOrElse(index) { dotColor } }
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     var isStarted by remember(lifecycleOwner) {
@@ -75,11 +89,11 @@ fun WaveDotsLoading(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val rotationDeg: Float
-    val phaseMs: Float
+    val rotationState: State<Float>?
+    val phaseState: State<Float>?
     if (isStarted) {
         val transition = rememberInfiniteTransition(label = "clusterDots")
-        val animRotation by transition.animateFloat(
+        rotationState = transition.animateFloat(
             initialValue = 0f,
             targetValue = 360f,
             animationSpec = infiniteRepeatable(
@@ -88,7 +102,7 @@ fun WaveDotsLoading(
             ),
             label = "clusterRotation"
         )
-        val animPhase by transition.animateFloat(
+        phaseState = transition.animateFloat(
             initialValue = 0f,
             targetValue = PULSE_CYCLE_DURATION_MS.toFloat(),
             animationSpec = infiniteRepeatable(
@@ -97,53 +111,35 @@ fun WaveDotsLoading(
             ),
             label = "clusterPulse"
         )
-        rotationDeg = animRotation
-        phaseMs = animPhase
     } else {
-        rotationDeg = 0f
-        phaseMs = 0f
+        rotationState = null
+        phaseState = null
     }
 
-    Box(
-        modifier = modifier
-            .size(containerSize)
-            .graphicsLayer {
-                rotationZ = rotationDeg
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        for (index in 0 until DOT_COUNT) {
-            val angleRad = remember(index) {
-                (-PI / 2.0) + index * (2.0 * PI / DOT_COUNT)
-            }
-            val offsetX = remember(orbitRadiusPx, angleRad) {
-                (orbitRadiusPx * cos(angleRad)).toFloat()
-            }
-            val offsetY = remember(orbitRadiusPx, angleRad) {
-                (orbitRadiusPx * sin(angleRad)).toFloat()
-            }
+    Canvas(modifier = modifier.size(containerSize)) {
+        val rotationDeg = rotationState?.value ?: 0f
+        val phaseMs = phaseState?.value ?: 0f
+        val cx = size.width / 2f
+        val cy = size.height / 2f
 
-            Box(
-                modifier = Modifier
-                    .size(dotSize)
-                    .graphicsLayer {
-                        val shifted = (phaseMs - index * delayUnit + PULSE_CYCLE_DURATION_MS * 4) % PULSE_CYCLE_DURATION_MS
-                        val rawFraction = if (shifted <= PULSE_HALF_CYCLE_MS) {
-                            shifted / PULSE_HALF_CYCLE_MS.toFloat()
-                        } else {
-                            (PULSE_CYCLE_DURATION_MS - shifted) / PULSE_HALF_CYCLE_MS.toFloat()
-                        }
-                        val eased = FastOutSlowInEasing.transform(rawFraction.coerceIn(0f, 1f))
-                        val scale = MIN_DOT_SCALE + (MAX_DOT_SCALE - MIN_DOT_SCALE) * eased
-                        translationX = offsetX
-                        translationY = offsetY
-                        scaleX = scale
-                        scaleY = scale
-                        shape = CircleShape
-                        clip = true
-                    }
-                    .background(dotColors.getOrElse(index) { dotColor })
-            )
+        rotate(degrees = rotationDeg) {
+            for (index in 0 until DOT_COUNT) {
+                val shifted = ((phaseMs - index * delayUnit) % PULSE_CYCLE_DURATION_MS + PULSE_CYCLE_DURATION_MS) %
+                    PULSE_CYCLE_DURATION_MS
+                val rawFraction = if (shifted <= PULSE_HALF_CYCLE_MS) {
+                    shifted / PULSE_HALF_CYCLE_MS.toFloat()
+                } else {
+                    (PULSE_CYCLE_DURATION_MS - shifted) / PULSE_HALF_CYCLE_MS.toFloat()
+                }
+                val eased = FastOutSlowInEasing.transform(rawFraction.coerceIn(0f, 1f))
+                val scale = MIN_DOT_SCALE + (MAX_DOT_SCALE - MIN_DOT_SCALE) * eased
+                val offset = dotOffsets[index]
+                drawCircle(
+                    color = resolvedColors[index],
+                    radius = baseDotRadiusPx * scale,
+                    center = Offset(cx + offset.x, cy + offset.y)
+                )
+            }
         }
     }
 }

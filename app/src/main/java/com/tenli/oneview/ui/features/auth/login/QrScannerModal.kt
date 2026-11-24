@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Size as AndroidSize
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
@@ -32,7 +33,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,6 +75,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -96,7 +97,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.DecodeHintType
@@ -113,6 +116,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 private const val INVALID_QR_COOLDOWN_MS = 2800L
+private const val AUTO_FOCUS_INTERVAL_MS = 6_500L
+private const val MIN_ANALYZE_INTERVAL_MS = 150L
 
 @Composable
 fun QrScannerModal(
@@ -212,7 +217,9 @@ private fun CameraQrPreview(
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val isDisposed = remember { booleanArrayOf(false) }
     val cameraProviderHolder = remember { arrayOfNulls<ProcessCameraProvider>(1) }
+    val previewHolder = remember { arrayOfNulls<Preview>(1) }
     val imageAnalysisHolder = remember { arrayOfNulls<ImageAnalysis>(1) }
+    val lastManualFocusTimestampMs = remember { longArrayOf(0L) }
     var cameraRef by remember { mutableStateOf<Camera?>(null) }
     var isTorchOn by remember { mutableStateOf(false) }
     var currentZoomRatio by remember { mutableFloatStateOf(1.5f) }
@@ -226,8 +233,17 @@ private fun CameraQrPreview(
                     cameraRef?.cameraControl?.enableTorch(false)
                 }
             }
-            runCatching { imageAnalysisHolder[0]?.clearAnalyzer() }
-            runCatching { cameraProviderHolder[0]?.unbindAll() }
+            val provider = cameraProviderHolder[0]
+            val boundPreview = previewHolder[0]
+            val boundAnalysis = imageAnalysisHolder[0]
+            runCatching { boundAnalysis?.clearAnalyzer() }
+            runCatching {
+                val useCases = listOfNotNull(boundPreview, boundAnalysis)
+                if (provider != null && useCases.isNotEmpty()) {
+                    provider.unbind(*useCases.toTypedArray())
+                }
+            }
+            previewHolder[0] = null
             imageAnalysisHolder[0] = null
             cameraProviderHolder[0] = null
             cameraRef = null
@@ -235,25 +251,32 @@ private fun CameraQrPreview(
         }
     }
 
-    // Tự động lấy nét & đo sáng (AF + AE) vào đúng tâm khung quét định kỳ
+    // Tự động lấy nét & đo sáng (AF + AE) vào đúng tâm khung quét định kỳ (chỉ khi RESUMED)
     // để chống cháy sáng (overexposure) khi quét mã QR nền trắng trên màn hình PC nền tối.
-    LaunchedEffect(cameraRef) {
+    LaunchedEffect(cameraRef, lifecycleOwner) {
         val cam = cameraRef ?: return@LaunchedEffect
         val factory = SurfaceOrientedMeteringPointFactory(1f, 1f)
-        while (true) {
-            try {
-                val centerPoint = factory.createPoint(0.5f, 0.5f, 0.16f)
-                val action = FocusMeteringAction.Builder(
-                    centerPoint,
-                    FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
-                )
-                    .setAutoCancelDuration(3, TimeUnit.SECONDS)
-                    .build()
-                cam.cameraControl.startFocusAndMetering(action)
-            } catch (_: Exception) {
-                // Ignore if camera is closing
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val elapsedSinceManual = SystemClock.elapsedRealtime() - lastManualFocusTimestampMs[0]
+                if (lastManualFocusTimestampMs[0] == 0L || elapsedSinceManual >= AUTO_FOCUS_INTERVAL_MS) {
+                    try {
+                        val centerPoint = factory.createPoint(0.5f, 0.5f, 0.16f)
+                        val action = FocusMeteringAction.Builder(
+                            centerPoint,
+                            FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE
+                        )
+                            .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                            .build()
+                        cam.cameraControl.startFocusAndMetering(action)
+                    } catch (_: Exception) {
+                        // Ignore if camera is closing
+                    }
+                    delay(AUTO_FOCUS_INTERVAL_MS)
+                } else {
+                    delay((AUTO_FOCUS_INTERVAL_MS - elapsedSinceManual).coerceAtLeast(250L))
+                }
             }
-            delay(3500L)
         }
     }
 
@@ -302,6 +325,7 @@ private fun CameraQrPreview(
                                 )
                                     .setAutoCancelDuration(3, TimeUnit.SECONDS)
                                     .build()
+                                lastManualFocusTimestampMs[0] = SystemClock.elapsedRealtime()
                                 cam.cameraControl.startFocusAndMetering(action)
                             } catch (_: Exception) {
                                 // Ignore metering error
@@ -313,21 +337,19 @@ private fun CameraQrPreview(
 
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
+                    if (isDisposed[0]) return@addListener
                     val cameraProvider = runCatching { cameraProviderFuture.get() }.getOrNull() ?: return@addListener
-                    if (isDisposed[0]) {
-                        runCatching { cameraProvider.unbindAll() }
-                        return@addListener
-                    }
+                    if (isDisposed[0]) return@addListener
                     cameraProviderHolder[0] = cameraProvider
 
-                    // Tăng độ phân giải phân tích lên Full HD (1920x1080) thay vì mặc định 640x480
-                    // để đọc rõ các mã QR mật độ cao (Version 7-9, ~49x49 modules) trên màn hình PC.
+                    // Giới hạn tối đa Full HD (1920x1080) với FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                    // để không bao giờ chọn 4K gây tốn CPU/RAM nhưng vẫn đọc rõ mã QR mật độ cao trên màn hình PC.
                     val resolutionSelector = ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
                         .setResolutionStrategy(
                             ResolutionStrategy(
                                 AndroidSize(1920, 1080),
-                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
                             )
                         )
                         .build()
@@ -336,6 +358,7 @@ private fun CameraQrPreview(
                         .setResolutionSelector(resolutionSelector)
                         .build()
                         .also {
+                            previewHolder[0] = it
                             it.surfaceProvider = previewView.surfaceProvider
                         }
 
@@ -589,7 +612,7 @@ private fun CameraQrPreview(
 @Composable
 private fun ScannerViewfinderOverlay() {
     val infiniteTransition = rememberInfiniteTransition(label = "QrScanLine")
-    val scanProgress by infiniteTransition.animateFloat(
+    val scanProgress = infiniteTransition.animateFloat(
         initialValue = 0.08f,
         targetValue = 0.92f,
         animationSpec = infiniteRepeatable(
@@ -599,95 +622,110 @@ private fun ScannerViewfinderOverlay() {
         label = "ScanLineOffset"
     )
 
-    Canvas(modifier = Modifier.fillMaxSize()) {
-        val cutoutSize = size.minDimension * 0.66f
-        val left = (size.width - cutoutSize) / 2f
-        val top = (size.height - cutoutSize) / 2f - 28.dp.toPx()
-        val right = left + cutoutSize
-        val bottom = top + cutoutSize
-        val cornerRadius = 22.dp.toPx()
+    Spacer(
+        modifier = Modifier
+            .fillMaxSize()
+            .drawWithCache {
+                val cutoutSize = size.minDimension * 0.66f
+                val left = (size.width - cutoutSize) / 2f
+                val top = (size.height - cutoutSize) / 2f - 28.dp.toPx()
+                val right = left + cutoutSize
+                val bottom = top + cutoutSize
+                val cornerRadius = 22.dp.toPx()
+                val cornerRadiusObj = CornerRadius(cornerRadius, cornerRadius)
+                val cutoutTopLeft = Offset(left, top)
+                val cutoutRectSize = Size(cutoutSize, cutoutSize)
+                val dimColor = Color.Black.copy(alpha = 0.62f)
+                val borderColor = Color.White.copy(alpha = 0.22f)
+                val borderStroke = Stroke(width = 1.5.dp.toPx())
 
-        // Dim background outside cutout
-        val dimPath = Path().apply {
-            fillType = PathFillType.EvenOdd
-            addRect(Rect(0f, 0f, size.width, size.height))
-            addRoundRect(
-                RoundRect(
-                    rect = Rect(left, top, right, bottom),
-                    cornerRadius = CornerRadius(cornerRadius, cornerRadius)
+                // Dim background outside cutout
+                val dimPath = Path().apply {
+                    fillType = PathFillType.EvenOdd
+                    addRect(Rect(0f, 0f, size.width, size.height))
+                    addRoundRect(
+                        RoundRect(
+                            rect = Rect(left, top, right, bottom),
+                            cornerRadius = cornerRadiusObj
+                        )
+                    )
+                }
+
+                // Corner brackets
+                val bracketLen = 30.dp.toPx()
+                val cornersStroke = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                val accentColor = Color(0xFF38BDF8)
+
+                val cornersPath = Path().apply {
+                    // Top-left
+                    moveTo(left, top + bracketLen)
+                    lineTo(left, top + cornerRadius)
+                    quadraticTo(left, top, left + cornerRadius, top)
+                    lineTo(left + bracketLen, top)
+
+                    // Top-right
+                    moveTo(right - bracketLen, top)
+                    lineTo(right - cornerRadius, top)
+                    quadraticTo(right, top, right, top + cornerRadius)
+                    lineTo(right, top + bracketLen)
+
+                    // Bottom-right
+                    moveTo(right, bottom - bracketLen)
+                    lineTo(right, bottom - cornerRadius)
+                    quadraticTo(right, bottom, right - cornerRadius, bottom)
+                    lineTo(right - bracketLen, bottom)
+
+                    // Bottom-left
+                    moveTo(left + bracketLen, bottom)
+                    lineTo(left + cornerRadius, bottom)
+                    quadraticTo(left, bottom, left, bottom - cornerRadius)
+                    lineTo(left, bottom - bracketLen)
+                }
+
+                val laserInset = 12.dp.toPx()
+                val laserStartX = left + laserInset
+                val laserEndX = right - laserInset
+                val laserStrokeWidth = 2.5.dp.toPx()
+                val laserBrush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.Transparent,
+                        accentColor.copy(alpha = 0.95f),
+                        Color.Transparent
+                    ),
+                    startX = laserStartX,
+                    endX = laserEndX
                 )
-            )
-        }
-        drawPath(
-            path = dimPath,
-            color = Color.Black.copy(alpha = 0.62f),
-            blendMode = BlendMode.SrcOver
-        )
 
-        // Subtle border around cutout
-        drawRoundRect(
-            color = Color.White.copy(alpha = 0.22f),
-            topLeft = Offset(left, top),
-            size = Size(cutoutSize, cutoutSize),
-            cornerRadius = CornerRadius(cornerRadius, cornerRadius),
-            style = Stroke(width = 1.5.dp.toPx())
-        )
+                onDrawBehind {
+                    drawPath(
+                        path = dimPath,
+                        color = dimColor,
+                        blendMode = BlendMode.SrcOver
+                    )
+                    drawRoundRect(
+                        color = borderColor,
+                        topLeft = cutoutTopLeft,
+                        size = cutoutRectSize,
+                        cornerRadius = cornerRadiusObj,
+                        style = borderStroke
+                    )
+                    drawPath(
+                        path = cornersPath,
+                        color = accentColor,
+                        style = cornersStroke
+                    )
 
-        // Corner brackets
-        val bracketLen = 30.dp.toPx()
-        val strokeWidth = 4.dp.toPx()
-        val accentColor = Color(0xFF38BDF8)
-
-        val cornersPath = Path().apply {
-            // Top-left
-            moveTo(left, top + bracketLen)
-            lineTo(left, top + cornerRadius)
-            quadraticTo(left, top, left + cornerRadius, top)
-            lineTo(left + bracketLen, top)
-
-            // Top-right
-            moveTo(right - bracketLen, top)
-            lineTo(right - cornerRadius, top)
-            quadraticTo(right, top, right, top + cornerRadius)
-            lineTo(right, top + bracketLen)
-
-            // Bottom-right
-            moveTo(right, bottom - bracketLen)
-            lineTo(right, bottom - cornerRadius)
-            quadraticTo(right, bottom, right - cornerRadius, bottom)
-            lineTo(right - bracketLen, bottom)
-
-            // Bottom-left
-            moveTo(left + bracketLen, bottom)
-            lineTo(left + cornerRadius, bottom)
-            quadraticTo(left, bottom, left, bottom - cornerRadius)
-            lineTo(left, bottom - bracketLen)
-        }
-
-        drawPath(
-            path = cornersPath,
-            color = accentColor,
-            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-        )
-
-        // Animated laser line
-        val lineY = top + cutoutSize * scanProgress
-        drawLine(
-            brush = Brush.horizontalGradient(
-                colors = listOf(
-                    Color.Transparent,
-                    accentColor.copy(alpha = 0.95f),
-                    Color.Transparent
-                ),
-                startX = left + 12.dp.toPx(),
-                endX = right - 12.dp.toPx()
-            ),
-            start = Offset(left + 12.dp.toPx(), lineY),
-            end = Offset(right - 12.dp.toPx(), lineY),
-            strokeWidth = 2.5.dp.toPx(),
-            cap = StrokeCap.Round
-        )
-    }
+                    val lineY = top + cutoutSize * scanProgress.value
+                    drawLine(
+                        brush = laserBrush,
+                        start = Offset(laserStartX, lineY),
+                        end = Offset(laserEndX, lineY),
+                        strokeWidth = laserStrokeWidth,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+    )
 }
 
 @Composable
@@ -782,9 +820,17 @@ private class ZxingQrCodeAnalyzer(
     private var luminanceBuffer = ByteArray(0)
     private var rowScratchBuffer = ByteArray(0)
     private var rotatedSquareBuffer = ByteArray(0)
+    private var lastAnalyzeTimestampMs = 0L
+    private var secondaryPassIndex = 0
 
     override fun analyze(image: ImageProxy) {
         try {
+            val nowMs = SystemClock.elapsedRealtime()
+            if (nowMs - lastAnalyzeTimestampMs < MIN_ANALYZE_INTERVAL_MS) {
+                return
+            }
+            lastAnalyzeTimestampMs = nowMs
+
             val plane = image.planes.firstOrNull() ?: return
             val width = image.width
             val height = image.height
@@ -812,56 +858,55 @@ private class ZxingQrCodeAnalyzer(
 
             var rawText = decodeSource(tightSource)
 
-            // 2. Xoay 90 độ vùng tâm khung quét:
-            //    Cảm biến camera điện thoại nằm ngang (xoay 90 độ so với màn hình dọc), trong khi
-            //    FinderPatternFinder của ZXing quét ưu tiên theo hàng ngang trước. Xoay 90 độ giúp
-            //    ZXing quét vuông góc với các vạch quét (scanlines) của màn hình PC.
+            // 2. Luân phiên 1 pass phụ (xoay 90° / vùng rộng 84% / toàn khung) qua từng khung hình
+            //    thay vì chạy cả 4 pass trên mọi frame → giảm ~70% tải CPU/nhiệt mà vẫn phủ đủ mọi góc quét.
             if (rawText.isNullOrBlank()) {
-                val rotatedBytes = rotateSquare90(yBytes, width, tightLeft, tightTop, tightSize)
-                val rotatedSource = PlanarYUVLuminanceSource(
-                    rotatedBytes,
-                    tightSize,
-                    tightSize,
-                    0,
-                    0,
-                    tightSize,
-                    tightSize,
-                    false
-                )
-                rawText = decodeSource(rotatedSource)
-            }
-
-            // 3. Mở rộng vùng quét trung tâm (84%) phòng trường hợp người dùng để lệch nhẹ hoặc gần hơn
-            if (rawText.isNullOrBlank()) {
-                val wideSize = (minDim * 0.84f).toInt().coerceAtLeast(tightSize)
-                val wideLeft = (width - wideSize) / 2
-                val wideTop = (height - wideSize) / 2
-                val wideSource = PlanarYUVLuminanceSource(
-                    yBytes,
-                    width,
-                    height,
-                    wideLeft,
-                    wideTop,
-                    wideSize,
-                    wideSize,
-                    false
-                )
-                rawText = decodeSource(wideSource)
-            }
-
-            // 4. Fallback toàn khung hình
-            if (rawText.isNullOrBlank()) {
-                val fullSource = PlanarYUVLuminanceSource(
-                    yBytes,
-                    width,
-                    height,
-                    0,
-                    0,
-                    width,
-                    height,
-                    false
-                )
-                rawText = decodeSource(fullSource)
+                when (secondaryPassIndex) {
+                    0 -> {
+                        val rotatedBytes = rotateSquare90(yBytes, width, tightLeft, tightTop, tightSize)
+                        val rotatedSource = PlanarYUVLuminanceSource(
+                            rotatedBytes,
+                            tightSize,
+                            tightSize,
+                            0,
+                            0,
+                            tightSize,
+                            tightSize,
+                            false
+                        )
+                        rawText = decodeSource(rotatedSource)
+                    }
+                    1 -> {
+                        val wideSize = (minDim * 0.84f).toInt().coerceAtLeast(tightSize)
+                        val wideLeft = (width - wideSize) / 2
+                        val wideTop = (height - wideSize) / 2
+                        val wideSource = PlanarYUVLuminanceSource(
+                            yBytes,
+                            width,
+                            height,
+                            wideLeft,
+                            wideTop,
+                            wideSize,
+                            wideSize,
+                            false
+                        )
+                        rawText = decodeSource(wideSource)
+                    }
+                    else -> {
+                        val fullSource = PlanarYUVLuminanceSource(
+                            yBytes,
+                            width,
+                            height,
+                            0,
+                            0,
+                            width,
+                            height,
+                            false
+                        )
+                        rawText = decodeSource(fullSource)
+                    }
+                }
+                secondaryPassIndex = (secondaryPassIndex + 1) % 3
             }
 
             if (!rawText.isNullOrBlank()) {

@@ -23,16 +23,30 @@ import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * Tiện ích tải trực tiếp Ảnh/Video sự kiện vào Thư viện thiết bị (MediaStore)
  * và chia sẻ Ảnh sự kiện thực tế (kèm khung nhận diện AI) qua FileProvider.
  */
 object MediaActionHelper {
+
+    private data class LoadedBitmap(
+        val bitmap: Bitmap,
+        val isFreshCopy: Boolean
+    )
 
     private const val GALLERY_SUBFOLDER = "TenliOneView"
     private const val SHARE_CACHE_DIR = "shared_media"
@@ -58,6 +72,28 @@ object MediaActionHelper {
             .build()
     }
 
+    private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation {
+            runCatching { cancel() }
+        }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isCancelled) return
+                cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (cont.isCancelled) {
+                    runCatching { response.close() }
+                    return
+                }
+                cont.resume(response) { _, value, _ ->
+                    runCatching { value.close() }
+                }
+            }
+        })
+    }
+
     /**
      * Tải ảnh sự kiện (có vẽ sẵn bounding box AI nếu có) trực tiếp vào Album Ảnh của điện thoại.
      */
@@ -70,12 +106,22 @@ object MediaActionHelper {
     ) {
         val appContext = context.applicationContext
         val saved = withContext(Dispatchers.IO) {
-            runCatching {
-                val bitmap = loadAnnotatedBitmap(appContext, imageUrl, boxes)
-                    ?: error("Empty bitmap")
-                val fileName = "Tenli_Event_${eventId}_${System.currentTimeMillis()}.jpg"
-                saveBitmapToGallery(appContext, bitmap, fileName)
-            }.getOrDefault(false)
+            try {
+                val loaded = loadAnnotatedBitmap(appContext, imageUrl, boxes)
+                    ?: return@withContext false
+                try {
+                    val fileName = "Tenli_Event_${eventId}_${System.currentTimeMillis()}.jpg"
+                    saveBitmapToGallery(appContext, loaded.bitmap, fileName)
+                } finally {
+                    if (loaded.isFreshCopy && !loaded.bitmap.isRecycled) {
+                        loaded.bitmap.recycle()
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                false
+            }
         }
         if (saved) {
             MobileTopPopupManager.success(
@@ -102,9 +148,11 @@ object MediaActionHelper {
             if (isEn) "Downloading event video..." else "Đang tải video sự kiện..."
         )
         val saved = withContext(Dispatchers.IO) {
-            runCatching {
-                val req = Request.Builder().url(videoUrl).get().build()
-                mediaDownloadClient.newCall(req).execute().use { response ->
+            val callerJob = currentCoroutineContext()[Job]
+            val req = Request.Builder().url(videoUrl).get().build()
+            val call = mediaDownloadClient.newCall(req)
+            try {
+                call.awaitResponse().use { response ->
                     if (!response.isSuccessful) {
                         error("HTTP ${response.code}")
                     }
@@ -112,11 +160,28 @@ object MediaActionHelper {
                     val fileName = "Tenli_Video_${eventId}_${System.currentTimeMillis()}.mp4"
                     saveStreamToGalleryVideo(appContext, fileName) { out ->
                         body.byteStream().use { input ->
-                            input.copyTo(out, bufferSize = 32 * 1024)
+                            val buffer = ByteArray(32 * 1024)
+                            while (true) {
+                                if (callerJob?.isActive == false) {
+                                    runCatching { call.cancel() }
+                                    throw CancellationException("Video download cancelled")
+                                }
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                out.write(buffer, 0, read)
+                            }
                         }
                     }
                 }
-            }.getOrDefault(false)
+            } catch (e: CancellationException) {
+                runCatching { call.cancel() }
+                throw e
+            } catch (_: Throwable) {
+                if (callerJob?.isActive == false) {
+                    throw CancellationException("Video download cancelled")
+                }
+                false
+            }
         }
         if (saved) {
             MobileTopPopupManager.success(
@@ -144,27 +209,37 @@ object MediaActionHelper {
     ) {
         val shareUri = if (!imageUrl.isNullOrBlank()) {
             withContext(Dispatchers.IO) {
-                runCatching {
-                    val bitmap = loadAnnotatedBitmap(context.applicationContext, imageUrl, boxes)
-                        ?: return@runCatching null
-                    val shareDir = File(context.cacheDir, SHARE_CACHE_DIR).apply { mkdirs() }
-                    val now = System.currentTimeMillis()
-                    shareDir.listFiles()?.forEach { f ->
-                        if (now - f.lastModified() > STALE_SHARE_FILE_MAX_AGE_MS) {
-                            runCatching { f.delete() }
+                try {
+                    val loaded = loadAnnotatedBitmap(context.applicationContext, imageUrl, boxes)
+                        ?: return@withContext null
+                    try {
+                        val shareDir = File(context.cacheDir, SHARE_CACHE_DIR).apply { mkdirs() }
+                        val now = System.currentTimeMillis()
+                        shareDir.listFiles()?.forEach { f ->
+                            if (now - f.lastModified() > STALE_SHARE_FILE_MAX_AGE_MS) {
+                                runCatching { f.delete() }
+                            }
+                        }
+                        val outFile = File(shareDir, "tenli_event_${eventId}_$now.jpg")
+                        FileOutputStream(outFile).use { out ->
+                            loaded.bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                            out.flush()
+                        }
+                        FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.provider",
+                            outFile
+                        )
+                    } finally {
+                        if (loaded.isFreshCopy && !loaded.bitmap.isRecycled) {
+                            loaded.bitmap.recycle()
                         }
                     }
-                    val outFile = File(shareDir, "tenli_event_${eventId}_$now.jpg")
-                    FileOutputStream(outFile).use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                        out.flush()
-                    }
-                    FileProvider.getUriForFile(
-                        context,
-                        "${context.packageName}.provider",
-                        outFile
-                    )
-                }.getOrNull()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
             }
         } else {
             null
@@ -199,7 +274,7 @@ object MediaActionHelper {
         context: Context,
         imageUrl: String,
         boxes: List<List<Float>>
-    ): Bitmap? {
+    ): LoadedBitmap? {
         val request = ImageRequest.Builder(context)
             .data(MonitorCacheManager.coilDataModel(imageUrl))
             .size(MAX_BITMAP_DIMENSION_PX, MAX_BITMAP_DIMENSION_PX)
@@ -219,33 +294,41 @@ object MediaActionHelper {
 
         val validBoxes = boxes.filter { it.size == 4 }
         if (validBoxes.isEmpty() && rawBitmap.config == Bitmap.Config.ARGB_8888) {
-            return rawBitmap
+            return LoadedBitmap(rawBitmap, isFreshCopy = false)
         }
 
-        val mutable = rawBitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return rawBitmap
-        if (validBoxes.isNotEmpty()) {
-            val canvas = Canvas(mutable)
-            val w = mutable.width.toFloat()
-            val h = mutable.height.toFloat()
-            val strokePx = (maxOf(w, h) * 0.0038f).coerceIn(3f, 12f)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE
-                strokeWidth = strokePx
-            }
-            val rect = RectF()
-            validBoxes.forEachIndexed { index, boxArr ->
-                val minX = (boxArr[0].coerceIn(0f, 1f)) * w
-                val minY = (boxArr[1].coerceIn(0f, 1f)) * h
-                val maxX = (boxArr[2].coerceIn(0f, 1f)) * w
-                val maxY = (boxArr[3].coerceIn(0f, 1f)) * h
-                if (maxX > minX && maxY > minY) {
-                    paint.color = BOUNDING_BOX_COLORS[index % BOUNDING_BOX_COLORS.size]
-                    rect.set(minX, minY, maxX, maxY)
-                    canvas.drawRect(rect, paint)
+        val mutable = rawBitmap.copy(Bitmap.Config.ARGB_8888, true)
+            ?: return LoadedBitmap(rawBitmap, isFreshCopy = false)
+        try {
+            if (validBoxes.isNotEmpty()) {
+                val canvas = Canvas(mutable)
+                val w = mutable.width.toFloat()
+                val h = mutable.height.toFloat()
+                val strokePx = (maxOf(w, h) * 0.0038f).coerceIn(3f, 12f)
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = strokePx
+                }
+                val rect = RectF()
+                validBoxes.forEachIndexed { index, boxArr ->
+                    val minX = (boxArr[0].coerceIn(0f, 1f)) * w
+                    val minY = (boxArr[1].coerceIn(0f, 1f)) * h
+                    val maxX = (boxArr[2].coerceIn(0f, 1f)) * w
+                    val maxY = (boxArr[3].coerceIn(0f, 1f)) * h
+                    if (maxX > minX && maxY > minY) {
+                        paint.color = BOUNDING_BOX_COLORS[index % BOUNDING_BOX_COLORS.size]
+                        rect.set(minX, minY, maxX, maxY)
+                        canvas.drawRect(rect, paint)
+                    }
                 }
             }
+            return LoadedBitmap(mutable, isFreshCopy = true)
+        } catch (t: Throwable) {
+            if (!mutable.isRecycled) {
+                mutable.recycle()
+            }
+            throw t
         }
-        return mutable
     }
 
     private fun saveBitmapToGallery(

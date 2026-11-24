@@ -20,7 +20,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,12 +29,10 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -92,7 +89,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -140,9 +139,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserPermissionManager
@@ -153,6 +154,7 @@ import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.ui.component.ActiveFilterChipItem
 import com.tenli.oneview.ui.component.ActiveFilterChipsRow
 import com.tenli.oneview.ui.component.CameraGridSkeleton
+import com.tenli.oneview.ui.component.CardPressIndication
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.EventCardSkeletonList
 import com.tenli.oneview.ui.component.IconBadge
@@ -185,10 +187,12 @@ import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.TrackTopItemSizesEffect
 import com.tenli.oneview.ui.utils.createTopItemSizeCache
 import com.tenli.oneview.ui.utils.smoothScrollToTop
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 private const val LIVE_STAGE_ASPECT_RATIO = 16f / 9f
 private const val SNAPSHOT_CARD_WIDTH_PX = 420
@@ -214,6 +218,7 @@ private val GroupFilterEmptyHeight = 160.dp
 private val GroupRowBaseHeight = 38.dp
 
 private class CacheKeyHolder(var key: String? = null)
+private val cameraFitRatioCache = ConcurrentHashMap<Int, Boolean>()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -254,10 +259,20 @@ fun MonitorScreen(
     val onCardSnapshotError: (CameraModel) -> Unit = remember(viewModel) {
         { cam -> viewModel.onCardSnapshotError(cam) }
     }
-    val onCardClick: (CameraModel) -> Unit = remember(viewModel, dismissKeyboard) {
+    val onCardClick: (CameraModel) -> Unit = remember(viewModel, dismissKeyboard, view, uiScope) {
         { cam ->
+            val keyboardWasOpen = ViewCompat.getRootWindowInsets(view)
+                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
             dismissKeyboard()
-            viewModel.openLiveCamera(cam)
+            if (keyboardWasOpen) {
+                // Nếu bàn phím đang mở: ưu tiên đóng bàn phím xong hoàn toàn (~240ms) rồi mới trượt mở màn hình Live
+                uiScope.launch {
+                    delay(240L)
+                    viewModel.openLiveCamera(cam)
+                }
+            } else {
+                viewModel.openLiveCamera(cam)
+            }
         }
     }
     val onToggleFavorite: (CameraModel) -> Unit = remember(viewModel) {
@@ -317,31 +332,6 @@ fun MonitorScreen(
         }
     }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val currentIsTabActive by rememberUpdatedState(isTabActive)
-    DisposableEffect(lifecycleOwner) {
-        var wasStopped = false
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                viewModel.setMonitorTabActive(currentIsTabActive)
-                if (wasStopped) {
-                    wasStopped = false
-                    if (currentIsTabActive) {
-                        viewModel.refreshActiveStreams()
-                        viewModel.loadVisibleCameraSnapshots()
-                    }
-                }
-            } else if (event == Lifecycle.Event.ON_STOP) {
-                wasStopped = true
-                viewModel.setMonitorTabActive(false)
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
     // Derived data precomputed on background/ViewModel layer
     val hasAvailableCameras = uiState.hasAvailableCameras
     val totalFilteredCamerasCount = uiState.totalFilteredCamerasCount
@@ -377,13 +367,22 @@ fun MonitorScreen(
             }
     }
 
-    // Scroll camera grid to top on filter / search / quickFilter change
+    // Scroll camera grid to top on filter / search / quickFilter change (skip initial emission to preserve restored scroll position)
+    var lastScrolledFilterKey by remember {
+        mutableStateOf(
+            Triple(uiState.selectedFilterNodeKey, uiState.searchQuery, uiState.quickFilter)
+        )
+    }
     LaunchedEffect(
         uiState.selectedFilterNodeKey,
         uiState.searchQuery,
         uiState.quickFilter
     ) {
-        cameraGridState.scrollToItem(0)
+        val nextKey = Triple(uiState.selectedFilterNodeKey, uiState.searchQuery, uiState.quickFilter)
+        if (nextKey != lastScrolledFilterKey) {
+            lastScrolledFilterKey = nextKey
+            cameraGridState.scrollToItem(0)
+        }
     }
 
     val bottomClearance = spacing.bottomNavHeight + spacing.space20
@@ -456,9 +455,10 @@ fun MonitorScreen(
                         .weight(1f)
                         .padding(bottom = bottomClearance)
                 ) {
-                    if (isTabActive && !isLiveScreenOpen) {
-                        CameraGridSkeleton(rowCount = 3)
-                    }
+                    CameraGridSkeleton(
+                        rowCount = 3,
+                        animate = isTabActive && !isLiveScreenOpen
+                    )
                 }
             } else if (!hasAvailableCameras) {
                 Box(
@@ -474,6 +474,20 @@ fun MonitorScreen(
                 // Camera Panel (.mobile-camera-panel) chiếm toàn bộ chiều cao màn hình
                 val controlBg = colors.surface
                 val placeholderColor = colors.textPlaceholder
+                val searchBarShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
+                val searchKeyboardOptions = remember { KeyboardOptions(imeAction = ImeAction.Search) }
+                val searchKeyboardActions = remember(dismissKeyboard) {
+                    KeyboardActions(
+                        onSearch = { dismissKeyboard() },
+                        onDone = { dismissKeyboard() }
+                    )
+                }
+                val bodySmallStyle = MaterialTheme.typography.bodySmall
+                val searchTextStyle = remember(bodySmallStyle, colors.textStrong) {
+                    bodySmallStyle.copy(color = colors.textStrong)
+                }
+                val searchCursorBrush = remember(colors.accent) { SolidColor(colors.accent) }
+                val searchClearBgColor = remember(colors.textMuted) { colors.textMuted.copy(alpha = 0.2f) }
 
                 Column(
                     modifier = Modifier
@@ -482,7 +496,7 @@ fun MonitorScreen(
                 ) {
                     // .camera-filter-header: Bên trái hiển thị đường dẫn nhóm ("Tất cả camera" hoặc "Nhóm - VMS"),
                     // bên phải là nút icon tìm kiếm thu gọn; khi bấm vào sẽ trượt rộng ra toàn chiều ngang.
-                    BoxWithConstraints(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(
@@ -493,7 +507,7 @@ fun MonitorScreen(
                             )
                             .height(spacing.buttonHeightSmall)
                     ) {
-                        val expandProgress by animateFloatAsState(
+                        val expandProgressState = animateFloatAsState(
                             targetValue = if (isSearchExpanded) 1f else 0f,
                             animationSpec = tween(
                                 durationMillis = 280,
@@ -501,16 +515,17 @@ fun MonitorScreen(
                             ),
                             label = "cameraSearchExpandProgress"
                         )
+                        val showPathRow by remember(expandProgressState) {
+                            derivedStateOf { expandProgressState.value < 0.535f }
+                        }
+                        val showSearchInput by remember(expandProgressState) {
+                            derivedStateOf { expandProgressState.value > 0.08f }
+                        }
                         val collapsedWidth = spacing.buttonHeightSmall
-                        val currentSearchWidth =
-                            collapsedWidth + (maxWidth - collapsedWidth) * expandProgress
-                        val pathAlpha = (1f - expandProgress * 1.85f).coerceIn(0f, 1f)
-                        val searchContentAlpha =
-                            ((expandProgress - 0.15f) / 0.85f).coerceIn(0f, 1f)
                         val searchHorizontalPad =
                             (spacing.buttonHeightSmall - spacing.iconSmall) / 2
 
-                        if (pathAlpha > 0.01f) {
+                        if (showPathRow) {
                             val isAllCameras =
                                 uiState.selectedFilterNodeKey == MonitorViewModel.FILTER_ALL ||
                                     (uiState.selectedFilterGroupName.isBlank() && uiState.selectedFilterVmsName.isBlank())
@@ -530,8 +545,9 @@ fun MonitorScreen(
                                         end = collapsedWidth + spacing.space8
                                     )
                                     .graphicsLayer {
-                                        alpha = pathAlpha
-                                        translationX = -expandProgress * 16.dp.toPx()
+                                        val progress = expandProgressState.value
+                                        alpha = (1f - progress * 1.85f).coerceIn(0f, 1f)
+                                        translationX = -progress * 16.dp.toPx()
                                     },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -545,7 +561,7 @@ fun MonitorScreen(
                                 Text(
                                     text = basePathText,
                                     color = colors.textMuted,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = bodySmallStyle,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -555,7 +571,7 @@ fun MonitorScreen(
                                 Text(
                                     text = "(${totalFilteredCamerasCount})",
                                     color = colors.textMuted,
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = bodySmallStyle,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1
                                 )
@@ -565,10 +581,27 @@ fun MonitorScreen(
                         Row(
                             modifier = Modifier
                                 .align(Alignment.CenterEnd)
-                                .width(currentSearchWidth)
+                                .layout { measurable, constraints ->
+                                    val collapsedPx = collapsedWidth.roundToPx()
+                                    val maxW = constraints.maxWidth
+                                    val targetW = (collapsedPx + (maxW - collapsedPx) * expandProgressState.value)
+                                        .toInt()
+                                        .coerceIn(collapsedPx.coerceAtMost(maxW), maxW)
+                                    val placeable = measurable.measure(
+                                        constraints.copy(minWidth = targetW, maxWidth = targetW)
+                                    )
+                                    layout(placeable.width, placeable.height) {
+                                        placeable.placeRelative(0, 0)
+                                    }
+                                }
                                 .fillMaxHeight()
-                                .clip(RoundedCornerShape(spacing.radiusSmall))
-                                .background(controlBg.copy(alpha = expandProgress))
+                                .clip(searchBarShape)
+                                .drawBehind {
+                                    val a = expandProgressState.value
+                                    if (a > 0.001f) {
+                                        drawRect(color = controlBg, alpha = a)
+                                    }
+                                }
                                 .then(
                                     if (!isSearchExpanded) {
                                         Modifier.clickable {
@@ -587,19 +620,21 @@ fun MonitorScreen(
                                 tint = if (colors.isDark) colors.accent else colors.textMuted,
                                 modifier = Modifier.size(spacing.iconSmall)
                             )
-                            if (expandProgress > 0.08f) {
+                            if (showSearchInput) {
                                 Spacer(modifier = Modifier.width(spacing.space6))
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .graphicsLayer { alpha = searchContentAlpha },
+                                        .graphicsLayer {
+                                            alpha = ((expandProgressState.value - 0.15f) / 0.85f).coerceIn(0f, 1f)
+                                        },
                                     contentAlignment = Alignment.CenterStart
                                 ) {
                                     if (uiState.searchQuery.isEmpty()) {
                                         Text(
                                             text = if (isEn) "Search camera..." else "Tìm camera...",
                                             color = placeholderColor,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            style = bodySmallStyle,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -608,15 +643,10 @@ fun MonitorScreen(
                                         value = uiState.searchQuery,
                                         onValueChange = { viewModel.setSearchQuery(it) },
                                         singleLine = true,
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                        keyboardActions = KeyboardActions(
-                                            onSearch = { dismissKeyboard() },
-                                            onDone = { dismissKeyboard() }
-                                        ),
-                                        textStyle = MaterialTheme.typography.bodySmall.copy(
-                                            color = colors.textStrong
-                                        ),
-                                        cursorBrush = SolidColor(colors.accent),
+                                        keyboardOptions = searchKeyboardOptions,
+                                        keyboardActions = searchKeyboardActions,
+                                        textStyle = searchTextStyle,
+                                        cursorBrush = searchCursorBrush,
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .focusRequester(searchFocusRequester)
@@ -626,7 +656,9 @@ fun MonitorScreen(
                                 Box(
                                     modifier = Modifier
                                         .size(spacing.buttonHeightSmall)
-                                        .graphicsLayer { alpha = searchContentAlpha }
+                                        .graphicsLayer {
+                                            alpha = ((expandProgressState.value - 0.15f) / 0.85f).coerceIn(0f, 1f)
+                                        }
                                         .clip(CircleShape)
                                         .clickable {
                                             if (uiState.searchQuery.isNotEmpty()) {
@@ -643,7 +675,7 @@ fun MonitorScreen(
                                         modifier = Modifier
                                             .size(spacing.badgeMinSize)
                                             .clip(CircleShape)
-                                            .background(colors.textMuted.copy(alpha = 0.2f)),
+                                            .background(searchClearBgColor),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
@@ -808,8 +840,10 @@ fun MonitorLiveCameraOverlay(
     // Trượt mở/đóng từ dưới lên trên trực tiếp trên GPU RenderThread (khớp 100% với EventDetailScreen)
     val slideFraction = remember { Animatable(if (isLiveScreenOpen) 0f else 1f) }
 
-    if (activeLiveCamera != null) {
-        displayedLiveCamera = activeLiveCamera
+    LaunchedEffect(activeLiveCamera) {
+        if (activeLiveCamera != null) {
+            displayedLiveCamera = activeLiveCamera
+        }
     }
 
     LaunchedEffect(isLiveScreenOpen, activeLiveCamera?.camera?.id) {
@@ -1066,10 +1100,14 @@ private fun MobileLiveCameraScreen(
 
     // Drag-down-to-dismiss giống hệt màn hình Chi tiết sự kiện (EventDetailScreen)
     val sheetOffsetY = remember(selectedCamera.camera.id) { Animatable(0f) }
+    var activeDragOffsetY by remember(selectedCamera.camera.id) { mutableFloatStateOf(0f) }
+    var isDraggingSheet by remember(selectedCamera.camera.id) { mutableStateOf(false) }
     var isDismissing by remember(selectedCamera.camera.id) { mutableStateOf(false) }
-    LaunchedEffect(isClosing) {
-        if (!isClosing && (isDismissing || sheetOffsetY.value > 0f)) {
+    LaunchedEffect(selectedCamera.camera.id, isClosing) {
+        if (!isClosing && (isDismissing || isDraggingSheet || activeDragOffsetY > 0f || sheetOffsetY.value > 0f)) {
             isDismissing = false
+            isDraggingSheet = false
+            activeDragOffsetY = 0f
             sheetOffsetY.snapTo(0f)
         }
     }
@@ -1081,8 +1119,11 @@ private fun MobileLiveCameraScreen(
     val currentOnSwipeDismissed by rememberUpdatedState(onSwipeDismissed)
     val currentOnSheetRevealingChange by rememberUpdatedState(onSheetRevealingChange)
     val isClosingState by rememberUpdatedState(isClosing || isDismissing)
-    val isSheetDragged by remember(sheetOffsetY) {
-        derivedStateOf { sheetOffsetY.value > LIVE_SHEET_DRAGGED_THRESHOLD_PX }
+    val isSheetDragged by remember(selectedCamera.camera.id, sheetOffsetY) {
+        derivedStateOf {
+            val effective = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+            effective > LIVE_SHEET_DRAGGED_THRESHOLD_PX
+        }
     }
     LaunchedEffect(isSheetDragged, isDismissing) {
         currentOnSheetRevealingChange(isSheetDragged || isDismissing)
@@ -1096,10 +1137,13 @@ private fun MobileLiveCameraScreen(
         RectangleShape
     }
 
-    fun triggerSmoothDismiss() {
+    fun triggerSmoothDismiss(startOffsetY: Float) {
         if (isDismissing) return
         isDismissing = true
         scope.launch {
+            sheetOffsetY.snapTo(startOffsetY)
+            isDraggingSheet = false
+            activeDragOffsetY = 0f
             sheetOffsetY.animateTo(
                 targetValue = dismissTravelPx,
                 animationSpec = tween(durationMillis = 300, easing = LivePageExitEasing)
@@ -1124,7 +1168,7 @@ private fun MobileLiveCameraScreen(
     var detailDragOffsetFraction by remember(selectedCamera.camera.id) { mutableFloatStateOf(0f) }
     val detailActiveOffsetFraction = remember(selectedCamera.camera.id) { Animatable(0f) }
 
-    LaunchedEffect(uiState.cameraDetailTab, visibleDetailTabs) {
+    LaunchedEffect(selectedCamera.camera.id, uiState.cameraDetailTab, visibleDetailTabs) {
         val targetTab = uiState.cameraDetailTab
         if (targetTab !in mountedDetailTabs) {
             mountedDetailTabs = mountedDetailTabs + targetTab
@@ -1177,7 +1221,7 @@ private fun MobileLiveCameraScreen(
     val currentOnSetPlaybackPlaying by rememberUpdatedState(onSetPlaybackPlaying)
     val topBarHeightDp = spacing.topBarHeight
 
-    val onBottomDetailTabClick: (CameraDetailTab) -> Unit = remember(scope) {
+    val onBottomDetailTabClick: (CameraDetailTab) -> Unit = remember(scope, selectedCamera.camera.id) {
         { targetTab: CameraDetailTab ->
             if (targetTab != activeDetailTab) {
                 if (targetTab == CameraDetailTab.LIVE && isPlaybackPlayingState) {
@@ -1214,8 +1258,9 @@ private fun MobileLiveCameraScreen(
         modifier = Modifier
             .fillMaxSize()
             .drawBehind {
-                if (!isFullscreen && (sheetOffsetY.value > 0f || isDismissing)) {
-                    val dragProgress = (sheetOffsetY.value / dismissTravelPx).coerceIn(0f, 1f)
+                val effectiveOffsetY = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                if (!isFullscreen && (effectiveOffsetY > 0f || isDismissing)) {
+                    val dragProgress = (effectiveOffsetY / dismissTravelPx).coerceIn(0f, 1f)
                     drawRect(Color.Black, alpha = LIVE_SHEET_SCRIM_MAX_ALPHA * (1f - dragProgress))
                 }
             }
@@ -1224,7 +1269,8 @@ private fun MobileLiveCameraScreen(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                translationY = if (isFullscreen) 0f else sheetOffsetY.value
+                val effectiveOffsetY = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                translationY = if (isFullscreen) 0f else effectiveOffsetY
             }
             .clip(sheetShape)
             .background(if (isFullscreen) colors.mediaBg else MaterialTheme.colorScheme.background)
@@ -1305,10 +1351,14 @@ private fun MobileLiveCameraScreen(
                                     }
                                 }
                             }
-                            if (sheetOffsetY.value > 0f) {
+                            val currentOffset = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                            if (currentOffset > 0f || isDraggingSheet) {
                                 scope.launch {
+                                    sheetOffsetY.snapTo(currentOffset)
+                                    isDraggingSheet = false
+                                    activeDragOffsetY = 0f
                                     sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                    if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                    if (!isDismissing && !isDraggingSheet && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
                                         currentOnSheetRevealingChange(false)
                                     }
                                 }
@@ -1379,9 +1429,6 @@ private fun MobileLiveCameraScreen(
                                     didRevealForCurrentGesture = true
                                     currentOnSheetRevealingChange(true)
                                 }
-                                change.consume()
-                                val dragOffset = ((dy - verticalLockSlopPx) * LIVE_SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
-                                scope.launch { sheetOffsetY.snapTo(dragOffset) }
                             } else if (canSwipeDismiss && dy > preConsumeVerticalSlopPx && dy > absX * 1.25f) {
                                 if (!didRevealForCurrentGesture) {
                                     didRevealForCurrentGesture = true
@@ -1397,8 +1444,8 @@ private fun MobileLiveCameraScreen(
                             break
                         } else if (gestureDirection == 3) {
                             change.consume()
-                            val dragOffset = ((dy - verticalLockSlopPx) * LIVE_SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
-                            scope.launch { sheetOffsetY.snapTo(dragOffset) }
+                            activeDragOffsetY = ((dy - verticalLockSlopPx) * LIVE_SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
+                            isDraggingSheet = true
                         } else if (gestureDirection == 1) {
                             change.consume()
                             val currentVisibleTabs = visibleDetailTabsState
@@ -1439,8 +1486,9 @@ private fun MobileLiveCameraScreen(
                     }
 
                     if (gestureDirection == 3) {
+                        val releaseOffsetY = activeDragOffsetY
                         val elapsedMs = (SystemClock.uptimeMillis() - startUptimeMs).coerceAtLeast(1L)
-                        val pulledDp = sheetOffsetY.value.toDp().value
+                        val pulledDp = releaseOffsetY.toDp().value
                         val totalDyDp = (lastY - startY).toDp().value
                         val velocityDpPerMs = totalDyDp / elapsedMs.toFloat()
                         val shouldDismiss = pulledDp >= LIVE_SHEET_DISMISS_DISTANCE_DP ||
@@ -1448,11 +1496,14 @@ private fun MobileLiveCameraScreen(
                                 velocityDpPerMs >= LIVE_SHEET_DISMISS_FLICK_VELOCITY_DP_PER_MS &&
                                 elapsedMs < LIVE_SHEET_DISMISS_FLICK_MAX_MS)
                         if (shouldDismiss) {
-                            triggerSmoothDismiss()
+                            triggerSmoothDismiss(releaseOffsetY)
                         } else {
                             scope.launch {
+                                sheetOffsetY.snapTo(releaseOffsetY)
+                                isDraggingSheet = false
+                                activeDragOffsetY = 0f
                                 sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                                if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                if (!isDismissing && !isDraggingSheet && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
                                     currentOnSheetRevealingChange(false)
                                 }
                             }
@@ -1525,19 +1576,26 @@ private fun MobileLiveCameraScreen(
                                 }
                             }
                         }
-                    } else if (sheetOffsetY.value > 0f) {
-                        scope.launch {
-                            sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
-                            if (!isDismissing && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
-                                currentOnSheetRevealingChange(false)
+                    } else {
+                        val currentOffset = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                        if (currentOffset > 0f || isDraggingSheet) {
+                            scope.launch {
+                                sheetOffsetY.snapTo(currentOffset)
+                                isDraggingSheet = false
+                                activeDragOffsetY = 0f
+                                sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                if (!isDismissing && !isDraggingSheet && sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX) {
+                                    currentOnSheetRevealingChange(false)
+                                }
                             }
                         }
                     }
 
+                    val currentEffectiveOffset = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
                     if (didRevealForCurrentGesture &&
                         gestureDirection != 3 &&
                         !isDismissing &&
-                        sheetOffsetY.value <= LIVE_SHEET_DRAGGED_THRESHOLD_PX
+                        currentEffectiveOffset <= LIVE_SHEET_DRAGGED_THRESHOLD_PX
                     ) {
                         currentOnSheetRevealingChange(false)
                     }
@@ -1649,7 +1707,7 @@ private fun MobileLiveCameraScreen(
                         isPlaybackPlaying = isPlaybackPlaying,
                         isLoadingPlaybacks = uiState.isLoadingPlaybacks,
                         selectedCamera = selectedCamera,
-                        isTabActive = isTabActive && !isLiveStageMode,
+                        isTabActive = isTabActive && !isLiveStageMode && activeDetailTab != CameraDetailTab.LIVE && !effectiveClosing,
                         isFullscreen = isFullscreen,
                         onSnapshotError = onSnapshotError,
                         onToggleFullscreen = onToggleFullscreen,
@@ -1665,6 +1723,7 @@ private fun MobileLiveCameraScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
+                        .clipToBounds()
                 ) {
                     OrderedCameraDetailTabs.forEach { tab ->
                         if (tab in effectiveMountedDetailTabs) {
@@ -1684,15 +1743,11 @@ private fun MobileLiveCameraScreen(
                                                     else -> offsetFraction + detailPartnerSide
                                                 }
                                                 val offsetX = (tabFraction * placeable.width).toInt()
-                                                val visibility = (1f - abs(tabFraction)).coerceIn(0f, 1f)
-                                                val pageAlpha = visibility * visibility * (3f - 2f * visibility)
-                                                placeable.placeRelativeWithLayer(
+                                                placeable.placeRelative(
                                                     x = offsetX,
                                                     y = 0,
                                                     zIndex = if (tab == currentActive) 2f else 1f
-                                                ) {
-                                                    alpha = pageAlpha
-                                                }
+                                                )
                                             }
                                         }
                                     }
@@ -1702,6 +1757,7 @@ private fun MobileLiveCameraScreen(
                                         CameraLiveTabInfoContent(
                                             uiState = uiState,
                                             selectedCamera = selectedCamera,
+                                            isTabVisible = isTabActive && uiState.cameraDetailTab == CameraDetailTab.LIVE,
                                             canAccessPlayback = permissionState.canAccessPlayback,
                                             canAccessEvents = permissionState.canAccessEvents,
                                             bottomClearance = bottomClearance,
@@ -1874,7 +1930,7 @@ private fun CameraPlaybackStage(
     val showSnapshotOverlay = activeVideo == null || (!isPlaybackVideoReady && !isPlaybackError)
     val showLoadingDots = isTabActive && (
         (activeVideo == null && isLoadingPlaybacks) ||
-            (activeVideo != null && !isPlaybackVideoReady && !isPlaybackError)
+            (activeVideo != null && isPlaybackPlaying && !isPlaybackVideoReady && !isPlaybackError)
         )
 
     Box(
@@ -1890,6 +1946,7 @@ private fun CameraPlaybackStage(
                 isOriginalRatio = false,
                 isFullscreen = isFullscreen,
                 playWhenReady = isPlaybackPlaying && isTabActive,
+                isActive = isTabActive,
                 showLoadingOverlay = false,
                 enableZoom = true,
                 onZoomChanged = onZoomChanged,
@@ -1938,9 +1995,12 @@ private fun CameraPlaybackStage(
         }
 
         if (activeVideo != null) {
-            val activeDateTimeText = activeVideo.displayDateTime.ifEmpty {
-                formatPlaybackDateTime(activeVideo.time)
+            val activeDateTimeText = remember(activeVideo.displayDateTime, activeVideo.time) {
+                activeVideo.displayDateTime.ifEmpty {
+                    formatPlaybackDateTime(activeVideo.time)
+                }
             }
+            val pillShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
             val overlayPillBg = colors.mediaBg.copy(alpha = 0.42f)
             val overlayPillBorder = colors.onMedia.copy(alpha = 0.12f)
             val pillHeight = spacing.iconButtonSmall
@@ -1958,9 +2018,9 @@ private fun CameraPlaybackStage(
                             .align(Alignment.TopStart)
                             .padding(spacing.space8)
                             .height(pillHeight)
-                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                            .clip(pillShape)
                             .background(overlayPillBg)
-                            .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                            .border(spacing.borderMedium, overlayPillBorder, pillShape)
                             .padding(horizontal = spacing.space8),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(spacing.space6)
@@ -2041,6 +2101,7 @@ private fun CameraPlaybackTabContent(
                     Spacer(modifier = Modifier.height(spacing.space12))
                     LoadMoreDaysButton(
                         isLoading = uiState.isLoadingMorePlaybackDays,
+                        isTabVisible = isTabVisible,
                         isEn = isEn,
                         onClick = onLoadMoreDays
                     )
@@ -2083,10 +2144,12 @@ private fun CameraPlaybackTabContent(
                         key = "pb_header_${group.dateKey}",
                         contentType = "pb_day_header"
                     ) {
-                        val dayLabel = if (isEn) {
-                            group.labelEn.ifEmpty { formatPlaybackDayLabel(group.dateKey, true) }
-                        } else {
-                            group.labelVi.ifEmpty { formatPlaybackDayLabel(group.dateKey, false) }
+                        val dayLabel = remember(group.dateKey, group.labelEn, group.labelVi, isEn) {
+                            if (isEn) {
+                                group.labelEn.ifEmpty { formatPlaybackDayLabel(group.dateKey, true) }
+                            } else {
+                                group.labelVi.ifEmpty { formatPlaybackDayLabel(group.dateKey, false) }
+                            }
                         }
                         Row(
                             modifier = Modifier
@@ -2150,6 +2213,7 @@ private fun CameraPlaybackTabContent(
                                 } else if (cellIdx == group.videos.size && group.hasMore) {
                                     LoadMoreDayVideosCard(
                                         isLoading = group.isLoadingMore,
+                                        isTabVisible = isTabVisible,
                                         isEn = isEn,
                                         onClick = { onLoadMoreForDay(group.dateKey) },
                                         modifier = Modifier.weight(1f)
@@ -2175,6 +2239,7 @@ private fun CameraPlaybackTabContent(
                         ) {
                             LoadMoreDaysButton(
                                 isLoading = uiState.isLoadingMorePlaybackDays,
+                                isTabVisible = isTabVisible,
                                 isEn = isEn,
                                 onClick = onLoadMoreDays
                             )
@@ -2356,61 +2421,85 @@ private fun PlayingBarsIndicator(
     color: Color,
     modifier: Modifier = Modifier
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "playbackPlayingBars")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 460, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "playingBarPhase"
-    )
-
-    Canvas(modifier = modifier) {
-        val scale = size.width / 24f
-        val strokeWidthPx = 2f * scale
-        val cornerPx = CornerRadius(1.75f * scale, 1.75f * scale)
-        val barWidthPx = 4f * scale
-
-        // Thanh trái và thanh phải nhấp nhô ngược pha nhau (1 thanh vươn lên thì thanh kia hạ xuống)
-        val pLeft = phase
-        val pRight = 1f - phase
-
-        val topLeftY = (10.8f - 6.8f * pLeft) * scale
-        val bottomLeftY = (19.6f - 1.1f * pLeft) * scale
-
-        val topRightY = (10.8f - 6.8f * pRight) * scale
-        val bottomRightY = (19.6f - 1.1f * pRight) * scale
-
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(6f * scale, topLeftY),
-            size = Size(barWidthPx, (bottomLeftY - topLeftY).coerceAtLeast(barWidthPx)),
-            cornerRadius = cornerPx,
-            style = Stroke(width = strokeWidthPx)
-        )
-
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(14f * scale, topRightY),
-            size = Size(barWidthPx, (bottomRightY - topRightY).coerceAtLeast(barWidthPx)),
-            cornerRadius = cornerPx,
-            style = Stroke(width = strokeWidthPx)
-        )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isStarted by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            isStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    val staticPhaseState = remember { mutableFloatStateOf(0.5f) }
+    val phaseState = if (isStarted) {
+        val infiniteTransition = rememberInfiniteTransition(label = "playbackPlayingBars")
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 460, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "playingBarPhase"
+        )
+    } else {
+        staticPhaseState
+    }
+
+    Spacer(
+        modifier = modifier.drawWithCache {
+            val scale = size.width / 24f
+            val stroke = Stroke(width = 2f * scale)
+            val cornerPx = CornerRadius(1.75f * scale, 1.75f * scale)
+            val barWidthPx = 4f * scale
+            val leftBarX = 6f * scale
+            val rightBarX = 14f * scale
+
+            onDrawBehind {
+                // Thanh trái và thanh phải nhấp nhô ngược pha nhau (1 thanh vươn lên thì thanh kia hạ xuống)
+                val pLeft = phaseState.value
+                val pRight = 1f - pLeft
+
+                val topLeftY = (10.8f - 6.8f * pLeft) * scale
+                val bottomLeftY = (19.6f - 1.1f * pLeft) * scale
+
+                val topRightY = (10.8f - 6.8f * pRight) * scale
+                val bottomRightY = (19.6f - 1.1f * pRight) * scale
+
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(leftBarX, topLeftY),
+                    size = Size(barWidthPx, (bottomLeftY - topLeftY).coerceAtLeast(barWidthPx)),
+                    cornerRadius = cornerPx,
+                    style = stroke
+                )
+
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(rightBarX, topRightY),
+                    size = Size(barWidthPx, (bottomRightY - topRightY).coerceAtLeast(barWidthPx)),
+                    cornerRadius = cornerPx,
+                    style = stroke
+                )
+            }
+        }
+    )
 }
 
 @Composable
 private fun LoadMoreDayVideosCard(
     isLoading: Boolean,
+    isTabVisible: Boolean = true,
     isEn: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusCompact)
+    val shape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
 
     Box(
         modifier = modifier
@@ -2426,11 +2515,15 @@ private fun LoadMoreDayVideosCard(
             modifier = Modifier.padding(spacing.space8)
         ) {
             if (isLoading) {
-                CircularProgressIndicator(
-                    color = colors.accent,
-                    modifier = Modifier.size(spacing.iconRegular),
-                    strokeWidth = spacing.progressStroke
-                )
+                if (isTabVisible) {
+                    CircularProgressIndicator(
+                        color = colors.accent,
+                        modifier = Modifier.size(spacing.iconRegular),
+                        strokeWidth = spacing.progressStroke
+                    )
+                } else {
+                    Spacer(modifier = Modifier.size(spacing.iconRegular))
+                }
             } else {
                 Icon(
                     imageVector = LucideIcons.PlusCircle,
@@ -2458,20 +2551,22 @@ private fun LoadMoreDayVideosCard(
 @Composable
 private fun LoadMoreDaysButton(
     isLoading: Boolean,
+    isTabVisible: Boolean = true,
     isEn: Boolean,
     onClick: () -> Unit
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
+    val shape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
 
     Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(spacing.radiusCompact))
+            .clip(shape)
             .background(colors.surface)
             .border(
                 width = spacing.borderThin,
                 color = colors.border,
-                shape = RoundedCornerShape(spacing.radiusCompact)
+                shape = shape
             )
             .clickable(enabled = !isLoading, onClick = onClick)
             .padding(horizontal = spacing.space14, vertical = spacing.space8),
@@ -2479,11 +2574,15 @@ private fun LoadMoreDaysButton(
         horizontalArrangement = Arrangement.spacedBy(spacing.space8)
     ) {
         if (isLoading) {
-            CircularProgressIndicator(
-                color = colors.accent,
-                modifier = Modifier.size(spacing.iconSmall),
-                strokeWidth = spacing.progressStroke
-            )
+            if (isTabVisible) {
+                CircularProgressIndicator(
+                    color = colors.accent,
+                    modifier = Modifier.size(spacing.iconSmall),
+                    strokeWidth = spacing.progressStroke
+                )
+            } else {
+                Spacer(modifier = Modifier.size(spacing.iconSmall))
+            }
         } else {
             Icon(
                 imageVector = LucideIcons.Calendar,
@@ -2509,6 +2608,7 @@ private fun LoadMoreDaysButton(
 private fun CameraLiveTabInfoContent(
     uiState: MonitorUiState,
     selectedCamera: SelectedCamera,
+    isTabVisible: Boolean,
     canAccessPlayback: Boolean,
     canAccessEvents: Boolean,
     bottomClearance: androidx.compose.ui.unit.Dp,
@@ -2620,7 +2720,8 @@ private fun CameraLiveTabInfoContent(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                val qualityBadgeBg by animateColorAsState(
+                val qualityBadgeShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
+                val qualityBadgeBgState = animateColorAsState(
                     targetValue = if (isHdStream) {
                         colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.11f)
                     } else {
@@ -2631,8 +2732,8 @@ private fun CameraLiveTabInfoContent(
                 )
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(spacing.radiusTiny))
-                        .background(qualityBadgeBg)
+                        .clip(qualityBadgeShape)
+                        .drawBehind { drawRect(qualityBadgeBgState.value) }
                         .padding(horizontal = spacing.space8, vertical = spacing.space4),
                     contentAlignment = Alignment.Center
                 ) {
@@ -2733,7 +2834,8 @@ private fun CameraLiveTabInfoContent(
                 if (uiState.isLoadingCameraEvents && recentCameraEvents.isEmpty()) {
                     EventCardSkeletonList(
                         isListView = true,
-                        count = 2
+                        count = 2,
+                        animate = isTabVisible
                     )
                 } else if (recentCameraEvents.isEmpty()) {
                     Row(
@@ -2891,6 +2993,10 @@ private fun CameraEventsTabContent(
 
     val cameraEventFilterChips = remember(
         uiState.cameraEventTimeFilter,
+        uiState.cameraEventCustomStartMs,
+        uiState.cameraEventCustomEndMs,
+        uiState.cameraEventCustomRangeFromMs,
+        uiState.cameraEventCustomRangeToMs,
         uiState.cameraEventAiType,
         isEn
     ) {
@@ -2898,8 +3004,8 @@ private fun CameraEventsTabContent(
             if (uiState.cameraEventTimeFilter != TimeFilter.TODAY) {
                 add(
                     ActiveFilterChipItem(
-                        key = "cam_time_${uiState.cameraEventTimeFilter.name}",
-                        label = TimeFilter.formatDisplayLabel(uiState.cameraEventTimeFilter, isEn),
+                        key = "cam_time_${uiState.cameraEventTimeFilter.name}_${uiState.cameraEventCustomStartMs}_${uiState.cameraEventCustomRangeFromMs}_${uiState.cameraEventCustomRangeToMs}",
+                        label = formatCameraEventTimeFilterLabel(uiState, isEn),
                         onRemove = { onApplyEventFilters(TimeFilter.TODAY, uiState.cameraEventAiType) }
                     )
                 )
@@ -2961,12 +3067,11 @@ private fun CameraEventsTabContent(
             ) {
                 if (uiState.isLoadingCameraEvents && uiState.cameraEvents.isEmpty()) {
                     item(key = "cam_event_loading", contentType = "state") {
-                        if (isTabVisible) {
-                            EventCardSkeletonList(
-                                isListView = true,
-                                count = 4
-                            )
-                        }
+                        EventCardSkeletonList(
+                            isListView = true,
+                            count = 4,
+                            animate = isTabVisible
+                        )
                     }
                 } else if (uiState.cameraEvents.isEmpty()) {
                     item(key = "cam_event_empty", contentType = "state") {
@@ -3031,50 +3136,53 @@ private fun CameraEventsTabContent(
     }
 }
 
-private val dateKeyParserThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
-    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-}
-private val dayDisplayFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
-    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-}
-private val timeOnlyFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
-    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-}
-private val dateTimeFormatterThreadLocal = object : ThreadLocal<SimpleDateFormat>() {
-    override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+private val DayDisplayFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM/yyyy", Locale.getDefault())
+private val TimeOnlyFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss", Locale.getDefault())
+private val DateTimeFormatterFull: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
+private val ShortDateTimeFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.getDefault())
+
+private fun formatCameraEventTimeFilterLabel(uiState: MonitorUiState, isEn: Boolean): String {
+    return when (val filter = uiState.cameraEventTimeFilter) {
+        TimeFilter.CUSTOM_DATE -> {
+            val prefix = if (isEn) filter.titleEn else filter.title
+            val startMs = uiState.cameraEventCustomStartMs.takeIf { it > 0L } ?: TimeFilter.customDateStartMs
+            val formatted = Instant.ofEpochMilli(startMs).atZone(ZoneId.systemDefault()).format(DayDisplayFormatter)
+            "$prefix ($formatted)"
+        }
+        TimeFilter.CUSTOM_RANGE -> {
+            val fromMs = uiState.cameraEventCustomRangeFromMs.takeIf { it > 0L } ?: TimeFilter.customRangeFromMs
+            val toMs = uiState.cameraEventCustomRangeToMs.takeIf { it > 0L } ?: TimeFilter.customRangeToMs
+            val zone = ZoneId.systemDefault()
+            val fromStr = Instant.ofEpochMilli(fromMs).atZone(zone).format(ShortDateTimeFormatter)
+            val toStr = Instant.ofEpochMilli(toMs).atZone(zone).format(ShortDateTimeFormatter)
+            "$fromStr - $toStr"
+        }
+        else -> TimeFilter.formatDisplayLabel(filter, isEn)
+    }
 }
 
 private fun formatPlaybackDayLabel(dateKey: String, isEn: Boolean): String {
-    val parsed = runCatching {
-        dateKeyParserThreadLocal.get()?.parse(dateKey)
-    }.getOrNull() ?: return dateKey
-
-    val targetCal = Calendar.getInstance().apply { time = parsed }
-    val todayCal = Calendar.getInstance()
-    if (targetCal.get(Calendar.YEAR) == todayCal.get(Calendar.YEAR) &&
-        targetCal.get(Calendar.DAY_OF_YEAR) == todayCal.get(Calendar.DAY_OF_YEAR)
-    ) {
-        return if (isEn) "Today" else "Hôm nay"
+    val targetDate = try {
+        LocalDate.parse(dateKey)
+    } catch (_: Exception) {
+        return dateKey
     }
-
-    val yesterdayCal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-    if (targetCal.get(Calendar.YEAR) == yesterdayCal.get(Calendar.YEAR) &&
-        targetCal.get(Calendar.DAY_OF_YEAR) == yesterdayCal.get(Calendar.DAY_OF_YEAR)
-    ) {
-        return if (isEn) "Yesterday" else "Hôm qua"
+    val today = LocalDate.now()
+    return when {
+        targetDate == today -> if (isEn) "Today" else "Hôm nay"
+        targetDate == today.minusDays(1) -> if (isEn) "Yesterday" else "Hôm qua"
+        else -> targetDate.format(DayDisplayFormatter)
     }
-
-    return dayDisplayFormatterThreadLocal.get()?.format(parsed) ?: dateKey
 }
 
 private fun formatPlaybackTimeOnly(timeStr: String): String {
     val millis = parseVideoQueryTime(timeStr) ?: return timeStr
-    return timeOnlyFormatterThreadLocal.get()?.format(Date(millis)) ?: timeStr
+    return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(TimeOnlyFormatter)
 }
 
 private fun formatPlaybackDateTime(timeStr: String): String {
     val millis = parseVideoQueryTime(timeStr) ?: return timeStr
-    return dateTimeFormatterThreadLocal.get()?.format(Date(millis)) ?: timeStr
+    return Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(DateTimeFormatterFull)
 }
 
 @Composable
@@ -3110,7 +3218,6 @@ private fun LandscapeFullscreenHandler(
 }
 
 private fun restoreSystemOrientationAndBars(activity: Activity?) {
-    activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
     val window = activity?.window
     val insetsController = window?.let {
         WindowCompat.getInsetsController(it, it.decorView)
@@ -3243,6 +3350,7 @@ private fun CameraQuickFilterChip(
 @Composable
 private fun MobileCameraSnapshotCard(
     camera: CameraModel,
+    @Suppress("UNUSED_PARAMETER")
     isTabActive: Boolean,
     hasSnapKey: Boolean,
     snapshotUrl: String?,
@@ -3255,64 +3363,27 @@ private fun MobileCameraSnapshotCard(
     val context = LocalContext.current
     val isEn = rememberIsEnglish()
     val haptic = LocalHapticFeedback.current
-    val view = LocalView.current
-    val focusManager = LocalFocusManager.current
-    val keyboardController = LocalSoftwareKeyboardController.current
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
 
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    var isTapFlashing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val currentCamera by rememberUpdatedState(camera)
     val currentOnClick by rememberUpdatedState(onClick)
     val currentOnToggleFavorite by rememberUpdatedState(onToggleFavorite)
     val currentOnSnapshotError by rememberUpdatedState(onSnapshotError)
 
-    val handleCardClick: () -> Unit = remember(scope, view, focusManager, keyboardController) {
-        {
-            val keyboardWasOpen = ViewCompat.getRootWindowInsets(view)
-                ?.isVisible(WindowInsetsCompat.Type.ime()) == true
-            focusManager.clearFocus()
-            keyboardController?.hide()
-
-            if (keyboardWasOpen) {
-                // Nếu bàn phím đang mở: ưu tiên đóng bàn phím xong hoàn toàn (~240ms) rồi mới trượt mở màn hình Live
-                isTapFlashing = true
-                scope.launch {
-                    delay(240L)
-                    currentOnClick(currentCamera)
-                    delay(160L)
-                    isTapFlashing = false
-                }
-            } else {
-                isTapFlashing = true
-                currentOnClick(currentCamera)
-                scope.launch {
-                    delay(160L)
-                    isTapFlashing = false
-                }
-            }
-        }
+    val handleCardClick: () -> Unit = remember {
+        { currentOnClick(currentCamera) }
     }
 
-    val isActivePress = isPressed || isTapFlashing
-    val targetCardBg = when {
-        isActivePress && colors.isDark -> Color(0xFF28374E)
-        isActivePress -> colors.thumbnailBg
-        else -> colors.surface
+    val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
+    val offlineBadgeShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
+    val pressIndication = remember(spacing.radiusCompact, colors.isDark) {
+        CardPressIndication(
+            pressedScale = 0.98f,
+            pressOverlayColor = if (colors.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f),
+            cornerRadius = spacing.radiusCompact
+        )
     }
-    val cardBg by animateColorAsState(
-        targetValue = targetCardBg,
-        animationSpec = tween(durationMillis = if (isActivePress) 35 else 180),
-        label = "cameraCardBg"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isActivePress) 0.98f else 1f,
-        animationSpec = tween(durationMillis = if (isActivePress) 45 else 160),
-        label = "cameraCardScale"
-    )
     val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
     val nameColor = colors.textTitle
 
@@ -3348,17 +3419,13 @@ private fun MobileCameraSnapshotCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = pressScale
-                scaleY = pressScale
-            }
-            .clip(RoundedCornerShape(spacing.radiusCompact))
-            .background(cardBg)
             .clickable(
-                interactionSource = interactionSource,
-                indication = null,
+                interactionSource = null,
+                indication = pressIndication,
                 onClick = handleCardClick
             )
+            .clip(cardShape)
+            .background(colors.surface)
     ) {
         // .cam-card-thumb (16:9) - Dùng nền thẻ (colors.surface = trắng ở Light mode) vì danh sách camera đã nằm trực tiếp trên nền trang
         Box(
@@ -3368,6 +3435,13 @@ private fun MobileCameraSnapshotCard(
             contentAlignment = Alignment.Center
         ) {
             if (imageRequest != null && !isImageError) {
+                if (isImageLoading && !hasLoadedAnyImage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(colors.thumbnailBg)
+                    )
+                }
                 AsyncImage(
                     model = imageRequest,
                     contentDescription = camera.name,
@@ -3387,18 +3461,11 @@ private fun MobileCameraSnapshotCard(
                         currentOnSnapshotError(currentCamera)
                     }
                 )
-                if (isImageLoading && !hasLoadedAnyImage && isTabActive) {
-                    WaveDotsLoading(
-                        dotSize = spacing.space6,
-                        dotColor = colors.accent,
-                        maxOffset = spacing.space6
-                    )
-                }
-            } else if (!hasSnapKey && isTabActive) {
-                WaveDotsLoading(
-                    dotSize = spacing.space6,
-                    dotColor = colors.accent,
-                    maxOffset = spacing.space6
+            } else if (!hasSnapKey) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(colors.thumbnailBg)
                 )
             } else {
                 Icon(
@@ -3414,7 +3481,7 @@ private fun MobileCameraSnapshotCard(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(start = spacing.space6, top = spacing.space6)
-                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                        .clip(offlineBadgeShape)
                         .background(Color(0xFFDC2626).copy(alpha = 0.88f))
                         .padding(horizontal = spacing.space6, vertical = spacing.space2),
                     verticalAlignment = Alignment.CenterVertically,
@@ -3444,7 +3511,7 @@ private fun MobileCameraSnapshotCard(
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = if (isFavorite) 0.48f else 0.32f))
                     .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
+                        interactionSource = null,
                         indication = null,
                         onClick = {
                             try {
@@ -3777,22 +3844,38 @@ fun CameraGridItem(
         selectedCamera.camera.sub.isNotBlank() && selectedCamera.camera.main.isNotBlank()
     }
 
-    // Đồng bộ camera_fit_ratio_${camId} ('contain' / 'cover') từ LiveVideoView.vue
-    val ratioPrefs = remember(context) {
-        context.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
+    // Đồng bộ camera_fit_ratio_${camId} ('contain' / 'cover') từ LiveVideoView.vue mà không chặn Main thread bằng SharedPreferences trên Frame 0
+    val ratioCamId = selectedCamera.camera.id
+    val ratioScope = rememberCoroutineScope()
+    var isOriginalRatio by remember(ratioCamId) {
+        mutableStateOf(cameraFitRatioCache[ratioCamId] ?: false)
     }
-    var isOriginalRatio by remember(selectedCamera.camera.id) {
-        mutableStateOf(
-            ratioPrefs.getString("camera_fit_ratio_${selectedCamera.camera.id}", "cover") == "contain"
-        )
+    LaunchedEffect(ratioCamId, context) {
+        val cached = cameraFitRatioCache[ratioCamId]
+        if (cached != null) {
+            isOriginalRatio = cached
+        } else {
+            val loaded = withContext(Dispatchers.IO) {
+                val prefs = context.applicationContext.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
+                val isContain = prefs.getString("camera_fit_ratio_$ratioCamId", "cover") == "contain"
+                cameraFitRatioCache[ratioCamId] = isContain
+                isContain
+            }
+            isOriginalRatio = loaded
+        }
     }
-    val toggleAspectRatio: () -> Unit = remember(selectedCamera.camera.id, ratioPrefs) {
+    val toggleAspectRatio: () -> Unit = remember(ratioCamId, context, ratioScope) {
         {
             val next = !isOriginalRatio
             isOriginalRatio = next
-            ratioPrefs.edit()
-                .putString("camera_fit_ratio_${selectedCamera.camera.id}", if (next) "contain" else "cover")
-                .apply()
+            cameraFitRatioCache[ratioCamId] = next
+            val appCtx = context.applicationContext
+            ratioScope.launch(Dispatchers.IO) {
+                appCtx.getSharedPreferences("tenli_camera_prefs", Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("camera_fit_ratio_$ratioCamId", if (next) "contain" else "cover")
+                    .apply()
+            }
         }
     }
 
@@ -4180,6 +4263,7 @@ fun CameraGridItem(
                     deviceKey = deviceKey,
                     isOriginalRatio = isOriginalRatio,
                     playWhenReady = !isStreamPaused,
+                    isActive = !isStreamPaused,
                     onPlayingChange = {
                         isLiveViewPlaying = it
                         if (it) {

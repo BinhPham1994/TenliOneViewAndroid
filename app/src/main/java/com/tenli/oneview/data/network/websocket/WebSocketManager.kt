@@ -9,11 +9,13 @@ import com.tenli.oneview.model.network.CameraInfo
 import com.tenli.oneview.model.network.NotifyData
 import com.tenli.oneview.model.network.ReportPayload
 import com.tenli.oneview.util.EventBus
+import com.tenli.oneview.util.NetworkMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +54,7 @@ class WebSocketManager(
     private val isConnectingReports = AtomicBoolean(false)
     private val notifyLock = Any()
     private val reportLock = Any()
+    private val reportClientsLock = Any()
 
     // Trạng thái mong muốn (để tự khôi phục khi app quay lại foreground)
     @Volatile private var desiredNotifyBaseUrl: String? = null
@@ -61,9 +64,11 @@ class WebSocketManager(
         get() = activeReportConsumers.isNotEmpty()
     @Volatile private var isAppInForeground = false
     @Volatile private var suspendedForBackground = false
+    @Volatile private var suspendedForOffline = false
     @Volatile private var backgroundJob: Job? = null
     @Volatile private var reportInactiveJob: Job? = null
     private val sessionGeneration = AtomicLong(0L)
+    private val reportGeneration = AtomicLong(0L)
 
     // Exposed Flows
     private val _notifyEvent = MutableSharedFlow<NotifyData>(extraBufferCapacity = 10)
@@ -95,7 +100,9 @@ class WebSocketManager(
         }
         scope.launch {
             EventBus.realtimeEventHint.collect {
-                _notifyEvent.tryEmit(NotifyData(event = TOPIC_FCM_HINT))
+                if (isAppInForeground) {
+                    _notifyEvent.tryEmit(NotifyData(event = TOPIC_FCM_HINT))
+                }
             }
         }
     }
@@ -109,6 +116,9 @@ class WebSocketManager(
         isAppInForeground = inForeground
         backgroundJob?.cancel()
         if (inForeground) {
+            if (NetworkMonitor.isNetworkAvailable()) {
+                suspendedForOffline = false
+            }
             if (suspendedForBackground) {
                 suspendedForBackground = false
                 desiredNotifyBaseUrl?.let { connectNotify(it) }
@@ -129,9 +139,57 @@ class WebSocketManager(
     }
 
     /**
+     * Gọi khi trạng thái kết nối mạng thay đổi (online ↔ offline):
+     * - Khi mất mạng: tạm ngắt toàn bộ socket và huỷ lịch reconnect để tránh spam CPU/pin nhưng vẫn giữ ý định kết nối.
+     * - Khi có mạng lại (và app đang ở foreground, đã đăng nhập): khôi phục lại các kết nối đang cần.
+     */
+    fun onConnectivityChanged(isOnline: Boolean) {
+        if (!isOnline) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "Network offline → suspend websockets")
+            suspendedForOffline = true
+            synchronized(notifyLock) {
+                notifyClient?.suspendForOffline()
+            }
+            synchronized(reportClientsLock) {
+                reportGeneration.incrementAndGet()
+                reportClients.values.forEach { it.suspendForOffline() }
+            }
+        } else {
+            suspendedForOffline = false
+            if (!isAppInForeground || UserSession.accessToken.isEmpty()) return
+            var notifyNeedsConnect = false
+            synchronized(notifyLock) {
+                val existing = notifyClient
+                if (existing != null) {
+                    existing.resumeFromOffline()
+                    notifyNeedsConnect = !existing.isConnected()
+                } else {
+                    notifyNeedsConnect = true
+                }
+            }
+            if (notifyNeedsConnect) {
+                desiredNotifyBaseUrl?.let { connectNotify(it) }
+            }
+            if (reportsRequested && isReportsTabActive) {
+                val allResumed = synchronized(reportClientsLock) {
+                    if (reportClients.isNotEmpty()) {
+                        reportClients.values.forEach { it.resumeFromOffline() }
+                        reportClients.values.all { it.isConnected() }
+                    } else {
+                        false
+                    }
+                }
+                if (!allResumed) {
+                    connectAllReports()
+                }
+            }
+        }
+    }
+
+    /**
      * Chỉ giữ kết nối các WebSocket Report (trạng thái camera/ghi hình của từng VMS) khi đang ở tab Trang chủ hoặc Trực tiếp.
      * Khi rời sang các tab khác quá [REPORT_INACTIVE_GRACE_MS], tự ngắt các socket Report để không tốn CPU/mạng/pin
-     * nhận bản tin JSON vài giây/lần và ping 15s/lần.
+     * nhận bản tin JSON vài giây/lần và ping định kỳ.
      */
     fun setReportsActive(active: Boolean, consumer: String = "home") {
         if (active) {
@@ -147,8 +205,13 @@ class WebSocketManager(
                 reportInactiveJob = scope.launch {
                     delay(REPORT_INACTIVE_GRACE_MS)
                     if (!isReportsTabActive) {
-                        reportClients.values.forEach { it.disconnect() }
-                        reportClients.clear()
+                        synchronized(reportClientsLock) {
+                            if (!isReportsTabActive) {
+                                reportGeneration.incrementAndGet()
+                                reportClients.values.forEach { it.disconnect() }
+                                reportClients.clear()
+                            }
+                        }
                     }
                 }
             }
@@ -162,8 +225,11 @@ class WebSocketManager(
         suspendedForBackground = true
         reportInactiveJob?.cancel()
         synchronized(notifyLock) { notifyClient?.disconnect() }
-        reportClients.values.forEach { it.disconnect() }
-        reportClients.clear()
+        synchronized(reportClientsLock) {
+            reportGeneration.incrementAndGet()
+            reportClients.values.forEach { it.disconnect() }
+            reportClients.clear()
+        }
     }
 
     /**
@@ -171,10 +237,11 @@ class WebSocketManager(
      * chủ động đóng socket cũ (gắn với IP cũ đã rớt) và mở lại kết nối ngay lập tức, đồng thời báo UI bù dữ liệu.
      */
     fun onActiveNetworkChanged() {
-        if (!isAppInForeground || UserSession.accessToken.isEmpty()) return
+        if (!isAppInForeground || UserSession.accessToken.isEmpty() || !NetworkMonitor.isNetworkAvailable()) return
         val gen = sessionGeneration.get()
         scope.launch {
-            if (gen != sessionGeneration.get() || !isAppInForeground || UserSession.accessToken.isEmpty()) return@launch
+            if (gen != sessionGeneration.get() || !isAppInForeground || UserSession.accessToken.isEmpty() || !NetworkMonitor.isNetworkAvailable()) return@launch
+            suspendedForOffline = false
             synchronized(notifyLock) {
                 val baseUrl = (desiredNotifyBaseUrl ?: UserSession.domain).trim()
                 if (baseUrl.isNotEmpty()) {
@@ -189,8 +256,17 @@ class WebSocketManager(
                 }
             }
             if (reportsRequested && isReportsTabActive) {
-                reportClients.values.forEach { it.forceReconnect() }
-                connectAllReports()
+                val shouldFetchReports = synchronized(reportClientsLock) {
+                    if (reportClients.isEmpty()) {
+                        true
+                    } else {
+                        reportClients.values.forEach { it.forceReconnect() }
+                        false
+                    }
+                }
+                if (shouldFetchReports) {
+                    connectAllReports()
+                }
             }
             _notifyEvent.tryEmit(NotifyData(event = TOPIC_APP_RESUMED))
         }
@@ -228,15 +304,25 @@ class WebSocketManager(
      */
     fun connectAllReports() {
         reportsRequested = true
-        if (!isAppInForeground || !isReportsTabActive || UserSession.accessToken.isEmpty()) return
-        if (reportClients.isNotEmpty() && reportClients.values.all { it.isConnected() }) return
+        if (!isAppInForeground || !isReportsTabActive || UserSession.accessToken.isEmpty() || !NetworkMonitor.isNetworkAvailable()) return
+        val alreadyAllConnected = synchronized(reportClientsLock) {
+            reportClients.isNotEmpty() && reportClients.values.all { it.isConnected() }
+        }
+        if (alreadyAllConnected) return
         if (!isConnectingReports.compareAndSet(false, true)) return
         val gen = sessionGeneration.get()
+        val reportGen = reportGeneration.get()
 
         scope.launch {
             try {
                 val response = vmsApi.getVMSServiceList()
-                if (gen != sessionGeneration.get() || !isAppInForeground || !isReportsTabActive || !reportsRequested || UserSession.accessToken.isEmpty()) {
+                if (gen != sessionGeneration.get() ||
+                    reportGen != reportGeneration.get() ||
+                    !isAppInForeground ||
+                    !isReportsTabActive ||
+                    !reportsRequested ||
+                    UserSession.accessToken.isEmpty()
+                ) {
                     return@launch
                 }
                 val ids = if (response.isSuccessful) {
@@ -244,13 +330,20 @@ class WebSocketManager(
                 } else {
                     listOf(LOCAL_VMS_ID)
                 }
-                connectReports(ids, gen)
+                connectReports(ids, gen, reportGen)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (BuildConfig.DEBUG) Log.w(TAG, "Failed to fetch VMS list: ${e.message}")
-                if (gen == sessionGeneration.get() && isAppInForeground && isReportsTabActive && reportsRequested && UserSession.accessToken.isNotEmpty()) {
-                    connectReports(listOf(LOCAL_VMS_ID), gen)
+                if (gen == sessionGeneration.get() &&
+                    reportGen == reportGeneration.get() &&
+                    isAppInForeground &&
+                    isReportsTabActive &&
+                    reportsRequested &&
+                    UserSession.accessToken.isNotEmpty() &&
+                    NetworkMonitor.isNetworkAvailable()
+                ) {
+                    connectReports(listOf(LOCAL_VMS_ID), gen, reportGen)
                 }
             } finally {
                 isConnectingReports.set(false)
@@ -261,48 +354,56 @@ class WebSocketManager(
     /**
      * Connect or update Report WebSockets for the given VMS IDs.
      */
-    private fun connectReports(vmsIds: List<Int>, expectedGen: Long) {
-        if (expectedGen != sessionGeneration.get()) return
-        // Disconnect removed VMS IDs
-        reportClients.keys.toList().forEach { id ->
-            if (id !in vmsIds) reportClients.remove(id)?.disconnect()
+    private suspend fun connectReports(vmsIds: List<Int>, expectedGen: Long, expectedReportGen: Long) {
+        if (expectedGen != sessionGeneration.get() || expectedReportGen != reportGeneration.get()) return
+        val idsToConnect = synchronized(reportClientsLock) {
+            if (expectedGen != sessionGeneration.get() || expectedReportGen != reportGeneration.get()) {
+                return
+            }
+            // Disconnect removed VMS IDs
+            reportClients.keys.toList().forEach { id ->
+                if (id !in vmsIds) reportClients.remove(id)?.disconnect()
+            }
+            vmsIds.filter { id -> reportClients[id]?.isConnected() != true }
         }
+        if (idsToConnect.isEmpty()) return
 
-        // Connect new VMS IDs
-        vmsIds.forEach { id ->
-            if (reportClients[id]?.isConnected() == true) return@forEach
-            scope.launch {
-                try {
-                    val response = vmsApi.getReportLink(id)
-                    val link = response.body()?.link
-                    if (expectedGen == sessionGeneration.get() &&
-                        response.isSuccessful &&
-                        link != null &&
-                        isAppInForeground &&
-                        isReportsTabActive &&
-                        reportsRequested &&
-                        UserSession.accessToken.isNotEmpty()
-                    ) {
-                        val reportClient = reportClients.getOrPut(id) {
-                            WebSocketReportClient(
-                                vmsId = id,
-                                client = client,
-                                gson = gson,
-                                scope = scope,
-                                onMessageReceived = ::handleReportPayload,
-                                onReconnectRefreshUrl = { vmsApi.getReportLink(id).body()?.link }
-                            )
+        // Connect new VMS IDs in parallel and join all children before clearing isConnectingReports
+        coroutineScope {
+            idsToConnect.forEach { id ->
+                launch {
+                    try {
+                        val response = vmsApi.getReportLink(id)
+                        val link = response.body()?.link
+                        if (response.isSuccessful && link != null) {
+                            synchronized(reportClientsLock) {
+                                if (expectedGen == sessionGeneration.get() &&
+                                    expectedReportGen == reportGeneration.get() &&
+                                    isAppInForeground &&
+                                    isReportsTabActive &&
+                                    reportsRequested &&
+                                    UserSession.accessToken.isNotEmpty() &&
+                                    NetworkMonitor.isNetworkAvailable()
+                                ) {
+                                    val reportClient = reportClients.getOrPut(id) {
+                                        WebSocketReportClient(
+                                            vmsId = id,
+                                            client = client,
+                                            gson = gson,
+                                            scope = scope,
+                                            onMessageReceived = ::handleReportPayload,
+                                            onReconnectRefreshUrl = { vmsApi.getReportLink(id).body()?.link }
+                                        )
+                                    }
+                                    reportClient.connect(link)
+                                }
+                            }
                         }
-                        if (expectedGen == sessionGeneration.get() && isAppInForeground && isReportsTabActive && reportsRequested) {
-                            reportClient.connect(link)
-                        } else {
-                            reportClients.remove(id)?.disconnect()
-                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        if (BuildConfig.DEBUG) Log.w(TAG, "Failed to fetch report link for VMS $id: ${e.message}")
                     }
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    if (BuildConfig.DEBUG) Log.w(TAG, "Failed to fetch report link for VMS $id: ${e.message}")
                 }
             }
         }
@@ -385,6 +486,7 @@ class WebSocketManager(
         desiredNotifyBaseUrl = null
         reportsRequested = false
         suspendedForBackground = false
+        suspendedForOffline = false
         backgroundJob?.cancel()
         reportInactiveJob?.cancel()
 
@@ -393,8 +495,11 @@ class WebSocketManager(
             notifyClient = null
         }
 
-        reportClients.values.forEach { it.disconnect() }
-        reportClients.clear()
+        synchronized(reportClientsLock) {
+            reportGeneration.incrementAndGet()
+            reportClients.values.forEach { it.disconnect() }
+            reportClients.clear()
+        }
 
         _cameraStatusMap.value = emptyMap()
         _recordStatusMap.value = emptyMap()

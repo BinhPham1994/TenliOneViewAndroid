@@ -34,13 +34,14 @@ import com.tenli.oneview.util.toUserFriendlyMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainViewModel(
     application: Application,
@@ -62,8 +63,8 @@ class MainViewModel(
     )
     val uiState = _uiState.asStateFlow()
 
-    private val _event = MutableSharedFlow<MainEvent>()
-    val event = _event.asSharedFlow()
+    private val _event = Channel<MainEvent>(Channel.BUFFERED)
+    val event = _event.receiveAsFlow()
 
     private val _notificationConfigState = MutableStateFlow(NotificationConfigState())
     val notificationConfigState = _notificationConfigState.asStateFlow()
@@ -71,14 +72,25 @@ class MainViewModel(
     private val _passwordChangeState = MutableStateFlow(PasswordChangeState())
     val passwordChangeState = _passwordChangeState.asStateFlow()
 
-    private var logoutJob: Job? = null
+    private val isLoggingOut = AtomicBoolean(false)
     private var permissionSyncJob: Job? = null
     private var notificationLoadJob: Job? = null
+    private var pushToggleJob: Job? = null
     private var aiModuleSaveJob: Job? = null
     private var passwordChangeJob: Job? = null
 
     @Volatile
+    private var isAppInForeground: Boolean = true
+
+    private val pendingNetworkRefresh = AtomicBoolean(false)
+    private val pendingNetworkRestoredEvent = AtomicBoolean(false)
+    private val pendingActiveNetworkReconnect = AtomicBoolean(false)
+
+    @Volatile
     private var cachedNotificationSettings: UserNotificationSettingsModel? = null
+
+    @Volatile
+    private var lastServerConfirmedSettings: UserNotificationSettingsModel? = null
 
     @Volatile
     private var hasResolvedNotificationSettingsOnce: Boolean = false
@@ -95,13 +107,18 @@ class MainViewModel(
         PermissionUtils.updateCallPermissionRequirement(required)
     }
 
-    private fun syncCallPermissionRequirementFromCacheFallback() {
+    private suspend fun syncCallPermissionRequirementFromCacheFallback() {
         if (UserSession.accessToken.isEmpty() || !UserPermissionManager.canAccessEvents()) {
             hasResolvedNotificationSettingsOnce = true
             PermissionUtils.updateCallPermissionRequirement(false)
             return
         }
-        val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+        val snapshot = cachedNotificationSettings
+            ?: loadCachedNotificationSettingsFromPrefs()?.also { cached ->
+                if (cachedNotificationSettings == null && UserSession.accessToken.isNotEmpty()) {
+                    cachedNotificationSettings = cached
+                }
+            }
         if (snapshot == null) {
             PermissionUtils.updateCallPermissionRequirement(false)
             return
@@ -124,8 +141,40 @@ class MainViewModel(
             ?: UserSession.savedUsername.takeIf { it.isNotBlank() }
             ?: ""
 
+    fun setAppForeground(inForeground: Boolean) {
+        isAppInForeground = inForeground
+        if (inForeground) {
+            flushPendingNetworkRefreshIfNeeded()
+        }
+    }
+
+    private fun flushPendingNetworkRefreshIfNeeded() {
+        val shouldRefresh = pendingNetworkRefresh.getAndSet(false)
+        val shouldEmitRestored = pendingNetworkRestoredEvent.getAndSet(false)
+        val shouldReconnectActiveNetwork = pendingActiveNetworkReconnect.getAndSet(false)
+        if (!shouldRefresh && !shouldEmitRestored && !shouldReconnectActiveNetwork) return
+        if (!NetworkMonitor.isNetworkAvailable()) return
+
+        if (shouldEmitRestored) {
+            EventBus.emitNetworkRestored()
+        }
+        if (UserSession.accessToken.isNotEmpty()) {
+            val baseUrl = UserSession.domain.trim()
+            if (baseUrl.isNotEmpty()) {
+                if (shouldReconnectActiveNetwork) {
+                    webSocketManager.onActiveNetworkChanged()
+                } else {
+                    webSocketManager.connectNotify(baseUrl)
+                    webSocketManager.connectAllReports()
+                }
+            }
+            if (shouldRefresh) {
+                refreshPermissionsAndSyncNotifications()
+            }
+        }
+    }
+
     init {
-        UserPermissionManager.syncFromUserSession()
         viewModelScope.launch {
             var lastPermVersion = UserPermissionManager.permissionState.value.version
             UserPermissionManager.permissionState.collect { permState ->
@@ -139,7 +188,12 @@ class MainViewModel(
                 }
                 if (permState.version != lastPermVersion) {
                     lastPermVersion = permState.version
-                    val snapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                    val snapshot = cachedNotificationSettings
+                        ?: loadCachedNotificationSettingsFromPrefs()?.also { cached ->
+                            if (cachedNotificationSettings == null && UserSession.accessToken.isNotEmpty()) {
+                                cachedNotificationSettings = cached
+                            }
+                        }
                     val rebuiltModules = buildAiModuleConfigs(snapshot)
                     _notificationConfigState.update { state ->
                         state.copy(aiModules = rebuiltModules)
@@ -159,26 +213,43 @@ class MainViewModel(
             var wasOffline = false
             networkMonitor.isOnline.collect { isOnline ->
                 _uiState.update { it.copy(isOffline = !isOnline) }
+                webSocketManager.onConnectivityChanged(isOnline)
 
                 if (!isOnline) {
                     wasOffline = true
+                    pendingNetworkRefresh.set(false)
+                    pendingNetworkRestoredEvent.set(false)
+                    pendingActiveNetworkReconnect.set(false)
                     if (!hasResolvedNotificationSettingsOnce && UserSession.accessToken.isNotEmpty()) {
                         syncCallPermissionRequirementFromCacheFallback()
                     }
-                    MobileTopPopupManager.error(noNetworkMessage(isEnglish))
-                } else {
-                    if (wasOffline) {
-                        wasOffline = false
-                        EventBus.emitNetworkRestored()
+                    if (isAppInForeground) {
+                        MobileTopPopupManager.error(noNetworkMessage(isEnglish))
                     }
-                    // Reconnect WebSockets & đồng bộ phân quyền + cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
-                    if (UserSession.accessToken.isNotEmpty()) {
-                        val baseUrl = UserSession.domain.trim()
-                        if (baseUrl.isNotEmpty()) {
-                            webSocketManager.connectNotify(baseUrl)
-                            webSocketManager.connectAllReports()
+                } else {
+                    val restoredFromOffline = wasOffline
+                    wasOffline = false
+                    if (isAppInForeground) {
+                        if (restoredFromOffline) {
+                            EventBus.emitNetworkRestored()
                         }
-                        refreshPermissionsAndSyncNotifications()
+                        // Reconnect WebSockets & đồng bộ phân quyền + cài đặt + FCM push token khi có mạng trở lại hoặc khởi chạy MainViewModel
+                        if (UserSession.accessToken.isNotEmpty()) {
+                            val baseUrl = UserSession.domain.trim()
+                            if (baseUrl.isNotEmpty()) {
+                                webSocketManager.connectNotify(baseUrl)
+                                webSocketManager.connectAllReports()
+                            }
+                            refreshPermissionsAndSyncNotifications()
+                        }
+                    } else {
+                        // App đang ở nền -> hoãn refresh & sự kiện khôi phục mạng cho tới khi quay lại foreground
+                        if (restoredFromOffline) {
+                            pendingNetworkRestoredEvent.set(true)
+                        }
+                        if (UserSession.accessToken.isNotEmpty()) {
+                            pendingNetworkRefresh.set(true)
+                        }
                     }
                 }
             }
@@ -186,7 +257,12 @@ class MainViewModel(
         viewModelScope.launch {
             networkMonitor.activeNetworkChanged.collect {
                 if (UserSession.accessToken.isNotEmpty() && UserSession.domain.isNotBlank()) {
-                    webSocketManager.onActiveNetworkChanged()
+                    if (isAppInForeground) {
+                        webSocketManager.onActiveNetworkChanged()
+                    } else {
+                        pendingNetworkRefresh.set(true)
+                        pendingActiveNetworkReconnect.set(true)
+                    }
                 }
             }
         }
@@ -250,61 +326,74 @@ class MainViewModel(
                     val rawJson = runCatching { LoginAuthClient.gson.toJson(body) }.getOrNull()
                     "✅ [SYNC CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
                 }
-                val explicitEnabled = body?.global?.enabled
-                if (body != null && explicitEnabled != null) {
-                    val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
-                    val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
-                        localOverrides = localSnapshot?.overrides,
-                        serverOverrides = body.overrides
-                    )
-                    val mergedModel = body.copy(overrides = mergedOverrides)
-                    saveNotificationSettingsCache(mergedModel)
-                    shouldRegisterToken = explicitEnabled
-                    savePushEnabledPref(explicitEnabled)
-                    val rebuiltModules = buildAiModuleConfigs(mergedModel)
-                    _notificationConfigState.update {
-                        it.copy(
-                            pushEnabled = explicitEnabled,
-                            aiModules = rebuiltModules
-                        )
+                if (body == null) {
+                    logWarn {
+                        "⚠️ [SYNC CẤU HÌNH] HTTP ${resp.code()} nhưng body=null -> giữ nguyên cache cục bộ, không ghi đè server"
                     }
-                    syncCallPermissionRequirement(explicitEnabled, rebuiltModules)
+                    syncCallPermissionRequirementFromCacheFallback()
+                    shouldRegisterToken = GlobalData.preferences.getBoolean(PREF_PUSH_NOTIFICATIONS_ENABLED, true)
                 } else {
-                    // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
-                    val initModel = UserNotificationSettingsModel(
-                        global = UserNotificationGlobalSetting(
-                            enabled = true,
-                            pauseUntil = body?.global?.pauseUntil
-                        ),
-                        overrides = body?.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson(),
-                        globalScripts = body?.globalScripts
-                    )
-                    logInfo {
-                        "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
-                    }
-                    val putResp = authRepository.updateUserNotificationSettings(initModel)
-                    if (UserSession.accessToken.isEmpty()) return
-                    val effectiveModel = if (putResp.isSuccessful) {
-                        logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
-                        putResp.body() ?: initModel
-                    } else {
-                        logWarn {
-                            val putErr = runCatching { putResp.errorBody()?.string() }.getOrNull()
-                            "⚠️ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THẤT BẠI] HTTP ${putResp.code()} | errorBody=$putErr"
-                        }
-                        initModel
-                    }
-                    saveNotificationSettingsCache(effectiveModel)
-                    shouldRegisterToken = true
-                    savePushEnabledPref(true)
-                    val rebuiltModules = buildAiModuleConfigs(effectiveModel)
-                    _notificationConfigState.update {
-                        it.copy(
-                            pushEnabled = true,
-                            aiModules = rebuiltModules
+                    val explicitEnabled = body.global?.enabled
+                    if (explicitEnabled != null) {
+                        val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+                        val mergedOverrides = AiTypeHelper.mergeNotificationOverrides(
+                            localOverrides = localSnapshot?.overrides,
+                            serverOverrides = body.overrides
                         )
+                        val mergedModel = body.copy(overrides = mergedOverrides)
+                        lastServerConfirmedSettings = mergedModel
+                        saveNotificationSettingsCache(mergedModel)
+                        shouldRegisterToken = explicitEnabled
+                        savePushEnabledPref(explicitEnabled)
+                        TenliApp.syncKeepAliveWorker(getApplication(), explicitEnabled)
+                        val rebuiltModules = buildAiModuleConfigs(mergedModel)
+                        _notificationConfigState.update {
+                            it.copy(
+                                pushEnabled = explicitEnabled,
+                                aiModules = rebuiltModules
+                            )
+                        }
+                        syncCallPermissionRequirement(explicitEnabled, rebuiltModules)
+                    } else {
+                        // Tài khoản mới chưa có cấu hình global.enabled trên server -> chủ động khởi tạo mặc định (enabled = true)
+                        val initModel = UserNotificationSettingsModel(
+                            global = UserNotificationGlobalSetting(
+                                enabled = true,
+                                pauseUntil = body.global?.pauseUntil
+                            ),
+                            overrides = body.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson(),
+                            globalScripts = body.globalScripts
+                        )
+                        logInfo {
+                            "[KHỞI TẠO CẤU HÌNH CHO TÀI KHOẢN MỚI] PUT /ts/api/v1/user/settings/notification_settings | payload=${runCatching { LoginAuthClient.gson.toJson(initModel) }.getOrNull()}"
+                        }
+                        val putResp = authRepository.updateUserNotificationSettings(initModel)
+                        if (UserSession.accessToken.isEmpty()) return
+                        val effectiveModel = if (putResp.isSuccessful) {
+                            logInfo { "✅ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THÀNH CÔNG] HTTP ${putResp.code()}" }
+                            val confirmed = putResp.body()?.takeIf { it.overrides != null } ?: initModel
+                            lastServerConfirmedSettings = confirmed
+                            confirmed
+                        } else {
+                            logWarn {
+                                val putErr = runCatching { putResp.errorBody()?.string() }.getOrNull()
+                                "⚠️ [KHỞI TẠO CẤU HÌNH MẶC ĐỊNH THẤT BẠI] HTTP ${putResp.code()} | errorBody=$putErr"
+                            }
+                            initModel
+                        }
+                        saveNotificationSettingsCache(effectiveModel)
+                        shouldRegisterToken = true
+                        savePushEnabledPref(true)
+                        TenliApp.syncKeepAliveWorker(getApplication(), true)
+                        val rebuiltModules = buildAiModuleConfigs(effectiveModel)
+                        _notificationConfigState.update {
+                            it.copy(
+                                pushEnabled = true,
+                                aiModules = rebuiltModules
+                            )
+                        }
+                        syncCallPermissionRequirement(true, rebuiltModules)
                     }
-                    syncCallPermissionRequirement(true, rebuiltModules)
                 }
             } else {
                 syncCallPermissionRequirementFromCacheFallback()
@@ -331,18 +420,30 @@ class MainViewModel(
     }
 
     fun logout() {
-        if (logoutJob?.isActive == true) return
+        if (!isLoggingOut.compareAndSet(false, true)) return
         permissionSyncJob?.cancel()
         notificationLoadJob?.cancel()
+        pushToggleJob?.cancel()
         aiModuleSaveJob?.cancel()
         passwordChangeJob?.cancel()
+        pendingNetworkRefresh.set(false)
+        pendingNetworkRestoredEvent.set(false)
+        pendingActiveNetworkReconnect.set(false)
         cachedNotificationSettings = null
+        lastServerConfirmedSettings = null
         hasResolvedNotificationSettingsOnce = false
         PermissionUtils.resetCallPermissionRequirement()
         webSocketManager.disconnectAll()
-        logoutJob = viewModelScope.launch {
-            _event.emit(MainEvent.Logout)
-        }
+        _event.trySend(MainEvent.Logout)
+    }
+
+    override fun onCleared() {
+        permissionSyncJob?.cancel()
+        notificationLoadJob?.cancel()
+        pushToggleJob?.cancel()
+        aiModuleSaveJob?.cancel()
+        passwordChangeJob?.cancel()
+        super.onCleared()
     }
 
     // ---------------------------------------------------------------------------------
@@ -354,12 +455,10 @@ class MainViewModel(
         val prefs = GlobalData.preferences
         val hasCachedPref = prefs.contains(PREF_PUSH_NOTIFICATIONS_ENABLED)
         val cachedEnabled = prefs.getBoolean(PREF_PUSH_NOTIFICATIONS_ENABLED, true)
-        if (cachedNotificationSettings == null) {
-            cachedNotificationSettings = loadCachedNotificationSettingsFromPrefs()
-        }
-        val initialModules = buildAiModuleConfigs(cachedNotificationSettings)
+        val inMemorySettings = cachedNotificationSettings
+        val initialModules = buildAiModuleConfigs(inMemorySettings)
         _notificationConfigState.value = NotificationConfigState(
-            isLoading = !hasCachedPref && cachedNotificationSettings == null,
+            isLoading = !hasCachedPref && inMemorySettings == null,
             isSaving = false,
             pushEnabled = cachedEnabled,
             aiModules = initialModules
@@ -367,22 +466,45 @@ class MainViewModel(
 
         notificationLoadJob?.cancel()
         notificationLoadJob = viewModelScope.launch {
+            val currentJob = coroutineContext[Job]
             try {
+                // Giải mã JSON cache từ đĩa trên Dispatchers.IO để không chặn Main thread
+                if (cachedNotificationSettings == null) {
+                    val diskCached = loadCachedNotificationSettingsFromPrefs()
+                    if (diskCached != null && cachedNotificationSettings == null && UserSession.accessToken.isNotEmpty()) {
+                        cachedNotificationSettings = diskCached
+                        val diskEnabled = prefs.getBoolean(
+                            PREF_PUSH_NOTIFICATIONS_ENABLED,
+                            diskCached.global?.enabled ?: cachedEnabled
+                        )
+                        val diskModules = buildAiModuleConfigs(diskCached)
+                        _notificationConfigState.update {
+                            it.copy(
+                                isLoading = false,
+                                pushEnabled = diskEnabled,
+                                aiModules = diskModules
+                            )
+                        }
+                    }
+                }
+
                 // Đồng bộ lại quyền mới nhất của user từ server để danh sách bài AI luôn khớp phân quyền hiện tại
-                withContext(Dispatchers.IO) {
+                val resp = withContext(Dispatchers.IO) {
                     runCatching { UserPermissionManager.fetchAndApplyPermissions() }.onFailure { e ->
                         if (e is CancellationException) throw e
                     }
+                    logInfo {
+                        "[TẢI CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | hasCachedPref=$hasCachedPref, cachedEnabled=$cachedEnabled | ${currentAccountDebugInfo()}"
+                    }
+                    authRepository.getUserNotificationSettings()
                 }
-                logInfo {
-                    "[TẢI CẤU HÌNH] GET /ts/api/v1/user/settings/notification_settings | hasCachedPref=$hasCachedPref, cachedEnabled=$cachedEnabled | ${currentAccountDebugInfo()}"
-                }
-                val resp = authRepository.getUserNotificationSettings()
                 if (resp.isSuccessful) {
                     val body = resp.body()
-                    logInfo {
-                        val rawJson = runCatching { LoginAuthClient.gson.toJson(body) }.getOrNull()
-                        "✅ [TẢI CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
+                    withContext(Dispatchers.IO) {
+                        logInfo {
+                            val rawJson = runCatching { LoginAuthClient.gson.toJson(body) }.getOrNull()
+                            "✅ [TẢI CẤU HÌNH THÀNH CÔNG] HTTP ${resp.code()} | body=$rawJson"
+                        }
                     }
                     if (body != null) {
                         val localSnapshot = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
@@ -391,6 +513,7 @@ class MainViewModel(
                             serverOverrides = body.overrides
                         )
                         val mergedModel = body.copy(overrides = mergedOverrides)
+                        lastServerConfirmedSettings = mergedModel
                         saveNotificationSettingsCache(mergedModel)
                         val enabled = mergedModel.global?.enabled ?: true
                         val rebuiltModules = buildAiModuleConfigs(mergedModel)
@@ -404,9 +527,11 @@ class MainViewModel(
                         syncCallPermissionRequirement(enabled, rebuiltModules)
                     }
                 } else {
-                    logError {
-                        val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
-                        "❌ [TẢI CẤU HÌNH THẤT BẠI] GET /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
+                    withContext(Dispatchers.IO) {
+                        logError {
+                            val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
+                            "❌ [TẢI CẤU HÌNH THẤT BẠI] GET /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | errorBody=$errBody | ${currentAccountDebugInfo()}"
+                        }
                     }
                     MobileTopPopupManager.error(
                         BackendHttpException(resp.code(), resp.message()).toUserFriendlyMessage()
@@ -419,7 +544,9 @@ class MainViewModel(
                 }
                 MobileTopPopupManager.error(e.toUserFriendlyMessage())
             } finally {
-                _notificationConfigState.update { it.copy(isLoading = false) }
+                if (notificationLoadJob === currentJob) {
+                    _notificationConfigState.update { it.copy(isLoading = false) }
+                }
             }
         }
     }
@@ -433,12 +560,20 @@ class MainViewModel(
     fun setPushNotificationsEnabled(enabled: Boolean, hasOsPermission: Boolean) {
         notificationLoadJob?.cancel()
         aiModuleSaveJob?.cancel()
-        val previousEnabled = _notificationConfigState.value.pushEnabled
+        pushToggleJob?.cancel()
+
+        val previousSettings = lastServerConfirmedSettings ?: cachedNotificationSettings
+        val previousEnabled = lastServerConfirmedSettings?.global?.enabled ?: _notificationConfigState.value.pushEnabled
+        val previousModules = _notificationConfigState.value.aiModules
+
         _notificationConfigState.update { it.copy(pushEnabled = enabled, isSaving = true) }
         savePushEnabledPref(enabled)
-        syncCallPermissionRequirement(enabled, _notificationConfigState.value.aiModules)
-        viewModelScope.launch {
+        syncCallPermissionRequirement(enabled, previousModules)
+
+        pushToggleJob = viewModelScope.launch {
+            val currentJob = coroutineContext[Job]
             val saveFailedMsg = localized("Failed to save notification settings", "Không thể lưu cấu hình thông báo")
+            var resolvedRollbackSettings = previousSettings
             try {
                 logInfo {
                     "[LƯU CẤU HÌNH - BẮT ĐẦU] enabled=$enabled, hasOsPermission=$hasOsPermission, hasCachedModel=${cachedNotificationSettings != null} | ${currentAccountDebugInfo()}"
@@ -446,6 +581,9 @@ class MainViewModel(
                 val baseSettings = cachedNotificationSettings
                     ?: loadCachedNotificationSettingsFromPrefs()
                     ?: fetchServerNotificationSettingsQuietly()
+                if (resolvedRollbackSettings == null) {
+                    resolvedRollbackSettings = baseSettings
+                }
 
                 val baseGlobal = baseSettings?.global ?: UserNotificationGlobalSetting()
                 val baseOverrides = baseSettings?.overrides ?: UserNotificationSettingsModel.defaultNotificationOverridesJson()
@@ -464,44 +602,62 @@ class MainViewModel(
 
                 saveNotificationSettingsCache(updatedModel)
 
-                logInfo {
-                    val requestJson = runCatching { LoginAuthClient.gson.toJson(updatedModel) }.getOrNull()
-                    "[LƯU CẤU HÌNH - GỬI PUT] PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson | ${currentAccountDebugInfo()}"
+                val resp = withContext(Dispatchers.IO) {
+                    logInfo {
+                        val requestJson = runCatching { LoginAuthClient.gson.toJson(updatedModel) }.getOrNull()
+                        "[LƯU CẤU HÌNH - GỬI PUT] PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson | ${currentAccountDebugInfo()}"
+                    }
+                    authRepository.updateUserNotificationSettings(updatedModel)
                 }
-
-                val resp = authRepository.updateUserNotificationSettings(updatedModel)
                 if (resp.isSuccessful) {
                     val respBody = resp.body()
-                    logInfo {
-                        val respJson = runCatching { LoginAuthClient.gson.toJson(respBody) }.getOrNull()
-                        "✅ [LƯU CẤU HÌNH THÀNH CÔNG] PUT /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | response=$respJson"
+                    withContext(Dispatchers.IO) {
+                        logInfo {
+                            val respJson = runCatching { LoginAuthClient.gson.toJson(respBody) }.getOrNull()
+                            "✅ [LƯU CẤU HÌNH THÀNH CÔNG] PUT /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} | response=$respJson"
+                        }
                     }
                     // Giữ nguyên updatedModel (không ghi đè bằng resp.body() vì PUT trả về model rỗng overrides)
+                    lastServerConfirmedSettings = updatedModel
                     saveNotificationSettingsCache(updatedModel)
                     val rebuiltModules = buildAiModuleConfigs(updatedModel)
                     _notificationConfigState.update {
                         it.copy(aiModules = rebuiltModules)
                     }
                     syncCallPermissionRequirement(enabled, rebuiltModules)
-                    runCatching {
-                        if (enabled) {
-                            FcmTokenManager.registerDevicePushToken(force = true)
-                        } else {
-                            FcmTokenManager.unregisterDevicePushToken()
+                    withContext(Dispatchers.IO) {
+                        TenliApp.syncKeepAliveWorker(getApplication(), enabled)
+                        runCatching {
+                            if (enabled) {
+                                FcmTokenManager.registerDevicePushToken(force = true)
+                            } else {
+                                FcmTokenManager.unregisterDevicePushToken()
+                            }
+                        }.onFailure { tokenErr ->
+                            if (tokenErr is CancellationException) throw tokenErr
+                            logWarn(tokenErr) { "⚠️ [LƯU CẤU HÌNH] Lỗi đồng bộ FCM token sau khi PUT thành công: ${tokenErr.message}" }
                         }
-                    }.onFailure { tokenErr ->
-                        if (tokenErr is CancellationException) throw tokenErr
-                        logWarn(tokenErr) { "⚠️ [LƯU CẤU HÌNH] Lỗi đồng bộ FCM token sau khi PUT thành công: ${tokenErr.message}" }
                     }
                 } else {
-                    logError {
-                        val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
-                        val requestJson = runCatching { LoginAuthClient.gson.toJson(updatedModel) }.getOrNull()
-                        "❌ [LƯU CẤU HÌNH THẤT BẠI - HTTP ERROR] PUT /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} (${resp.message()}) | errorBody=$errBody | requestPayload=$requestJson | ${currentAccountDebugInfo()}"
+                    withContext(Dispatchers.IO) {
+                        logError {
+                            val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
+                            val requestJson = runCatching { LoginAuthClient.gson.toJson(updatedModel) }.getOrNull()
+                            "❌ [LƯU CẤU HÌNH THẤT BẠI - HTTP ERROR] PUT /ts/api/v1/user/settings/notification_settings -> HTTP ${resp.code()} (${resp.message()}) | errorBody=$errBody | requestPayload=$requestJson | ${currentAccountDebugInfo()}"
+                        }
                     }
-                    _notificationConfigState.update { it.copy(pushEnabled = previousEnabled) }
-                    savePushEnabledPref(previousEnabled)
-                    syncCallPermissionRequirement(previousEnabled, _notificationConfigState.value.aiModules)
+                    val rollbackEnabled = resolvedRollbackSettings?.global?.enabled ?: previousEnabled
+                    val rollbackModules = if (resolvedRollbackSettings != null) {
+                        buildAiModuleConfigs(resolvedRollbackSettings)
+                    } else {
+                        previousModules
+                    }
+                    saveNotificationSettingsCache(resolvedRollbackSettings)
+                    _notificationConfigState.update {
+                        it.copy(pushEnabled = rollbackEnabled, aiModules = rollbackModules)
+                    }
+                    savePushEnabledPref(rollbackEnabled)
+                    syncCallPermissionRequirement(rollbackEnabled, rollbackModules)
                 }
                 when {
                     !resp.isSuccessful -> MobileTopPopupManager.error(saveFailedMsg)
@@ -523,12 +679,23 @@ class MainViewModel(
                 logError(e) {
                     "❌ [LƯU CẤU HÌNH THẤT BẠI - EXCEPTION] ${e.javaClass.simpleName}: ${e.message} | ${currentAccountDebugInfo()}"
                 }
-                _notificationConfigState.update { it.copy(pushEnabled = previousEnabled) }
-                savePushEnabledPref(previousEnabled)
-                syncCallPermissionRequirement(previousEnabled, _notificationConfigState.value.aiModules)
+                val rollbackEnabled = resolvedRollbackSettings?.global?.enabled ?: previousEnabled
+                val rollbackModules = if (resolvedRollbackSettings != null) {
+                    buildAiModuleConfigs(resolvedRollbackSettings)
+                } else {
+                    previousModules
+                }
+                saveNotificationSettingsCache(resolvedRollbackSettings)
+                _notificationConfigState.update {
+                    it.copy(pushEnabled = rollbackEnabled, aiModules = rollbackModules)
+                }
+                savePushEnabledPref(rollbackEnabled)
+                syncCallPermissionRequirement(rollbackEnabled, rollbackModules)
                 MobileTopPopupManager.error(saveFailedMsg)
             } finally {
-                _notificationConfigState.update { it.copy(isSaving = false) }
+                if (pushToggleJob === currentJob) {
+                    _notificationConfigState.update { it.copy(isSaving = false) }
+                }
             }
         }
     }
@@ -545,62 +712,92 @@ class MainViewModel(
         notificationLoadJob?.cancel()
 
         val previousModules = _notificationConfigState.value.aiModules
-        val previousSettings = cachedNotificationSettings ?: loadCachedNotificationSettingsFromPrefs()
+        val previousSettings = cachedNotificationSettings
+        val currentPushEnabled = _notificationConfigState.value.pushEnabled
 
-        val baseGlobal = previousSettings?.global
-            ?: UserNotificationGlobalSetting(enabled = _notificationConfigState.value.pushEnabled)
-        val updatedOverrides = AiTypeHelper.applyModuleOverrideToJson(
-            baseOverrides = previousSettings?.overrides,
-            module = module,
-            enabled = enabled,
-            alarmMode = alarmMode.apiValue
-        )
-        val optimisticModel = if (previousSettings != null) {
+        val immediateOptimisticModel = if (previousSettings != null) {
+            val baseGlobal = previousSettings.global ?: UserNotificationGlobalSetting(enabled = currentPushEnabled)
+            val updatedOverrides = AiTypeHelper.applyModuleOverrideToJson(
+                baseOverrides = previousSettings.overrides,
+                module = module,
+                enabled = enabled,
+                alarmMode = alarmMode.apiValue
+            )
             previousSettings.copy(
                 global = baseGlobal,
                 overrides = updatedOverrides
-            )
+            ).also { cachedNotificationSettings = it }
         } else {
-            UserNotificationSettingsModel(
-                global = baseGlobal,
-                overrides = updatedOverrides
-            )
+            null
         }
 
-        // Lưu xuống đĩa và cập nhật UI tức thì trên Main thread (giữ nguyên vị trí các bài AI)
-        saveNotificationSettingsCache(optimisticModel)
-        val optimisticModules = buildAiModuleConfigs(optimisticModel)
-        _notificationConfigState.update { state ->
-            state.copy(
-                aiModules = optimisticModules
-            )
+        // Cập nhật UI tức thì trên Main thread (0ms Gson I/O; giữ nguyên vị trí các bài AI)
+        val optimisticModules = if (immediateOptimisticModel != null) {
+            buildAiModuleConfigs(immediateOptimisticModel)
+        } else {
+            previousModules.map { item ->
+                if (item.moduleKey == module.key) item.copy(enabled = enabled, alarmMode = alarmMode) else item
+            }
         }
-        syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, optimisticModules)
+        _notificationConfigState.update { state ->
+            state.copy(aiModules = optimisticModules)
+        }
+        syncCallPermissionRequirement(currentPushEnabled, optimisticModules)
 
         aiModuleSaveJob?.cancel()
         aiModuleSaveJob = viewModelScope.launch {
             val saveFailedMsg = localized("Failed to save notification settings", "Không thể lưu cấu hình thông báo")
+            var fallbackRollbackSettings = previousSettings
             try {
-                val modelToSave = cachedNotificationSettings ?: optimisticModel
-                logInfo {
-                    val requestJson = runCatching { LoginAuthClient.gson.toJson(modelToSave) }.getOrNull()
-                    "[LƯU CẤU HÌNH BÀI AI] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} | PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson"
+                val modelToSave = immediateOptimisticModel ?: run {
+                    val diskSettings = loadCachedNotificationSettingsFromPrefs()
+                    fallbackRollbackSettings = diskSettings
+                    val baseGlobal = diskSettings?.global ?: UserNotificationGlobalSetting(enabled = currentPushEnabled)
+                    val updatedOverrides = AiTypeHelper.applyModuleOverrideToJson(
+                        baseOverrides = diskSettings?.overrides,
+                        module = module,
+                        enabled = enabled,
+                        alarmMode = alarmMode.apiValue
+                    )
+                    if (diskSettings != null) {
+                        diskSettings.copy(global = baseGlobal, overrides = updatedOverrides)
+                    } else {
+                        UserNotificationSettingsModel(global = baseGlobal, overrides = updatedOverrides)
+                    }
                 }
 
-                val resp = authRepository.updateUserNotificationSettings(modelToSave)
+                // Serialize JSON xuống SharedPreferences trên Dispatchers.IO
+                saveNotificationSettingsCache(modelToSave)
+
+                val resp = withContext(Dispatchers.IO) {
+                    logInfo {
+                        val requestJson = runCatching { LoginAuthClient.gson.toJson(modelToSave) }.getOrNull()
+                        "[LƯU CẤU HÌNH BÀI AI] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} | PUT /ts/api/v1/user/settings/notification_settings | payload=$requestJson"
+                    }
+                    authRepository.updateUserNotificationSettings(modelToSave)
+                }
                 if (resp.isSuccessful) {
+                    lastServerConfirmedSettings = modelToSave
                     logInfo {
                         "✅ [LƯU CẤU HÌNH BÀI AI THÀNH CÔNG] module=${module.key}, enabled=$enabled, alarmMode=${alarmMode.apiValue} -> HTTP ${resp.code()}"
                     }
                     // Lưu ý: Không ghi đè cachedNotificationSettings bằng resp.body() vì API PUT trả về object không chứa overrides.event_types
                 } else {
-                    logError {
-                        val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
-                        "❌ [LƯU CẤU HÌNH BÀI AI THẤT BẠI] module=${module.key} -> HTTP ${resp.code()} | errorBody=$errBody"
+                    withContext(Dispatchers.IO) {
+                        logError {
+                            val errBody = runCatching { resp.errorBody()?.string() }.getOrNull()
+                            "❌ [LƯU CẤU HÌNH BÀI AI THẤT BẠI] module=${module.key} -> HTTP ${resp.code()} | errorBody=$errBody"
+                        }
                     }
-                    saveNotificationSettingsCache(previousSettings)
-                    _notificationConfigState.update { it.copy(aiModules = previousModules) }
-                    syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, previousModules)
+                    val rollbackModel = lastServerConfirmedSettings ?: fallbackRollbackSettings
+                    val rollbackModules = if (rollbackModel != null) buildAiModuleConfigs(rollbackModel) else previousModules
+                    val rollbackPushEnabled = rollbackModel?.global?.enabled ?: _notificationConfigState.value.pushEnabled
+                    saveNotificationSettingsCache(rollbackModel)
+                    _notificationConfigState.update {
+                        it.copy(pushEnabled = rollbackPushEnabled, aiModules = rollbackModules)
+                    }
+                    savePushEnabledPref(rollbackPushEnabled)
+                    syncCallPermissionRequirement(rollbackPushEnabled, rollbackModules)
                     MobileTopPopupManager.error(saveFailedMsg)
                 }
             } catch (e: Exception) {
@@ -608,26 +805,38 @@ class MainViewModel(
                 logError(e) {
                     "❌ [EXCEPTION LƯU CẤU HÌNH BÀI AI] module=${module.key} -> ${e.javaClass.simpleName}: ${e.message}"
                 }
-                saveNotificationSettingsCache(previousSettings)
-                _notificationConfigState.update { it.copy(aiModules = previousModules) }
-                syncCallPermissionRequirement(_notificationConfigState.value.pushEnabled, previousModules)
+                val rollbackModel = lastServerConfirmedSettings ?: fallbackRollbackSettings
+                val rollbackModules = if (rollbackModel != null) buildAiModuleConfigs(rollbackModel) else previousModules
+                val rollbackPushEnabled = rollbackModel?.global?.enabled ?: _notificationConfigState.value.pushEnabled
+                saveNotificationSettingsCache(rollbackModel)
+                _notificationConfigState.update {
+                    it.copy(pushEnabled = rollbackPushEnabled, aiModules = rollbackModules)
+                }
+                savePushEnabledPref(rollbackPushEnabled)
+                syncCallPermissionRequirement(rollbackPushEnabled, rollbackModules)
                 MobileTopPopupManager.error(saveFailedMsg)
             }
         }
     }
 
     private suspend fun fetchServerNotificationSettingsQuietly(): UserNotificationSettingsModel? {
-        return runCatching {
-            logInfo { "[LƯU CẤU HÌNH] cachedNotificationSettings=null -> gọi GET /ts/api/v1/user/settings/notification_settings trước khi PUT" }
-            val getResp = authRepository.getUserNotificationSettings()
-            if (getResp.isSuccessful) {
-                getResp.body()
-            } else {
-                null
-            }
-        }.onFailure { e ->
-            if (e is CancellationException) throw e
-        }.getOrNull()
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                logInfo { "[LƯU CẤU HÌNH] cachedNotificationSettings=null -> gọi GET /ts/api/v1/user/settings/notification_settings trước khi PUT" }
+                val getResp = authRepository.getUserNotificationSettings()
+                if (getResp.isSuccessful) {
+                    getResp.body()?.also { serverBody ->
+                        if (lastServerConfirmedSettings == null) {
+                            lastServerConfirmedSettings = serverBody
+                        }
+                    }
+                } else {
+                    null
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) throw e
+            }.getOrNull()
+        }
     }
 
     private fun buildAiModuleConfigs(
@@ -648,29 +857,36 @@ class MainViewModel(
         }
     }
 
-    private fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {
+    private suspend fun saveNotificationSettingsCache(model: UserNotificationSettingsModel?) {
         if (model != null && UserSession.accessToken.isEmpty()) return
         cachedNotificationSettings = model
-        runCatching {
-            val json = if (model != null) LoginAuthClient.gson.toJson(model) else null
-            GlobalData.preferences.edit {
-                if (json != null) {
-                    putString(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON, json)
-                } else {
-                    remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+        withContext(Dispatchers.IO) {
+            if (model != null && UserSession.accessToken.isEmpty()) return@withContext
+            // Tránh bản ghi cũ trên IO ghi đè model mới hơn đã cập nhật trong RAM (hoặc đã logout)
+            if (cachedNotificationSettings !== model) return@withContext
+            runCatching {
+                val json = if (model != null) LoginAuthClient.gson.toJson(model) else null
+                GlobalData.preferences.edit {
+                    if (json != null) {
+                        putString(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON, json)
+                    } else {
+                        remove(AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON)
+                    }
                 }
             }
         }
     }
 
-    private fun loadCachedNotificationSettingsFromPrefs(): UserNotificationSettingsModel? {
-        return runCatching {
-            val raw = GlobalData.preferences.getString(
-                AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON,
-                null
-            ) ?: return null
-            LoginAuthClient.gson.fromJson(raw, UserNotificationSettingsModel::class.java)
-        }.getOrNull()
+    private suspend fun loadCachedNotificationSettingsFromPrefs(): UserNotificationSettingsModel? {
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val raw = GlobalData.preferences.getString(
+                    AiTypeHelper.PREF_USER_NOTIFICATION_SETTINGS_JSON,
+                    null
+                )
+                raw?.let { LoginAuthClient.gson.fromJson(it, UserNotificationSettingsModel::class.java) }
+            }.getOrNull()
+        }
     }
 
     private fun savePushEnabledPref(enabled: Boolean) {

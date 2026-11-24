@@ -2,6 +2,7 @@ package com.tenli.oneview.ui.features.monitor
 
 import android.app.Application
 import android.graphics.Bitmap
+import android.util.LruCache
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -50,6 +51,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -59,6 +61,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -160,6 +163,10 @@ data class MonitorUiState(
     val defaultPlaybackChannel: String = "main", // "main" | "sub"
     val playbackChannel: String = "main", // "main" | "sub"
     val playbackTimeFilter: TimeFilter = TimeFilter.TODAY,
+    val playbackCustomStartMs: Long = TimeFilter.customDateStartMs,
+    val playbackCustomEndMs: Long = TimeFilter.customDateEndMs,
+    val playbackCustomRangeFromMs: Long = TimeFilter.customRangeFromMs,
+    val playbackCustomRangeToMs: Long = TimeFilter.customRangeToMs,
     val playbackDayGroups: List<PlaybackDayGroup> = emptyList(),
     val isLoadingPlaybacks: Boolean = false,
     val isLoadingMorePlaybackDays: Boolean = false,
@@ -174,6 +181,10 @@ data class MonitorUiState(
     val isPaginatingCameraEvents: Boolean = false,
     val hasMoreCameraEvents: Boolean = false,
     val cameraEventTimeFilter: TimeFilter = TimeFilter.TODAY,
+    val cameraEventCustomStartMs: Long = TimeFilter.customDateStartMs,
+    val cameraEventCustomEndMs: Long = TimeFilter.customDateEndMs,
+    val cameraEventCustomRangeFromMs: Long = TimeFilter.customRangeFromMs,
+    val cameraEventCustomRangeToMs: Long = TimeFilter.customRangeToMs,
     val cameraEventAiType: String? = null
 ) {
     val hasActivePlaybackFilter: Boolean
@@ -392,6 +403,7 @@ private class CameraTreeIndex(val tree: List<CameraTreeNode>) {
     }
 }
 
+@OptIn(FlowPreview::class)
 class MonitorViewModel(
     application: Application,
     private val monitorRepository: MonitorRepository,
@@ -407,42 +419,47 @@ class MonitorViewModel(
     var activePlaybackPlaying by mutableStateOf(false)
         private set
 
-    /** Chỉ được đọc/ghi trên Main thread (cùng luồng với _uiState.update) */
-    private var treeIndex = CameraTreeIndex(emptyList())
-    private var latestCameraStatusMap: Map<String, String> = emptyMap()
+    @Volatile private var treeIndex = CameraTreeIndex(emptyList())
+    @Volatile private var latestCameraStatusMap: Map<String, String> = emptyMap()
+    @Volatile private var pendingCameraStatusRecompute: Boolean = false
+    @Volatile private var pendingNetworkRestoreReload: Boolean = false
 
     /** Dữ liệu gốc chưa lọc phân quyền để dựng lại cây khi quyền tài khoản thay đổi */
-    private var rawVmsList: List<VMSServiceModel> = emptyList()
-    private var rawGroupList: List<CameraGroupModel> = emptyList()
-    private var rawCameraList: List<CameraModel> = emptyList()
-    private var rawCameraInGroups: List<CameraInGroupModel> = emptyList()
+    @Volatile private var rawVmsList: List<VMSServiceModel> = emptyList()
+    @Volatile private var rawGroupList: List<CameraGroupModel> = emptyList()
+    @Volatile private var rawCameraList: List<CameraModel> = emptyList()
+    @Volatile private var rawCameraInGroups: List<CameraInGroupModel> = emptyList()
 
     /** AI services chỉ dùng để lưu kèm cache Monitor (các màn hình khác đọc lại), UI màn hình này không hiển thị */
-    private var aiServices: List<AIServiceModel> = emptyList()
+    @Volatile private var aiServices: List<AIServiceModel> = emptyList()
 
+    private var loadDataJob: Job? = null
     private val streamJobs = arrayOfNulls<Job>(SLOT_COUNT)
     private val blinkJobs = arrayOfNulls<Job>(SLOT_COUNT)
+    private val slotSnapshotJobs = arrayOfNulls<Job>(SLOT_COUNT)
     private var snapshotLookupJob: Job? = null
+    private var playbackPrewarmJob: Job? = null
     private var playbackFetchJob: Job? = null
     private var playbackLoadMoreDaysJob: Job? = null
     private var playbackThumbPrefetchJob: Job? = null
     private val playbackDayJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
-    private val playbackSessionCache = java.util.concurrent.ConcurrentHashMap<String, CachedPlaybackSession>()
+    private val playbackSessionCache = LruCache<String, PlaybackSessionCacheEntry>(PLAYBACK_SESSION_CACHE_MAX_SIZE)
+    private var cameraEventPrewarmJob: Job? = null
     private var cameraEventFetchJob: Job? = null
     private var cameraEventPaginateJob: Job? = null
     private val cameraEventRealtimeChannel = Channel<Boolean>(Channel.CONFLATED)
-    private var lastCameraEventRawId: Int? = null
-    private var lastCameraEventRawIdByType: Map<String, Int?> = emptyMap()
-    private var exhaustedCameraEventTypes: Set<String> = emptySet()
+    @Volatile private var lastCameraEventRawId: Int? = null
+    @Volatile private var lastCameraEventRawIdByType: Map<String, Int?> = emptyMap()
+    @Volatile private var exhaustedCameraEventTypes: Set<String> = emptySet()
     @Volatile private var effectiveCameraUnfilteredTypes: List<String> = emptyList()
-    private var playbackLoadedForCameraId: Int? = null
-    private var eventsLoadedForCameraId: Int? = null
-    private var playbackCurrentSearchDayMs: Long? = null
-    private var playbackMinSearchDayMs: Long? = null
-    private var playbackRangeMinMs: Long = 0L
-    private var playbackRangeMaxMs: Long = 0L
+    @Volatile private var playbackLoadedForCameraId: Int? = null
+    @Volatile private var eventsLoadedForCameraId: Int? = null
+    @Volatile private var playbackCurrentSearchDayMs: Long? = null
+    @Volatile private var playbackMinSearchDayMs: Long? = null
+    @Volatile private var playbackRangeMinMs: Long = 0L
+    @Volatile private var playbackRangeMaxMs: Long = 0L
 
-    private data class CachedPlaybackSession(
+    private data class PlaybackSessionCacheEntry(
         val dayGroups: List<PlaybackDayGroup>,
         val hasMoreDays: Boolean,
         val nextSearchDayMs: Long?,
@@ -452,7 +469,7 @@ class MonitorViewModel(
         val updatedAt: Long
     )
 
-    private var isMonitorTabActive: Boolean = false
+    @Volatile private var isMonitorTabActive: Boolean = false
     private val cardSnapshotJobs = java.util.concurrent.ConcurrentHashMap<Int, Job>()
     @Volatile
     private var currentVisibleCameras: List<CameraModel> = emptyList()
@@ -474,11 +491,15 @@ class MonitorViewModel(
         /** Đồng bộ PlaybackPage.vue (VMS mode): mỗi ngày tải 12 video, mỗi lô tối đa 8 ngày */
         private const val PLAYBACK_PER_DAY_COUNT = 12
         private const val PLAYBACK_DAYS_BATCH = 8
+        private const val PLAYBACK_SESSION_CACHE_MAX_SIZE = 24
+        private const val PLAYBACK_SESSION_CACHE_TTL_MS = 5L * 60L * 1000L
 
         /** Đồng bộ EventViewModel: mỗi batch lấy 50 bản ghi thô, lọc tối thiểu 20 sự kiện hợp lệ */
         private const val EVENT_RAW_BATCH_SIZE = 50
         private const val EVENT_PAGE_TARGET_COUNT = 20
         private const val EVENT_MAX_BATCH_ATTEMPTS = 5
+        private const val MAX_REALTIME_CAMERA_EVENTS = 500
+        private const val STATUS_DEBOUNCE_MS = 350L
 
         /** Đồng bộ LiveVideoView.vue: poll `LiveStream` mỗi 2000ms, tối đa 10 lần trên mobile */
         private const val LIVE_POLL_MAX_ATTEMPTS = 10
@@ -675,38 +696,27 @@ class MonitorViewModel(
     init {
         val savedNodes = monitorRepository.getExpandedNodesPref()
         val savedFavorites = monitorRepository.getFavoriteCameraIds()
+        latestCameraStatusMap = webSocketManager.cameraStatusMap.value
         _uiState.update {
             it.copy(
+                isLoading = true,
                 expandedNodes = savedNodes,
                 favoriteCameraIds = savedFavorites,
                 gridSize = 1
             )
         }
 
-        viewModelScope.launch {
-            webSocketManager.cameraStatusMap.collect { statusMap ->
-                latestCameraStatusMap = statusMap
-                val nextOffline = computeOfflineCameraIds(treeIndex.allCameras, statusMap)
-                _uiState.update { cur ->
-                    if (cur.offlineCameraIds == nextOffline) cur
-                    else cur.copy(offlineCameraIds = nextOffline).withDerivedData()
+        viewModelScope.launch(Dispatchers.Default) {
+            webSocketManager.cameraStatusMap
+                .debounce(STATUS_DEBOUNCE_MS)
+                .collect { statusMap ->
+                    latestCameraStatusMap = statusMap
+                    if (isMonitorTabActive) {
+                        recomputeOfflineCameras(statusMap)
+                    } else {
+                        pendingCameraStatusRecompute = true
+                    }
                 }
-            }
-        }
-
-        // Nếu dữ liệu cây camera đã được preload sẵn trong RAM, áp dụng ngay tức thì (0ms)
-        val memCached = monitorRepository.getMonitorDataInMemory()
-        if (memCached != null && (memCached.vmsList.isNotEmpty() || memCached.cameraList.isNotEmpty())) {
-            rawVmsList = memCached.vmsList
-            rawGroupList = memCached.groupList
-            rawCameraList = memCached.cameraList
-            rawCameraInGroups = memCached.cameraInGroups
-            if (memCached.aiServices.isNotEmpty()) aiServices = memCached.aiServices
-            applyTree(
-                CameraTreeIndex(
-                    buildTree(memCached.vmsList, memCached.groupList, memCached.cameraList, memCached.cameraInGroups)
-                )
-            )
         }
 
         // Lắng nghe cập nhật snapshot (vd. frame vừa chụp từ luồng live) để đồng bộ ngay lên thẻ camera & ô live
@@ -744,7 +754,11 @@ class MonitorViewModel(
 
         viewModelScope.launch {
             EventBus.networkRestored.collect {
-                loadData()
+                if (isMonitorTabActive) {
+                    loadData()
+                } else {
+                    pendingNetworkRestoreReload = true
+                }
             }
         }
 
@@ -894,13 +908,21 @@ class MonitorViewModel(
         return offline
     }
 
+    private fun recomputeOfflineCameras(statusMap: Map<String, String>) {
+        val index = treeIndex
+        val nextOffline = computeOfflineCameraIds(index.allCameras, statusMap)
+        _uiState.update { cur ->
+            if (cur.offlineCameraIds == nextOffline) cur
+            else cur.copy(offlineCameraIds = nextOffline).withDerivedData(index)
+        }
+    }
+
     /**
      * Chuẩn hoá bộ lọc/trang và tính lại dữ liệu suy ra (danh sách camera theo trang, cây nhóm...).
      * Chỉ gọi khi cây / bộ lọc / tìm kiếm / trang / nhóm mở rộng thay đổi. Giữ nguyên instance list cũ nếu nội dung
      * không đổi để Compose bỏ qua recomposition.
      */
-    private fun MonitorUiState.withDerivedData(): MonitorUiState {
-        val index = treeIndex
+    private fun MonitorUiState.withDerivedData(index: CameraTreeIndex = treeIndex): MonitorUiState {
         val filterKey = if (selectedFilterNodeKey != FILTER_ALL &&
             (index.vmsNodes.isEmpty() || !index.hasNode(selectedFilterNodeKey))
         ) FILTER_ALL else selectedFilterNodeKey
@@ -994,6 +1016,26 @@ class MonitorViewModel(
         streamJobs[slotIndex] = null
     }
 
+    private fun cancelSlotSnapshotJob(slotIndex: Int) {
+        slotSnapshotJobs[slotIndex]?.cancel()
+        slotSnapshotJobs[slotIndex] = null
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        loadDataJob?.cancel()
+        loadDataJob = null
+        for (i in 0 until SLOT_COUNT) {
+            cancelStreamJob(i)
+            cancelSlotSnapshotJob(i)
+            blinkJobs[i]?.cancel()
+            blinkJobs[i] = null
+        }
+        cancelAllCardSnapshotFetches()
+        cancelCameraDetailSubJobs()
+        playbackSessionCache.evictAll()
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Tab / grid / selection
     // ---------------------------------------------------------------------------------------------
@@ -1008,7 +1050,10 @@ class MonitorViewModel(
         if (!active) {
             // Dừng mọi vòng poll LiveStream / retry, huỷ tải snapshot và tác vụ phụ khi màn hình không hiển thị hoặc app vào nền.
             // Đồng thời xóa ngay streamUrl cũ (token WS chỉ dùng 1 lần) để khi quay lại không khởi tạo nhầm ExoPlayer với link cũ ở Frame 1.
-            for (i in 0 until SLOT_COUNT) cancelStreamJob(i)
+            for (i in 0 until SLOT_COUNT) {
+                cancelStreamJob(i)
+                cancelSlotSnapshotJob(i)
+            }
             cancelAllCardSnapshotFetches()
             cancelCameraDetailSubJobs()
             _uiState.update { cur ->
@@ -1026,6 +1071,19 @@ class MonitorViewModel(
                         }
                     )
                 }
+            }
+        } else {
+            if (pendingCameraStatusRecompute) {
+                pendingCameraStatusRecompute = false
+                viewModelScope.launch(Dispatchers.Default) {
+                    val statusMap = webSocketManager.cameraStatusMap.value
+                    latestCameraStatusMap = statusMap
+                    recomputeOfflineCameras(statusMap)
+                }
+            }
+            if (pendingNetworkRestoreReload) {
+                pendingNetworkRestoreReload = false
+                loadData()
             }
         }
     }
@@ -1537,15 +1595,19 @@ class MonitorViewModel(
         if (camId == 0) return
         // Khi thiết bị đang mất kết nối mạng, giữ nguyên link snapshot đã cache trên đĩa tránh xóa nhầm
         if (!NetworkMonitor.isNetworkAvailable()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            monitorRepository.removeCachedCameraImageLink(camId)
-        }
-
-        if (retriedCardSnapshotIds.add(camId)) {
+        val shouldRetry = retriedCardSnapshotIds.add(camId)
+        if (shouldRetry) {
             _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots - camId) }
-            fetchCardSnapshot(cam, force = true)
         } else {
             _uiState.update { cur -> cur.copy(cameraSnapshots = cur.cameraSnapshots + (camId to null)) }
+        }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                monitorRepository.removeCachedCameraImageLink(camId)
+            }
+            if (shouldRetry) {
+                fetchCardSnapshot(cam, force = true)
+            }
         }
     }
 
@@ -1579,7 +1641,7 @@ class MonitorViewModel(
                 expandedNodes = expanded,
                 favoriteCameraIds = savedFavorites,
                 offlineCameraIds = offlineIds
-            ).withDerivedData()
+            ).withDerivedData(index)
         }
         // Không tự động chọn camera phát live khi mới vào màn hình: chỉ hiển thị lưới snapshot camera,
         // người dùng chạm vào camera nào mới mở màn hình xem trực tiếp của camera đó.
@@ -1587,9 +1649,12 @@ class MonitorViewModel(
     }
 
     private fun loadData() {
-        viewModelScope.launch {
+        loadDataJob?.cancel()
+        loadDataJob = viewModelScope.launch {
             if (treeIndex.tree.isEmpty()) {
-                val cachedData = monitorRepository.getMonitorData()
+                val cachedData = monitorRepository.getMonitorDataInMemory()
+                    ?.takeIf { it.vmsList.isNotEmpty() || it.cameraList.isNotEmpty() }
+                    ?: monitorRepository.getMonitorData()
                 if (cachedData != null && (cachedData.vmsList.isNotEmpty() || cachedData.cameraList.isNotEmpty())) {
                     rawVmsList = cachedData.vmsList
                     rawGroupList = cachedData.groupList
@@ -1745,19 +1810,25 @@ class MonitorViewModel(
         // Pre-warm danh sách playback & sự kiện ngầm sau khi hiệu ứng trượt mở Live hoàn tất (~350ms)
         // để khi người dùng vuốt ngang sang tab "Xem lại" hoặc "Sự kiện", dữ liệu hiển thị tức thì 0ms.
         if (UserPermissionManager.canAccessPlayback()) {
-            playbackFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            playbackPrewarmJob = viewModelScope.launch {
                 delay(350L)
                 val activeCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
-                if (activeCam?.id == camera.id && playbackLoadedForCameraId != camera.id) {
+                if (activeCam?.id == camera.id &&
+                    playbackLoadedForCameraId != camera.id &&
+                    playbackFetchJob?.isActive != true
+                ) {
                     fetchCameraPlaybacks(isBackgroundPrewarm = true)
                 }
             }
         }
         if (UserPermissionManager.canAccessEvents()) {
-            cameraEventFetchJob = viewModelScope.launch(Dispatchers.IO) {
+            cameraEventPrewarmJob = viewModelScope.launch {
                 delay(480L)
                 val activeCam = _uiState.value.selectedCameras.getOrNull(0)?.camera
-                if (activeCam?.id == camera.id && eventsLoadedForCameraId != camera.id) {
+                if (activeCam?.id == camera.id &&
+                    eventsLoadedForCameraId != camera.id &&
+                    cameraEventFetchJob?.isActive != true
+                ) {
                     fetchCameraEvents(isUserRefresh = false, isBackgroundPrewarm = true)
                 }
             }
@@ -1765,6 +1836,8 @@ class MonitorViewModel(
     }
 
     private fun cancelCameraDetailSubJobs() {
+        playbackPrewarmJob?.cancel()
+        playbackPrewarmJob = null
         playbackFetchJob?.cancel()
         playbackFetchJob = null
         playbackLoadMoreDaysJob?.cancel()
@@ -1773,6 +1846,8 @@ class MonitorViewModel(
         playbackThumbPrefetchJob = null
         for (job in playbackDayJobs.values) job.cancel()
         playbackDayJobs.clear()
+        cameraEventPrewarmJob?.cancel()
+        cameraEventPrewarmJob = null
         cameraEventFetchJob?.cancel()
         cameraEventFetchJob = null
         cameraEventPaginateJob?.cancel()
@@ -1986,61 +2061,67 @@ class MonitorViewModel(
     }
 
     private fun ensureCameraSnapshotUrl(camera: CameraModel, slotIndex: Int, force: Boolean) {
-        viewModelScope.launch {
-            if (!force) {
-                val currentSlot = _uiState.value.selectedCameras.getOrNull(slotIndex)
-                if (currentSlot?.camera?.id == camera.id && currentSlot.fallbackImageUrl.isNotEmpty()) {
-                    val hasFreshCache = withContext(Dispatchers.IO) {
-                        monitorRepository.isSnapshotCacheFresh(camera.id) &&
-                            !monitorRepository.getCachedCameraImageLink(camera.id).isNullOrBlank()
+        if (slotIndex !in 0 until SLOT_COUNT) return
+        slotSnapshotJobs[slotIndex]?.cancel()
+        slotSnapshotJobs[slotIndex] = viewModelScope.launch {
+            ensureCameraSnapshotUrlInternal(camera, slotIndex, force)
+        }
+    }
+
+    private suspend fun ensureCameraSnapshotUrlInternal(camera: CameraModel, slotIndex: Int, force: Boolean) {
+        if (!force) {
+            val currentSlot = _uiState.value.selectedCameras.getOrNull(slotIndex)
+            if (currentSlot?.camera?.id == camera.id && currentSlot.fallbackImageUrl.isNotEmpty()) {
+                val hasFreshCache = withContext(Dispatchers.IO) {
+                    monitorRepository.isSnapshotCacheFresh(camera.id) &&
+                        !monitorRepository.getCachedCameraImageLink(camera.id).isNullOrBlank()
+                }
+                if (hasFreshCache) return
+            }
+        }
+
+        try {
+            var rawLink = ""
+            val response = safeApiCall { monitorRepository.getCameraImageLink(camera.id) }.getOrNull()
+            if (response?.isSuccessful == true) {
+                val fetched = response.body()?.link?.trim().orEmpty()
+                if (fetched.isNotEmpty() && fetched != NO_IMAGE) {
+                    rawLink = fetched
+                }
+            }
+            if (rawLink.isEmpty()) {
+                val videoRes = safeApiCall {
+                    monitorRepository.getVideoList(camera = camera.id, count = 1, from = null, to = null)
+                }.getOrNull()
+                if (videoRes?.isSuccessful == true) {
+                    val firstVideo = videoRes.body()?.firstOrNull()
+                    val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
+                    if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
+                        rawLink = rawThumb
                     }
-                    if (hasFreshCache) return@launch
                 }
             }
 
-            try {
-                var rawLink = ""
-                val response = runCatching { monitorRepository.getCameraImageLink(camera.id) }.getOrNull()
-                if (response?.isSuccessful == true) {
-                    val fetched = response.body()?.link?.trim().orEmpty()
-                    if (fetched.isNotEmpty() && fetched != NO_IMAGE) {
-                        rawLink = fetched
+            if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
+                val finalSnap = withContext(Dispatchers.IO) {
+                    monitorRepository.setCachedCameraImageLink(camera.id, rawLink)
+                    val latestCached = monitorRepository.getCachedCameraImageLink(camera.id)
+                    if (latestCached != null && latestCached.startsWith("file://")) latestCached else resolveFullMediaUrl(rawLink)
+                }
+                updateSlot(slotIndex, camera.id) { slot ->
+                    if (force || slot.fallbackImageUrl.isEmpty()) {
+                        slot.copy(fallbackImageUrl = finalSnap)
+                    } else {
+                        slot
                     }
                 }
-                if (rawLink.isEmpty()) {
-                    val videoRes = runCatching {
-                        monitorRepository.getVideoList(camera = camera.id, count = 1, from = null, to = null)
-                    }.getOrNull()
-                    if (videoRes?.isSuccessful == true) {
-                        val firstVideo = videoRes.body()?.firstOrNull()
-                        val rawThumb = firstVideo?.thumbnailLink?.ifBlank { firstVideo.imageLink }?.trim().orEmpty()
-                        if (rawThumb.isNotEmpty() && rawThumb != NO_IMAGE) {
-                            rawLink = rawThumb
-                        }
-                    }
-                }
-
-                if (rawLink.isNotEmpty() && rawLink != NO_IMAGE) {
-                    val finalSnap = withContext(Dispatchers.IO) {
-                        monitorRepository.setCachedCameraImageLink(camera.id, rawLink)
-                        val latestCached = monitorRepository.getCachedCameraImageLink(camera.id)
-                        if (latestCached != null && latestCached.startsWith("file://")) latestCached else resolveFullMediaUrl(rawLink)
-                    }
-                    updateSlot(slotIndex, camera.id) { slot ->
-                        if (force || slot.fallbackImageUrl.isEmpty()) {
-                            slot.copy(fallbackImageUrl = finalSnap)
-                        } else {
-                            slot
-                        }
-                    }
-                } else if (force) {
-                    clearSlotSnapshotUrl(camera.id, slotIndex)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                if (force) clearSlotSnapshotUrl(camera.id, slotIndex)
+            } else if (force) {
+                clearSlotSnapshotUrl(camera.id, slotIndex)
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            if (force) clearSlotSnapshotUrl(camera.id, slotIndex)
         }
     }
 
@@ -2061,18 +2142,24 @@ class MonitorViewModel(
      * Khi ảnh snapshot cache bị lỗi hoặc hết hạn, xoá khỏi cache và gọi lại `CameraImageLink/{id}` với `force = true` 1 lần.
      */
     fun onSnapshotLoadError(slotIndex: Int) {
+        if (slotIndex !in 0 until SLOT_COUNT) return
         if (!NetworkMonitor.isNetworkAvailable()) return
         val current = _uiState.value.selectedCameras.getOrNull(slotIndex) ?: return
         val camera = current.camera
-        viewModelScope.launch(Dispatchers.IO) {
-            monitorRepository.removeCachedCameraImageLink(camera.id)
-        }
-
-        if (!current.snapshotRetried) {
+        val shouldRetry = !current.snapshotRetried
+        if (shouldRetry) {
             updateSlot(slotIndex, camera.id) { it.copy(snapshotRetried = true) }
-            ensureCameraSnapshotUrl(camera, slotIndex, force = true)
         } else {
             clearSlotSnapshotUrl(camera.id, slotIndex)
+        }
+        slotSnapshotJobs[slotIndex]?.cancel()
+        slotSnapshotJobs[slotIndex] = viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                monitorRepository.removeCachedCameraImageLink(camera.id)
+            }
+            if (shouldRetry) {
+                ensureCameraSnapshotUrlInternal(camera, slotIndex, force = true)
+            }
         }
     }
 
@@ -2145,8 +2232,7 @@ class MonitorViewModel(
                                 it.copy(
                                     streamUrl = wsUrl,
                                     channel = channel,
-                                    hasFallbackTried = isFallback,
-                                    retryCount = 0
+                                    hasFallbackTried = isFallback
                                 )
                             }
                             _uiState.update { it.copy(error = null) }
@@ -2187,6 +2273,7 @@ class MonitorViewModel(
     fun removeCamera(slotIndex: Int) {
         if (slotIndex !in 0 until SLOT_COUNT) return
         cancelStreamJob(slotIndex)
+        cancelSlotSnapshotJob(slotIndex)
         var updatedCameras: List<SelectedCamera?> = emptyList()
         _uiState.update { state ->
             val cameras = state.selectedCameras.toPaddedMutableList()
@@ -2257,31 +2344,120 @@ class MonitorViewModel(
         override fun initialValue(): SimpleDateFormat = SimpleDateFormat("HH:mm:ss dd/MM/yyyy", Locale.getDefault())
     }
 
-    private fun playbackCacheKey(cameraId: Int, filter: TimeFilter, channel: String): String =
-        "${cameraId}_${filter.name}_$channel"
+    private fun resolveMonitorTimeRangeMillis(
+        filter: TimeFilter,
+        customStartMs: Long,
+        customEndMs: Long,
+        customRangeFromMs: Long,
+        customRangeToMs: Long
+    ): Pair<Long, Long> = when (filter) {
+        TimeFilter.CUSTOM_DATE -> {
+            val start = customStartMs.takeIf { it > 0L } ?: TimeFilter.customDateStartMs
+            val end = customEndMs.takeIf { it > 0L } ?: TimeFilter.customDateEndMs
+            start to end
+        }
+        TimeFilter.CUSTOM_RANGE -> {
+            val from = customRangeFromMs.takeIf { it > 0L } ?: TimeFilter.customRangeFromMs
+            val to = customRangeToMs.takeIf { it > 0L } ?: TimeFilter.customRangeToMs
+            if (from <= to) from to to else to to from
+        }
+        else -> TimeFilter.resolveTimeRangeMillis(filter)
+    }
+
+    private fun playbackCustomToken(
+        filter: TimeFilter,
+        customStartMs: Long,
+        customEndMs: Long,
+        customRangeFromMs: Long,
+        customRangeToMs: Long
+    ): String = when (filter) {
+        TimeFilter.CUSTOM_DATE -> "${customStartMs}_${customEndMs}"
+        TimeFilter.CUSTOM_RANGE -> "${customRangeFromMs}_${customRangeToMs}"
+        else -> ""
+    }
+
+    private fun playbackCacheKey(
+        cameraId: Int,
+        filter: TimeFilter,
+        channel: String,
+        customStartMs: Long = 0L,
+        customEndMs: Long = 0L,
+        customRangeFromMs: Long = 0L,
+        customRangeToMs: Long = 0L
+    ): String {
+        val todayDateKey = formatDateKey(System.currentTimeMillis())
+        val customToken = playbackCustomToken(
+            filter = filter,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+        return if (customToken.isEmpty()) {
+            "${cameraId}_${filter.name}_${todayDateKey}_$channel"
+        } else {
+            "${cameraId}_${filter.name}_${customToken}_${todayDateKey}_$channel"
+        }
+    }
 
     private fun getPlaybackSessionCache(
         cameraId: Int,
         filter: TimeFilter,
-        channel: String
-    ): CachedPlaybackSession? = playbackSessionCache[playbackCacheKey(cameraId, filter, channel)]
+        channel: String,
+        customStartMs: Long = 0L,
+        customEndMs: Long = 0L,
+        customRangeFromMs: Long = 0L,
+        customRangeToMs: Long = 0L
+    ): PlaybackSessionCacheEntry? {
+        val key = playbackCacheKey(
+            cameraId = cameraId,
+            filter = filter,
+            channel = channel,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+        val entry = playbackSessionCache.get(key) ?: return null
+        if (System.currentTimeMillis() - entry.updatedAt > PLAYBACK_SESSION_CACHE_TTL_MS) {
+            playbackSessionCache.remove(key)
+            return null
+        }
+        return entry
+    }
 
     private fun putPlaybackSessionCache(
         cameraId: Int,
         filter: TimeFilter,
         channel: String,
+        customStartMs: Long,
+        customEndMs: Long,
+        customRangeFromMs: Long,
+        customRangeToMs: Long,
         dayGroups: List<PlaybackDayGroup>,
         hasMoreDays: Boolean
     ) {
         if (cameraId <= 0) return
-        playbackSessionCache[playbackCacheKey(cameraId, filter, channel)] = CachedPlaybackSession(
-            dayGroups = dayGroups,
-            hasMoreDays = hasMoreDays,
-            nextSearchDayMs = playbackCurrentSearchDayMs,
-            minSearchDayMs = playbackMinSearchDayMs,
-            rangeMinMs = playbackRangeMinMs,
-            rangeMaxMs = playbackRangeMaxMs,
-            updatedAt = System.currentTimeMillis()
+        val key = playbackCacheKey(
+            cameraId = cameraId,
+            filter = filter,
+            channel = channel,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+        playbackSessionCache.put(
+            key,
+            PlaybackSessionCacheEntry(
+                dayGroups = dayGroups,
+                hasMoreDays = hasMoreDays,
+                nextSearchDayMs = playbackCurrentSearchDayMs,
+                minSearchDayMs = playbackMinSearchDayMs,
+                rangeMinMs = playbackRangeMinMs,
+                rangeMaxMs = playbackRangeMaxMs,
+                updatedAt = System.currentTimeMillis()
+            )
         )
     }
 
@@ -2394,10 +2570,32 @@ class MonitorViewModel(
         }.getOrNull()?.let(::startOfDayMillis)
 
     fun applyPlaybackFilters(filter: TimeFilter, channel: String) {
+        playbackPrewarmJob?.cancel()
+        playbackPrewarmJob = null
         val normalizedChannel = if (channel == "sub") "sub" else "main"
-        val cameraId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id ?: 0
-        val cached = getPlaybackSessionCache(cameraId, filter, normalizedChannel)
-        val isPlaybackStage = _uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK
+        val prevState = _uiState.value
+        val cameraId = prevState.selectedCameras.getOrNull(0)?.camera?.id ?: 0
+        val customStartMs = if (filter == TimeFilter.CUSTOM_DATE) TimeFilter.customDateStartMs else prevState.playbackCustomStartMs
+        val customEndMs = if (filter == TimeFilter.CUSTOM_DATE) TimeFilter.customDateEndMs else prevState.playbackCustomEndMs
+        val customRangeFromMs = if (filter == TimeFilter.CUSTOM_RANGE) TimeFilter.customRangeFromMs else prevState.playbackCustomRangeFromMs
+        val customRangeToMs = if (filter == TimeFilter.CUSTOM_RANGE) TimeFilter.customRangeToMs else prevState.playbackCustomRangeToMs
+
+        val cached = getPlaybackSessionCache(
+            cameraId = cameraId,
+            filter = filter,
+            channel = normalizedChannel,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+        if (cached != null) {
+            playbackCurrentSearchDayMs = cached.nextSearchDayMs
+            playbackMinSearchDayMs = cached.minSearchDayMs
+            playbackRangeMinMs = cached.rangeMinMs
+            playbackRangeMaxMs = cached.rangeMaxMs
+        }
+        val isPlaybackStage = prevState.cameraStageMode == CameraDetailTab.PLAYBACK
         val firstCachedVideo = if (isPlaybackStage) {
             cached?.dayGroups?.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
         } else {
@@ -2409,6 +2607,10 @@ class MonitorViewModel(
             it.copy(
                 playbackTimeFilter = filter,
                 playbackChannel = normalizedChannel,
+                playbackCustomStartMs = customStartMs,
+                playbackCustomEndMs = customEndMs,
+                playbackCustomRangeFromMs = customRangeFromMs,
+                playbackCustomRangeToMs = customRangeToMs,
                 selectedPlaybackVideo = firstCachedVideo,
                 isPlaybackPlaying = firstCachedVideo != null,
                 playbackDayGroups = cached?.dayGroups ?: emptyList(),
@@ -2475,22 +2677,33 @@ class MonitorViewModel(
      * Tuyệt đối không gọi bất kỳ API nào của NVR.
      */
     fun fetchCameraPlaybacks(isBackgroundPrewarm: Boolean = false) {
-        val camera = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
-        val channel = _uiState.value.playbackChannel
-        val filter = _uiState.value.playbackTimeFilter
+        val stateSnapshot = _uiState.value
+        val camera = stateSnapshot.selectedCameras.getOrNull(0)?.camera ?: return
+        val channel = stateSnapshot.playbackChannel
+        val filter = stateSnapshot.playbackTimeFilter
+        val customStartMs = stateSnapshot.playbackCustomStartMs
+        val customEndMs = stateSnapshot.playbackCustomEndMs
+        val customRangeFromMs = stateSnapshot.playbackCustomRangeFromMs
+        val customRangeToMs = stateSnapshot.playbackCustomRangeToMs
 
+        if (!isBackgroundPrewarm) {
+            playbackPrewarmJob?.cancel()
+            playbackPrewarmJob = null
+        }
         playbackFetchJob?.cancel()
         playbackLoadMoreDaysJob?.cancel()
         for (job in playbackDayJobs.values) job.cancel()
         playbackDayJobs.clear()
 
-        val (minMs, maxMs) = TimeFilter.resolveTimeRangeMillis(filter)
-        playbackRangeMinMs = minMs
-        playbackRangeMaxMs = maxMs
-        playbackCurrentSearchDayMs = startOfDayMillis(maxMs)
-        playbackMinSearchDayMs = startOfDayMillis(minMs)
-
-        val cached = getPlaybackSessionCache(camera.id, filter, channel)
+        val cached = getPlaybackSessionCache(
+            cameraId = camera.id,
+            filter = filter,
+            channel = channel,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
         val hasCachedGroups = cached != null && cached.dayGroups.isNotEmpty()
 
         var resolvedAutoVideo: VideoModel? = null
@@ -2524,14 +2737,23 @@ class MonitorViewModel(
 
         playbackFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                fetchPlaybackDaysBatchInternal(
+                val anyBatchSucceeded = fetchPlaybackDaysBatchInternal(
                     cameraId = camera.id,
                     filter = filter,
                     channel = channel,
+                    customStartMs = customStartMs,
+                    customEndMs = customEndMs,
+                    customRangeFromMs = customRangeFromMs,
+                    customRangeToMs = customRangeToMs,
                     targetDaysCount = PLAYBACK_DAYS_BATCH,
                     isInitial = true
                 )
-                playbackLoadedForCameraId = camera.id
+                if (anyBatchSucceeded) {
+                    val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
+                    if (activeCamId == camera.id) {
+                        playbackLoadedForCameraId = camera.id
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -2539,7 +2761,7 @@ class MonitorViewModel(
                     it.copy(
                         isLoadingPlaybacks = false,
                         isLoadingMorePlaybackDays = false,
-                        hasMorePlaybackDays = false
+                        hasMorePlaybackDays = if (it.playbackDayGroups.isNotEmpty()) it.hasMorePlaybackDays else false
                     )
                 }
             }
@@ -2559,6 +2781,10 @@ class MonitorViewModel(
                     cameraId = camera.id,
                     filter = state.playbackTimeFilter,
                     channel = state.playbackChannel,
+                    customStartMs = state.playbackCustomStartMs,
+                    customEndMs = state.playbackCustomEndMs,
+                    customRangeFromMs = state.playbackCustomRangeFromMs,
+                    customRangeToMs = state.playbackCustomRangeToMs,
                     targetDaysCount = PLAYBACK_DAYS_BATCH,
                     isInitial = false
                 )
@@ -2574,9 +2800,28 @@ class MonitorViewModel(
         cameraId: Int,
         filter: TimeFilter,
         channel: String,
+        customStartMs: Long,
+        customEndMs: Long,
+        customRangeFromMs: Long,
+        customRangeToMs: Long,
         targetDaysCount: Int,
         isInitial: Boolean
-    ) {
+    ): Boolean {
+        val expectedCustomToken = playbackCustomToken(
+            filter = filter,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+        val (rangeMinMs, rangeMaxMs) = if (isInitial) {
+            resolveMonitorTimeRangeMillis(filter, customStartMs, customEndMs, customRangeFromMs, customRangeToMs)
+        } else {
+            playbackRangeMinMs to playbackRangeMaxMs
+        }
+        val minDay: Long? = if (isInitial) startOfDayMillis(rangeMinMs) else playbackMinSearchDayMs
+        var cursorDayMs: Long? = if (isInitial) startOfDayMillis(rangeMaxMs) else playbackCurrentSearchDayMs
+
         val accumulatedNewGroups = mutableListOf<PlaybackDayGroup>()
         var anyBatchSucceeded = false
         var firstBatchError: Throwable? = null
@@ -2584,10 +2829,22 @@ class MonitorViewModel(
         var scanRound = 0
         val maxScanRounds = 4 // Tối đa quét 4 lô (32 ngày) nếu các ngày gần nhất trống
 
+        fun isStillMatchingCurrentState(state: MonitorUiState): Boolean {
+            return state.selectedCameras.getOrNull(0)?.camera?.id == cameraId &&
+                state.playbackTimeFilter == filter &&
+                state.playbackChannel == channel &&
+                playbackCustomToken(
+                    filter = state.playbackTimeFilter,
+                    customStartMs = state.playbackCustomStartMs,
+                    customEndMs = state.playbackCustomEndMs,
+                    customRangeFromMs = state.playbackCustomRangeFromMs,
+                    customRangeToMs = state.playbackCustomRangeToMs
+                ) == expectedCustomToken
+        }
+
         while (scanRound < maxScanRounds) {
             scanRound++
-            val startCursor = playbackCurrentSearchDayMs
-            val minDay = playbackMinSearchDayMs
+            val startCursor = cursorDayMs
             if (startCursor == null || minDay == null || startCursor < minDay) {
                 hasMoreDays = false
                 break
@@ -2601,14 +2858,14 @@ class MonitorViewModel(
             }
 
             if (dayMillisList.isEmpty()) {
+                cursorDayMs = null
                 playbackCurrentSearchDayMs = null
                 hasMoreDays = false
                 break
             }
 
             val nextSearchDay = cal.timeInMillis
-            hasMoreDays = nextSearchDay >= minDay
-            playbackCurrentSearchDayMs = if (hasMoreDays) nextSearchDay else null
+            val moreDaysAfterRound = nextSearchDay >= minDay
 
             val fetchedResults = coroutineScope {
                 dayMillisList.map { dayStartMs ->
@@ -2616,8 +2873,8 @@ class MonitorViewModel(
                         val dateKey = formatDateKey(dayStartMs)
                         val (labelVi, labelEn) = resolveDayLabels(dateKey, dayStartMs)
                         val dayEndMs = endOfDayMillis(dayStartMs)
-                        val fromMs = maxOf(dayStartMs, playbackRangeMinMs)
-                        val toMs = minOf(dayEndMs, playbackRangeMaxMs)
+                        val fromMs = maxOf(dayStartMs, rangeMinMs)
+                        val toMs = minOf(dayEndMs, rangeMaxMs)
                         val fromStr = formatVideoQueryTime(fromMs)
                         val toStr = formatVideoQueryTime(toMs)
 
@@ -2651,18 +2908,30 @@ class MonitorViewModel(
                 }.awaitAll()
             }
 
-            val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
-            if (activeCamId != cameraId) return
+            if (!isStillMatchingCurrentState(_uiState.value)) return false
 
             val fetchedGroups = fetchedResults.map { it.first }
             val roundSucceeded = fetchedResults.any { it.second == null }
-            if (roundSucceeded) anyBatchSucceeded = true
+            if (roundSucceeded) {
+                anyBatchSucceeded = true
+                cursorDayMs = if (moreDaysAfterRound) nextSearchDay else null
+                playbackRangeMinMs = rangeMinMs
+                playbackRangeMaxMs = rangeMaxMs
+                playbackMinSearchDayMs = minDay
+                playbackCurrentSearchDayMs = cursorDayMs
+                hasMoreDays = moreDaysAfterRound
+            } else {
+                // Lỗi mạng tạm thời: KHÔNG tịnh tiến playbackCurrentSearchDayMs để lần thử lại lấy đúng các ngày này
+                hasMoreDays = true
+            }
             if (firstBatchError == null) {
                 firstBatchError = fetchedResults.firstNotNullOfOrNull { it.second }
             }
 
-            val nonEmpty = fetchedGroups.filter { it.videos.isNotEmpty() }
-            accumulatedNewGroups.addAll(nonEmpty)
+            if (roundSucceeded) {
+                val nonEmpty = fetchedGroups.filter { it.videos.isNotEmpty() }
+                accumulatedNewGroups.addAll(nonEmpty)
+            }
 
             // Nếu đã tìm thấy ít nhất 1 ngày có bản ghi, hoặc không còn ngày cũ hơn, hoặc mạng lỗi -> dừng vòng quét
             if (accumulatedNewGroups.isNotEmpty() || !hasMoreDays || !roundSucceeded) {
@@ -2670,66 +2939,88 @@ class MonitorViewModel(
             }
         }
 
-        val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
-        if (activeCamId != cameraId) return
+        if (!isStillMatchingCurrentState(_uiState.value)) return false
 
         var finalMergedGroups: List<PlaybackDayGroup> = emptyList()
-        val effectiveHasMoreDays = hasMoreDays && anyBatchSucceeded
-        var autoSelectedVideo: VideoModel? = null
-        var autoSelectedPlaying = false
+        var committed = false
 
-        _uiState.update { state ->
-            val merged = if (isInitial) {
-                accumulatedNewGroups.distinctBy { it.dateKey }
-            } else {
-                val existingByKey = state.playbackDayGroups.associateBy { it.dateKey }.toMutableMap()
-                for (grp in accumulatedNewGroups) {
-                    existingByKey[grp.dateKey] = grp
-                }
-                existingByKey.values.sortedByDescending { it.dateKey }
-            }
-            finalMergedGroups = merged
-            val shouldAutoSelectFirst = state.cameraStageMode == CameraDetailTab.PLAYBACK &&
-                state.selectedPlaybackVideo == null &&
-                merged.isNotEmpty()
-            val firstVideo = if (shouldAutoSelectFirst) {
-                merged.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
-            } else {
-                state.selectedPlaybackVideo
-            }
-            val nextPlaying = if (shouldAutoSelectFirst && firstVideo != null) true else state.isPlaybackPlaying
-            autoSelectedVideo = firstVideo
-            autoSelectedPlaying = nextPlaying
-            state.copy(
-                playbackDayGroups = merged,
-                selectedPlaybackVideo = firstVideo,
-                isPlaybackPlaying = nextPlaying,
-                isLoadingPlaybacks = false,
-                isLoadingMorePlaybackDays = false,
-                hasMorePlaybackDays = effectiveHasMoreDays,
-                error = if (!anyBatchSucceeded) {
-                    firstBatchError?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() } ?: state.error
+        withContext(Dispatchers.Main.immediate) {
+            if (!isStillMatchingCurrentState(_uiState.value)) return@withContext
+            var autoSelectedVideo: VideoModel? = null
+            var autoSelectedPlaying = false
+
+            _uiState.update { state ->
+                if (!isStillMatchingCurrentState(state)) return@update state
+                val merged = if (!anyBatchSucceeded) {
+                    state.playbackDayGroups
+                } else if (isInitial) {
+                    accumulatedNewGroups.distinctBy { it.dateKey }
                 } else {
-                    state.error
+                    val existingByKey = state.playbackDayGroups.associateBy { it.dateKey }.toMutableMap()
+                    for (grp in accumulatedNewGroups) {
+                        existingByKey[grp.dateKey] = grp
+                    }
+                    existingByKey.values.sortedByDescending { it.dateKey }
                 }
-            )
-        }
-        if (_uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK && activePlaybackVideo == null && autoSelectedVideo != null) {
-            activePlaybackVideo = autoSelectedVideo
-            activePlaybackPlaying = autoSelectedPlaying
+                finalMergedGroups = merged
+                committed = true
+                val nextHasMoreDays = when {
+                    anyBatchSucceeded -> hasMoreDays
+                    !isInitial -> true
+                    state.playbackDayGroups.isNotEmpty() -> state.hasMorePlaybackDays
+                    else -> false
+                }
+                val shouldAutoSelectFirst = state.cameraStageMode == CameraDetailTab.PLAYBACK &&
+                    state.selectedPlaybackVideo == null &&
+                    merged.isNotEmpty()
+                val firstVideo = if (shouldAutoSelectFirst) {
+                    merged.firstOrNull { it.videos.isNotEmpty() }?.videos?.firstOrNull()
+                } else {
+                    state.selectedPlaybackVideo
+                }
+                val nextPlaying = if (shouldAutoSelectFirst && firstVideo != null) true else state.isPlaybackPlaying
+                autoSelectedVideo = firstVideo
+                autoSelectedPlaying = nextPlaying
+                state.copy(
+                    playbackDayGroups = merged,
+                    selectedPlaybackVideo = firstVideo,
+                    isPlaybackPlaying = nextPlaying,
+                    isLoadingPlaybacks = false,
+                    isLoadingMorePlaybackDays = false,
+                    hasMorePlaybackDays = nextHasMoreDays,
+                    error = if (!anyBatchSucceeded) {
+                        firstBatchError?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() } ?: state.error
+                    } else {
+                        state.error
+                    }
+                )
+            }
+            if (committed &&
+                _uiState.value.cameraStageMode == CameraDetailTab.PLAYBACK &&
+                activePlaybackVideo == null &&
+                autoSelectedVideo != null
+            ) {
+                activePlaybackVideo = autoSelectedVideo
+                activePlaybackPlaying = autoSelectedPlaying
+            }
         }
 
-        if (anyBatchSucceeded) {
+        if (committed && anyBatchSucceeded) {
             putPlaybackSessionCache(
                 cameraId = cameraId,
                 filter = filter,
                 channel = channel,
+                customStartMs = customStartMs,
+                customEndMs = customEndMs,
+                customRangeFromMs = customRangeFromMs,
+                customRangeToMs = customRangeToMs,
                 dayGroups = finalMergedGroups,
-                hasMoreDays = effectiveHasMoreDays
+                hasMoreDays = hasMoreDays
             )
             val newVideosForPrefetch = accumulatedNewGroups.flatMap { it.videos }
             prefetchPlaybackThumbnails(cameraId, newVideosForPrefetch)
         }
+        return committed && anyBatchSucceeded
     }
 
     /**
@@ -2756,6 +3047,30 @@ class MonitorViewModel(
         val nextToStr = formatVideoQueryTime(nextToMs)
         val channel = state.playbackChannel
         val filter = state.playbackTimeFilter
+        val customStartMs = state.playbackCustomStartMs
+        val customEndMs = state.playbackCustomEndMs
+        val customRangeFromMs = state.playbackCustomRangeFromMs
+        val customRangeToMs = state.playbackCustomRangeToMs
+        val expectedCustomToken = playbackCustomToken(
+            filter = filter,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+
+        fun isMatchingPlaybackContext(cur: MonitorUiState): Boolean {
+            return cur.selectedCameras.getOrNull(0)?.camera?.id == camera.id &&
+                cur.playbackTimeFilter == filter &&
+                cur.playbackChannel == channel &&
+                playbackCustomToken(
+                    filter = cur.playbackTimeFilter,
+                    customStartMs = cur.playbackCustomStartMs,
+                    customEndMs = cur.playbackCustomEndMs,
+                    customRangeFromMs = cur.playbackCustomRangeFromMs,
+                    customRangeToMs = cur.playbackCustomRangeToMs
+                ) == expectedCustomToken
+        }
 
         _uiState.update { cur ->
             cur.copy(
@@ -2768,7 +3083,7 @@ class MonitorViewModel(
         playbackDayJobs[dateKey]?.cancel()
         playbackDayJobs[dateKey] = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val response = runCatching {
+                val result = safeApiCall {
                     monitorRepository.getVideoList(
                         camera = camera.id,
                         count = PLAYBACK_PER_DAY_COUNT,
@@ -2776,22 +3091,29 @@ class MonitorViewModel(
                         to = nextToStr,
                         channel = channel
                     )
-                }.getOrNull()
-
-                val rawVideos = if (response?.isSuccessful == true) {
-                    response.body().orEmpty()
-                } else {
-                    emptyList()
+                }
+                val response = result.getOrNull()
+                if (response == null) {
+                    // Lỗi mạng tạm thời: giữ nguyên grp.hasMore, chỉ tắt isLoadingMore và không ghi đè cache
+                    _uiState.update { cur ->
+                        if (!isMatchingPlaybackContext(cur)) return@update cur
+                        cur.copy(
+                            playbackDayGroups = cur.playbackDayGroups.map { grp ->
+                                if (grp.dateKey == dateKey) grp.copy(isLoadingMore = false) else grp
+                            },
+                            error = result.exceptionOrNull()?.toUserFriendlyMessage()?.takeIf { it.isNotEmpty() } ?: cur.error
+                        )
+                    }
+                    return@launch
                 }
 
+                val rawVideos = response.body().orEmpty()
                 val newVideos = rawVideos.map(::normalizeVideoModel)
 
-                val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
-                if (activeCamId != camera.id) return@launch
-
-                var updatedGroups: List<PlaybackDayGroup> = emptyList()
+                var updatedGroups: List<PlaybackDayGroup>? = null
                 var latestHasMoreDays = false
                 _uiState.update { cur ->
+                    if (!isMatchingPlaybackContext(cur)) return@update cur
                     val nextGroups = cur.playbackDayGroups.map { grp ->
                         if (grp.dateKey != dateKey) {
                             grp
@@ -2811,18 +3133,26 @@ class MonitorViewModel(
                     cur.copy(playbackDayGroups = nextGroups)
                 }
 
-                putPlaybackSessionCache(
-                    cameraId = camera.id,
-                    filter = filter,
-                    channel = channel,
-                    dayGroups = updatedGroups,
-                    hasMoreDays = latestHasMoreDays
-                )
-                prefetchPlaybackThumbnails(camera.id, newVideos)
+                val committedGroups = updatedGroups
+                if (committedGroups != null) {
+                    putPlaybackSessionCache(
+                        cameraId = camera.id,
+                        filter = filter,
+                        channel = channel,
+                        customStartMs = customStartMs,
+                        customEndMs = customEndMs,
+                        customRangeFromMs = customRangeFromMs,
+                        customRangeToMs = customRangeToMs,
+                        dayGroups = committedGroups,
+                        hasMoreDays = latestHasMoreDays
+                    )
+                    prefetchPlaybackThumbnails(camera.id, newVideos)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 _uiState.update { cur ->
+                    if (!isMatchingPlaybackContext(cur)) return@update cur
                     cur.copy(
                         playbackDayGroups = cur.playbackDayGroups.map { grp ->
                             if (grp.dateKey == dateKey) grp.copy(isLoadingMore = false) else grp
@@ -2838,9 +3168,20 @@ class MonitorViewModel(
     // ---------------------------------------------------------------------------------------------
 
     fun applyCameraEventFilters(filter: TimeFilter, aiType: String?) {
+        cameraEventPrewarmJob?.cancel()
+        cameraEventPrewarmJob = null
+        val prevState = _uiState.value
+        val customStartMs = if (filter == TimeFilter.CUSTOM_DATE) TimeFilter.customDateStartMs else prevState.cameraEventCustomStartMs
+        val customEndMs = if (filter == TimeFilter.CUSTOM_DATE) TimeFilter.customDateEndMs else prevState.cameraEventCustomEndMs
+        val customRangeFromMs = if (filter == TimeFilter.CUSTOM_RANGE) TimeFilter.customRangeFromMs else prevState.cameraEventCustomRangeFromMs
+        val customRangeToMs = if (filter == TimeFilter.CUSTOM_RANGE) TimeFilter.customRangeToMs else prevState.cameraEventCustomRangeToMs
         _uiState.update {
             it.copy(
                 cameraEventTimeFilter = filter,
+                cameraEventCustomStartMs = customStartMs,
+                cameraEventCustomEndMs = customEndMs,
+                cameraEventCustomRangeFromMs = customRangeFromMs,
+                cameraEventCustomRangeToMs = customRangeToMs,
                 cameraEventAiType = aiType,
                 isRefreshingCameraEvents = false
             )
@@ -2853,6 +3194,8 @@ class MonitorViewModel(
     }
 
     fun refreshCameraEvents() {
+        cameraEventPrewarmJob?.cancel()
+        cameraEventPrewarmJob = null
         _uiState.update { it.copy(isRefreshingCameraEvents = true) }
         fetchCameraEvents(isUserRefresh = true)
     }
@@ -2868,9 +3211,14 @@ class MonitorViewModel(
     }
 
     fun fetchCameraEvents(isUserRefresh: Boolean = false, isBackgroundPrewarm: Boolean = false) {
-        val camera = _uiState.value.selectedCameras.getOrNull(0)?.camera ?: return
+        val state = _uiState.value
+        val camera = state.selectedCameras.getOrNull(0)?.camera ?: return
         val cameraUuid = camera.extra?.uuid?.trim().orEmpty()
 
+        if (!isBackgroundPrewarm) {
+            cameraEventPrewarmJob?.cancel()
+            cameraEventPrewarmJob = null
+        }
         cameraEventFetchJob?.cancel()
         cameraEventPaginateJob?.cancel()
         lastCameraEventRawId = null
@@ -2893,9 +3241,32 @@ class MonitorViewModel(
             return
         }
 
-        val state = _uiState.value
         val filter = state.cameraEventTimeFilter
         val aiType = state.cameraEventAiType
+        val customStartMs = state.cameraEventCustomStartMs
+        val customEndMs = state.cameraEventCustomEndMs
+        val customRangeFromMs = state.cameraEventCustomRangeFromMs
+        val customRangeToMs = state.cameraEventCustomRangeToMs
+        val expectedCustomToken = playbackCustomToken(
+            filter = filter,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+
+        fun isMatchingEventContext(cur: MonitorUiState): Boolean {
+            return cur.selectedCameras.getOrNull(0)?.camera?.id == camera.id &&
+                cur.cameraEventTimeFilter == filter &&
+                cur.cameraEventAiType == aiType &&
+                playbackCustomToken(
+                    filter = cur.cameraEventTimeFilter,
+                    customStartMs = cur.cameraEventCustomStartMs,
+                    customEndMs = cur.cameraEventCustomEndMs,
+                    customRangeFromMs = cur.cameraEventCustomRangeFromMs,
+                    customRangeToMs = cur.cameraEventCustomRangeToMs
+                ) == expectedCustomToken
+        }
 
         if (!isBackgroundPrewarm) {
             _uiState.update {
@@ -2909,7 +3280,13 @@ class MonitorViewModel(
 
         cameraEventFetchJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(filter)
+                val (fromMs, toMs) = resolveMonitorTimeRangeMillis(
+                    filter = filter,
+                    customStartMs = customStartMs,
+                    customEndMs = customEndMs,
+                    customRangeFromMs = customRangeFromMs,
+                    customRangeToMs = customRangeToMs
+                )
                 val fromSec = fromMs / 1000
                 val toSec = toMs / 1000
                 val resolvedTypes = resolveApiEventTypes(aiType)
@@ -2922,6 +3299,7 @@ class MonitorViewModel(
                     resolvedTypes = resolvedTypes
                 )
                 if (aiType.isNullOrBlank() &&
+                    batchResult.apiSucceeded &&
                     !batchResult.reachedEnd &&
                     batchResult.events.size < EVENT_PAGE_TARGET_COUNT
                 ) {
@@ -2950,13 +3328,14 @@ class MonitorViewModel(
                 val nextLastId = batchResult.lastRawId
                 val hasMore = batchResult.hasMore
 
-                val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
-                if (activeCamId != camera.id) return@launch
+                if (!isMatchingEventContext(_uiState.value)) return@launch
 
-                lastCameraEventRawId = nextLastId
-                lastCameraEventRawIdByType = batchResult.lastRawIdByType
-                exhaustedCameraEventTypes = batchResult.exhaustedTypes
-                eventsLoadedForCameraId = camera.id
+                if (batchResult.apiSucceeded) {
+                    lastCameraEventRawId = nextLastId
+                    lastCameraEventRawIdByType = batchResult.lastRawIdByType
+                    exhaustedCameraEventTypes = batchResult.exhaustedTypes
+                    eventsLoadedForCameraId = camera.id
+                }
 
                 if (events.isNotEmpty()) {
                     monitorRepository.cacheInMemory(
@@ -2967,12 +3346,19 @@ class MonitorViewModel(
                 }
 
                 _uiState.update {
+                    if (!isMatchingEventContext(it)) return@update it
                     it.copy(
                         cameraEvents = if (batchResult.apiSucceeded || events.isNotEmpty()) events else it.cameraEvents,
                         isLoadingCameraEvents = false,
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
-                        hasMoreCameraEvents = hasMore,
+                        hasMoreCameraEvents = if (batchResult.apiSucceeded) {
+                            hasMore
+                        } else if (it.cameraEvents.isNotEmpty()) {
+                            it.hasMoreCameraEvents
+                        } else {
+                            false
+                        },
                         error = if (!isBackgroundPrewarm) {
                             batchResult.firstError?.toUserFriendlyMessage()?.takeIf { msg -> msg.isNotEmpty() } ?: it.error
                         } else {
@@ -2985,11 +3371,12 @@ class MonitorViewModel(
             } catch (e: Exception) {
                 if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
+                    if (!isMatchingEventContext(it)) return@update it
                     it.copy(
                         isLoadingCameraEvents = false,
                         isRefreshingCameraEvents = false,
                         isPaginatingCameraEvents = false,
-                        hasMoreCameraEvents = false,
+                        hasMoreCameraEvents = if (it.cameraEvents.isNotEmpty()) it.hasMoreCameraEvents else false,
                         error = if (!isBackgroundPrewarm) {
                             e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
                         } else {
@@ -3009,11 +3396,38 @@ class MonitorViewModel(
         if (cameraUuid.isEmpty()) return
         if (state.isLoadingCameraEvents || state.isPaginatingCameraEvents || !state.hasMoreCameraEvents || state.cameraEvents.isEmpty()) return
 
+        val filter = state.cameraEventTimeFilter
+        val aiType = state.cameraEventAiType
+        val customStartMs = state.cameraEventCustomStartMs
+        val customEndMs = state.cameraEventCustomEndMs
+        val customRangeFromMs = state.cameraEventCustomRangeFromMs
+        val customRangeToMs = state.cameraEventCustomRangeToMs
+        val expectedCustomToken = playbackCustomToken(
+            filter = filter,
+            customStartMs = customStartMs,
+            customEndMs = customEndMs,
+            customRangeFromMs = customRangeFromMs,
+            customRangeToMs = customRangeToMs
+        )
+
+        fun isMatchingEventContext(cur: MonitorUiState): Boolean {
+            return cur.selectedCameras.getOrNull(0)?.camera?.id == camera.id &&
+                cur.cameraEventTimeFilter == filter &&
+                cur.cameraEventAiType == aiType &&
+                playbackCustomToken(
+                    filter = cur.cameraEventTimeFilter,
+                    customStartMs = cur.cameraEventCustomStartMs,
+                    customEndMs = cur.cameraEventCustomEndMs,
+                    customRangeFromMs = cur.cameraEventCustomRangeFromMs,
+                    customRangeToMs = cur.cameraEventCustomRangeToMs
+                ) == expectedCustomToken
+        }
+
         cameraEventPaginateJob?.cancel()
         cameraEventPaginateJob = viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isPaginatingCameraEvents = true) }
             try {
-                val resolvedTypes = resolveApiEventTypes(state.cameraEventAiType)
+                val resolvedTypes = resolveApiEventTypes(aiType)
                     .ifEmpty { effectiveCameraUnfilteredTypes }
                 val startId: Int? = if (resolvedTypes.size <= 1) {
                     val sid = lastCameraEventRawId ?: state.cameraEvents.lastOrNull()?.id
@@ -3029,7 +3443,13 @@ class MonitorViewModel(
                     }
                     null
                 }
-                val (fromMs, toMs) = TimeFilter.resolveTimeRangeMillis(state.cameraEventTimeFilter)
+                val (fromMs, toMs) = resolveMonitorTimeRangeMillis(
+                    filter = filter,
+                    customStartMs = customStartMs,
+                    customEndMs = customEndMs,
+                    customRangeFromMs = customRangeFromMs,
+                    customRangeToMs = customRangeToMs
+                )
                 val batchResult = fetchPermittedCameraEventBatch(
                     startLastId = startId,
                     fromSec = fromMs / 1000,
@@ -3044,8 +3464,7 @@ class MonitorViewModel(
                 val nextLastId = batchResult.lastRawId
                 val hasMore = batchResult.hasMore
 
-                val activeCamId = _uiState.value.selectedCameras.getOrNull(0)?.camera?.id
-                if (activeCamId != camera.id) return@launch
+                if (!isMatchingEventContext(_uiState.value)) return@launch
 
                 if (batchResult.apiSucceeded) {
                     lastCameraEventRawId = nextLastId
@@ -3057,6 +3476,7 @@ class MonitorViewModel(
                 }
 
                 _uiState.update { cur ->
+                    if (!isMatchingEventContext(cur)) return@update cur
                     val merged = (cur.cameraEvents + newEvents)
                         .distinctBy { ev -> ev.uniqueKey() }
                         .let { list -> if (resolvedTypes.size > 1) list.sortedWith(EventDescendingComparator) else list }
@@ -3064,7 +3484,7 @@ class MonitorViewModel(
                         isPaginatingCameraEvents = false,
                         cameraEvents = merged,
                         hasMoreCameraEvents = if (batchResult.apiSucceeded) {
-                            hasMore && merged.size > cur.cameraEvents.size
+                            hasMore && (merged.size > cur.cameraEvents.size || (!batchResult.reachedEnd && nextLastId != startId))
                         } else {
                             cur.hasMoreCameraEvents
                         },
@@ -3076,6 +3496,7 @@ class MonitorViewModel(
             } catch (e: Exception) {
                 if (UserSession.accessToken.isEmpty()) return@launch
                 _uiState.update {
+                    if (!isMatchingEventContext(it)) return@update it
                     it.copy(
                         isPaginatingCameraEvents = false,
                         error = e.toUserFriendlyMessage().takeIf { msg -> msg.isNotEmpty() }
@@ -3118,6 +3539,7 @@ class MonitorViewModel(
         var attempts = 0
         var reachedEnd = false
         var anySuccessful = false
+        var failedOnRetryAttempt = false
         var firstError: Throwable? = null
 
         val allCameras = rawCameraList.ifEmpty { monitorRepository.getCamerasInMemory() }
@@ -3141,7 +3563,9 @@ class MonitorViewModel(
             val response = result.getOrNull()
             if (response == null) {
                 if (firstError == null) firstError = result.exceptionOrNull()
-                reachedEnd = true
+                if (attempts >= 2) {
+                    failedOnRetryAttempt = true
+                }
                 break
             }
             anySuccessful = true
@@ -3152,11 +3576,10 @@ class MonitorViewModel(
                 break
             }
 
-            for (ev in batchData) {
-                if (ev.isWithinTimeRangeSeconds(fromSec, toSec) &&
-                    UserPermissionManager.isEventPermitted(ev, allCameras) &&
-                    seenKeys.add(ev.uniqueKey())
-                ) {
+            val inRangeEvents = batchData.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) }
+            val permittedEvents = UserPermissionManager.filterEventsByPermissions(inRangeEvents, allCameras)
+            for (ev in permittedEvents) {
+                if (seenKeys.add(ev.uniqueKey())) {
                     validData.add(ev)
                 }
             }
@@ -3183,7 +3606,7 @@ class MonitorViewModel(
             }
         }
 
-        val hasMore = !reachedEnd && validData.isNotEmpty()
+        val hasMore = !reachedEnd && (validData.isNotEmpty() || failedOnRetryAttempt)
         return CameraEventBatchResult(
             events = validData,
             lastRawId = currentLastId,
@@ -3278,7 +3701,8 @@ class MonitorViewModel(
         val mergedEvents = combined
             .distinctBy { it.uniqueKey() }
             .sortedWith(EventDescendingComparator)
-        val hasMore = resolvedTypes.any { it !in nextExhausted } && mergedEvents.isNotEmpty()
+        val hasMore = resolvedTypes.any { it !in nextExhausted } &&
+            (mergedEvents.isNotEmpty() || subResults.any { (_, sub) -> !sub.reachedEnd })
 
         CameraEventBatchResult(
             events = mergedEvents,
@@ -3348,10 +3772,19 @@ class MonitorViewModel(
                 }
                 monitorRepository.cacheInMemory(events = batch.events)
                 _uiState.update { cur ->
-                    val merged = (batch.events + cur.cameraEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) })
+                    val mergedRaw = (batch.events + cur.cameraEvents.filter { it.isWithinTimeRangeSeconds(fromSec, toSec) })
                         .distinctBy { it.uniqueKey() }
                         .sortedWith(EventDescendingComparator)
-                    if (merged == cur.cameraEvents) cur else cur.copy(cameraEvents = merged)
+                    val shouldCap = !cur.isPaginatingCameraEvents && mergedRaw.size > MAX_REALTIME_CAMERA_EVENTS
+                    val merged = if (shouldCap) mergedRaw.take(MAX_REALTIME_CAMERA_EVENTS) else mergedRaw
+                    if (merged == cur.cameraEvents) {
+                        cur
+                    } else {
+                        cur.copy(
+                            cameraEvents = merged,
+                            hasMoreCameraEvents = cur.hasMoreCameraEvents || shouldCap
+                        )
+                    }
                 }
             }
         } catch (e: CancellationException) {

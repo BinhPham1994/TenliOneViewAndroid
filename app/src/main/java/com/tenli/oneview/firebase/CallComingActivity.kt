@@ -7,10 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.Ringtone
 import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -18,6 +20,7 @@ import android.util.Log
 import android.view.WindowManager
 import android.window.SplashScreen
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
@@ -114,6 +117,7 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppState
+import com.tenli.oneview.util.EventBus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -174,6 +178,7 @@ class CallComingActivity : ComponentActivity() {
     private var ringtone: Ringtone? = null
     private var vibrator: Vibrator? = null
     private var timeoutJob: Job? = null
+    private var hasUserInteracted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableAppEdgeToEdge()
@@ -184,8 +189,28 @@ class CallComingActivity : ComponentActivity() {
         AppState.isShowCallActivity = true
         val initialCall = intent.toIncomingCall()
         viewModel.onIncomingCall(initialCall)
+        // Gỡ thông báo cuộc gọi đang reo trước khi bật chuông trong Activity để tránh chồng tiếng chuông
+        cancelCallNotification(initialCall.eventId, initialCall.notificationId)
         startRinging()
         scheduleTimeout()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                declineCall()
+            }
+        })
+
+        lifecycleScope.launch {
+            EventBus.callDismissed.collect { dismissedNotifId ->
+                val current = viewModel.uiState.value.call
+                if (dismissedNotifId == 0 ||
+                    dismissedNotifId == current.notificationId ||
+                    (current.eventId.isNotEmpty() && dismissedNotifId == current.eventId.hashCode())
+                ) {
+                    closeCall(current.eventId, current.notificationId)
+                }
+            }
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -197,7 +222,7 @@ class CallComingActivity : ComponentActivity() {
                     enrichedAiService = uiState.enrichedAiService,
                     enrichedProfiles = uiState.enrichedProfiles,
                     enrichedGroups = uiState.enrichedGroups,
-                    onUserInteract = ::scheduleTimeout,
+                    onUserInteract = ::onUserInteract,
                     onDecline = ::declineCall,
                     onAccept = ::acceptCall
                 )
@@ -208,6 +233,7 @@ class CallComingActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppState.isShowCallActivity = true
+        EventMessagingService.releaseIncomingCallWakeLock()
         val current = viewModel.uiState.value.call
         // Khi màn hình Call đã hiển thị trực tiếp trước mặt người dùng, gỡ thông báo Heads-Up trên thanh trạng thái
         // để không bị đè banner lên giao diện Call và không phát 2 tiếng nhạc chuông chồng nhau.
@@ -222,9 +248,11 @@ class CallComingActivity : ComponentActivity() {
         cancelCallNotification(previous.eventId, previous.notificationId)
         cancelCallNotification(next.eventId, next.notificationId)
         if (next.eventId.isNotEmpty() && next.eventId == previous.eventId) {
-            if (ringtone?.isPlaying != true) startRinging()
+            if (!hasUserInteracted && ringtone?.isPlaying != true) startRinging()
             return
         }
+        hasUserInteracted = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setIntent(intent)
         viewModel.onIncomingCall(next)
         if (ringtone?.isPlaying != true) startRinging()
@@ -237,53 +265,86 @@ class CallComingActivity : ComponentActivity() {
         stopRinging()
     }
 
+    override fun onStop() {
+        super.onStop()
+        stopRinging()
+        timeoutJob?.cancel()
+        timeoutJob = null
+        AppState.isShowCallActivity = false
+        EventMessagingService.releaseIncomingCallWakeLock()
+    }
+
     override fun onDestroy() {
         timeoutJob?.cancel()
         stopRinging()
         AppState.isShowCallActivity = false
+        EventMessagingService.releaseIncomingCallWakeLock()
         super.onDestroy()
     }
 
-    private fun startRinging() {
+    private fun onUserInteract() {
+        hasUserInteracted = true
+        timeoutJob?.cancel()
+        timeoutJob = null
         stopRinging()
+    }
+
+    private fun startRinging() {
+        stopRinging(clearKeepScreenOn = false)
+        val appCtx = applicationContext
+        val audioManager = appCtx.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val ringerMode = audioManager?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
+
         val ringAttrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
-        ringtone = try {
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            RingtoneManager.getRingtone(this, uri)?.apply {
-                audioAttributes = ringAttrs
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
-                play()
+        if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            ringtone = try {
+                val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                RingtoneManager.getRingtone(appCtx, uri)?.apply {
+                    audioAttributes = ringAttrs
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isLooping = true
+                    play()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Cannot play ringtone", e)
+                null
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot play ringtone", e)
-            null
         }
 
-        // Bật rung lặp theo nhịp cuộc gọi (tương thích mọi máy kể cả khi để chế độ Rung)
-        runCatching {
-            val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
-                vm?.defaultVibrator
-            } else {
-                @Suppress("DEPRECATION")
-                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            }
-            if (vib?.hasVibrator() == true) {
-                vibrator = vib
-                val pattern = longArrayOf(0L, 1000L, 800L)
-                @Suppress("DEPRECATION")
-                vib.vibrate(VibrationEffect.createWaveform(pattern, 0), ringAttrs)
+        // Chỉ bật rung lặp theo nhịp cuộc gọi khi thiết bị không ở chế độ Im lặng (RINGER_MODE_SILENT)
+        if (ringerMode != AudioManager.RINGER_MODE_SILENT) {
+            runCatching {
+                val vib = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vm = appCtx.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                    vm?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    appCtx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                }
+                if (vib?.hasVibrator() == true) {
+                    vibrator = vib
+                    val pattern = longArrayOf(0L, 1000L, 800L)
+                    val effect = VibrationEffect.createWaveform(pattern, 0)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        val vibAttrs = VibrationAttributes.Builder()
+                            .setUsage(VibrationAttributes.USAGE_RINGTONE)
+                            .build()
+                        vib.vibrate(effect, vibAttrs)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vib.vibrate(effect, ringAttrs)
+                    }
+                }
             }
         }
     }
 
-    private fun stopRinging() {
+    private fun stopRinging(clearKeepScreenOn: Boolean = true) {
         ringtone?.let {
             try {
                 it.stop()
@@ -296,15 +357,22 @@ class CallComingActivity : ComponentActivity() {
             runCatching { it.cancel() }
         }
         vibrator = null
+        if (clearKeepScreenOn) {
+            runCatching {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }
     }
 
     private fun scheduleTimeout() {
         timeoutJob?.cancel()
+        if (hasUserInteracted) return
         // lifecycleScope tự huỷ khi Activity bị destroy → không rò rỉ Timer/Handler
         timeoutJob = lifecycleScope.launch {
             delay(CALL_TIMEOUT_MS)
+            if (hasUserInteracted) return@launch
             val current = viewModel.uiState.value.call
-            showMissedCallNotification(this@CallComingActivity, current.title, current.eventId)
+            showMissedCallNotification(applicationContext, current.title, current.eventId)
             closeCall(current.eventId, current.notificationId)
         }
     }
@@ -370,7 +438,7 @@ class CallComingActivity : ComponentActivity() {
         }
 
         window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         )
     }
 }

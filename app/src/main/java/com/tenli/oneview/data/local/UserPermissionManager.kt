@@ -27,13 +27,13 @@ import java.util.concurrent.atomic.AtomicLong
 
 @Immutable
 data class UserPermissionState(
-    val isAdmin: Boolean = true,
+    val isAdmin: Boolean = false,
     val permissions: UserPermissions? = null,
-    val canAccessLiveStream: Boolean = true,
-    val canAccessPlayback: Boolean = true,
-    val canAccessEvents: Boolean = true,
-    val canAccessSettings: Boolean = true,
-    val activeAiModules: List<AiModuleOption> = AiTypeHelper.defaultModules,
+    val canAccessLiveStream: Boolean = false,
+    val canAccessPlayback: Boolean = false,
+    val canAccessEvents: Boolean = false,
+    val canAccessSettings: Boolean = false,
+    val activeAiModules: List<AiModuleOption> = emptyList(),
     val version: Long = 0L
 )
 
@@ -49,7 +49,7 @@ object UserPermissionManager {
      * has been resolved from `/VMS/api/User/{id}` yet.
      */
     private fun isUnresolvedLegacySession(userData: UserData?): Boolean {
-        if (userData == null) return true
+        if (userData == null) return false
         return userData.isAdmin == null && userData.permissions == null
     }
 
@@ -61,10 +61,10 @@ object UserPermissionManager {
     }
 
     fun isAdmin(userData: UserData? = UserSession.userData): Boolean {
-        if (userData == null) return true
+        if (userData == null) return false
         val uname = resolveUsername(userData)
         if (isUnresolvedLegacySession(userData)) {
-            return uname == "admin" || userData.isAdmin == null
+            return uname == "admin"
         }
         return userData.isAdmin == true && uname == "admin"
     }
@@ -124,6 +124,7 @@ object UserPermissionManager {
         return perms.aiEvents?.mode == "custom" || perms.events?.mode == "custom"
     }
 
+    @Synchronized
     fun syncFromUserSession() {
         val user = UserSession.userData
         val admin = isAdmin(user)
@@ -137,17 +138,35 @@ object UserPermissionManager {
             modulesConfig = modulesConfig
         )
 
-        val nextState = UserPermissionState(
+        val liveStream = canAccessLiveStream(user)
+        val playback = canAccessPlayback(user)
+        val events = canAccessEvents(user)
+        val settings = canAccessSettings(user)
+        val modules = AiTypeHelper.activeModules
+
+        val prev = _permissionState.value
+        val unchanged = prev.isAdmin == admin &&
+            prev.permissions == perms &&
+            prev.canAccessLiveStream == liveStream &&
+            prev.canAccessPlayback == playback &&
+            prev.canAccessEvents == events &&
+            prev.canAccessSettings == settings &&
+            prev.activeAiModules == modules
+
+        if (unchanged && prev.version > 0L) {
+            return
+        }
+
+        _permissionState.value = UserPermissionState(
             isAdmin = admin,
             permissions = perms,
-            canAccessLiveStream = canAccessLiveStream(user),
-            canAccessPlayback = canAccessPlayback(user),
-            canAccessEvents = canAccessEvents(user),
-            canAccessSettings = canAccessSettings(user),
-            activeAiModules = AiTypeHelper.activeModules,
+            canAccessLiveStream = liveStream,
+            canAccessPlayback = playback,
+            canAccessEvents = events,
+            canAccessSettings = settings,
+            activeAiModules = modules,
             version = versionCounter.incrementAndGet()
         )
-        _permissionState.value = nextState
     }
 
     fun restoreModulesConfigFromPrefs(domain: String = UserSession.domain): ModulesConfigModel? {
@@ -189,6 +208,20 @@ object UserPermissionManager {
         }
     }
 
+    private fun isSessionMatchingForModulesConfig(
+        cleanDomain: String,
+        expectedToken: String?,
+        expectedUserId: Int?
+    ): Boolean {
+        if (expectedToken != null && UserSession.accessToken != expectedToken) return false
+        if (expectedUserId != null && UserSession.userData?.id != expectedUserId) return false
+        val currentDomain = UserSession.domain.trim().trimEnd('/')
+        if (expectedToken != null || expectedUserId != null) {
+            return currentDomain.equals(cleanDomain, ignoreCase = true)
+        }
+        return currentDomain.isEmpty() || currentDomain.equals(cleanDomain, ignoreCase = true)
+    }
+
     /**
      * Tải cấu hình phân quyền bài AI của dự án từ `GET https://<domain-backend>/modules-config.json`.
      * - Nếu backend hỗ trợ và trả về JSON hợp lệ: lưu vào RAM (`AiTypeHelper`) và `SharedPreferences`.
@@ -196,7 +229,11 @@ object UserPermissionManager {
      *   xoá cache và dùng cơ chế mặc định hiện tại (toàn bộ `AiTypeHelper.defaultModules`).
      * - Nếu lỗi mạng tạm thời: khôi phục cấu hình đã cache của domain hiện tại (nếu có).
      */
-    suspend fun fetchAndCacheModulesConfig(domain: String): ModulesConfigModel? {
+    suspend fun fetchAndCacheModulesConfig(
+        domain: String,
+        expectedToken: String? = null,
+        expectedUserId: Int? = null
+    ): ModulesConfigModel? {
         val cleanDomain = domain.trim().trimEnd('/')
         if (cleanDomain.isEmpty()) return null
         val url = "$cleanDomain/modules-config.json"
@@ -212,20 +249,30 @@ object UserPermissionManager {
                     } else {
                         null
                     }
-                    if (parsed != null && parsed.isValidConfig()) {
-                        saveModulesConfigToPrefs(cleanDomain, rawBody, parsed)
-                        parsed
-                    } else {
-                        clearModulesConfigFromPrefs()
-                        null
+                    synchronized(UserSession) {
+                        if (!isSessionMatchingForModulesConfig(cleanDomain, expectedToken, expectedUserId)) {
+                            return@withContext null
+                        }
+                        if (parsed != null && parsed.isValidConfig()) {
+                            saveModulesConfigToPrefs(cleanDomain, rawBody, parsed)
+                            parsed
+                        } else {
+                            clearModulesConfigFromPrefs()
+                            null
+                        }
                     }
                 } else {
                     val code = response.code()
-                    if (code == 404 || code == 403 || code == 405 || code == 400) {
-                        clearModulesConfigFromPrefs()
-                        null
-                    } else {
-                        restoreModulesConfigFromPrefs(cleanDomain)
+                    synchronized(UserSession) {
+                        if (!isSessionMatchingForModulesConfig(cleanDomain, expectedToken, expectedUserId)) {
+                            return@withContext null
+                        }
+                        if (code == 404 || code == 403 || code == 405 || code == 400) {
+                            clearModulesConfigFromPrefs()
+                            null
+                        } else {
+                            restoreModulesConfigFromPrefs(cleanDomain)
+                        }
                     }
                 }
             }
@@ -233,20 +280,29 @@ object UserPermissionManager {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "fetchAndCacheModulesConfig failed for domain=$cleanDomain: ${e.message}")
-            restoreModulesConfigFromPrefs(cleanDomain)
+            synchronized(UserSession) {
+                if (!isSessionMatchingForModulesConfig(cleanDomain, expectedToken, expectedUserId)) {
+                    null
+                } else {
+                    restoreModulesConfigFromPrefs(cleanDomain)
+                }
+            }
         }
     }
 
+    @Synchronized
     fun reset() {
         AiTypeHelper.resetPermissions()
-        _permissionState.value = UserPermissionState(
-            version = versionCounter.incrementAndGet()
-        )
+        val prev = _permissionState.value
+        val nextBase = UserPermissionState(version = prev.version)
+        if (prev != nextBase) {
+            _permissionState.value = nextBase.copy(version = versionCounter.incrementAndGet())
+        }
     }
 
     fun isCameraPermitted(camera: CameraModel, userData: UserData? = UserSession.userData): Boolean {
         if (isAdmin(userData)) return true
-        val perms = currentPermissions(userData) ?: return true
+        val perms = currentPermissions(userData) ?: return false
         if (perms.visualMonitoring?.enabled == false) return false
         if (perms.cameras?.mode == "custom") {
             val allowedList = perms.cameras.list ?: return false
@@ -264,7 +320,7 @@ object UserPermissionManager {
         userData: UserData? = UserSession.userData
     ): List<CameraModel> {
         if (isAdmin(userData)) return cameras
-        val perms = currentPermissions(userData) ?: return cameras
+        val perms = currentPermissions(userData) ?: return emptyList()
         if (perms.visualMonitoring?.enabled == false) return emptyList()
         if (perms.cameras?.mode == "custom") {
             val allowedList = perms.cameras.list ?: return emptyList()
@@ -288,21 +344,26 @@ object UserPermissionManager {
         userData: UserData? = UserSession.userData
     ): Set<String>? {
         if (isAdmin(userData)) return null
-        val perms = currentPermissions(userData) ?: return null
+        val perms = currentPermissions(userData) ?: return emptySet()
+        if (perms.visualMonitoring?.enabled == false) return emptySet()
         val camerasMode = perms.cameras?.mode ?: "all"
         if (camerasMode != "custom") return null
 
         val allowedCameras = perms.cameras?.list ?: emptyList()
         if (allowedCameras.isEmpty()) return emptySet()
 
-        val allowedUuids = HashSet<String>()
-        for (allowed in allowedCameras) {
-            val targetVmsId = allowed.vmsId
-            val targetCameraId = allowed.cameraId
-            val matchedCam = allCameras.find { c ->
-                c.vmsId == targetVmsId && (c.id == targetCameraId || c.cameraId == targetCameraId)
+        val uuidByVmsAndCameraId = HashMap<String, String>(allCameras.size * 2)
+        for (cam in allCameras) {
+            val uuid = cam.extra?.uuid?.trim()?.lowercase()
+            if (!uuid.isNullOrEmpty()) {
+                uuidByVmsAndCameraId["${cam.vmsId}_${cam.id}"] = uuid
+                uuidByVmsAndCameraId["${cam.vmsId}_${cam.cameraId}"] = uuid
             }
-            val uuid = matchedCam?.extra?.uuid?.trim()?.lowercase()
+        }
+
+        val allowedUuids = HashSet<String>(allowedCameras.size)
+        for (allowed in allowedCameras) {
+            val uuid = uuidByVmsAndCameraId["${allowed.vmsId}_${allowed.cameraId}"]
             if (!uuid.isNullOrEmpty()) {
                 allowedUuids.add(uuid)
             }
@@ -319,7 +380,7 @@ object UserPermissionManager {
         if (!AiTypeHelper.isAiTypeEnabled(eventType)) return false
         if (isAdmin(userData)) return true
 
-        val perms = currentPermissions(userData) ?: return true
+        val perms = currentPermissions(userData) ?: return false
         val camerasMode = perms.cameras?.mode ?: "all"
         val aiEventsMode = perms.aiEvents?.mode ?: perms.events?.mode ?: "all"
 
@@ -354,10 +415,7 @@ object UserPermissionManager {
             return events.filter { AiTypeHelper.isAiTypeEnabled(it.type) }
         }
 
-        val perms = currentPermissions(userData)
-        if (perms == null) {
-            return events.filter { AiTypeHelper.isAiTypeEnabled(it.type) }
-        }
+        val perms = currentPermissions(userData) ?: return emptyList()
 
         val camerasMode = perms.cameras?.mode ?: "all"
         val aiEventsMode = perms.aiEvents?.mode ?: perms.events?.mode ?: "all"
@@ -375,6 +433,25 @@ object UserPermissionManager {
             null
         }
 
+        val expandedAllowedTypesLower: Set<String>? = if (aiEventsMode == "custom") {
+            val expanded = HashSet<String>(allowedAiEvents.size * 2)
+            for (allowedType in allowedAiEvents) {
+                val cleanAllowed = allowedType.trim()
+                if (cleanAllowed.isEmpty()) continue
+                expanded.add(cleanAllowed.lowercase())
+                for (et in AiTypeHelper.getAiEventTypes(cleanAllowed)) {
+                    val lower = et.trim().lowercase()
+                    if (lower.isNotEmpty()) {
+                        expanded.add(lower)
+                    }
+                }
+            }
+            if (expanded.isEmpty()) return emptyList()
+            expanded
+        } else {
+            null
+        }
+
         return events.filter { ev ->
             val eventType = ev.type.trim()
             if (!AiTypeHelper.isAiTypeEnabled(eventType)) return@filter false
@@ -386,13 +463,10 @@ object UserPermissionManager {
                 }
             }
 
-            if (aiEventsMode == "custom") {
-                val isTypeAllowed = allowedAiEvents.any { allowedType ->
-                    val cleanAllowed = allowedType.trim()
-                    eventType.equals(cleanAllowed, ignoreCase = true) ||
-                        AiTypeHelper.getAiEventTypes(cleanAllowed).any { it.equals(eventType, ignoreCase = true) }
+            if (expandedAllowedTypesLower != null) {
+                if (!expandedAllowedTypesLower.contains(eventType.lowercase())) {
+                    return@filter false
                 }
-                if (!isTypeAllowed) return@filter false
             }
 
             true
@@ -468,7 +542,13 @@ object UserPermissionManager {
         }
 
         val vmsUser = coroutineScope {
-            val modulesDeferred = async { fetchAndCacheModulesConfig(domain) }
+            val modulesDeferred = async {
+                fetchAndCacheModulesConfig(
+                    domain = domain,
+                    expectedToken = token,
+                    expectedUserId = userId
+                )
+            }
             val userDeferred = async { fetchVmsUserWithRetry(domain = domain, token = token, userId = userId) }
             modulesDeferred.await()
             userDeferred.await()
@@ -482,17 +562,34 @@ object UserPermissionManager {
             val effectiveIsAdmin = rawAdminFlag && resolvedUsername == "admin"
             val resolvedPerms = vmsUser.extra?.permissions
 
-            UserSession.updateUserPermissions(
-                username = resolvedUsername,
-                fullName = vmsUser.name?.takeIf { it.isNotBlank() },
-                isAdmin = effectiveIsAdmin,
-                permissions = resolvedPerms
-            )
-            syncFromUserSession()
-            return resolvedPerms
+            val applied = synchronized(UserSession) {
+                val stillSameSession = UserSession.accessToken == token &&
+                    UserSession.userData?.id == userId &&
+                    UserSession.domain.trim().trimEnd('/').equals(domain, ignoreCase = true)
+                if (stillSameSession) {
+                    // updateUserPermissions() -> saveSession() -> syncFromUserSession()
+                    UserSession.updateUserPermissions(
+                        username = resolvedUsername,
+                        fullName = vmsUser.name?.takeIf { it.isNotBlank() },
+                        isAdmin = effectiveIsAdmin,
+                        permissions = resolvedPerms
+                    )
+                    true
+                } else {
+                    false
+                }
+            }
+            return if (applied) resolvedPerms else UserSession.userData?.permissions
         } else {
-            syncFromUserSession()
-            return currentUser?.permissions
+            val stillSameSession = synchronized(UserSession) {
+                UserSession.accessToken == token &&
+                    UserSession.userData?.id == userId &&
+                    UserSession.domain.trim().trimEnd('/').equals(domain, ignoreCase = true)
+            }
+            if (stillSameSession) {
+                syncFromUserSession()
+            }
+            return UserSession.userData?.permissions
         }
     }
 }

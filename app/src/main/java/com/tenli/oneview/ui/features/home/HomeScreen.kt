@@ -3,6 +3,7 @@ package com.tenli.oneview.ui.features.home
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -41,6 +42,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +51,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -117,6 +122,7 @@ private val StatActiveAiTasksGradient = listOf(PurpleAccent, StatPurpleGradientE
 private val StatRecordingCamerasGradient = listOf(OrangeUserAccent, OrangeDeep)
 
 private val HomeBottomContentPadding = 130.dp
+private val FavoriteCameraCardWidth = 168.dp
 private const val HOME_CAROUSEL_ASPECT_RATIO = 16f / 9f
 private const val HOME_SHELF_IMAGE_WIDTH_PX = 540
 private const val HOME_SHELF_IMAGE_HEIGHT_PX = 304
@@ -180,6 +186,29 @@ fun HomeScreen(
             uiState.cameraList.filter { it.id in uiState.favoriteCameraIds }
         }
     }
+    val favoriteOfflineCameraIds = remember(favoriteCameras, uiState.offlineCameraIds) {
+        if (favoriteCameras.isEmpty() || uiState.offlineCameraIds.isEmpty()) {
+            emptySet()
+        } else {
+            buildSet {
+                for (cam in favoriteCameras) {
+                    if (cam.id in uiState.offlineCameraIds) add(cam.id)
+                }
+            }
+        }
+    }
+    val favoriteCameraSnapshots = remember(favoriteCameras, uiState.cameraSnapshots) {
+        if (favoriteCameras.isEmpty() || uiState.cameraSnapshots.isEmpty()) {
+            emptyMap()
+        } else {
+            buildMap {
+                for (cam in favoriteCameras) {
+                    uiState.cameraSnapshots[cam.id]?.let { put(cam.id, it) }
+                }
+            }
+        }
+    }
+    val sharedShimmerProgress = rememberShimmerProgressState(enabled = isTabActive)
 
     val recentFiveEvents = uiState.recentEvents
 
@@ -243,7 +272,7 @@ fun HomeScreen(
                         HomeRecentEventsCarouselSection(
                             events = recentFiveEvents,
                             isLoading = uiState.isLoading,
-                            isTabActive = isTabActive,
+                            shimmerProgress = sharedShimmerProgress,
                             cameraMap = cameraMap,
                             isEn = isEn,
                             onEventClick = handleEventCardClick,
@@ -338,8 +367,9 @@ fun HomeScreen(
                     item(key = "home_favorite_cameras", contentType = "favorite_cameras_shelf") {
                         HomeFavoriteCamerasSection(
                             cameras = favoriteCameras,
-                            offlineCameraIds = uiState.offlineCameraIds,
-                            cameraSnapshots = uiState.cameraSnapshots,
+                            offlineCameraIds = favoriteOfflineCameraIds,
+                            cameraSnapshots = favoriteCameraSnapshots,
+                            containerWidth = containerWidthDp,
                             isEn = isEn,
                             onCameraClick = handleOpenCamera,
                             onViewAllClick = handleViewFavoriteCameras,
@@ -362,7 +392,7 @@ fun HomeScreen(
                             item = item,
                             events = moduleEvents,
                             isLoading = isModuleLoading,
-                            isTabActive = isTabActive,
+                            shimmerProgress = sharedShimmerProgress,
                             cameraMap = cameraMap,
                             cardWidth = shelfCardWidth,
                             containerWidth = containerWidthDp,
@@ -387,7 +417,7 @@ fun HomeScreen(
 private fun HomeRecentEventsCarouselSection(
     events: List<EventData>,
     isLoading: Boolean,
-    isTabActive: Boolean,
+    shimmerProgress: State<Float>,
     cameraMap: Map<String, String>,
     isEn: Boolean,
     onEventClick: (EventData) -> Unit,
@@ -399,15 +429,19 @@ private fun HomeRecentEventsCarouselSection(
     val spacing = MaterialTheme.spacing
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     val currentOnSwipeZoneChanged by rememberUpdatedState(onHorizontalSwipeZoneChanged)
+    val latestCoords = remember(zoneKey) { arrayOfNulls<LayoutCoordinates>(1) }
+    val hasScrollable = events.size > 1
 
     DisposableEffect(zoneKey) {
-        onDispose { currentOnSwipeZoneChanged(zoneKey, null) }
-    }
-
-    LaunchedEffect(zoneKey, events.size) {
-        if (events.size <= 1) {
+        onDispose {
+            latestCoords[0] = null
             currentOnSwipeZoneChanged(zoneKey, null)
         }
+    }
+
+    LaunchedEffect(zoneKey, hasScrollable) {
+        val coords = latestCoords[0]?.takeIf { it.isAttached }
+        currentOnSwipeZoneChanged(zoneKey, if (hasScrollable) coords else null)
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -418,17 +452,14 @@ private fun HomeRecentEventsCarouselSection(
         )
 
         if (isLoading && events.isEmpty()) {
-            if (isTabActive) {
-                val shimmerProgress = rememberShimmerProgressState()
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = spacing.space10)
-                        .aspectRatio(HOME_CAROUSEL_ASPECT_RATIO)
-                        .clip(cardShape)
-                        .shimmerBackground(shimmerProgress, colors.isDark)
-                )
-            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = spacing.space10)
+                    .aspectRatio(HOME_CAROUSEL_ASPECT_RATIO)
+                    .clip(cardShape)
+                    .shimmerBackground(shimmerProgress, colors.isDark)
+            )
         } else if (events.isEmpty()) {
             Row(
                 modifier = Modifier
@@ -498,9 +529,10 @@ private fun HomeRecentEventsCarouselSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onPlaced { coords ->
+                            latestCoords[0] = coords
                             currentOnSwipeZoneChanged(
                                 zoneKey,
-                                if (events.size > 1) coords else null
+                                if (hasScrollable) coords else null
                             )
                         }
                 ) {
@@ -547,32 +579,56 @@ private fun HomeCarouselDots(
     pagerState: PagerState,
     count: Int
 ) {
+    if (count <= 0) return
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val currentPage = pagerState.currentPage
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(spacing.space6),
-        verticalAlignment = Alignment.CenterVertically
+    val selectedWidth = spacing.space18
+    val unselectedWidth = spacing.space6
+    val dotHeight = spacing.space6
+    val dotGap = spacing.space6
+    val selectedColor = colors.accent
+    val unselectedColor = colors.textPlaceholder.copy(alpha = 0.45f)
+
+    val dotWidthStates = List(count) { index ->
+        animateDpAsState(
+            targetValue = if (currentPage == index) selectedWidth else unselectedWidth,
+            animationSpec = tween(durationMillis = 200),
+            label = "homeCarouselDotWidth_$index"
+        )
+    }
+    val dotColorStates = List(count) { index ->
+        animateColorAsState(
+            targetValue = if (currentPage == index) selectedColor else unselectedColor,
+            animationSpec = tween(durationMillis = 200),
+            label = "homeCarouselDotColor_$index"
+        )
+    }
+    val totalWidth = selectedWidth + unselectedWidth * (count - 1) + dotGap * (count - 1)
+
+    Canvas(
+        modifier = Modifier
+            .width(totalWidth)
+            .height(dotHeight)
     ) {
-        repeat(count) { index ->
-            val isSelected = currentPage == index
-            val dotWidth by animateDpAsState(
-                targetValue = if (isSelected) spacing.space18 else spacing.space6,
-                animationSpec = tween(durationMillis = 200),
-                label = "homeCarouselDotWidth"
+        val h = size.height
+        val cornerRadius = CornerRadius(h * 0.5f, h * 0.5f)
+        val gapPx = dotGap.toPx()
+        var animatedSpanPx = 0f
+        for (i in 0 until count) {
+            animatedSpanPx += dotWidthStates[i].value.toPx()
+        }
+        animatedSpanPx += gapPx * (count - 1)
+        var x = (size.width - animatedSpanPx) * 0.5f
+        for (i in 0 until count) {
+            val w = dotWidthStates[i].value.toPx()
+            drawRoundRect(
+                color = dotColorStates[i].value,
+                topLeft = Offset(x, 0f),
+                size = Size(w, h),
+                cornerRadius = cornerRadius
             )
-            val dotColor by animateColorAsState(
-                targetValue = if (isSelected) colors.accent else colors.textPlaceholder.copy(alpha = 0.45f),
-                animationSpec = tween(durationMillis = 200),
-                label = "homeCarouselDotColor"
-            )
-            Box(
-                modifier = Modifier
-                    .width(dotWidth)
-                    .height(spacing.space6)
-                    .clip(CircleShape)
-                    .background(dotColor)
-            )
+            x += w + gapPx
         }
     }
 }
@@ -702,6 +758,7 @@ private fun HomeFavoriteCamerasSection(
     cameras: List<CameraModel>,
     offlineCameraIds: Set<Int>,
     cameraSnapshots: Map<Int, String>,
+    containerWidth: Dp,
     isEn: Boolean,
     onCameraClick: (CameraModel) -> Unit,
     onViewAllClick: () -> Unit,
@@ -710,16 +767,26 @@ private fun HomeFavoriteCamerasSection(
 ) {
     val spacing = MaterialTheme.spacing
     val currentOnSwipeZoneChanged by rememberUpdatedState(onHorizontalSwipeZoneChanged)
-    val hasScrollable = cameras.size > 1
+    val latestCoords = remember(zoneKey) { arrayOfNulls<LayoutCoordinates>(1) }
+    val naturalContentWidth = remember(cameras.size, spacing.space10) {
+        if (cameras.isEmpty()) {
+            0.dp
+        } else {
+            FavoriteCameraCardWidth * cameras.size + spacing.space10 * (cameras.size - 1) + spacing.space10 * 2
+        }
+    }
+    val hasScrollable = cameras.size > 1 && naturalContentWidth > containerWidth
 
     DisposableEffect(zoneKey) {
-        onDispose { currentOnSwipeZoneChanged(zoneKey, null) }
+        onDispose {
+            latestCoords[0] = null
+            currentOnSwipeZoneChanged(zoneKey, null)
+        }
     }
 
     LaunchedEffect(zoneKey, hasScrollable) {
-        if (!hasScrollable) {
-            currentOnSwipeZoneChanged(zoneKey, null)
-        }
+        val coords = latestCoords[0]?.takeIf { it.isAttached }
+        currentOnSwipeZoneChanged(zoneKey, if (hasScrollable) coords else null)
     }
 
     Column(
@@ -737,6 +804,7 @@ private fun HomeFavoriteCamerasSection(
             modifier = Modifier
                 .fillMaxWidth()
                 .onPlaced { coords ->
+                    latestCoords[0] = coords
                     currentOnSwipeZoneChanged(
                         zoneKey,
                         if (hasScrollable) coords else null
@@ -800,7 +868,7 @@ private fun HomeFavoriteCameraCard(
 
     Column(
         modifier = Modifier
-            .width(168.dp)
+            .width(FavoriteCameraCardWidth)
             .clip(cardShape)
             .background(colors.surface)
             .border(spacing.borderMedium, colors.border, cardShape)
@@ -909,7 +977,7 @@ private fun HomeAiModuleEventsShelf(
     item: HomeAiDistributionItem,
     events: List<EventData>,
     isLoading: Boolean,
-    isTabActive: Boolean,
+    shimmerProgress: State<Float>,
     cameraMap: Map<String, String>,
     cardWidth: Dp,
     containerWidth: Dp,
@@ -924,6 +992,7 @@ private fun HomeAiModuleEventsShelf(
     val haptic = LocalHapticFeedback.current
     val currentOnSelectModule by rememberUpdatedState(onSelectModule)
     val currentOnSwipeZoneChanged by rememberUpdatedState(onHorizontalSwipeZoneChanged)
+    val latestCoords = remember(zoneKey) { arrayOfNulls<LayoutCoordinates>(1) }
 
     val moduleColor = remember(item.filterSensorType) {
         AiTypeHelper.getAiColor(item.filterSensorType)
@@ -977,13 +1046,15 @@ private fun HomeAiModuleEventsShelf(
     }
 
     DisposableEffect(zoneKey) {
-        onDispose { currentOnSwipeZoneChanged(zoneKey, null) }
+        onDispose {
+            latestCoords[0] = null
+            currentOnSwipeZoneChanged(zoneKey, null)
+        }
     }
 
     LaunchedEffect(zoneKey, hasHorizontalScrollableItems) {
-        if (!hasHorizontalScrollableItems) {
-            currentOnSwipeZoneChanged(zoneKey, null)
-        }
+        val coords = latestCoords[0]?.takeIf { it.isAttached }
+        currentOnSwipeZoneChanged(zoneKey, if (hasHorizontalScrollableItems) coords else null)
     }
 
     Column(
@@ -1002,6 +1073,7 @@ private fun HomeAiModuleEventsShelf(
             modifier = Modifier
                 .fillMaxWidth()
                 .onPlaced { coords ->
+                    latestCoords[0] = coords
                     currentOnSwipeZoneChanged(
                         zoneKey,
                         if (hasHorizontalScrollableItems) coords else null
@@ -1009,23 +1081,20 @@ private fun HomeAiModuleEventsShelf(
                 }
         ) {
             if (isLoading && events.isEmpty()) {
-                if (isTabActive) {
-                    val shimmerProgress = rememberShimmerProgressState()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = spacing.space10),
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space10)
-                    ) {
-                        repeat(2) {
-                            Box(
-                                modifier = Modifier
-                                    .width(cardWidth)
-                                    .aspectRatio(HOME_CAROUSEL_ASPECT_RATIO)
-                                    .clip(cardShape)
-                                    .shimmerBackground(shimmerProgress, colors.isDark)
-                            )
-                        }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = spacing.space10),
+                    horizontalArrangement = Arrangement.spacedBy(spacing.space10)
+                ) {
+                    repeat(2) {
+                        Box(
+                            modifier = Modifier
+                                .width(cardWidth)
+                                .aspectRatio(HOME_CAROUSEL_ASPECT_RATIO)
+                                .clip(cardShape)
+                                .shimmerBackground(shimmerProgress, colors.isDark)
+                        )
                     }
                 }
             } else if (events.isEmpty()) {

@@ -18,6 +18,7 @@ enum class MainTab(val route: String) {
     Setting("setting")
 }
 
+@Immutable
 sealed interface MainEvent {
     data object Logout : MainEvent
 }
@@ -64,6 +65,7 @@ data class PasswordChangeState(
 )
 
 /** Lỗi đổi mật khẩu – UI tự chuyển sang chuỗi hiển thị theo ngôn ngữ */
+@Immutable
 sealed interface PasswordChangeError {
     data object EmptyFields : PasswordChangeError
     data object TooShort : PasswordChangeError

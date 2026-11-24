@@ -26,6 +26,24 @@ object UserSession {
 
     private const val DOMAIN_KEY = "DOMAIN_KEY"
 
+    @Synchronized
+    fun setSession(
+        userData: UserData?,
+        accessToken: String,
+        refreshToken: String,
+        domain: String,
+        savedUsername: String = this.savedUsername,
+        savedPassword: String = this.savedPassword
+    ) {
+        this.userData = userData
+        this.accessToken = accessToken
+        this.refreshToken = refreshToken
+        this.domain = domain
+        this.savedUsername = savedUsername
+        this.savedPassword = savedPassword
+    }
+
+    @Synchronized
     fun hasSavedCredentials(): Boolean =
         savedUsername.isNotEmpty() && savedPassword.isNotEmpty() && domain.isNotEmpty()
 

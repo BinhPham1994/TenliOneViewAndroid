@@ -39,6 +39,7 @@
         </activity>
         <activity
             android:name=".firebase.CallComingActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|fontScale"
             android:excludeFromRecents="true"
             android:exported="false"
             android:launchMode="singleInstance"

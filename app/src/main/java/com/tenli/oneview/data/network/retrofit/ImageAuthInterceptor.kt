@@ -5,8 +5,8 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 /**
- * Gắn Bearer token cho request ảnh (Coil) khi ảnh thuộc backend Tenli.
- * Không gắn token cho host bên thứ 3 (vd. URL ký sẵn của storage) để tránh lộ token / lỗi 400.
+ * Gắn Bearer token cho request ảnh (Coil) khi ảnh thuộc host backend Tenli đang đăng nhập.
+ * Không gắn token cho host bên thứ 3 hoặc URL ký sẵn của storage để tránh lộ token / lỗi 400.
  */
 class ImageAuthInterceptor : Interceptor {
 
@@ -19,16 +19,11 @@ class ImageAuthInterceptor : Interceptor {
 
         val url = req.url
         // Không gắn Authorization vào URL lưu trữ đã ký sẵn (S3/MinIO/GCS presigned URL) để tránh lỗi HTTP 400 & tránh lộ token
-        if (PRESIGNED_QUERY_KEYS.any { url.queryParameter(it) != null }) {
+        if (url.queryParameterNames.any { it.lowercase() in PRESIGNED_QUERY_KEYS_LOWER }) {
             return chain.proceed(req)
         }
 
-        val path = url.encodedPath
-        val domainHost = HostResolver.currentDomainHost()
-        val isSameBackendHost = domainHost != null && url.host.equals(domainHost, ignoreCase = true)
-        val needsAuth = isSameBackendHost || AUTH_PATH_MARKERS.any { path.contains(it) }
-
-        return if (needsAuth) {
+        return if (HostResolver.isMainBackendHost(url.host)) {
             chain.proceed(req.newBuilder().header("Authorization", "Bearer $token").build())
         } else {
             chain.proceed(req)
@@ -36,13 +31,12 @@ class ImageAuthInterceptor : Interceptor {
     }
 
     private companion object {
-        val AUTH_PATH_MARKERS = arrayOf("/files/download/", "/Data/", "/VMS/", "/api/", "/ts/api/")
-        val PRESIGNED_QUERY_KEYS = arrayOf(
-            "X-Amz-Signature",
-            "X-Amz-Algorithm",
-            "X-Amz-Credential",
-            "GoogleAccessId",
-            "Signature"
+        val PRESIGNED_QUERY_KEYS_LOWER = setOf(
+            "x-amz-signature",
+            "x-amz-algorithm",
+            "x-amz-credential",
+            "googleaccessid",
+            "signature"
         )
     }
 }

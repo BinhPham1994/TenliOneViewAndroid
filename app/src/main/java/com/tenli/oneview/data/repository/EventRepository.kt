@@ -23,6 +23,8 @@ import com.tenli.oneview.model.network.VideoModel
 import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.util.EventBus
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import retrofit2.Response
 
 /**
@@ -228,7 +230,9 @@ class EventRepository(
         MonitorCacheManager.getCachedCameraImageLinkInMemory(cameraId)
 
     suspend fun getCachedCameraImageLink(cameraId: Int): String? =
-        MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+        withContext(Dispatchers.IO) {
+            MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+        }
 
     /**
      * Báo cáo sự kiện sai lên server và đồng bộ xoá sự kiện khỏi toàn bộ RAM/Disk Cache + thông báo cho các ViewModel.

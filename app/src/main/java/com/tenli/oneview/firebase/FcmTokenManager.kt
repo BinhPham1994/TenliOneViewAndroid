@@ -165,13 +165,20 @@ object FcmTokenManager {
 
                 // Nếu google-services.json đổi mobilesdk_app_id (vd. chuyển từ kk sang kk-dev),
                 // xoá token mặc định cũ để Firebase cấp lại token mới khớp với mobilesdk_app_id hiện tại.
+                // Với máy cài mới (lastAppId chưa có), chỉ lưu defaultAppId mà KHÔNG xoá token mới.
+                var effectiveOverride = overrideToken?.trim()?.takeIf { it.isNotEmpty() }
                 if (prefs != null && defaultAppId.isNotEmpty()) {
                     val lastAppId = prefs.getString(PREF_LAST_GOOGLE_APP_ID, null)
-                    if (lastAppId != defaultAppId) {
+                    if (lastAppId.isNullOrEmpty()) {
+                        prefs.edit {
+                            putString(PREF_LAST_GOOGLE_APP_ID, defaultAppId)
+                        }
+                    } else if (lastAppId != defaultAppId) {
                         logInfo {
                             "🔄 [GOOGLE APP ID THAY ĐỔI] $lastAppId -> $defaultAppId, xoá FCM token cũ và cấp mới theo project '$defaultProjectId'..."
                         }
                         awaitDeleteDefaultFcmToken()
+                        effectiveOverride = null
                         prefs.edit {
                             putString(PREF_LAST_GOOGLE_APP_ID, defaultAppId)
                             remove(PREF_LATEST_DEVICE_TOKEN)
@@ -184,7 +191,7 @@ object FcmTokenManager {
                 // Kiểm tra cache chống trùng lặp NGAY ĐẦU HÀM (trước khi gọi mạng / Google Play Services)
                 // để không đánh thức radio mạng hay IPC ngầm khi token vừa đăng ký chưa quá hạn.
                 val earlyNow = System.currentTimeMillis()
-                if (!force && overrideToken.isNullOrBlank() && prefs != null) {
+                if (!force && effectiveOverride.isNullOrBlank() && prefs != null) {
                     val lastToken = prefs.getString(PREF_REGISTERED_TOKEN, null)
                     val lastUser = prefs.getString(PREF_REGISTERED_USER, null)
                     val lastDomain = prefs.getString(PREF_REGISTERED_DOMAIN, null)
@@ -286,7 +293,7 @@ object FcmTokenManager {
                         awaitTokenViaGmsRpc(ctx, targetSenderId)
                     } else null
                 } else {
-                    overrideToken?.trim()?.takeIf { it.isNotEmpty() }
+                    effectiveOverride
                         ?: awaitDefaultFcmToken()
                         ?: prefs?.getString(PREF_LATEST_DEVICE_TOKEN, null)
                 }
@@ -383,9 +390,16 @@ object FcmTokenManager {
     ) = withContext(Dispatchers.IO) {
         registerMutex.withLock {
             try {
-                if (explicitDomain.isNullOrBlank() && explicitAccessToken.isNullOrBlank()) {
+                val isExplicitLogoutCleanup = !explicitDomain.isNullOrBlank() || !explicitAccessToken.isNullOrBlank()
+                if (!isExplicitLogoutCleanup) {
                     UserSession.ensureRestored()
                 }
+                if (isExplicitLogoutCleanup && UserSession.accessToken.isNotEmpty()) {
+                    logWarn { "[HUỶ ĐĂNG KÝ FCM] Phiên đăng nhập mới đã hoạt động → bỏ qua dọn dẹp token của phiên cũ" }
+                    return@withLock
+                }
+                val entrySessionToken = UserSession.accessToken
+
                 val effectiveDomain = (explicitDomain?.takeIf { it.isNotBlank() } ?: UserSession.domain)
                     .trim()
                     .trimEnd('/')
@@ -396,6 +410,17 @@ object FcmTokenManager {
                 val targetToken = prefs?.getString(PREF_REGISTERED_TOKEN, null)?.takeIf { it.isNotBlank() }
                     ?: prefs?.getString(PREF_LATEST_DEVICE_TOKEN, null)?.takeIf { it.isNotBlank() }
                     ?: awaitDefaultFcmToken()
+
+                // Xác minh chưa có phiên đăng nhập mới chiếm chỗ trước khi xoá PREF_REGISTERED_*
+                val canWipePrefs = if (isExplicitLogoutCleanup) {
+                    UserSession.accessToken.isEmpty()
+                } else {
+                    UserSession.accessToken.isEmpty() || UserSession.accessToken == entrySessionToken
+                }
+                if (!canWipePrefs) {
+                    logWarn { "[HUỶ ĐĂNG KÝ FCM] Phiên đăng nhập mới đã thay thế → giữ nguyên cấu hình FCM mới" }
+                    return@withLock
+                }
 
                 // Xoá cache đăng ký ngay lập tức để lần đăng nhập tiếp theo luôn đăng ký mới
                 prefs?.edit {
@@ -438,7 +463,12 @@ object FcmTokenManager {
                     }
                 }
 
-                if (deleteLocalToken) {
+                val canDeleteLocalToken = deleteLocalToken && if (isExplicitLogoutCleanup) {
+                    UserSession.accessToken.isEmpty()
+                } else {
+                    UserSession.accessToken.isEmpty() || UserSession.accessToken == entrySessionToken
+                }
+                if (canDeleteLocalToken) {
                     logInfo { "[HUỶ ĐĂNG KÝ FCM] Xoá FCM token cục bộ (FirebaseMessaging.deleteToken) để cấp mới cho phiên sau..." }
                     awaitDeleteDefaultFcmToken()
                 }
@@ -517,14 +547,16 @@ object FcmTokenManager {
                         if (!cont.isActive) return@addOnCompleteListener
                         if (resultTask.isSuccessful) {
                             val resBundle = resultTask.result
-                            val rawRegId = resBundle?.getString("registration_id")
-                                ?: resBundle?.getString("unregistered")
-                            val cleanToken = rawRegId
-                                ?.removePrefix("|ID|")
-                                ?.substringAfter(':')
-                                ?.trim()
-                                ?.takeIf { it.isNotEmpty() }
-                                ?: rawRegId?.trim()?.takeIf { it.isNotEmpty() }
+                            val rawRegId = resBundle?.getString("registration_id")?.trim()
+                            val cleanToken = when {
+                                rawRegId.isNullOrEmpty() -> null
+                                rawRegId.startsWith("|ID|") -> rawRegId
+                                    .removePrefix("|ID|")
+                                    .substringAfter(':', missingDelimiterValue = "")
+                                    .trim()
+                                    .takeIf { it.isNotEmpty() }
+                                else -> rawRegId
+                            }
                             if (!cleanToken.isNullOrBlank()) {
                                 cont.resume(cleanToken)
                             } else {

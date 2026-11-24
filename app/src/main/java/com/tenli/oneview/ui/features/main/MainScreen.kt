@@ -29,6 +29,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -83,10 +84,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -105,6 +104,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -169,6 +169,7 @@ import com.tenli.oneview.ui.utils.createTopItemSizeCache
 import com.tenli.oneview.ui.utils.smoothScrollToTop
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -390,9 +391,14 @@ fun MainScreen(
     var isLifecycleStarted by remember(lifecycleOwner) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val initialStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        isLifecycleStarted = initialStarted
+        viewModel.setAppForeground(initialStarted)
         val observer = LifecycleEventObserver { _, _ ->
-            isLifecycleStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            val started = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            isLifecycleStarted = started
+            viewModel.setAppForeground(started)
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
@@ -813,28 +819,39 @@ fun MainScreen(
 
                 // Khi người dùng xem nhanh từ Trang chủ (vd. bấm vào 1 bài AI ở Phân bố AI) rồi rời khỏi tab Sự kiện / Trực tiếp,
                 // đợi hiệu ứng trượt thoát hoàn tất (tab khuất hẳn khỏi màn hình) rồi tự động khôi phục bộ lọc gốc.
-                val isEventTabVisible = uiState.currentTab == MainTab.Event ||
-                    activeTab == MainTab.Event ||
-                    outgoingTab == MainTab.Event
-                LaunchedEffect(isEventTabVisible) {
-                    if (!isEventTabVisible) {
-                        val evVm = currentEventViewModel
-                        if (evVm != null && evVm.clearTemporaryExternalFilter()) {
-                            eventListState.scrollToItem(0)
-                        }
+                // Đọc activeTab/outgoingTab bên trong snapshotFlow (không đọc trong composition) để đạt 0 recomposition ở Frame 1 khi vuốt ngang.
+                LaunchedEffect(Unit) {
+                    snapshotFlow {
+                        currentTabState == MainTab.Event ||
+                            activeTab == MainTab.Event ||
+                            outgoingTab == MainTab.Event
                     }
+                        .distinctUntilChanged()
+                        .collect { isEventTabVisible ->
+                            if (!isEventTabVisible) {
+                                val evVm = currentEventViewModel
+                                if (evVm != null && evVm.clearTemporaryExternalFilter()) {
+                                    eventListState.scrollToItem(0)
+                                }
+                            }
+                        }
                 }
 
-                val isMonitorTabVisible = uiState.currentTab == MainTab.Monitor ||
-                    activeTab == MainTab.Monitor ||
-                    outgoingTab == MainTab.Monitor
-                LaunchedEffect(isMonitorTabVisible) {
-                    if (!isMonitorTabVisible) {
-                        val monVm = currentMonitorViewModel
-                        if (monVm != null && monVm.clearTemporaryExternalQuickFilter()) {
-                            monitorGridState.scrollToItem(0)
-                        }
+                LaunchedEffect(Unit) {
+                    snapshotFlow {
+                        currentTabState == MainTab.Monitor ||
+                            activeTab == MainTab.Monitor ||
+                            outgoingTab == MainTab.Monitor
                     }
+                        .distinctUntilChanged()
+                        .collect { isMonitorTabVisible ->
+                            if (!isMonitorTabVisible) {
+                                val monVm = currentMonitorViewModel
+                                if (monVm != null && monVm.clearTemporaryExternalQuickFilter()) {
+                                    monitorGridState.scrollToItem(0)
+                                }
+                            }
+                        }
                 }
 
                 val onHomeNavigateToEvents: (TimeFilter, Int?, String?) -> Unit = remember(switchToTab, scope) {
@@ -920,15 +937,11 @@ fun MainScreen(
                                                     else -> offsetFraction + partnerSide
                                                 }
                                                 val offsetX = (tabFraction * placeable.width).toInt()
-                                                val visibility = (1f - abs(tabFraction)).coerceIn(0f, 1f)
-                                                val pageAlpha = visibility * visibility * (3f - 2f * visibility)
-                                                placeable.placeRelativeWithLayer(
+                                                placeable.placeRelative(
                                                     x = offsetX,
                                                     y = 0,
                                                     zIndex = if (tab == currentActive) 2f else 1f
-                                                ) {
-                                                    alpha = pageAlpha
-                                                }
+                                                )
                                             }
                                         }
                                     }
@@ -1026,7 +1039,6 @@ fun MainScreen(
                     visible = showNotificationConfigPage,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = innerPadding.calculateTopPadding())
                         .zIndex(30f),
                     enter = slideInHorizontally(
                         initialOffsetX = { fullWidth -> fullWidth },
@@ -1094,7 +1106,8 @@ fun SettingScreen(
     var showChangePasswordSheet by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
-    var currentLanguage by remember { mutableStateOf(LocaleManager.getLocale(context)) }
+    val isEn = rememberIsEnglish()
+    val currentLanguage = if (isEn) "en" else "vi"
 
     val uriHandler = LocalUriHandler.current
     val colors = MaterialTheme.appColors
@@ -1103,7 +1116,6 @@ fun SettingScreen(
     val defaultMyPage = stringResource(id = R.string.setting_my_page)
     val userName: String = mainUiState.accountName.ifBlank { defaultMyPage }
 
-    val isEn = currentLanguage.startsWith("en")
     val groupModifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = spacing.space10)
@@ -1227,7 +1239,6 @@ fun SettingScreen(
                             isSelected = currentLanguage == option.code,
                             onClick = {
                                 LocaleManager.setLocale(context, option.code)
-                                currentLanguage = option.code
                                 showLanguageSheet = false
                                 (context as? Activity)?.recreate()
                             },
@@ -1326,9 +1337,10 @@ private fun SettingTopCard(
     onClick: (() -> Unit)? = null
 ) {
     val spacing = MaterialTheme.spacing
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(spacing.radiusMedium))
+            .clip(cardShape)
             .background(MaterialTheme.appColors.surface)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(vertical = spacing.space16, horizontal = spacing.space14),
@@ -1374,12 +1386,14 @@ private fun SettingsGroupCard(
     background: Color = MaterialTheme.appColors.surface,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val spacing = MaterialTheme.spacing
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusMedium))
+            .clip(cardShape)
             .background(background)
-            .padding(vertical = MaterialTheme.spacing.space2),
+            .padding(vertical = spacing.space2),
         content = content
     )
 }
@@ -1387,12 +1401,14 @@ private fun SettingsGroupCard(
 /** Thẻ danh sách lựa chọn trong bottom sheet (ngôn ngữ, giao diện, mật khẩu) */
 @Composable
 private fun OptionsCard(content: @Composable ColumnScope.() -> Unit) {
+    val spacing = MaterialTheme.spacing
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(MaterialTheme.spacing.radiusMedium))
+            .clip(cardShape)
             .background(MaterialTheme.appColors.surfaceRaised)
-            .padding(vertical = MaterialTheme.spacing.space4),
+            .padding(vertical = spacing.space4),
         content = content
     )
 }
@@ -1529,12 +1545,6 @@ private fun MobileNotificationConfigScreen(
     val scrollState = rememberScrollState()
     var isAiModulesExpanded by rememberSaveable { mutableStateOf(false) }
 
-    // Neo vị trí cuộn: khi khối quyền Cuộc gọi & Pin ở đầu trang thêm/bớt chiều cao, bù đúng deltaPx vào scrollState
-    // ngay trong cùng frame layout để phần Cài đặt chung & Cấu hình thông báo theo bài AI giữ nguyên vị trí trên màn hình.
-    val currentCallPermsHeightPx = remember { IntArray(1) }
-    val prevCallPermsHeightPx = remember { IntArray(1) }
-    val isScrollAnchorInitialized = remember { BooleanArray(1) }
-
     var hasOsPermission by remember { mutableStateOf(hasOsNotificationPermission(context)) }
     var hasOverlayPerm by remember { mutableStateOf(hasOverlayPermission(context)) }
     var hasBatteryPerm by remember {
@@ -1592,13 +1602,20 @@ private fun MobileNotificationConfigScreen(
         }
     }
 
-    var resumeTick by remember { mutableIntStateOf(0) }
+    val latestTryCompletePendingCallActivation by rememberUpdatedState(tryCompletePendingCallActivation)
+    var awaitingSettingsReturn by remember { mutableStateOf(false) }
+    var settingsReturnTick by remember { mutableIntStateOf(0) }
 
     DisposableEffect(lifecycleOwner) {
+        var hasObservedInitialResume = false
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                resumeTick++
-                tryCompletePendingCallActivation()
+                latestTryCompletePendingCallActivation()
+                if (hasObservedInitialResume && awaitingSettingsReturn) {
+                    awaitingSettingsReturn = false
+                    settingsReturnTick++
+                }
+                hasObservedInitialResume = true
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -1607,20 +1624,26 @@ private fun MobileNotificationConfigScreen(
         }
     }
 
-    // Bắt kịp trường hợp Android Settings lưu trạng thái "Không hạn chế pin" / "Hiển thị trên ứng dụng khác"
-    // bất đồng bộ vài trăm ms sau khi quay lại app, giúp tự động ẩn sheet và cập nhật trạng thái ngay lập tức.
-    LaunchedEffect(resumeTick, pendingCallActivation) {
-        for (i in 0 until 20) {
+    // Chỉ kiểm tra lặp ngắn có giới hạn khi vừa quay lại từ màn hình Android Settings
+    // (một số ROM cập nhật trạng thái pin/overlay trễ vài trăm ms sau ON_RESUME); khi mới mở màn chỉ kiểm tra 1 lần.
+    LaunchedEffect(settingsReturnTick) {
+        if (settingsReturnTick <= 0) return@LaunchedEffect
+        val recheckDelaysMs = longArrayOf(200L, 200L, 400L, 200L) // t = 200ms, 400ms, 800ms, 1000ms
+        for (waitMs in recheckDelaysMs) {
             if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
-            if (hasOsPermission && hasOverlayPerm && hasBatteryPerm && pendingCallActivation == null) {
-                return@LaunchedEffect
+            val isSatisfied = when (val pending = pendingCallActivation) {
+                null -> hasOsPermission && hasOverlayPerm && hasBatteryPerm
+                is PendingCallActivation.ManualStep -> when (pending.step) {
+                    CallPermissionStep.NOTIFICATION -> hasOsPermission
+                    CallPermissionStep.OVERLAY -> hasOverlayPerm
+                    CallPermissionStep.BATTERY -> hasBatteryPerm
+                }
+                else -> hasOsPermission && hasOverlayPerm && hasBatteryPerm
             }
-            delay(125L)
-            tryCompletePendingCallActivation()
-        }
-        while (pendingCallActivation != null && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            delay(250L)
-            tryCompletePendingCallActivation()
+            if (isSatisfied) return@LaunchedEffect
+            delay(waitMs)
+            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
+            latestTryCompletePendingCallActivation()
         }
     }
 
@@ -1629,16 +1652,24 @@ private fun MobileNotificationConfigScreen(
             val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                 putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
             }
+            awaitingSettingsReturn = true
             context.startActivity(intent)
         } catch (_: Exception) {
+            awaitingSettingsReturn = false
         }
     }
 
     val openOverlayPermissionSettings: () -> Unit = {
+        awaitingSettingsReturn = true
         com.tenli.oneview.ui.utils.PermissionUtils.openEmergencyCallPermissionSettings(
             context = context,
             preferManufacturerSettings = isChinesePhone
         )
+    }
+
+    val openBatteryPermissionSettings: () -> Unit = {
+        awaitingSettingsReturn = true
+        com.tenli.oneview.ui.utils.PermissionUtils.openAppDetailsSettings(context)
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -1685,10 +1716,17 @@ private fun MobileNotificationConfigScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
+            .statusBarsPadding()
     ) {
         SettingSubPageHeader(
             title = stringResource(id = R.string.setting_notifications),
-            onBackClick = onBackClick
+            onBackClick = onBackClick,
+            backgroundColor = backgroundColor
         )
 
         if (state.isLoading) {
@@ -1701,6 +1739,22 @@ private fun MobileNotificationConfigScreen(
                 WaveDotsLoading(dotColor = colors.accent)
             }
         } else {
+            // Neo vị trí cuộn ngoài pha layout/measure: khi khối quyền Cuộc gọi & Pin đổi chiều cao,
+            // cập nhật scrollState bằng scrollBy trong LaunchedEffect thay vì dispatchRawDelta trong Modifier.layout.
+            var callPermsHeightPx by remember { mutableIntStateOf(-1) }
+            var prevCallPermsHeightPx by remember { mutableIntStateOf(-1) }
+            LaunchedEffect(callPermsHeightPx) {
+                if (callPermsHeightPx < 0) return@LaunchedEffect
+                val previous = prevCallPermsHeightPx
+                prevCallPermsHeightPx = callPermsHeightPx
+                if (previous >= 0) {
+                    val deltaPx = callPermsHeightPx - previous
+                    if (deltaPx != 0) {
+                        scrollState.scrollBy(deltaPx.toFloat())
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1712,31 +1766,6 @@ private fun MobileNotificationConfigScreen(
                     modifier = Modifier
                         .widthIn(max = spacing.contentMaxWidth)
                         .fillMaxWidth()
-                        .layout { measurable, constraints ->
-                            val scrollBefore = Snapshot.withoutReadObservation { scrollState.value }
-                            val placeable = measurable.measure(constraints)
-                            val measuredCallPermsHeight = currentCallPermsHeightPx[0]
-                            if (!isScrollAnchorInitialized[0]) {
-                                isScrollAnchorInitialized[0] = true
-                                prevCallPermsHeightPx[0] = measuredCallPermsHeight
-                            } else {
-                                val deltaPx = measuredCallPermsHeight - prevCallPermsHeightPx[0]
-                                if (deltaPx != 0) {
-                                    prevCallPermsHeightPx[0] = measuredCallPermsHeight
-                                    Snapshot.withoutReadObservation {
-                                        val newMax = scrollState.maxValue
-                                        val desiredScroll = (scrollBefore + deltaPx).coerceIn(0, newMax)
-                                        val correction = desiredScroll - scrollState.value
-                                        if (correction != 0) {
-                                            scrollState.dispatchRawDelta(correction.toFloat())
-                                        }
-                                    }
-                                }
-                            }
-                            layout(placeable.width, placeable.height) {
-                                placeable.placeRelative(0, 0)
-                            }
-                        }
                         .verticalScroll(scrollState)
                         .padding(spacing.space10)
                 ) {
@@ -1788,12 +1817,8 @@ private fun MobileNotificationConfigScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .layout { measurable, constraints ->
-                                    val placeable = measurable.measure(constraints)
-                                    currentCallPermsHeightPx[0] = placeable.height
-                                    layout(placeable.width, placeable.height) {
-                                        placeable.placeRelative(0, 0)
-                                    }
+                                .onSizeChanged { size ->
+                                    callPermsHeightPx = size.height
                                 }
                         ) {
                             if (showOverlayRow || showBatteryRow) {
@@ -1947,7 +1972,13 @@ private fun MobileNotificationConfigScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .alpha(if (state.pushEnabled) 1f else 0.5f)
+                                .then(
+                                    if (state.pushEnabled) {
+                                        Modifier
+                                    } else {
+                                        Modifier.graphicsLayer { alpha = 0.5f }
+                                    }
+                                )
                         ) {
                             SettingsGroupCard {
                                 // Danh sách các bài AI hiển thị mặc định (giữ nguyên thứ tự gốc)
@@ -2181,7 +2212,7 @@ private fun MobileNotificationConfigScreen(
                     when (step) {
                         CallPermissionStep.NOTIFICATION -> requestOrOpenPermission()
                         CallPermissionStep.OVERLAY -> openOverlayPermissionSettings()
-                        CallPermissionStep.BATTERY -> com.tenli.oneview.ui.utils.PermissionUtils.openAppDetailsSettings(context)
+                        CallPermissionStep.BATTERY -> openBatteryPermissionSettings()
                     }
                 },
                 onDismiss = {
@@ -2271,11 +2302,14 @@ private fun AiModuleNotifyRow(
             exit = shrinkVertically(tween(180)) + fadeOut(tween(150))
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                val modeSelectorShape = remember(spacing.radiusSmallMedium) {
+                    RoundedCornerShape(spacing.radiusSmallMedium)
+                }
                 Spacer(modifier = Modifier.height(spacing.space10))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(spacing.radiusSmallMedium))
+                        .clip(modeSelectorShape)
                         .background(colors.controlBg)
                         .padding(spacing.space3),
                     horizontalArrangement = Arrangement.spacedBy(spacing.space4)
@@ -2316,7 +2350,7 @@ private fun AlarmModeOptionButton(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val shape = RoundedCornerShape(spacing.radiusSmall)
+    val shape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     val bgColor = if (selected) activeColor else Color.Transparent
     val contentColor = if (selected) colors.onAccent else colors.textMuted
 
@@ -2399,12 +2433,12 @@ private fun MobileAboutScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(backgroundColor)
-            .statusBarsPadding()
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {}
             )
+            .statusBarsPadding()
     ) {
         SettingSubPageHeader(
             title = stringResource(id = R.string.setting_introduce),
@@ -2497,10 +2531,11 @@ private fun StatusChip(
     onClick: (() -> Unit)? = null
 ) {
     val spacing = MaterialTheme.spacing
+    val chipShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     Box(
         modifier = Modifier
             .then(if (onClick != null) Modifier.heightIn(min = spacing.avatarSmall) else Modifier)
-            .clip(RoundedCornerShape(spacing.radiusSmall))
+            .clip(chipShape)
             .background(color)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(
@@ -2583,7 +2618,7 @@ private fun MobilePasswordChangeSheet(
     ) {
         val error = state.error
         if (error != null) {
-            val errorShape = RoundedCornerShape(spacing.radiusCompact)
+            val errorShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

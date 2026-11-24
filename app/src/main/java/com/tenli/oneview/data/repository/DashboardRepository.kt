@@ -7,7 +7,6 @@ import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
 import com.tenli.oneview.data.local.MonitorCacheManager
-import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.api.AiApi
 import com.tenli.oneview.data.network.api.BsApi
@@ -23,8 +22,14 @@ import com.tenli.oneview.model.network.VmsEventCountByTypeModel
 import com.tenli.oneview.ui.features.home.TimeFilter
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.util.safeApiCall
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import retrofit2.Response
 
 /**
@@ -95,11 +100,17 @@ class DashboardRepository(
         val needProfiles = AiTypeHelper.isAiTypeEnabled("logic-face") ||
             AiTypeHelper.isAiTypeEnabled("sensor-uniform-camera")
         if (!needProfiles) return
-        if (EventCacheManager.getProfilesInMemory().isEmpty()) {
-            val profiles = safeApiCall { bsApi.getProfileList() }.getOrNull()?.body().orEmpty()
-            val groups = safeApiCall { bsApi.getProfileGroupList() }.getOrNull()?.body().orEmpty()
-            if (profiles.isNotEmpty() || groups.isNotEmpty()) {
-                EventCacheManager.saveProfilesCache(appContext, profiles, groups)
+        if (EventCacheManager.getProfilesInMemory().isNotEmpty()) return
+        prewarmProfilesMutex.withLock {
+            if (EventCacheManager.getProfilesInMemory().isNotEmpty()) return
+            coroutineScope {
+                val profilesDeferred = async { safeApiCall { bsApi.getProfileList() }.getOrNull()?.body().orEmpty() }
+                val groupsDeferred = async { safeApiCall { bsApi.getProfileGroupList() }.getOrNull()?.body().orEmpty() }
+                val profiles = profilesDeferred.await()
+                val groups = groupsDeferred.await()
+                if (profiles.isNotEmpty() || groups.isNotEmpty()) {
+                    EventCacheManager.saveProfilesCache(appContext, profiles, groups)
+                }
             }
         }
     }
@@ -155,17 +166,8 @@ class DashboardRepository(
     suspend fun getMonitorListExt(url: String, authHeader: String): Response<List<Monitor>> =
         aiApi.getMonitorListExt(url = url, authHeader = authHeader)
 
-    private fun favoritePrefKey(): String {
-        val domainKey = UserSession.domain.trim().lowercase().ifEmpty { "default" }
-        return "$PREF_FAVORITE_CAMERAS_PREFIX$domainKey"
-    }
-
-    fun getFavoriteCameraIds(): Set<Int> {
-        val raw = GlobalData.preferences.getStringSet(favoritePrefKey(), emptySet()) ?: emptySet()
-        val parsed = if (raw.isEmpty()) emptySet() else raw.mapNotNull { it.toIntOrNull() }.toSet()
-        MonitorCacheManager.notifyFavoritesUpdated(parsed)
-        return parsed
-    }
+    fun getFavoriteCameraIds(): Set<Int> =
+        MonitorCacheManager.readFavoriteCameraIds()
 
     val favoriteCameraIdsFlow: StateFlow<Set<Int>>
         get() = MonitorCacheManager.favoriteCameraIdsFlow
@@ -177,7 +179,9 @@ class DashboardRepository(
         MonitorCacheManager.getCachedCameraImageLinkInMemory(cameraId)
 
     suspend fun getCachedCameraImageLink(cameraId: Int): String? =
-        MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+        withContext(Dispatchers.IO) {
+            MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+        }
 
     fun setCachedCameraImageLink(cameraId: Int, link: String) {
         MonitorCacheManager.setCachedCameraImageLink(appContext, cameraId, link)
@@ -188,6 +192,6 @@ class DashboardRepository(
 
     companion object {
         private const val PREF_VIEW_MODE = "mobile_event_view_mode"
-        private const val PREF_FAVORITE_CAMERAS_PREFIX = "saved_favorite_cameras_"
+        private val prewarmProfilesMutex = Mutex()
     }
 }

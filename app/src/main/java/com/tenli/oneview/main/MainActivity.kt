@@ -66,8 +66,10 @@ import com.google.android.play.core.appupdate.AppUpdateInfo
 import com.google.android.play.core.appupdate.AppUpdateManager
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.model.ActivityResult as PlayActivityResult
 import com.google.android.play.core.install.model.AppUpdateType
 import com.google.android.play.core.install.model.UpdateAvailability
+import com.tenli.oneview.TenliApp
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
 import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.ui.component.enableAppEdgeToEdge
@@ -83,9 +85,11 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.ui.utils.PermissionUtils
+import com.tenli.oneview.util.EventBus
 import kotlinx.coroutines.delay
 
 private const val TAG = "MainActivity"
+private const val MAX_IMMEDIATE_UPDATE_RETRIES = 2
 
 /** Các khoá extra mở chi tiết sự kiện (từ FCM data, notification hệ thống hoặc màn cuộc gọi) */
 private val EVENT_ID_EXTRA_KEYS = arrayOf(
@@ -103,12 +107,28 @@ class MainActivity : ComponentActivity() {
     private var pendingEventNav by mutableStateOf<PendingEventNav?>(null)
 
     private val appUpdateManager: AppUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
+    private var updateRetryCount = 0
 
-    /** Kết quả flow cập nhật IMMEDIATE: nếu người dùng huỷ thì kiểm tra & yêu cầu lại (bắt buộc cập nhật). */
+    /** Kết quả flow cập nhật IMMEDIATE: tránh lặp vô hạn nếu Play Store lỗi (RESULT_IN_APP_UPDATE_FAILED). */
     private val updateLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        if (result.resultCode != RESULT_OK) checkUpdate()
+        when (result.resultCode) {
+            RESULT_OK -> {
+                updateRetryCount = 0
+            }
+            PlayActivityResult.RESULT_IN_APP_UPDATE_FAILED -> {
+                Log.w(TAG, "In-app update failed (RESULT_IN_APP_UPDATE_FAILED), stopping retry loop")
+            }
+            else -> {
+                if (updateRetryCount < MAX_IMMEDIATE_UPDATE_RETRIES) {
+                    updateRetryCount++
+                    checkUpdate()
+                } else {
+                    Log.w(TAG, "In-app update retry cap reached ($updateRetryCount), deferring")
+                }
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,7 +137,7 @@ class MainActivity : ComponentActivity() {
         enableAppEdgeToEdge()
 
         super.onCreate(savedInstanceState)
-        requestHighestRefreshRateMode()
+        (application as? TenliApp)?.preloadUiCachesIfNeeded()
 
         splashScreen.setKeepOnScreenCondition {
             splashViewModel.uiState.value.destination is SplashDestination.Loading
@@ -138,7 +158,11 @@ class MainActivity : ComponentActivity() {
                 val uiState by splashViewModel.uiState.collectAsStateWithLifecycle()
 
                 LaunchedEffect(Unit) {
-                    com.tenli.oneview.util.EventBus.unauthorized.collect {
+                    if (EventBus.consumePendingUnauthorized()) {
+                        splashViewModel.logout()
+                    }
+                    EventBus.unauthorized.collect {
+                        EventBus.consumePendingUnauthorized()
                         splashViewModel.logout()
                     }
                 }
@@ -177,29 +201,6 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(LocaleManager.updateResources(newBase))
     }
 
-    /**
-     * Mở khóa tần số quét tối đa (90Hz / 120Hz) trên cùng độ phân giải gốc để các thao tác cuộn & chuyển tab đạt chuẩn 120fps.
-     */
-    private fun requestHighestRefreshRateMode() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        runCatching {
-            val currentDisplay = display ?: return
-            val activeMode = currentDisplay.mode
-            val bestMode = currentDisplay.supportedModes
-                .filter {
-                    it.physicalWidth == activeMode.physicalWidth &&
-                        it.physicalHeight == activeMode.physicalHeight
-                }
-                .maxByOrNull { it.refreshRate }
-                ?: return
-            if (bestMode.modeId != activeMode.modeId && bestMode.refreshRate > activeMode.refreshRate + 1f) {
-                window.attributes = window.attributes.apply {
-                    preferredDisplayModeId = bestMode.modeId
-                }
-            }
-        }
-    }
-
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -213,6 +214,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (EventBus.consumePendingUnauthorized()) {
+            splashViewModel.logout()
+        }
         // Tiếp tục flow cập nhật IMMEDIATE nếu đang dở (vd. người dùng thoát app giữa chừng)
         appUpdateManager.appUpdateInfo.addOnSuccessListener(this) { info ->
             if (info.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS) {
@@ -293,6 +297,10 @@ private fun StartupPermissionDialogs() {
     // Khởi tạo đồng bộ = true ngay từ frame đầu trên máy mới cài để tuyệt đối không bật bottom sheet phía sau hộp thoại xin quyền hệ thống
     var isRequestingNotification by remember { mutableStateOf(needsInitialRuntimeNotificationRequest) }
     var grantedNotificationInLauncher by remember { mutableStateOf(false) }
+    var hasNotificationPerm by remember {
+        mutableStateOf(PermissionUtils.isNotificationEnabled(context))
+    }
+    var awaitingSettingsReturn by remember { mutableStateOf(false) }
 
     fun refreshDialogs(
         checkState: PermissionUtils.CallPermissionCheckState = PermissionUtils.callPermissionCheckState.value
@@ -301,10 +309,8 @@ private fun StartupPermissionDialogs() {
         if (osEnabled) {
             grantedNotificationInLauncher = false
         }
-        val hasNotificationPerm = osEnabled || grantedNotificationInLauncher
-        if (hasNotificationPerm) {
-            FcmTokenManager.registerDevicePushTokenAsync(force = false)
-        }
+        val effectiveHasNotificationPerm = osEnabled || grantedNotificationInLauncher
+        hasNotificationPerm = effectiveHasNotificationPerm
 
         // Chờ đóng xong hộp thoại xin quyền hệ thống VÀ chờ API kiểm tra xong xem tài khoản có bài AI bật "Cuộc gọi" hay không
         // mới quyết định hiển thị hoặc ẩn bottom sheet cấp quyền.
@@ -316,17 +322,23 @@ private fun StartupPermissionDialogs() {
         activeStep = if (checkState.requiresCallPermissions) {
             // Bắt buộc cấp đủ các quyền phục vụ Cuộc gọi khẩn cấp (bỏ qua trạng thái "Để sau")
             when {
-                !hasNotificationPerm -> CallPermissionStep.NOTIFICATION
+                !effectiveHasNotificationPerm -> CallPermissionStep.NOTIFICATION
                 !PermissionUtils.isEmergencyCallPermissionGranted(context) -> CallPermissionStep.OVERLAY
                 !PermissionUtils.isIgnoringBattery(context) -> CallPermissionStep.BATTERY
                 else -> null
             }
         } else {
             when {
-                !hasNotificationPerm && CallPermissionStep.NOTIFICATION !in dismissedInSession ->
+                !effectiveHasNotificationPerm && CallPermissionStep.NOTIFICATION !in dismissedInSession ->
                     CallPermissionStep.NOTIFICATION
                 else -> null
             }
+        }
+    }
+
+    LaunchedEffect(hasNotificationPerm) {
+        if (hasNotificationPerm) {
+            FcmTokenManager.registerDevicePushTokenAsync(force = false)
         }
     }
 
@@ -336,7 +348,6 @@ private fun StartupPermissionDialogs() {
         isRequestingNotification = false
         if (granted) {
             grantedNotificationInLauncher = true
-            FcmTokenManager.registerDevicePushTokenAsync(force = false)
         } else {
             dismissedInSession = dismissedInSession + CallPermissionStep.NOTIFICATION
         }
@@ -361,8 +372,10 @@ private fun StartupPermissionDialogs() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                resumeTick++
                 refreshDialogs()
+                if (activeStep != null || awaitingSettingsReturn) {
+                    resumeTick++
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -370,19 +383,20 @@ private fun StartupPermissionDialogs() {
     }
 
     // Trên Android, khi bật "Không hạn chế pin" (Unrestricted) hoặc "Hiển thị trên ứng dụng khác" rồi bấm Back ngay,
-    // Settings của hệ thống ghi whitelist bất đồng bộ trong onStop() (trễ ~150ms - 1500ms sau khi MainActivity.onResume chạy).
-    // Kiểm tra lặp ngắn sau khi quay lại app và trong lúc sheet đang mở để tự động ẩn ngay khi hệ thống cập nhật xong.
-    LaunchedEffect(resumeTick, activeStep, callCheckState) {
-        if (isRequestingNotification || !callCheckState.isResolved) return@LaunchedEffect
-        for (i in 0 until 20) {
-            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@LaunchedEffect
-            if (activeStep == null && PermissionUtils.isCallReady(context)) return@LaunchedEffect
-            delay(125L)
+    // Settings của hệ thống ghi whitelist bất đồng bộ (trễ ~150ms - 1000ms sau khi MainActivity.onResume chạy).
+    // Chỉ kiểm tra có giới hạn tối đa 4 lần sau ON_RESUME khi sheet đang mở hoặc vừa quay lại từ Settings, rồi dừng hẳn.
+    LaunchedEffect(resumeTick) {
+        if (resumeTick == 0) return@LaunchedEffect
+        val shouldRecheck = activeStep != null || awaitingSettingsReturn
+        awaitingSettingsReturn = false
+        if (!shouldRecheck || isRequestingNotification || !callCheckState.isResolved) return@LaunchedEffect
+        val recheckDelaysMs = longArrayOf(200L, 400L, 800L, 1000L)
+        for (waitMs in recheckDelaysMs) {
+            if (activeStep == null) break
+            if (!lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) break
+            delay(waitMs)
             refreshDialogs()
-        }
-        while (activeStep != null && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            delay(250L)
-            refreshDialogs()
+            if (activeStep == null) break
         }
     }
 
@@ -393,6 +407,7 @@ private fun StartupPermissionDialogs() {
         step = currentStep,
         isMandatory = isMandatory,
         onConfirmStep = { step ->
+            awaitingSettingsReturn = true
             if (!isMandatory) {
                 activeStep = null
             }

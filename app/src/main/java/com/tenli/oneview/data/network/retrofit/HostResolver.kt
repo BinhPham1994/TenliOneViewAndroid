@@ -16,21 +16,22 @@ internal object HostResolver {
     /** Host placeholder mặc định của Retrofit */
     const val defaultHost: String = "localhost"
 
-    @Volatile
-    private var cachedDomainRaw: String? = null
+    private data class CachedDomain(val raw: String, val url: HttpUrl?)
 
     @Volatile
-    private var cachedDomainUrl: HttpUrl? = null
+    private var cachedDomain: CachedDomain? = null
 
     /** HttpUrl của domain người dùng hiện tại (null nếu chưa đăng nhập / domain không hợp lệ) */
     fun currentDomainUrl(): HttpUrl? {
         val raw = UserSession.domain
         if (raw.isEmpty()) return null
-        if (raw != cachedDomainRaw) {
-            cachedDomainUrl = raw.trim().toHttpUrlOrNull()
-            cachedDomainRaw = raw
+        val current = cachedDomain
+        if (current != null && current.raw == raw) {
+            return current.url
         }
-        return cachedDomainUrl
+        val parsed = raw.trim().toHttpUrlOrNull()
+        cachedDomain = CachedDomain(raw, parsed)
+        return parsed
     }
 
     fun currentDomainHost(): String? = currentDomainUrl()?.host

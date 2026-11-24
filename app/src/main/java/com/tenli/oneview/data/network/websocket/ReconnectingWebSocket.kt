@@ -7,6 +7,7 @@ import com.google.gson.JsonParser
 import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
+import com.tenli.oneview.util.NetworkMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,7 @@ abstract class ReconnectingWebSocket(
     @Volatile private var isConnected = false
     @Volatile private var isConnecting = false
     @Volatile private var manuallyDisconnected = false
+    @Volatile private var pausedForOffline = false
     @Volatile private var hasReceivedMessage = false
     @Volatile private var lastMessageElapsedMs: Long = SystemClock.elapsedRealtime()
     private val lock = Any()
@@ -65,40 +67,74 @@ abstract class ReconnectingWebSocket(
 
     fun connect(urlStr: String) {
         if (UserSession.accessToken.isEmpty()) return
+        synchronized(lock) {
+            connectLocked(urlStr, resetManualFlag = true)
+        }
+    }
+
+    private fun connectLocked(
+        urlStr: String,
+        resetManualFlag: Boolean,
+        forceResetSocket: Boolean = false
+    ) {
+        if (UserSession.accessToken.isEmpty()) return
+        if (!resetManualFlag && manuallyDisconnected) return
+
         val protocolUrl = normalizeUrl(urlStr)
         if (protocolUrl.isEmpty()) return
 
-        synchronized(lock) {
-            if (webSocket != null && (isConnected || isConnecting) && rawUrl == urlStr) {
-                return
-            }
-
+        if (resetManualFlag) {
             manuallyDisconnected = false
+        }
+
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            rawUrl = urlStr
+            pausedForOffline = true
+            isConnected = false
+            isConnecting = false
             hasReceivedMessage = false
             reconnectJob?.cancel()
             reconnectJob = null
             subscribeRetryJob?.cancel()
             subscribeRetryJob = null
             stopHeartbeat()
-
-            // Đóng kết nối cũ (nếu có) trước khi mở socket mới để tránh rò rỉ socket song song
             val oldSocket = webSocket
             webSocket = null
-            isConnected = false
-            isConnecting = true
             runCatching { oldSocket?.cancel() }
+            return
+        }
 
-            rawUrl = urlStr
-            lastUsedToken = UserSession.accessToken
-            val finalUrl = appendTokenToUrl(protocolUrl, preserveExistingToken = preserveExistingUrlToken)
-            if (BuildConfig.DEBUG) Log.d(logTag, "Connecting: $protocolUrl")
-            try {
-                val request = Request.Builder().url(finalUrl).build()
-                webSocket = client.newWebSocket(request, Listener())
-            } catch (e: Exception) {
-                isConnecting = false
-                if (BuildConfig.DEBUG) Log.w(logTag, "Failed to open WebSocket: ${e.message}")
-            }
+        if (!resetManualFlag && pausedForOffline) return
+        pausedForOffline = false
+
+        if (!forceResetSocket && webSocket != null && (isConnected || isConnecting) && rawUrl == urlStr) {
+            return
+        }
+
+        hasReceivedMessage = false
+        reconnectJob?.cancel()
+        reconnectJob = null
+        subscribeRetryJob?.cancel()
+        subscribeRetryJob = null
+        stopHeartbeat()
+
+        // Đóng kết nối cũ (nếu có) trước khi mở socket mới để tránh rò rỉ socket song song
+        val oldSocket = webSocket
+        webSocket = null
+        isConnected = false
+        isConnecting = true
+        runCatching { oldSocket?.cancel() }
+
+        rawUrl = urlStr
+        lastUsedToken = UserSession.accessToken
+        val finalUrl = appendTokenToUrl(protocolUrl, preserveExistingToken = preserveExistingUrlToken)
+        if (BuildConfig.DEBUG) Log.d(logTag, "Connecting: $protocolUrl")
+        try {
+            val request = Request.Builder().url(finalUrl).build()
+            webSocket = client.newWebSocket(request, Listener())
+        } catch (e: Exception) {
+            isConnecting = false
+            if (BuildConfig.DEBUG) Log.w(logTag, "Failed to open WebSocket: ${e.message}")
         }
     }
 
@@ -112,6 +148,7 @@ abstract class ReconnectingWebSocket(
     fun disconnect() {
         synchronized(lock) {
             manuallyDisconnected = true
+            pausedForOffline = false
             isConnecting = false
             isConnected = false
             hasReceivedMessage = false
@@ -131,28 +168,67 @@ abstract class ReconnectingWebSocket(
         }
     }
 
+    /**
+     * Tạm dừng kết nối khi thiết bị mất mạng mà vẫn giữ nguyên trạng thái phiên mong muốn
+     * (`manuallyDisconnected` không đổi) để có thể khôi phục khi mạng trở lại qua [resumeFromOffline].
+     */
+    fun suspendForOffline() {
+        synchronized(lock) {
+            pausedForOffline = true
+            isConnecting = false
+            isConnected = false
+            hasReceivedMessage = false
+            stopHeartbeat()
+            subscribeRetryJob?.cancel()
+            subscribeRetryJob = null
+            reconnectJob?.cancel()
+            reconnectJob = null
+            val ws = webSocket
+            webSocket = null
+            if (ws != null) {
+                runCatching { ws.cancel() }
+            }
+        }
+    }
+
+    /** Khôi phục kết nối sau khi mạng hoạt động trở lại nếu chưa bị chủ động ngắt. */
+    fun resumeFromOffline() {
+        synchronized(lock) {
+            if (manuallyDisconnected || UserSession.accessToken.isEmpty() || !NetworkMonitor.isNetworkAvailable()) {
+                return
+            }
+            val wasPaused = pausedForOffline
+            pausedForOffline = false
+            if (rawUrl.isEmpty()) return
+            if (wasPaused || (!isConnected && !isConnecting && webSocket == null)) {
+                reconnectDelay = INITIAL_RECONNECT_DELAY_MS
+                connectLocked(rawUrl, resetManualFlag = false)
+            }
+        }
+    }
+
     /** true khi đang kết nối hoặc đã kết nối */
     fun isConnected(): Boolean = isConnected || isConnecting
 
     /** Buộc mở lại kết nối ngay lập tức (khi đổi mạng Wi-Fi ↔ 4G, token mới hoặc phát hiện socket treo). */
     fun forceReconnect(urlOverride: String? = null) {
-        val target = urlOverride?.takeIf { it.isNotBlank() } ?: rawUrl
-        if (target.isEmpty() || UserSession.accessToken.isEmpty()) return
         synchronized(lock) {
-            isConnected = false
-            isConnecting = false
-            val old = webSocket
-            webSocket = null
-            runCatching { old?.cancel() }
+            if (manuallyDisconnected || UserSession.accessToken.isEmpty()) return
+            val target = urlOverride?.takeIf { it.isNotBlank() } ?: rawUrl
+            if (target.isEmpty()) return
+            pausedForOffline = false
+            reconnectDelay = INITIAL_RECONNECT_DELAY_MS
+            connectLocked(target, resetManualFlag = false, forceResetSocket = true)
         }
-        connect(target)
     }
 
     /** Kết nối lại nếu token đăng nhập hiện tại khác token đã dùng lúc mở socket */
     fun reconnectIfTokenChanged(newToken: String) {
-        if (manuallyDisconnected || newToken.isEmpty() || rawUrl.isEmpty() || preserveExistingUrlToken) return
-        if (lastUsedToken != newToken) {
-            forceReconnect()
+        synchronized(lock) {
+            if (manuallyDisconnected || pausedForOffline || newToken.isEmpty() || rawUrl.isEmpty() || preserveExistingUrlToken) return
+            if (lastUsedToken != newToken) {
+                connectLocked(rawUrl, resetManualFlag = false, forceResetSocket = true)
+            }
         }
     }
 
@@ -161,7 +237,7 @@ abstract class ReconnectingWebSocket(
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             synchronized(lock) {
-                if (!isCurrent(webSocket) || manuallyDisconnected) {
+                if (!isCurrent(webSocket) || manuallyDisconnected || pausedForOffline) {
                     runCatching {
                         if (!webSocket.close(NORMAL_CLOSURE, null)) webSocket.cancel()
                     }
@@ -180,7 +256,7 @@ abstract class ReconnectingWebSocket(
                 subscribeRetryJob = scope.launch {
                     delay(SUBSCRIBE_RETRY_DELAY_MS)
                     val shouldRetry = synchronized(lock) {
-                        isCurrent(webSocket) && isConnected && !manuallyDisconnected && !hasReceivedMessage
+                        isCurrent(webSocket) && isConnected && !manuallyDisconnected && !pausedForOffline && !hasReceivedMessage
                     }
                     if (shouldRetry) {
                         send(mapOf("action" to "subscribe", "topic" to subscribeTopic))
@@ -230,8 +306,12 @@ abstract class ReconnectingWebSocket(
             subscribeRetryJob = null
             stopHeartbeat()
             webSocket = null
-            if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
-                scheduleReconnectLocked(authFailed)
+            if (!manuallyDisconnected && !pausedForOffline && UserSession.accessToken.isNotEmpty()) {
+                if (NetworkMonitor.isNetworkAvailable()) {
+                    scheduleReconnectLocked(authFailed)
+                } else {
+                    pausedForOffline = true
+                }
             }
         }
     }
@@ -239,12 +319,12 @@ abstract class ReconnectingWebSocket(
     private fun startHeartbeat() {
         stopHeartbeat()
         heartbeatJob = scope.launch {
-            while (isActive && isConnected && !manuallyDisconnected) {
+            while (isActive && isConnected && !manuallyDisconnected && !pausedForOffline) {
                 delay(HEARTBEAT_INTERVAL_MS)
-                if (!isConnected || manuallyDisconnected) break
-                send(PING_MESSAGE)
+                if (!isConnected || manuallyDisconnected || pausedForOffline) break
+                val silenceMs = SystemClock.elapsedRealtime() - lastMessageElapsedMs
                 if (enableSilentWatchdog) {
-                    val silenceMs = SystemClock.elapsedRealtime() - lastMessageElapsedMs
+                    send(PING_MESSAGE)
                     if (silenceMs > WATCHDOG_SILENCE_TIMEOUT_MS) {
                         if (BuildConfig.DEBUG) {
                             Log.w(logTag, "Heartbeat watchdog timeout (${silenceMs}ms silence), reconnecting...")
@@ -252,6 +332,8 @@ abstract class ReconnectingWebSocket(
                         forceReconnect()
                         break
                     }
+                } else if (silenceMs >= HEARTBEAT_INTERVAL_MS) {
+                    send(PING_MESSAGE)
                 }
             }
         }
@@ -263,7 +345,13 @@ abstract class ReconnectingWebSocket(
     }
 
     private fun scheduleReconnectLocked(authFailed: Boolean = false) {
-        if (manuallyDisconnected || reconnectJob?.isActive == true || rawUrl.isEmpty() || UserSession.accessToken.isEmpty()) return
+        if (manuallyDisconnected || pausedForOffline || reconnectJob?.isActive == true ||
+            rawUrl.isEmpty() || UserSession.accessToken.isEmpty()
+        ) return
+        if (!NetworkMonitor.isNetworkAvailable()) {
+            pausedForOffline = true
+            return
+        }
 
         val currentDelay = reconnectDelay + Random.nextLong(RECONNECT_JITTER_MS)
         reconnectDelay = min((reconnectDelay * BACKOFF_MULTIPLIER).roundToLong(), MAX_RECONNECT_DELAY_MS)
@@ -271,7 +359,13 @@ abstract class ReconnectingWebSocket(
 
         reconnectJob = scope.launch {
             delay(currentDelay)
-            if (manuallyDisconnected || UserSession.accessToken.isEmpty()) return@launch
+            if (manuallyDisconnected || pausedForOffline || UserSession.accessToken.isEmpty()) return@launch
+            if (!NetworkMonitor.isNetworkAvailable()) {
+                synchronized(lock) {
+                    if (!manuallyDisconnected) pausedForOffline = true
+                }
+                return@launch
+            }
             try {
                 if (authFailed && !preserveExistingUrlToken) {
                     withContext(Dispatchers.IO) {
@@ -287,8 +381,11 @@ abstract class ReconnectingWebSocket(
                 } else {
                     null
                 }
-                if (!manuallyDisconnected && UserSession.accessToken.isNotEmpty()) {
-                    connect(refreshedUrl?.takeIf { it.isNotBlank() } ?: rawUrl)
+                synchronized(lock) {
+                    if (!manuallyDisconnected && !pausedForOffline && UserSession.accessToken.isNotEmpty()) {
+                        val target = refreshedUrl?.takeIf { it.isNotBlank() } ?: rawUrl
+                        connectLocked(target, resetManualFlag = false)
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -302,8 +399,8 @@ abstract class ReconnectingWebSocket(
         private const val MAX_RECONNECT_DELAY_MS = 30_000L
         private const val RECONNECT_JITTER_MS = 1_000L
         private const val BACKOFF_MULTIPLIER = 1.5
-        private const val HEARTBEAT_INTERVAL_MS = 15_000L
-        private const val WATCHDOG_SILENCE_TIMEOUT_MS = 35_000L
+        private const val HEARTBEAT_INTERVAL_MS = 28_000L
+        private const val WATCHDOG_SILENCE_TIMEOUT_MS = 65_000L
         private const val SUBSCRIBE_RETRY_DELAY_MS = 3_500L
         private val PING_MESSAGE = mapOf("action" to "ping")
         private val TOKEN_PARAM_REGEX = Regex("([?&])token=[^&]*(&|$)")

@@ -35,6 +35,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.extractor.Extractor
@@ -44,6 +45,7 @@ import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.ui.PlayerView
+import com.tenli.oneview.BuildConfig
 import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
@@ -104,14 +106,14 @@ fun LiveStreamPlayer(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    var isLifecycleStarted by remember(lifecycleOwner) {
-        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+    var isLifecycleResumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
     }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> isLifecycleStarted = true
-                Lifecycle.Event.ON_STOP -> isLifecycleStarted = false
+                Lifecycle.Event.ON_RESUME -> isLifecycleResumed = true
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> isLifecycleResumed = false
                 else -> Unit
             }
         }
@@ -121,10 +123,11 @@ fun LiveStreamPlayer(
         }
     }
 
-    val effectivePaused = isPaused || !isLifecycleStarted
+    val effectivePaused = isPaused || !isLifecycleResumed
     var isPlaying by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var isError by remember(cameraId, wsUrl) { mutableStateOf(false) }
     var hasCapturedFrame by remember(cameraId, wsUrl) { mutableStateOf(false) }
+    val hasPreparedOnce = remember(cameraId, wsUrl) { booleanArrayOf(false) }
     val playerViewHolder = remember(cameraId, wsUrl) { arrayOfNulls<PlayerView>(1) }
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
     val currentOnErrorChange by rememberUpdatedState(onErrorChange)
@@ -172,6 +175,15 @@ fun LiveStreamPlayer(
                 currentOnErrorChange(false)
             }
 
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED && !currentIsPaused) {
+                    isError = true
+                    isPlaying = false
+                    currentOnPlayingChange(false)
+                    currentOnErrorChange(true)
+                }
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 if (currentIsPaused) return
                 Log.e("LiveStreamPlayer", "ExoPlayer error: ${error.message}", error)
@@ -179,6 +191,25 @@ fun LiveStreamPlayer(
                 isPlaying = false
                 currentOnPlayingChange(false)
                 currentOnErrorChange(true)
+            }
+        }
+    }
+
+    val analyticsListener = remember(cameraId, wsUrl) {
+        object : AnalyticsListener {
+            override fun onVideoDecoderInitialized(
+                eventTime: AnalyticsListener.EventTime,
+                decoderName: String,
+                initializedTimestampMs: Long,
+                initializationDurationMs: Long
+            ) {
+                val isSoftwareDecoder = decoderName.startsWith("c2.android.", ignoreCase = true) ||
+                    decoderName.startsWith("OMX.google.", ignoreCase = true)
+                if (isSoftwareDecoder) {
+                    Log.w("LiveStreamPlayer", "Software video decoder fallback active: $decoderName (camId=$cameraId)")
+                } else if (BuildConfig.DEBUG) {
+                    Log.d("LiveStreamPlayer", "Video decoder initialized: $decoderName (camId=$cameraId)")
+                }
             }
         }
     }
@@ -237,8 +268,10 @@ fun LiveStreamPlayer(
             .apply {
                 volume = 0f // Muted – same as web player
                 addListener(playerListener)
+                addAnalyticsListener(analyticsListener)
                 setMediaSource(mediaSource)
                 if (!effectivePaused) {
+                    hasPreparedOnce[0] = true
                     prepare()
                     playWhenReady = true
                 } else {
@@ -261,9 +294,18 @@ fun LiveStreamPlayer(
                 exoPlayer.stop()
             }
         } else if (exoPlayer.playbackState == Player.STATE_IDLE) {
-            isError = false
-            exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+            if (hasPreparedOnce[0]) {
+                // Token WebSocket 1 lần đã được sử dụng trước khi pause/stop; báo lỗi để màn hình cha cấp token mới.
+                isPlaying = false
+                isError = true
+                currentOnPlayingChange(false)
+                currentOnErrorChange(true)
+            } else {
+                isError = false
+                hasPreparedOnce[0] = true
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = true
+            }
         } else {
             exoPlayer.playWhenReady = true
         }
@@ -272,12 +314,16 @@ fun LiveStreamPlayer(
     DisposableEffect(exoPlayer, cameraId) {
         val boundCameraId = cameraId
         onDispose {
-            if (isPlaying && !hasCapturedFrame && boundCameraId > 0) {
-                captureCurrentFrameToCache(boundCameraId, playerViewHolder[0])
+            val pv = playerViewHolder[0]
+            if (pv?.player === exoPlayer) {
+                if (isPlaying && !hasCapturedFrame && boundCameraId > 0) {
+                    captureCurrentFrameToCache(boundCameraId, pv)
+                }
+                pv.player = null
             }
-            exoPlayer.removeListener(playerListener)
-            playerViewHolder[0]?.player = null
             playerViewHolder[0] = null
+            exoPlayer.removeListener(playerListener)
+            exoPlayer.removeAnalyticsListener(analyticsListener)
             exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()

@@ -201,10 +201,12 @@ data class EventData(
 
 // ==================== Search ====================
 
+@Immutable
 data class ParamPlateModel(
     val value: String = ""
 )
 
+@Immutable
 data class DataSearchPlateModel(
     val type: String = "",
     val confidence: Double = 0.0,
@@ -213,12 +215,14 @@ data class DataSearchPlateModel(
 
 // ==================== Confirm ====================
 
+@Immutable
 data class Confirm(
     val isConfirmed: Boolean = true
 )
 
 // ==================== Face ====================
 
+@Immutable
 data class Face(
     val id: Int = 0,
     val profileId: Int = 0
@@ -226,29 +230,34 @@ data class Face(
 
 // ==================== Rule ====================
 
+@Immutable
 data class TargetModel(
     val type: String = "",
     val value: String = "",
     val enabled: Boolean? = null
 )
 
+@Immutable
 data class ParamActionModel(
     val targets: List<TargetModel> = emptyList(),
     val variables: ActionVariables = ActionVariables(),
     val imageBase64: String? = null
 )
 
+@Immutable
 data class ActionVariables(
     val publicDomain: String = "",
     val faceName: String? = null,
     val scenarioName: String? = null
 )
 
+@Immutable
 data class ActionModel(
     val action: String = "",
     val param: ParamActionModel = ParamActionModel()
 )
 
+@Immutable
 data class ConditionModel(
     val type: String = "",
     val op: String = "",
@@ -256,6 +265,7 @@ data class ConditionModel(
     val similarity: Double = 0.0
 )
 
+@Immutable
 data class RuleObjectModel(
     val conditions: List<ConditionModel> = emptyList(),
     val actions: List<ActionModel> = emptyList()

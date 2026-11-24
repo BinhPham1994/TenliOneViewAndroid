@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -78,11 +79,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import kotlin.math.roundToInt
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
@@ -121,6 +120,19 @@ private const val CARD_SHADOW_AMBIENT_DARK = 0.45f
 private const val CARD_SHADOW_AMBIENT_LIGHT = 0.18f
 private const val CARD_SHADOW_SPOT_DARK = 0.55f
 private const val CARD_SHADOW_SPOT_LIGHT = 0.22f
+
+private val DomainKeyboardOptions = KeyboardOptions(
+    keyboardType = KeyboardType.Uri,
+    imeAction = ImeAction.Next
+)
+private val EmailKeyboardOptions = KeyboardOptions(
+    keyboardType = KeyboardType.Text,
+    imeAction = ImeAction.Next
+)
+private val PasswordKeyboardOptions = KeyboardOptions(
+    keyboardType = KeyboardType.Password,
+    imeAction = ImeAction.Done
+)
 
 @Composable
 fun LoginScreen(
@@ -186,7 +198,7 @@ private fun LoginContent(
     val keyboardController = LocalSoftwareKeyboardController.current
     val domainFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
-    var currentStep by remember { mutableIntStateOf(STEP_DOMAIN) }
+    var currentStep by rememberSaveable { mutableIntStateOf(STEP_DOMAIN) }
     var showQrScanner by remember { mutableStateOf(false) }
     var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val isVietnamese = !rememberIsEnglish()
@@ -208,8 +220,10 @@ private fun LoginContent(
         onBackToDomainStep()
     }
 
-    LaunchedEffect(currentStep) {
+    LaunchedEffect(currentStep, showQrScanner) {
+        if (showQrScanner) return@LaunchedEffect
         delay(FOCUS_DELAY_MS)
+        if (showQrScanner) return@LaunchedEffect
         try {
             if (currentStep == STEP_DOMAIN) {
                 domainFocusRequester.requestFocus()
@@ -217,7 +231,9 @@ private fun LoginContent(
                 emailFocusRequester.requestFocus()
             }
             delay(KEYBOARD_DELAY_MS)
-            keyboardController?.show()
+            if (!showQrScanner) {
+                keyboardController?.show()
+            }
         } catch (_: IllegalStateException) {
             // FocusRequester chưa gắn vào layout (đang chuyển bước) – bỏ qua
         }
@@ -258,6 +274,14 @@ private fun LoginContent(
         keyboardController?.hide()
         if (!uiState.isLoading) onLoginClick()
     }
+    val currentOnNextStep by rememberUpdatedState(onNextStep)
+    val domainKeyboardActions = remember {
+        KeyboardActions(
+            onNext = { currentOnNextStep() },
+            onDone = { currentOnNextStep() }
+        )
+    }
+    val onClearDomain = remember(onDomainChange) { { onDomainChange("") } }
 
     Scaffold(containerColor = colors.pageBg) { padding ->
         Box(
@@ -292,7 +316,10 @@ private fun LoginContent(
                     modifier = Modifier
                         .widthIn(max = spacing.dialogMaxWidth)
                         .onGloballyPositioned { coords ->
-                            cardTopInRootPx = coords.positionInRoot().y
+                            val topY = coords.positionInRoot().y
+                            if (cardTopInRootPx != topY) {
+                                cardTopInRootPx = topY
+                            }
                         },
                     topStartAction = {
                         AnimatedVisibility(
@@ -323,15 +350,9 @@ private fun LoginContent(
                                     onValueChange = onDomainChange,
                                     label = if (isVietnamese) "Nhập domain dự án" else "Enter project domain",
                                     leadingIcon = LucideIcons.Globe,
-                                    onClear = { onDomainChange("") },
-                                    keyboardOptions = KeyboardOptions(
-                                        keyboardType = KeyboardType.Uri,
-                                        imeAction = ImeAction.Next
-                                    ),
-                                    keyboardActions = KeyboardActions(
-                                        onNext = { onNextStep() },
-                                        onDone = { onNextStep() }
-                                    ),
+                                    onClear = onClearDomain,
+                                    keyboardOptions = DomainKeyboardOptions,
+                                    keyboardActions = domainKeyboardActions,
                                     focusRequester = domainFocusRequester
                                 )
                                 Spacer(modifier = Modifier.height(spacing.space20))
@@ -393,10 +414,9 @@ private fun LoginContent(
                             top = spacing.space12,
                             end = spacing.space24
                         )
-                        .offset {
+                        .graphicsLayer {
                             val maxAllowedTopPx = cardTopInRootPx - settingsMinGapPx - settingsBarHeightPx
-                            val pushUpOffsetPx = (maxAllowedTopPx - settingsBaseTopPx).coerceAtMost(0f).roundToInt()
-                            IntOffset(0, pushUpOffsetPx)
+                            translationY = (maxAllowedTopPx - settingsBaseTopPx).coerceAtMost(0f)
                         }
                 )
             }
@@ -559,7 +579,7 @@ private fun LoginCard(
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
     val isDark = colors.isDark
-    val shape = RoundedCornerShape(spacing.radiusExtraLarge)
+    val shape = remember(spacing.radiusExtraLarge) { RoundedCornerShape(spacing.radiusExtraLarge) }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -648,18 +668,25 @@ private fun CredentialsStep(
     onSubmit: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
+    val currentOnMoveFocusDown by rememberUpdatedState(onMoveFocusDown)
+    val currentOnKeyboardDone by rememberUpdatedState(onKeyboardDone)
+    val emailKeyboardActions = remember {
+        KeyboardActions(onNext = { currentOnMoveFocusDown() })
+    }
+    val passwordKeyboardActions = remember {
+        KeyboardActions(onDone = { currentOnKeyboardDone() })
+    }
+    val onClearEmail = remember(onEmailChange) { { onEmailChange("") } }
+    val onClearPassword = remember(onPasswordChange) { { onPasswordChange("") } }
 
     LoginInputField(
         value = uiState.email,
         onValueChange = onEmailChange,
         label = if (isVietnamese) "Nhập tên đăng nhập" else "Enter username",
         leadingIcon = LucideIcons.User,
-        onClear = { onEmailChange("") },
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Text,
-            imeAction = ImeAction.Next
-        ),
-        keyboardActions = KeyboardActions(onNext = { onMoveFocusDown() }),
+        onClear = onClearEmail,
+        keyboardOptions = EmailKeyboardOptions,
+        keyboardActions = emailKeyboardActions,
         focusRequester = emailFocusRequester
     )
 
@@ -673,12 +700,9 @@ private fun CredentialsStep(
         isPassword = true,
         showPassword = uiState.showPassword,
         onPasswordToggle = onTogglePassword,
-        onClear = { onPasswordChange("") },
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Password,
-            imeAction = ImeAction.Done
-        ),
-        keyboardActions = KeyboardActions(onDone = { onKeyboardDone() })
+        onClear = onClearPassword,
+        keyboardOptions = PasswordKeyboardOptions,
+        keyboardActions = passwordKeyboardActions
     )
 
     Spacer(modifier = Modifier.height(spacing.space20))

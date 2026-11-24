@@ -15,6 +15,9 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import java.io.IOException
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 @UnstableApi
 class WebSocketDataSource(
@@ -26,13 +29,20 @@ class WebSocketDataSource(
     private var webSocket: WebSocket? = null
     private var dataSpec: DataSpec? = null
     // Giới hạn kích thước queue đủ chứa burst keyframe fMP4 mà không làm tràn bộ nhớ RAM
-    private val dataQueue = LinkedBlockingQueue<ByteArray>(256)
+    private val dataQueue = LinkedBlockingQueue<ByteArray>(MAX_QUEUED_CHUNKS)
+    private val queuedBytes = AtomicInteger(0)
+    private val openGeneration = AtomicLong(0L)
     private var currentBuffer: ByteArray? = null
     private var currentBufferPosition = 0
     @Volatile
     private var isOpen = false
     @Volatile
     private var error: IOException? = null
+
+    private fun clearQueue() {
+        dataQueue.clear()
+        queuedBytes.set(0)
+    }
 
     override fun open(dataSpec: DataSpec): Long {
         this.dataSpec = dataSpec
@@ -59,34 +69,38 @@ class WebSocketDataSource(
             isOpen = false
             throw IOException("Invalid WebSocket URL: $urlStr", e)
         }
-        dataQueue.clear()
+        clearQueue()
         currentBuffer = null
         currentBufferPosition = 0
-        isOpen = true
         error = null
+        isOpen = true
+        val gen = openGeneration.incrementAndGet()
         
         transferInitializing(dataSpec)
 
         try {
             webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
-                private fun isCurrentSocket(ws: WebSocket): Boolean = ws === this@WebSocketDataSource.webSocket
+                private fun isCurrentGeneration(): Boolean = openGeneration.get() == gen
 
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    if (!isOpen || !isCurrentSocket(webSocket)) {
+                    if (!isOpen || !isCurrentGeneration()) {
                         runCatching { webSocket.cancel() }
                         return
                     }
                     if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Opened")
                 }
+
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    if (isOpen && isCurrentSocket(webSocket)) {
+                    if (isOpen && isCurrentGeneration()) {
+                        if (bytes.size == 0) return
                         val chunk = bytes.toByteArray()
-                        if (!dataQueue.offer(chunk)) {
+                        val newTotalBytes = queuedBytes.addAndGet(chunk.size)
+                        if (newTotalBytes > MAX_QUEUED_BYTES || !dataQueue.offer(chunk)) {
                             // Không poll() bỏ 1 chunk giữa chừng vì làm hỏng cấu trúc moof/mdat của fMP4.
                             // Báo lỗi tràn bộ đệm để LiveStreamPlayer tự kết nối lại luồng mới từ keyframe.
-                            isOpen = false
                             error = IOException("WebSocket live buffer overflow")
-                            dataQueue.clear()
+                            isOpen = false
+                            clearQueue()
                             dataQueue.offer(ByteArray(0))
                             runCatching { webSocket.cancel() }
                         }
@@ -95,23 +109,29 @@ class WebSocketDataSource(
                         runCatching { webSocket.cancel() }
                     }
                 }
+
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (!isCurrentSocket(webSocket)) return
-                    if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $reason")
+                    if (!isCurrentGeneration()) return
+                    if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "WebSocket Closed: $code $reason")
+                    if (isOpen) {
+                        error = IOException("WebSocket closed unexpectedly: $code $reason")
+                    }
                     isOpen = false
-                    dataQueue.clear()
+                    clearQueue()
                     dataQueue.offer(ByteArray(0)) // Unblock read
                 }
+
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (!isCurrentSocket(webSocket)) return
+                    if (!isCurrentGeneration()) return
                     if (BuildConfig.DEBUG) Log.e("WebSocketDataSource", "WebSocket Failure", t)
-                    isOpen = false
                     error = IOException("WebSocket failure", t)
-                    dataQueue.clear()
+                    isOpen = false
+                    clearQueue()
                     dataQueue.offer(ByteArray(0)) // Unblock read
                 }
             })
         } catch (e: Exception) {
+            openGeneration.incrementAndGet()
             isOpen = false
             throw IOException("Failed to initialize WebSocket", e)
         }
@@ -128,13 +148,17 @@ class WebSocketDataSource(
         var buf = currentBuffer
         while (buf == null || currentBufferPosition >= buf.size) {
             try {
-                val nextBuffer = dataQueue.poll(15, java.util.concurrent.TimeUnit.SECONDS)
+                val nextBuffer = dataQueue.poll(15, TimeUnit.SECONDS)
                 if (nextBuffer == null) {
+                    error?.let { throw it }
                     if (!isOpen) {
                         return C.RESULT_END_OF_INPUT
                     } else {
                         throw IOException("WebSocket read timeout (no data received for 15s)")
                     }
+                }
+                if (nextBuffer.isNotEmpty()) {
+                    queuedBytes.updateAndGet { cur -> (cur - nextBuffer.size).coerceAtLeast(0) }
                 }
                 currentBufferPosition = 0
                 error?.let { throw it }
@@ -161,13 +185,14 @@ class WebSocketDataSource(
 
     override fun close() {
         if (BuildConfig.DEBUG) Log.d("WebSocketDataSource", "Closing WebSocket")
+        openGeneration.incrementAndGet()
         val wasOpen = isOpen
         isOpen = false
         val ws = webSocket
         webSocket = null
         currentBuffer = null
         currentBufferPosition = 0
-        dataQueue.clear()
+        clearQueue()
         // Unblock any thread stuck in read() waiting on dataQueue.poll()
         dataQueue.offer(ByteArray(0))
         if (ws != null) {
@@ -182,5 +207,10 @@ class WebSocketDataSource(
         if (wasOpen) {
             transferEnded()
         }
+    }
+
+    private companion object {
+        const val MAX_QUEUED_CHUNKS = 256
+        const val MAX_QUEUED_BYTES = 6 * 1024 * 1024
     }
 }

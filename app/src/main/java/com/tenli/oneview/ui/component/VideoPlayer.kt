@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -61,8 +62,9 @@ import com.tenli.oneview.data.local.MonitorCacheManager
 import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
 import com.tenli.oneview.ui.theme.appColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.isActive as isCoroutineActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -89,7 +91,8 @@ fun VideoPlayer(
     enableZoom: Boolean = false,
     smoothResetTrigger: Int = 0,
     isExternallyTransformed: Boolean = false,
-    onZoomChanged: (Boolean) -> Unit = {}
+    onZoomChanged: (Boolean) -> Unit = {},
+    isActive: Boolean = true
 ) {
     var isError by remember(videoUrl) { mutableStateOf(false) }
     val context = LocalContext.current
@@ -100,13 +103,18 @@ fun VideoPlayer(
     var zoomScale by remember(videoUrl) { mutableFloatStateOf(1f) }
     var zoomOffsetX by remember(videoUrl) { mutableFloatStateOf(0f) }
     var zoomOffsetY by remember(videoUrl) { mutableFloatStateOf(0f) }
-    var viewportSize = remember(videoUrl) { IntSize.Zero }
+    val zoomValuesHolder = remember(videoUrl) { floatArrayOf(1f, 0f, 0f) }
+    val zoomAnimJobHolder = remember(videoUrl) { arrayOfNulls<Job>(1) }
+    val authRefreshJobHolder = remember(videoUrl) { arrayOfNulls<Job>(1) }
+    val viewportSizeHolder = remember(videoUrl) { arrayOf(IntSize.Zero) }
     val playerViewHolder = remember(videoUrl) { arrayOfNulls<PlayerView>(1) }
     val exoPlayerHolder = remember(videoUrl) { arrayOfNulls<ExoPlayer>(1) }
     val currentTokenHolder = remember(videoUrl) { arrayOf(deviceKey) }
     val hasRetriedAuth = remember(videoUrl) { booleanArrayOf(false) }
     val savedResumePositionMs = remember(videoUrl) { longArrayOf(C.TIME_UNSET) }
     val wasStoppedForBackground = remember(videoUrl) { booleanArrayOf(false) }
+    val wasStoppedForInactive = remember(videoUrl) { booleanArrayOf(false) }
+    val wasEndedBeforeStop = remember(videoUrl) { booleanArrayOf(false) }
     val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
     val suppressFullscreenCallback = remember(videoUrl) { booleanArrayOf(false) }
     val colors = MaterialTheme.appColors
@@ -117,6 +125,7 @@ fun VideoPlayer(
         else -> Color.Transparent
     }
     val currentPlayWhenReady by rememberUpdatedState(playWhenReady)
+    val currentIsActive by rememberUpdatedState(isActive)
     val currentIsFullscreen by rememberUpdatedState(isFullscreen)
     val currentIsExternallyTransformed by rememberUpdatedState(isExternallyTransformed)
     val currentOnPlayingChange by rememberUpdatedState(onPlayingChange)
@@ -153,7 +162,13 @@ fun VideoPlayer(
         }
     }
 
+    fun cancelZoomAnimation() {
+        zoomAnimJobHolder[0]?.cancel()
+        zoomAnimJobHolder[0] = null
+    }
+
     fun applyVideoZoom(targetScale: Float, rawX: Float, rawY: Float) {
+        val viewportSize = viewportSizeHolder[0]
         val s = targetScale.coerceIn(1f, 5f)
         val clamped = if (s <= 1.001f || viewportSize.width <= 0 || viewportSize.height <= 0) {
             Offset.Zero
@@ -162,7 +177,10 @@ fun VideoPlayer(
             val maxY = (viewportSize.height * (s - 1f)) * 0.5f
             Offset(rawX.coerceIn(-maxX, maxX), rawY.coerceIn(-maxY, maxY))
         }
-        val wasZoomed = zoomScale > 1.02f
+        val wasZoomed = zoomValuesHolder[0] > 1.02f
+        zoomValuesHolder[0] = s
+        zoomValuesHolder[1] = clamped.x
+        zoomValuesHolder[2] = clamped.y
         zoomScale = s
         zoomOffsetX = clamped.x
         zoomOffsetY = clamped.y
@@ -174,10 +192,11 @@ fun VideoPlayer(
     }
 
     val resetVideoZoom: () -> Unit = {
-        coroutineScope.launch {
-            val startScale = zoomScale
-            val startX = zoomOffsetX
-            val startY = zoomOffsetY
+        cancelZoomAnimation()
+        zoomAnimJobHolder[0] = coroutineScope.launch {
+            val startScale = zoomValuesHolder[0]
+            val startX = zoomValuesHolder[1]
+            val startY = zoomValuesHolder[2]
             if (startScale <= 1.005f) {
                 applyVideoZoom(1f, 0f, 0f)
                 return@launch
@@ -265,7 +284,8 @@ fun VideoPlayer(
                     hasRetriedAuth[0] = true
                     val failedToken = currentTokenHolder[0]
                     val resumePos = player.currentPosition.coerceAtLeast(0L)
-                    coroutineScope.launch {
+                    authRefreshJobHolder[0]?.cancel()
+                    authRefreshJobHolder[0] = coroutineScope.launch {
                         val newToken = withContext(Dispatchers.IO) {
                             TokenAuthenticator.refreshAccessToken(failedToken)
                         }
@@ -321,31 +341,64 @@ fun VideoPlayer(
                     seekTo(initialSeekPositionMs)
                 }
                 addListener(playerListener)
+                val shouldStart = currentPlayWhenReady && currentIsActive
                 suppressPlayWhenReadyCallback[0] = true
                 try {
-                    this.playWhenReady = currentPlayWhenReady
+                    this.playWhenReady = shouldStart
                 } finally {
                     suppressPlayWhenReadyCallback[0] = false
                 }
-                if (currentPlayWhenReady) {
+                if (shouldStart) {
                     prepare()
                 }
             }
     }
 
-    androidx.compose.runtime.LaunchedEffect(exoPlayer, playWhenReady) {
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    androidx.compose.runtime.LaunchedEffect(exoPlayer, playWhenReady, isActive) {
         suppressPlayWhenReadyCallback[0] = true
         try {
+            if (!isActive) {
+                if (exoPlayer.playbackState != Player.STATE_IDLE) {
+                    val wasEnded = exoPlayer.playbackState == Player.STATE_ENDED
+                    wasEndedBeforeStop[0] = wasEnded
+                    if (!wasEnded) {
+                        savedResumePositionMs[0] = exoPlayer.currentPosition.coerceAtLeast(0L)
+                    } else {
+                        savedResumePositionMs[0] = C.TIME_UNSET
+                    }
+                    wasStoppedForInactive[0] = true
+                    isActuallyPlaying = false
+                    exoPlayer.stop()
+                } else if (exoPlayer.playWhenReady) {
+                    exoPlayer.pause()
+                }
+                return@LaunchedEffect
+            }
+
+            val stoppedForInactive = wasStoppedForInactive[0]
+            wasStoppedForInactive[0] = false
+            val isLifecycleStarted = lifecycleOwner.lifecycle.currentState.isAtLeast(
+                androidx.lifecycle.Lifecycle.State.STARTED
+            )
+
             if (playWhenReady) {
+                if (!isLifecycleStarted) {
+                    return@LaunchedEffect
+                }
                 if (exoPlayer.playbackState == Player.STATE_IDLE) {
                     val resumePos = savedResumePositionMs[0]
-                    exoPlayer.prepare()
-                    if (resumePos != C.TIME_UNSET && resumePos > 0L) {
+                    if (wasEndedBeforeStop[0]) {
+                        exoPlayer.seekTo(0L)
+                        wasEndedBeforeStop[0] = false
+                    } else if (resumePos != C.TIME_UNSET && resumePos > 0L) {
                         exoPlayer.seekTo(resumePos)
                         savedResumePositionMs[0] = C.TIME_UNSET
                     }
+                    exoPlayer.prepare()
                 } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
-                    exoPlayer.seekTo(0)
+                    exoPlayer.seekTo(0L)
                 }
                 if (!exoPlayer.playWhenReady) {
                     exoPlayer.play()
@@ -353,6 +406,10 @@ fun VideoPlayer(
             } else {
                 if (exoPlayer.playWhenReady) {
                     exoPlayer.pause()
+                }
+                if (stoppedForInactive && exoPlayer.playbackState == Player.STATE_IDLE) {
+                    isVideoReady = false
+                    currentOnPlayingChange(false)
                 }
             }
         } finally {
@@ -362,17 +419,25 @@ fun VideoPlayer(
 
     DisposableEffect(exoPlayer) {
         onDispose {
+            authRefreshJobHolder[0]?.cancel()
+            authRefreshJobHolder[0] = null
+            cancelZoomAnimation()
             isActuallyPlaying = false
             exoPlayer.removeListener(playerListener)
-            playerViewHolder[0]?.player = null
+            val pv = playerViewHolder[0]
+            if (pv?.player === exoPlayer) {
+                pv.player = null
+            }
             playerViewHolder[0] = null
+            if (exoPlayerHolder[0] === exoPlayer) {
+                exoPlayerHolder[0] = null
+            }
             exoPlayer.clearVideoSurface()
             exoPlayer.stop()
             exoPlayer.release()
         }
     }
 
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, exoPlayer) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             when (event) {
@@ -387,8 +452,14 @@ fun VideoPlayer(
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                     suppressPlayWhenReadyCallback[0] = true
                     try {
-                        if (exoPlayer.playbackState != Player.STATE_IDLE && exoPlayer.playbackState != Player.STATE_ENDED) {
-                            savedResumePositionMs[0] = exoPlayer.currentPosition.coerceAtLeast(0L)
+                        if (exoPlayer.playbackState != Player.STATE_IDLE) {
+                            val wasEnded = exoPlayer.playbackState == Player.STATE_ENDED
+                            wasEndedBeforeStop[0] = wasEnded
+                            if (!wasEnded) {
+                                savedResumePositionMs[0] = exoPlayer.currentPosition.coerceAtLeast(0L)
+                            } else {
+                                savedResumePositionMs[0] = C.TIME_UNSET
+                            }
                             wasStoppedForBackground[0] = true
                             isActuallyPlaying = false
                             exoPlayer.stop()
@@ -402,23 +473,31 @@ fun VideoPlayer(
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
                     val stoppedForBg = wasStoppedForBackground[0]
                     wasStoppedForBackground[0] = false
-                    if (currentPlayWhenReady && exoPlayer.playbackState != Player.STATE_ENDED) {
+                    if (!currentIsActive) {
+                        if (stoppedForBg) {
+                            isVideoReady = false
+                            currentOnPlayingChange(false)
+                        }
+                        return@LifecycleEventObserver
+                    }
+                    if (currentPlayWhenReady && !wasEndedBeforeStop[0] && exoPlayer.playbackState != Player.STATE_ENDED) {
                         suppressPlayWhenReadyCallback[0] = true
                         try {
                             if (exoPlayer.playbackState == Player.STATE_IDLE) {
                                 val resumePos = savedResumePositionMs[0]
-                                exoPlayer.prepare()
                                 if (resumePos != C.TIME_UNSET && resumePos > 0L) {
                                     exoPlayer.seekTo(resumePos)
                                     savedResumePositionMs[0] = C.TIME_UNSET
                                 }
+                                exoPlayer.prepare()
                             }
                             exoPlayer.play()
                         } finally {
                             suppressPlayWhenReadyCallback[0] = false
                         }
-                    } else if (stoppedForBg && !currentPlayWhenReady) {
+                    } else if (stoppedForBg && (!currentPlayWhenReady || wasEndedBeforeStop[0])) {
                         isVideoReady = false
+                        currentOnPlayingChange(false)
                     }
                 }
                 else -> Unit
@@ -434,7 +513,7 @@ fun VideoPlayer(
     if (onTimeUpdate != null) {
         androidx.compose.runtime.LaunchedEffect(exoPlayer, isActuallyPlaying) {
             if (!isActuallyPlaying) return@LaunchedEffect
-            while (isActive && isActuallyPlaying) {
+            while (isCoroutineActive && isActuallyPlaying) {
                 currentOnTimeUpdate?.invoke(exoPlayer.currentPosition.coerceAtLeast(0L))
                 delay(250L)
             }
@@ -453,15 +532,24 @@ fun VideoPlayer(
         }
     }
 
+    androidx.compose.runtime.LaunchedEffect(videoUrl, exoPlayer) {
+        syncSurfaceZoom(
+            playerViewHolder[0],
+            zoomValuesHolder[0],
+            zoomValuesHolder[1],
+            zoomValuesHolder[2]
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .clipToBounds()
             .background(stageBg)
             .onSizeChanged { size ->
-                viewportSize = size
-                if (zoomScale > 1.001f) {
-                    applyVideoZoom(zoomScale, zoomOffsetX, zoomOffsetY)
+                viewportSizeHolder[0] = size
+                if (zoomValuesHolder[0] > 1.001f) {
+                    applyVideoZoom(zoomValuesHolder[0], zoomValuesHolder[1], zoomValuesHolder[2])
                 }
             }
             .then(
@@ -474,6 +562,7 @@ fun VideoPlayer(
                                 requireUnconsumed = false,
                                 pass = PointerEventPass.Initial
                             )
+                            cancelZoomAnimation()
                             val startedInBottomBar =
                                 isControllerShown && down.position.y >= (size.height - controllerSafeZonePx)
                             var isTransforming = false
@@ -497,12 +586,12 @@ fun VideoPlayer(
                                     }
 
                                     if (isTransforming && centroid != Offset.Unspecified) {
-                                        val oldScale = zoomScale
+                                        val oldScale = zoomValuesHolder[0]
                                         val newScale = (oldScale * zoomChange).coerceIn(1f, 5f)
                                         val effectiveZoom = if (oldScale > 0f) newScale / oldScale else 1f
                                         val center = Offset(size.width * 0.5f, size.height * 0.5f)
                                         val newOffset = (centroid - center) * (1f - effectiveZoom) +
-                                            Offset(zoomOffsetX, zoomOffsetY) * effectiveZoom +
+                                            Offset(zoomValuesHolder[1], zoomValuesHolder[2]) * effectiveZoom +
                                             panChange
                                         applyVideoZoom(newScale, newOffset.x, newOffset.y)
                                     }
@@ -512,7 +601,7 @@ fun VideoPlayer(
                                             change.consume()
                                         }
                                     }
-                                } else if (zoomScale > 1.02f && !startedInBottomBar) {
+                                } else if (zoomValuesHolder[0] > 1.02f && !startedInBottomBar) {
                                     val panChange = event.calculatePan()
                                     if (!isTransforming) {
                                         panAccumulated += panChange
@@ -522,9 +611,9 @@ fun VideoPlayer(
                                     }
                                     if (isTransforming) {
                                         applyVideoZoom(
-                                            targetScale = zoomScale,
-                                            rawX = zoomOffsetX + panChange.x,
-                                            rawY = zoomOffsetY + panChange.y
+                                            targetScale = zoomValuesHolder[0],
+                                            rawX = zoomValuesHolder[1] + panChange.x,
+                                            rawY = zoomValuesHolder[2] + panChange.y
                                         )
                                         event.changes.forEach { change ->
                                             if (change.positionChanged()) {
@@ -535,7 +624,7 @@ fun VideoPlayer(
                                 }
                             } while (event.changes.any { it.pressed })
 
-                            if (zoomScale in 1.0001f..1.03f) {
+                            if (zoomValuesHolder[0] in 1.0001f..1.03f) {
                                 applyVideoZoom(1f, 0f, 0f)
                             }
                         }
@@ -585,7 +674,7 @@ fun VideoPlayer(
                 } else {
                     setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
                 }
-                syncSurfaceZoom(this, zoomScale, zoomOffsetX, zoomOffsetY)
+                syncSurfaceZoom(this, zoomValuesHolder[0], zoomValuesHolder[1], zoomValuesHolder[2])
             }
         }, update = { view ->
             (view as PlayerView).let { pv ->
@@ -593,6 +682,7 @@ fun VideoPlayer(
                 pv.controllerAutoShow = showControllerInitially
                 if (pv.player !== exoPlayer) {
                     pv.player = exoPlayer
+                    syncSurfaceZoom(pv, zoomValuesHolder[0], zoomValuesHolder[1], zoomValuesHolder[2])
                     if (!showControllerInitially) {
                         pv.hideController()
                         isControllerShown = false
@@ -616,7 +706,6 @@ fun VideoPlayer(
                 } else {
                     pv.setFullscreenButtonClickListener(null as PlayerView.FullscreenButtonClickListener?)
                 }
-                syncSurfaceZoom(pv, zoomScale, zoomOffsetX, zoomOffsetY)
             }
         }, onRelease = { view ->
             val pv = view as? PlayerView
@@ -737,19 +826,14 @@ fun VideoPlayer(
             })
 
         if (enableZoom) {
-            AnimatedVisibility(
-                visible = zoomScale > 1.06f && isVideoReady && !isError,
-                enter = fadeIn(animationSpec = tween(160)),
-                exit = fadeOut(animationSpec = tween(160)),
+            VideoZoomResetBadge(
+                scaleProvider = { zoomScale },
+                isVisibleProvider = { zoomScale > 1.06f && isVideoReady && !isError },
+                onReset = resetVideoZoom,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(8.dp)
-            ) {
-                ZoomResetPill(
-                    scale = zoomScale,
-                    onClick = resetVideoZoom
-                )
-            }
+            )
         }
 
         if (isError) {
@@ -820,5 +904,28 @@ fun VideoPlayer(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VideoZoomResetBadge(
+    scaleProvider: () -> Float,
+    isVisibleProvider: () -> Boolean,
+    onReset: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val visible by remember {
+        derivedStateOf { isVisibleProvider() }
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(160)),
+        exit = fadeOut(animationSpec = tween(160)),
+        modifier = modifier
+    ) {
+        ZoomResetPill(
+            scale = scaleProvider(),
+            onClick = onReset
+        )
     }
 }

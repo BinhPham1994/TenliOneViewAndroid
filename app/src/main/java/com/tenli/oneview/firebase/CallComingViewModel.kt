@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tenli.oneview.TenliApp
+import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.repository.EventRepository
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.BsProfileGroupModel
@@ -157,22 +158,30 @@ class CallComingViewModel(
                     coroutineScope {
                         val camDef = async(Dispatchers.IO) {
                             if (fetchCameras) {
-                                runCatching { eventRepository.getCameraList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getCameraList() }
+                                    .onFailure { if (it is CancellationException) throw it }
+                                    .getOrNull()?.body() ?: emptyList()
                             } else cameraList
                         }
                         val svcDef = async(Dispatchers.IO) {
                             if (fetchServices) {
-                                runCatching { eventRepository.getAIServiceList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getAIServiceList() }
+                                    .onFailure { if (it is CancellationException) throw it }
+                                    .getOrNull()?.body() ?: emptyList()
                             } else memServices
                         }
                         val profDef = async(Dispatchers.IO) {
                             if (fetchProfiles) {
-                                runCatching { eventRepository.getProfileList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getProfileList() }
+                                    .onFailure { if (it is CancellationException) throw it }
+                                    .getOrNull()?.body() ?: emptyList()
                             } else memProfiles
                         }
                         val grpDef = async(Dispatchers.IO) {
                             if (fetchGroups) {
-                                runCatching { eventRepository.getProfileGroupList() }.getOrNull()?.body() ?: emptyList()
+                                runCatching { eventRepository.getProfileGroupList() }
+                                    .onFailure { if (it is CancellationException) throw it }
+                                    .getOrNull()?.body() ?: emptyList()
                             } else memGroups
                         }
 
@@ -189,6 +198,12 @@ class CallComingViewModel(
                             cameras = finalCameras,
                             aiServices = finalServices
                         )
+                        if (fetchProfiles || fetchGroups) {
+                            EventCacheManager.cacheProfilesInMemory(
+                                profiles = finalProfiles,
+                                groups = finalGroups
+                            )
+                        }
                         _uiState.update { state ->
                             state.copy(
                                 enrichedCamera = resolveCameraForEvent(targetEvent, finalCameras) ?: state.enrichedCamera,

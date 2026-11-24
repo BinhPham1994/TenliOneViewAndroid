@@ -14,6 +14,7 @@ import com.tenli.oneview.data.network.websocket.WebSocketManager
 import com.tenli.oneview.data.repository.AuthRepository
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -43,7 +44,9 @@ class SplashViewModel(
     }
 
     fun logout() {
-        val needsCleanup = UserSession.accessToken.isNotEmpty() || UserSession.refreshToken.isNotEmpty()
+        val needsCleanup = UserSession.accessToken.isNotEmpty() ||
+            UserSession.refreshToken.isNotEmpty() ||
+            UserSession.userData != null
         val snapshot = if (needsCleanup) {
             webSocketManager.disconnectAll()
             authRepository.clearSessionMemoryAndPrefs()
@@ -54,7 +57,7 @@ class SplashViewModel(
         _uiState.update { it.copy(destination = SplashDestination.Login) }
 
         if (snapshot != null) {
-            viewModelScope.launch(Dispatchers.IO) {
+            viewModelScope.launch(NonCancellable + Dispatchers.IO) {
                 authRepository.clearSessionCachesAndPushToken(snapshot)
             }
         }

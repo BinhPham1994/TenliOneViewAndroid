@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 class NetworkMonitor(context: Context, private val dispatcherProvider: DispatcherProvider) {
     private val appContext = context.applicationContext
@@ -81,16 +82,21 @@ class NetworkMonitor(context: Context, private val dispatcherProvider: Dispatche
      * mà [isOnline] vẫn giữ nguyên `true`), để WebSocket chủ động kết nối lại ngay thay vì chờ TCP ping timeout.
      */
     val activeNetworkChanged: Flow<Unit> = callbackFlow {
-        var lastHandle: Long? = runCatching { connectivityManager.activeNetwork?.networkHandle }.getOrNull()
+        val lastHandle = AtomicReference<Long?>(
+            runCatching { connectivityManager.activeNetwork?.networkHandle }.getOrNull()
+        )
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 val handle = network.networkHandle
-                val prev = lastHandle
-                lastHandle = handle
+                val prev = lastHandle.getAndSet(handle)
                 if (prev != null && prev != handle) {
                     trySend(Unit)
                 }
+            }
+
+            override fun onLost(network: Network) {
+                lastHandle.compareAndSet(network.networkHandle, null)
             }
         }
 

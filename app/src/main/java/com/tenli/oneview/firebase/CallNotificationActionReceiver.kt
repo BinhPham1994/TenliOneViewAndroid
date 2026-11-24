@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.tenli.oneview.util.EventBus
 
 /**
  * Xử lý nút hành động "Bỏ qua" trực tiếp trên thông báo Heads-Up của cuộc gọi cảnh báo
@@ -15,6 +16,14 @@ class CallNotificationActionReceiver : BroadcastReceiver() {
         if (intent?.action != ACTION_DISMISS_CALL_NOTIFICATION) return
         val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, 0)
         val eventId = intent.getStringExtra(EXTRA_EVENT_ID).orEmpty()
+
+        EventMessagingService.releaseIncomingCallWakeLock()
+        val effectiveId = when {
+            notificationId != 0 -> notificationId
+            eventId.isNotEmpty() -> eventId.hashCode()
+            else -> 0
+        }
+        EventBus.emitCallDismissed(effectiveId)
 
         runCatching {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return

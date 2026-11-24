@@ -110,9 +110,6 @@ class EventMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // Phát tín hiệu làm mới danh sách sự kiện trên UI ngay lập tức khi có bản tin FCM (bảo hiểm song song với WebSocket)
-        EventBus.emitRealtimeEventHint()
-
         val prefs = runCatching { GlobalData.preferences }.getOrNull()
         if (prefs != null && !prefs.getBoolean("push_notifications_enabled", true)) {
             if (BuildConfig.DEBUG) {
@@ -237,6 +234,9 @@ class EventMessagingService : FirebaseMessagingService() {
             }
         }
 
+        // Chỉ phát tín hiệu làm mới danh sách sự kiện sau khi đã qua đầy đủ các bước kiểm tra quyền và bật thông báo
+        EventBus.emitRealtimeEventHint()
+
         val explicitMakeCall = (
             data["makeCall"] ?: data["make_call"] ?: data["isCall"] ?: data["is_call"] ?: data["call"]
             ).orEmpty().trim()
@@ -268,7 +268,7 @@ class EventMessagingService : FirebaseMessagingService() {
 
         if (isCall) {
             if (isStaleDelayedCall(remoteMessage.sentTime, rawEventTime)) {
-                showMissedCallNotification(title, body, imageUrl, eventId)
+                showMissedCallNotification(applicationContext, title, body, imageUrl, eventId)
             } else {
                 handleIncomingCall(
                     title = title,
@@ -300,10 +300,16 @@ class EventMessagingService : FirebaseMessagingService() {
                             ApiProvider.eventApi.getDataList(lastId = eventIdInt + 1, count = 1)
                                 .body()
                                 ?.firstOrNull { it.id == eventIdInt }
+                        }.onFailure { e ->
+                            if (e is CancellationException) throw e
                         }.getOrNull()
                 }
             }
-        }.getOrNull()
+        }.onFailure { e ->
+            if (e is CancellationException) throw e
+        }.getOrNull()?.also { resolved ->
+            EventCacheManager.cacheInMemory(events = listOf(resolved))
+        }
     }
 
     /**
@@ -345,155 +351,19 @@ class EventMessagingService : FirebaseMessagingService() {
         return "$base/${trimmed.trimStart('/')}"
     }
 
-    private fun getSafeNotificationId(eId: String, offset: Int = 0): Int {
-        return if (eId.isNotEmpty()) eId.hashCode() + offset else (System.currentTimeMillis().toInt() + offset)
-    }
-
-    /** Intent mở chi tiết sự kiện trong MainActivity (giữ nguyên instance đang mở nếu có) */
-    private fun eventDetailPendingIntent(
-        eId: String,
-        requestCode: Int,
-        fromNotification: Boolean,
-        notificationIdToCancel: Int = 0,
-        ctx: Context = this
-    ): PendingIntent {
-        val intent = Intent(ctx, MainActivity::class.java).apply {
-            putExtra(EXTRA_EVENT_ID, eId)
-            if (fromNotification) putExtra(EXTRA_FROM_NOTIFICATION, true)
-            if (notificationIdToCancel != 0) putExtra("NOTIFICATION_ID", notificationIdToCancel)
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        return runCatching {
-            PendingIntent.getActivity(
-                ctx,
-                requestCode,
-                intent,
-                flags,
-                splashIconOptionsBundle()
-            )
-        }.getOrElse {
-            PendingIntent.getActivity(ctx, requestCode, intent, flags)
-        }
-    }
-
-    private fun dismissCallPendingIntent(eId: String, notificationId: Int): PendingIntent {
-        val intent = Intent(this, CallNotificationActionReceiver::class.java).apply {
+    private fun dismissCallPendingIntent(ctx: Context, eId: String, notificationId: Int): PendingIntent {
+        val appCtx = ctx.applicationContext
+        val intent = Intent(appCtx, CallNotificationActionReceiver::class.java).apply {
             action = CallNotificationActionReceiver.ACTION_DISMISS_CALL_NOTIFICATION
             putExtra(CallNotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
             putExtra(CallNotificationActionReceiver.EXTRA_EVENT_ID, eId)
         }
         return PendingIntent.getBroadcast(
-            this,
+            appCtx,
             notificationId + 3,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-    }
-
-    /**
-     * Trên Android 12+ (API 31+), khi mở Activity từ PendingIntent (thông báo), hệ thống mặc định dùng
-     * SPLASH_SCREEN_STYLE_SOLID_COLOR (chỉ hiện nền trắng trống không có logo). Truyền SPLASH_SCREEN_STYLE_ICON
-     * để luôn hiển thị đầy đủ màn hình Splash có icon giống như khi mở từ màn hình chính.
-     */
-    private fun splashIconOptionsBundle(): Bundle? {
-        return when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
-                ActivityOptions.makeBasic()
-                    .setSplashScreenStyle(SplashScreen.SPLASH_SCREEN_STYLE_ICON)
-                    .toBundle()
-            }
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                ActivityOptions.makeBasic().toBundle().apply {
-                    putInt("android.activity.splashScreenStyle", 1)
-                }
-            }
-            else -> null
-        }
-    }
-
-    private fun showMissedCallNotification(
-        title: String,
-        body: String,
-        url: String?,
-        eId: String,
-        ctx: Context = this
-    ) {
-        val notificationId = getSafeNotificationId(eId, 1)
-
-        val builder = NotificationCompat.Builder(ctx, NotificationChannels.EVENT)
-            .setSmallIcon(R.mipmap.app_icon_notify)
-            .setContentTitle(ctx.getString(R.string.notif_missed_call_title, title))
-            .setContentText(ctx.getString(R.string.notif_missed_call_text, body.take(MISSED_CALL_BODY_PREVIEW)))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
-            .setAutoCancel(true)
-            .setContentIntent(
-                eventDetailPendingIntent(
-                    eId = eId,
-                    requestCode = notificationId,
-                    fromNotification = true,
-                    notificationIdToCancel = notificationId,
-                    ctx = ctx
-                )
-            )
-
-        loadImageAndNotify(builder, url, notificationId, ctx)
-    }
-
-    private fun loadImageAndNotify(
-        builder: NotificationCompat.Builder,
-        url: String?,
-        notificationId: Int,
-        ctx: Context = this
-    ) {
-        val appCtx = ctx.applicationContext
-        val manager = NotificationManagerCompat.from(appCtx)
-
-        // Gửi thông báo ngay lập tức để tránh process bị kill
-        notifySafely(manager, notificationId, builder)
-
-        if (url.isNullOrEmpty()) return
-        val app = appCtx as? TenliApp ?: return
-        val loader = Coil.imageLoader(appCtx)
-        // Giới hạn kích thước decode: ảnh thông báo không cần full-res → tiết kiệm RAM/CPU
-        val request = ImageRequest.Builder(appCtx)
-            .data(url)
-            .size(NOTIFICATION_IMAGE_MAX_PX)
-            .allowHardware(false)
-            .build()
-        app.appScope.launch {
-            try {
-                val bitmap = (loader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return@launch
-                builder.setLargeIcon(bitmap)
-                builder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
-                notifySafely(manager, notificationId, builder)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (BuildConfig.DEBUG) Log.w(TAG, "Load notification image failed: ${e.message}")
-            }
-        }
-    }
-
-    private fun notifySafely(manager: NotificationManagerCompat, id: Int, builder: NotificationCompat.Builder) {
-        try {
-            val areEnabled = manager.areNotificationsEnabled()
-            manager.notify(id, builder.build())
-            if (BuildConfig.DEBUG) {
-                Log.i(
-                    FcmTokenManager.LOG_TAG,
-                    "✅ [HIỂN THỊ NOTIFY LÊN TRAY] notificationId=$id | areNotificationsEnabled=$areEnabled"
-                )
-            }
-        } catch (e: SecurityException) {
-            if (BuildConfig.DEBUG) {
-                Log.e(FcmTokenManager.LOG_TAG, "❌ [THIẾU QUYỀN POST_NOTIFICATIONS] ${e.message}", e)
-            }
-        }
     }
 
     private fun handleIncomingCall(
@@ -506,12 +376,13 @@ class EventMessagingService : FirebaseMessagingService() {
         cameraName: String,
         eventTime: Double
     ) {
-        wakeUpScreenForIncomingCall()
+        val appCtx = applicationContext
+        wakeUpScreenForIncomingCall(appCtx)
 
-        val manager = NotificationManagerCompat.from(this)
+        val manager = NotificationManagerCompat.from(appCtx)
         val notificationId = getSafeNotificationId(eId)
 
-        val callIntent = Intent(this, CallComingActivity::class.java).apply {
+        val callIntent = Intent(appCtx, CallComingActivity::class.java).apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -529,25 +400,26 @@ class EventMessagingService : FirebaseMessagingService() {
             putExtra("EVENT_TIME", eventTime)
         }
         val callPendingIntent = PendingIntent.getActivity(
-            this,
+            appCtx,
             notificationId,
             callIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val acceptPendingIntent = eventDetailPendingIntent(
+            ctx = appCtx,
             eId = eId,
             requestCode = notificationId + 2,
             fromNotification = true,
             notificationIdToCancel = notificationId
         )
-        val dismissPendingIntent = dismissCallPendingIntent(eId, notificationId)
+        val dismissPendingIntent = dismissCallPendingIntent(appCtx, eId, notificationId)
 
-        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(this).equals("en", ignoreCase = true)
+        val isEn = com.tenli.oneview.ui.utils.LocaleManager.getLocale(appCtx).equals("en", ignoreCase = true)
         val declineLabel = if (isEn) "Decline" else "Từ chối"
         val acceptLabel = if (isEn) "View now" else "Xem ngay"
 
-        val builder = NotificationCompat.Builder(this, NotificationChannels.EMERGENCY_CALL)
+        val builder = NotificationCompat.Builder(appCtx, NotificationChannels.EMERGENCY_CALL)
             .setSmallIcon(R.mipmap.app_icon_notify)
             .setContentTitle(title)
             .setContentText(body)
@@ -560,12 +432,11 @@ class EventMessagingService : FirebaseMessagingService() {
             .addAction(0, acceptLabel, acceptPendingIntent)
             .setOngoing(true)
             .setAutoCancel(true)
-            .setTimeoutAfter(CALL_NOTIFICATION_TIMEOUT_MS)
+            .setTimeoutAfter(CALL_NOTIFICATION_TIMEOUT_MS + 2_000L)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         notifySafely(manager, notificationId, builder)
 
-        val appCtx = applicationContext
         var startedDirectly = false
         try {
             startActivity(callIntent)
@@ -587,43 +458,26 @@ class EventMessagingService : FirebaseMessagingService() {
         }
 
         // Bảo hiểm trường hợp hệ điều hành chỉ hiển thị Heads-Up Notification mà chặn mở CallComingActivity:
-        // Sau 30s tự động huỷ thông báo đang reo và chuyển thành thông báo cuộc gọi nhỡ
+        // Sau đúng CALL_NOTIFICATION_TIMEOUT_MS (trước khi setTimeoutAfter tự huỷ +2s), kiểm tra và chuyển sang cuộc gọi nhỡ.
         val app = appCtx as? TenliApp
         app?.appScope?.launch {
-            delay(CALL_NOTIFICATION_TIMEOUT_MS + 500L)
+            delay(CALL_NOTIFICATION_TIMEOUT_MS)
             val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return@launch
             val isStillActive = runCatching {
                 nm.activeNotifications.any { it.id == notificationId }
             }.getOrDefault(false)
             if (isStillActive && !AppState.isShowCallActivity) {
                 runCatching { nm.cancel(notificationId) }
-                showMissedCallNotification(title, body, url, eId, appCtx)
+                showMissedCallNotification(appCtx, title, body, url, eId)
             }
         }
     }
 
-    /**
-     * Đánh thức màn hình trong 10 giây khi nhận cuộc gọi cảnh báo lúc máy đang tắt màn hình / app bị kill.
-     */
-    private fun wakeUpScreenForIncomingCall() {
-        runCatching {
-            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
-            @Suppress("DEPRECATION")
-            val wakeLock = pm.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    PowerManager.ON_AFTER_RELEASE,
-                "tenli:incoming_call_wakelock"
-            )
-            wakeLock.setReferenceCounted(false)
-            wakeLock.acquire(10_000L)
-        }
-    }
-
     private fun showRegularNotification(title: String, body: String, url: String?, eId: String) {
+        val appCtx = applicationContext
         val notificationId = getSafeNotificationId(eId)
 
-        val builder = NotificationCompat.Builder(this, NotificationChannels.EVENT)
+        val builder = NotificationCompat.Builder(appCtx, NotificationChannels.EVENT)
             .setSmallIcon(R.mipmap.app_icon_notify)
             .setContentTitle(title)
             .setContentText(body)
@@ -632,6 +486,7 @@ class EventMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setContentIntent(
                 eventDetailPendingIntent(
+                    ctx = appCtx,
                     eId = eId,
                     requestCode = notificationId,
                     fromNotification = true,
@@ -639,18 +494,204 @@ class EventMessagingService : FirebaseMessagingService() {
                 )
             )
 
-        loadImageAndNotify(builder, url, notificationId)
+        loadImageAndNotify(appCtx, builder, url, notificationId)
     }
 
-    private companion object {
-        const val TAG = "EventMessagingService"
-        const val EXTRA_EVENT_ID = "EVENT_ID"
-        const val EXTRA_FROM_NOTIFICATION = "FROM_NOTIFICATION"
-        const val MISSED_CALL_THRESHOLD_MS = 300_000L
-        const val MAX_CLOCK_DRIFT_TOLERANCE_MS = 1_800_000L
-        const val CALL_NOTIFICATION_TIMEOUT_MS = 30_000L
-        const val QUICK_EVENT_FETCH_TIMEOUT_MS = 2_500L
-        const val MISSED_CALL_BODY_PREVIEW = 20
-        const val NOTIFICATION_IMAGE_MAX_PX = 1024
+    companion object {
+        private const val TAG = "EventMessagingService"
+        private const val EXTRA_EVENT_ID = "EVENT_ID"
+        private const val EXTRA_FROM_NOTIFICATION = "FROM_NOTIFICATION"
+        private const val MISSED_CALL_THRESHOLD_MS = 300_000L
+        private const val MAX_CLOCK_DRIFT_TOLERANCE_MS = 1_800_000L
+        private const val CALL_NOTIFICATION_TIMEOUT_MS = 30_000L
+        private const val INCOMING_CALL_WAKELOCK_TIMEOUT_MS = 3_000L
+        private const val QUICK_EVENT_FETCH_TIMEOUT_MS = 2_500L
+        private const val MISSED_CALL_BODY_PREVIEW = 20
+        private const val NOTIFICATION_IMAGE_MAX_PX = 1024
+
+        private val wakeLockGuard = Any()
+        @Volatile
+        private var incomingCallWakeLock: PowerManager.WakeLock? = null
+
+        /**
+         * Đánh thức màn hình ngắn (3s) khi nhận cuộc gọi cảnh báo lúc máy tắt màn hình / app bị kill.
+         * Giữ duy nhất 1 WakeLock đồng bộ (nhả lock cũ trước khi cấp mới) và không dùng ON_AFTER_RELEASE.
+         */
+        private fun wakeUpScreenForIncomingCall(ctx: Context) {
+            runCatching {
+                val pm = ctx.applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+                synchronized(wakeLockGuard) {
+                    incomingCallWakeLock?.let { prev ->
+                        runCatching { if (prev.isHeld) prev.release() }
+                    }
+                    @Suppress("DEPRECATION")
+                    val wakeLock = pm.newWakeLock(
+                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                            PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                        "tenli:incoming_call_wakelock"
+                    )
+                    wakeLock.setReferenceCounted(false)
+                    wakeLock.acquire(INCOMING_CALL_WAKELOCK_TIMEOUT_MS)
+                    incomingCallWakeLock = wakeLock
+                }
+            }
+        }
+
+        /** Chủ động giải phóng WakeLock ngay khi CallComingActivity đã hiển thị hoặc đóng/tắt. */
+        fun releaseIncomingCallWakeLock() {
+            synchronized(wakeLockGuard) {
+                val wl = incomingCallWakeLock
+                incomingCallWakeLock = null
+                if (wl != null) {
+                    runCatching { if (wl.isHeld) wl.release() }
+                }
+            }
+        }
+
+        private fun getSafeNotificationId(eId: String, offset: Int = 0): Int {
+            return if (eId.isNotEmpty()) eId.hashCode() + offset else (System.currentTimeMillis().toInt() + offset)
+        }
+
+        /** Intent mở chi tiết sự kiện trong MainActivity (giữ nguyên instance đang mở nếu có) */
+        private fun eventDetailPendingIntent(
+            ctx: Context,
+            eId: String,
+            requestCode: Int,
+            fromNotification: Boolean,
+            notificationIdToCancel: Int = 0
+        ): PendingIntent {
+            val appCtx = ctx.applicationContext
+            val intent = Intent(appCtx, MainActivity::class.java).apply {
+                putExtra(EXTRA_EVENT_ID, eId)
+                if (fromNotification) putExtra(EXTRA_FROM_NOTIFICATION, true)
+                if (notificationIdToCancel != 0) putExtra("NOTIFICATION_ID", notificationIdToCancel)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            return runCatching {
+                PendingIntent.getActivity(
+                    appCtx,
+                    requestCode,
+                    intent,
+                    flags,
+                    splashIconOptionsBundle()
+                )
+            }.getOrElse {
+                PendingIntent.getActivity(appCtx, requestCode, intent, flags)
+            }
+        }
+
+        /**
+         * Trên Android 12+ (API 31+), khi mở Activity từ PendingIntent (thông báo), hệ thống mặc định dùng
+         * SPLASH_SCREEN_STYLE_SOLID_COLOR (chỉ hiện nền trắng trống không có logo). Truyền SPLASH_SCREEN_STYLE_ICON
+         * để luôn hiển thị đầy đủ màn hình Splash có icon giống như khi mở từ màn hình chính.
+         */
+        private fun splashIconOptionsBundle(): Bundle? {
+            return when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                    ActivityOptions.makeBasic()
+                        .setSplashScreenStyle(SplashScreen.SPLASH_SCREEN_STYLE_ICON)
+                        .toBundle()
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    ActivityOptions.makeBasic().toBundle().apply {
+                        putInt("android.activity.splashScreenStyle", 1)
+                    }
+                }
+                else -> null
+            }
+        }
+
+        private fun showMissedCallNotification(
+            ctx: Context,
+            title: String,
+            body: String,
+            url: String?,
+            eId: String
+        ) {
+            val appCtx = ctx.applicationContext
+            val notificationId = getSafeNotificationId(eId, 1)
+
+            val builder = NotificationCompat.Builder(appCtx, NotificationChannels.EVENT)
+                .setSmallIcon(R.mipmap.app_icon_notify)
+                .setContentTitle(appCtx.getString(R.string.notif_missed_call_title, title))
+                .setContentText(appCtx.getString(R.string.notif_missed_call_text, body.take(MISSED_CALL_BODY_PREVIEW)))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setVibrate(NotificationChannels.EVENT_VIBRATION_PATTERN)
+                .setAutoCancel(true)
+                .setContentIntent(
+                    eventDetailPendingIntent(
+                        ctx = appCtx,
+                        eId = eId,
+                        requestCode = notificationId,
+                        fromNotification = true,
+                        notificationIdToCancel = notificationId
+                    )
+                )
+
+            loadImageAndNotify(appCtx, builder, url, notificationId)
+        }
+
+        private fun loadImageAndNotify(
+            ctx: Context,
+            builder: NotificationCompat.Builder,
+            url: String?,
+            notificationId: Int
+        ) {
+            val appCtx = ctx.applicationContext
+            val manager = NotificationManagerCompat.from(appCtx)
+
+            // Gửi thông báo ngay lập tức để tránh process bị kill
+            notifySafely(manager, notificationId, builder)
+
+            if (url.isNullOrEmpty()) return
+            val app = appCtx as? TenliApp ?: return
+            val loader = Coil.imageLoader(appCtx)
+            // Giới hạn kích thước decode: ảnh thông báo không cần full-res → tiết kiệm RAM/CPU
+            val request = ImageRequest.Builder(appCtx)
+                .data(url)
+                .size(NOTIFICATION_IMAGE_MAX_PX)
+                .allowHardware(false)
+                .build()
+            app.appScope.launch {
+                try {
+                    val bitmap = (loader.execute(request).drawable as? BitmapDrawable)?.bitmap ?: return@launch
+                    val nm = appCtx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    val isStillActive = runCatching {
+                        nm?.activeNotifications?.any { it.id == notificationId } == true
+                    }.getOrDefault(false)
+                    if (!isStillActive) return@launch
+
+                    builder.setOnlyAlertOnce(true)
+                    builder.setLargeIcon(bitmap)
+                    builder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
+                    notifySafely(manager, notificationId, builder)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (BuildConfig.DEBUG) Log.w(TAG, "Load notification image failed: ${e.message}")
+                }
+            }
+        }
+
+        private fun notifySafely(manager: NotificationManagerCompat, id: Int, builder: NotificationCompat.Builder) {
+            try {
+                val areEnabled = manager.areNotificationsEnabled()
+                manager.notify(id, builder.build())
+                if (BuildConfig.DEBUG) {
+                    Log.i(
+                        FcmTokenManager.LOG_TAG,
+                        "✅ [HIỂN THỊ NOTIFY LÊN TRAY] notificationId=$id | areNotificationsEnabled=$areEnabled"
+                    )
+                }
+            } catch (e: SecurityException) {
+                if (BuildConfig.DEBUG) {
+                    Log.e(FcmTokenManager.LOG_TAG, "❌ [THIẾU QUYỀN POST_NOTIFICATIONS] ${e.message}", e)
+                }
+            }
+        }
     }
 }

@@ -1,7 +1,10 @@
 package com.tenli.oneview
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.Application
+import android.content.ComponentCallbacks2
+import android.content.Context
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -23,6 +26,7 @@ import com.tenli.oneview.data.network.KeepAliveWorker
 import com.tenli.oneview.data.network.retrofit.LoginAuthClient
 import com.tenli.oneview.di.AppContainer
 import com.tenli.oneview.di.DefaultAppContainer
+import com.tenli.oneview.firebase.CallComingActivity
 import com.tenli.oneview.firebase.FcmTokenManager
 import com.tenli.oneview.service.NotificationChannels
 import com.tenli.oneview.ui.component.VideoFrameCache
@@ -35,6 +39,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class TenliApp : Application(), ImageLoaderFactory {
 
@@ -43,19 +48,28 @@ class TenliApp : Application(), ImageLoaderFactory {
     /** Scope sống cùng tiến trình cho các tác vụ nền ngắn (preload cache, tải ảnh thông báo...) */
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    private val uiCachesPreloaded = AtomicBoolean(false)
+
     override fun newImageLoader(): ImageLoader {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryCachePercent = if (activityManager?.isLowRamDevice == true) {
+            IMAGE_MEMORY_CACHE_PERCENT_LOW_RAM
+        } else {
+            IMAGE_MEMORY_CACHE_PERCENT
+        }
         return ImageLoader.Builder(this)
             // Dùng chung connection pool/thread pool với API (xem LoginAuthClient.imageClient)
             .okHttpClient(LoginAuthClient.imageClient)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(IMAGE_MEMORY_CACHE_PERCENT)
+                    .maxSizePercent(memoryCachePercent)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(IMAGE_DISK_CACHE_BYTES) // disk cache cho ảnh sự kiện & snapshot camera
+                    .maxSizePercent(IMAGE_DISK_CACHE_PERCENT)
+                    .maximumMaxSizeBytes(IMAGE_DISK_CACHE_BYTES)
                     .build()
             }
             // Luôn ưu tiên đọc ảnh ngay từ DiskCache khi mở app (0ms network wait), không phụ thuộc Cache-Control của server
@@ -85,37 +99,53 @@ class TenliApp : Application(), ImageLoaderFactory {
         // Khôi phục ngay phiên đăng nhập vào RAM (< 0.2ms) để SplashViewModel mở thẳng vào Main ở Frame 1
         runCatching { UserSession.ensureRestored(GlobalData.preferences) }
 
-        // Chỉ pre-warm các cache từ ổ đĩa lên RAM khi đã có phiên đăng nhập hợp lệ
-        if (UserSession.accessToken.isNotEmpty() && UserSession.userData != null) {
-            appScope.launch { runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) } }
-            appScope.launch { runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) } }
-            appScope.launch { runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) } }
-        }
-
         FcmTokenManager.init(this)
+
+        val shouldRunKeepAlive = UserSession.accessToken.isNotEmpty() &&
+            runCatching { GlobalData.preferences.getBoolean(PREF_PUSH_NOTIFICATIONS_ENABLED, true) }
+                .getOrDefault(true)
 
         appScope.launch {
             runCatching { NotificationChannels.createAll(this@TenliApp) }
-            setupBackgroundWorkers()
+            TenliApp.syncKeepAliveWorker(this@TenliApp, shouldRunKeepAlive)
         }
 
         registerActivityLifecycleCallbacks(ForegroundTracker())
     }
 
     /**
+     * Chỉ pre-warm các cache UI từ đĩa lên RAM khi mở [com.tenli.oneview.main.MainActivity] và đã có phiên đăng nhập,
+     * tránh tốn RAM/CPU/I/O khi tiến trình chỉ được hệ thống đánh thức ngầm bởi FCM hay WorkManager.
+     */
+    fun preloadUiCachesIfNeeded() {
+        if (UserSession.accessToken.isEmpty() || UserSession.userData == null) return
+        if (!uiCachesPreloaded.compareAndSet(false, true)) return
+        appScope.launch { runCatching { HomeCacheManager.preloadDefaultCache(this@TenliApp) } }
+        appScope.launch { runCatching { EventCacheManager.preloadDefaultCache(this@TenliApp) } }
+        appScope.launch { runCatching { MonitorCacheManager.preloadDefaultCache(this@TenliApp) } }
+    }
+
+    fun syncKeepAliveWorker(context: Context, enabled: Boolean) {
+        Companion.syncKeepAliveWorker(context, enabled)
+    }
+
+    /**
      * Theo dõi app foreground/background (đếm số Activity đang started) để WebSocket chỉ chạy khi người dùng
      * đang mở app → giảm đáng kể pin/nhiệt khi app ở nền.
+     * Bỏ qua [CallComingActivity] để màn cuộc gọi cảnh báo không vô tình đánh thức toàn bộ WebSocket nền.
      */
     private inner class ForegroundTracker : ActivityLifecycleCallbacks {
         private var startedCount = 0
 
         override fun onActivityStarted(activity: Activity) {
+            if (activity is CallComingActivity) return
             if (startedCount++ == 0) {
                 container.webSocketManager.onAppForegroundChanged(true)
             }
         }
 
         override fun onActivityStopped(activity: Activity) {
+            if (activity is CallComingActivity) return
             startedCount = (startedCount - 1).coerceAtLeast(0)
             if (startedCount == 0 && !activity.isChangingConfigurations) {
                 container.webSocketManager.onAppForegroundChanged(false)
@@ -129,36 +159,52 @@ class TenliApp : Application(), ImageLoaderFactory {
         override fun onActivityDestroyed(activity: Activity) = Unit
     }
 
+    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         VideoFrameCache.trimMemory(level)
-    }
-
-    private fun setupBackgroundWorkers() {
-        runCatching {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED) // Chỉ chạy khi có mạng
-                .setRequiresBatteryNotLow(true) // Không đánh thức máy khi pin yếu
-                .build()
-            val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(
-                KEEP_ALIVE_WORK_INTERVAL_HOURS,
-                TimeUnit.HOURS
-            )
-                .setConstraints(constraints)
-                .build()
-
-            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-                KEEP_ALIVE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
-                workRequest
-            )
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+            level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW
+        ) {
+            HomeCacheManager.trimMemory()
+            EventCacheManager.trimMemory()
         }
     }
 
-    private companion object {
-        const val IMAGE_MEMORY_CACHE_PERCENT = 0.25
-        const val IMAGE_DISK_CACHE_BYTES = 150L * 1024 * 1024
-        const val KEEP_ALIVE_WORK_NAME = "ping_firebase"
-        const val KEEP_ALIVE_WORK_INTERVAL_HOURS = 6L
+    companion object {
+        private const val IMAGE_MEMORY_CACHE_PERCENT = 0.25
+        private const val IMAGE_MEMORY_CACHE_PERCENT_LOW_RAM = 0.15
+        private const val IMAGE_DISK_CACHE_PERCENT = 0.02
+        private const val IMAGE_DISK_CACHE_BYTES = 150L * 1024 * 1024
+        private const val KEEP_ALIVE_WORK_NAME = "ping_firebase"
+        private const val KEEP_ALIVE_WORK_INTERVAL_HOURS = 6L
+        private const val PREF_PUSH_NOTIFICATIONS_ENABLED = "push_notifications_enabled"
+
+        fun syncKeepAliveWorker(context: Context, enabled: Boolean) {
+            runCatching {
+                val wm = WorkManager.getInstance(context.applicationContext)
+                if (enabled) {
+                    val constraints = Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED) // Chỉ chạy khi có mạng
+                        .setRequiresBatteryNotLow(true) // Không đánh thức máy khi pin yếu
+                        .build()
+                    val workRequest = PeriodicWorkRequestBuilder<KeepAliveWorker>(
+                        KEEP_ALIVE_WORK_INTERVAL_HOURS,
+                        TimeUnit.HOURS
+                    )
+                        .setConstraints(constraints)
+                        .build()
+
+                    wm.enqueueUniquePeriodicWork(
+                        KEEP_ALIVE_WORK_NAME,
+                        ExistingPeriodicWorkPolicy.UPDATE,
+                        workRequest
+                    )
+                } else {
+                    wm.cancelUniqueWork(KEEP_ALIVE_WORK_NAME)
+                }
+            }
+        }
     }
 }

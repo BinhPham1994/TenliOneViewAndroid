@@ -1,7 +1,6 @@
 package com.tenli.oneview.ui.features.auth.login
 
 import android.app.Application
-import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -20,14 +19,19 @@ import com.tenli.oneview.util.NetworkMonitor
 import com.tenli.oneview.util.noNetworkMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import retrofit2.HttpException
+import java.io.IOException
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 
 private const val DOMAIN_KEY = "DOMAIN_KEY"
 
@@ -39,8 +43,8 @@ class LoginViewModel(
 
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState = _uiState.asStateFlow()
-    private val _event = MutableSharedFlow<LoginEvent>()
-    val event = _event.asSharedFlow()
+    private val _event = Channel<LoginEvent>(Channel.BUFFERED)
+    val event = _event.receiveAsFlow()
 
     private var loginJob: Job? = null
 
@@ -73,7 +77,7 @@ class LoginViewModel(
 
     fun onDomainChanged(domain: String) {
         val cleaned = if (domain.contains("://")) {
-            domain.replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
+            domain.replace(SCHEME_REGEX, "")
         } else {
             domain
         }
@@ -168,7 +172,9 @@ class LoginViewModel(
         loginJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
             try {
-                val result = authRepository.loginVms(domain, LogInModel(username = email, password = password))
+                val result = withContext(dispatcherProvider.io) {
+                    authRepository.loginVms(domain, LogInModel(username = email, password = password))
+                }
                 val loginData = result.getOrNull()
                 when {
                     result.isFailure -> MobileTopPopupManager.error(
@@ -185,7 +191,7 @@ class LoginViewModel(
                             password = password,
                             isDomainFromQr = isDomainFromQr
                         )
-                        _event.emit(LoginEvent.LoginSuccess)
+                        _event.send(LoginEvent.LoginSuccess)
                     }
                 }
             } catch (e: CancellationException) {
@@ -207,19 +213,49 @@ class LoginViewModel(
             return noNetworkMessage(isEn)
         }
         val errorMsg = error?.message.orEmpty()
+        val httpCode = (error as? HttpException)?.code()
+            ?: HTTP_CODE_REGEX.find(errorMsg)?.groupValues?.getOrNull(1)?.toIntOrNull()
+        val rootCause = error?.cause
+        val isConnectionError = error is UnknownHostException ||
+            error is SocketTimeoutException ||
+            error is ConnectException ||
+            error is SSLException ||
+            error is IOException ||
+            rootCause is UnknownHostException ||
+            rootCause is SocketTimeoutException ||
+            rootCause is ConnectException ||
+            rootCause is SSLException ||
+            rootCause is IOException ||
+            errorMsg.contains("Unable to resolve host", ignoreCase = true) ||
+            errorMsg.contains("timeout", ignoreCase = true) ||
+            errorMsg.contains("Failed to connect", ignoreCase = true)
+
+        val connectionMsg = if (isEn) {
+            "Connection error to server, please try again later"
+        } else {
+            "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
+        }
+        val invalidCredentialsMsg = if (isEn) {
+            "Invalid login credentials"
+        } else {
+            "Thông tin đăng nhập không chính xác"
+        }
+        val genericErrorMsg = if (isEn) {
+            "An error occurred, please try again later."
+        } else {
+            "Có lỗi xảy ra, vui lòng thử lại sau."
+        }
+
         return when {
-            !isUnexpected && (errorMsg.contains("failed with code 401") ||
-                errorMsg.contains("failed with code 400") ||
-                errorMsg.contains("Failed to authenticate")) ->
-                if (isEn) "Invalid login credentials" else "Thông tin đăng nhập không chính xác"
-            error is UnknownHostException || errorMsg.contains("Unable to resolve host") ->
-                if (isEn) "Connection error to server, please try again later" else "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
-            error is SocketTimeoutException || errorMsg.contains("timeout") ->
-                if (isEn) "Connection error to server, please try again later" else "Lỗi kết nối đến máy chủ, vui lòng thử lại sau"
-            isUnexpected ->
-                if (isEn) "An error occurred, please try again later." else "Có lỗi xảy ra, vui lòng thử lại sau."
+            !isUnexpected && (httpCode == 400 || httpCode == 401 || httpCode == 403 ||
+                errorMsg.contains("Failed to authenticate", ignoreCase = true)) ->
+                invalidCredentialsMsg
+            httpCode == 404 || (httpCode != null && httpCode >= 500) ->
+                connectionMsg
+            isConnectionError ->
+                connectionMsg
             else ->
-                if (isEn) "Invalid login credentials" else "Thông tin đăng nhập không chính xác"
+                genericErrorMsg
         }
     }
 
@@ -241,13 +277,15 @@ class LoginViewModel(
             }
         }
         // Ủy quyền toàn bộ việc xoá cache phiên cũ, thiết lập UserSession, đồng bộ quyền và ghi SharedPreferences cho AuthRepository
-        authRepository.establishAuthenticatedSession(
-            loginData = loginData,
-            formattedDomain = formattedDomain,
-            username = username,
-            password = password,
-            isDomainFromQr = isDomainFromQr
-        )
+        withContext(dispatcherProvider.io) {
+            authRepository.establishAuthenticatedSession(
+                loginData = loginData,
+                formattedDomain = formattedDomain,
+                username = username,
+                password = password,
+                isDomainFromQr = isDomainFromQr
+            )
+        }
         // Chuẩn bị sẵn trạng thái sạch cho lần quay lại màn hình Login tiếp theo (sau khi đăng xuất):
         // - Quét QR: xoá trống ô domain; Nhập tay: giữ domain đã nhập
         // - Luôn xoá trống tài khoản & mật khẩu để nhập mới
@@ -264,13 +302,16 @@ class LoginViewModel(
     }
 
     companion object {
+        private val SCHEME_REGEX = Regex("^https?://", RegexOption.IGNORE_CASE)
+        private val MOBILE_PATH_SUFFIX_REGEX = Regex("/m/?$", RegexOption.IGNORE_CASE)
+        private val HTTP_CODE_REGEX = Regex("failed with code (\\d{3})")
         private val DOMAIN_LABEL_REGEX = Regex("^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
         private val DOMAIN_TLD_REGEX = Regex("^[a-zA-Z]{2,63}$")
 
         fun normalizeDomainInput(raw: String): String =
             raw.trim()
-                .replace(Regex("^https?://", RegexOption.IGNORE_CASE), "")
-                .replace(Regex("/m/?$", RegexOption.IGNORE_CASE), "")
+                .replace(SCHEME_REGEX, "")
+                .replace(MOBILE_PATH_SUFFIX_REGEX, "")
                 .trimEnd('/')
 
         /**

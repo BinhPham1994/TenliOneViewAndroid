@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -53,13 +54,14 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.spacing
 import java.util.Locale
 import kotlin.math.abs
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 private const val DEFAULT_MIN_SCALE = 1f
 private const val DEFAULT_MAX_SCALE = 5f
 private const val DOUBLE_TAP_TARGET_SCALE = 2.5f
 private const val ZOOM_ACTIVE_EPSILON = 1.02f
-private const val ZOOM_BADGE_THRESHOLD = 1.06f
+private const val ZOOM_BADGE_THRESHOLD = 1.01f
 
 /**
  * Khung media hỗ trợ Pinch-to-Zoom 2 ngón (1.0x..5.0x), kéo pan 1 ngón khi đang zoom,
@@ -90,14 +92,21 @@ fun ZoomableMediaBox(
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
-    var containerSize = remember { IntSize.Zero }
+    val containerSizeHolder = remember { arrayOf(IntSize.Zero) }
+    val zoomAnimJobHolder = remember { arrayOfNulls<Job>(1) }
 
     val currentOnTap by rememberUpdatedState(onTap)
     val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     val currentOnZoomChanged by rememberUpdatedState(onZoomChanged)
     val currentEnableDoubleTapZoom by rememberUpdatedState(enableDoubleTapZoom)
 
+    fun cancelZoomAnimation() {
+        zoomAnimJobHolder[0]?.cancel()
+        zoomAnimJobHolder[0] = null
+    }
+
     fun clampOffset(rawX: Float, rawY: Float, targetScale: Float): Offset {
+        val containerSize = containerSizeHolder[0]
         if (targetScale <= 1.001f || containerSize.width <= 0 || containerSize.height <= 0) {
             return Offset.Zero
         }
@@ -122,27 +131,31 @@ fun ZoomableMediaBox(
         }
     }
 
-    val resetZoomSmooth: () -> Unit = {
-        scope.launch {
-            val startScale = scale
-            val startOffset = Offset(offsetX, offsetY)
-            if (startScale <= 1.005f && startOffset == Offset.Zero) {
+    val resetZoomSmooth: () -> Unit = remember(scope, minScale, maxScale) {
+        {
+            cancelZoomAnimation()
+            zoomAnimJobHolder[0] = scope.launch {
+                val startScale = scale
+                val startOffset = Offset(offsetX, offsetY)
+                if (startScale <= 1.005f && startOffset == Offset.Zero) {
+                    applyTransformInstant(1f, Offset.Zero)
+                    return@launch
+                }
+                val anim = Animatable(0f)
+                anim.animateTo(1f, animationSpec = tween(durationMillis = 200)) {
+                    val fraction = value
+                    val s = startScale + (1f - startScale) * fraction
+                    val ox = startOffset.x * (1f - fraction)
+                    val oy = startOffset.y * (1f - fraction)
+                    applyTransformInstant(s, Offset(ox, oy))
+                }
                 applyTransformInstant(1f, Offset.Zero)
-                return@launch
             }
-            val anim = Animatable(0f)
-            anim.animateTo(1f, animationSpec = tween(durationMillis = 200)) {
-                val fraction = value
-                val s = startScale + (1f - startScale) * fraction
-                val ox = startOffset.x * (1f - fraction)
-                val oy = startOffset.y * (1f - fraction)
-                applyTransformInstant(s, Offset(ox, oy))
-            }
-            applyTransformInstant(1f, Offset.Zero)
         }
     }
 
     LaunchedEffect(zoomResetKey) {
+        cancelZoomAnimation()
         if (scale != 1f || offsetX != 0f || offsetY != 0f) {
             applyTransformInstant(1f, Offset.Zero)
         }
@@ -158,7 +171,7 @@ fun ZoomableMediaBox(
         modifier = modifier
             .clipToBounds()
             .onSizeChanged { size ->
-                containerSize = size
+                containerSizeHolder[0] = size
                 if (scale > 1.001f) {
                     val clamped = clampOffset(offsetX, offsetY, scale)
                     offsetX = clamped.x
@@ -173,6 +186,7 @@ fun ZoomableMediaBox(
                     val touchSlop = viewConfiguration.touchSlop
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
+                        cancelZoomAnimation()
                         var isTransforming = false
                         var panAccumulated = Offset.Zero
 
@@ -257,7 +271,8 @@ fun ZoomableMediaBox(
                                         val center = Offset(size.width * 0.5f, size.height * 0.5f)
                                         val rawTargetOffset = (tapOffset - center) * (1f - targetScale)
                                         val targetOffset = clampOffset(rawTargetOffset.x, rawTargetOffset.y, targetScale)
-                                        scope.launch {
+                                        cancelZoomAnimation()
+                                        zoomAnimJobHolder[0] = scope.launch {
                                             val anim = Animatable(Offset(0f, 0f), Offset.VectorConverter)
                                             val startScale = scale
                                             val startOffset = Offset(offsetX, offsetY)
@@ -289,23 +304,54 @@ fun ZoomableMediaBox(
             content = content
         )
 
-        overlay(scale, resetZoomSmooth)
+        ZoomOverlayHost(
+            scaleProvider = { scale },
+            resetZoom = resetZoomSmooth,
+            overlay = overlay
+        )
 
         if (showZoomBadge) {
-            AnimatedVisibility(
-                visible = scale > ZOOM_BADGE_THRESHOLD,
-                enter = fadeIn(animationSpec = tween(160)),
-                exit = fadeOut(animationSpec = tween(160)),
-                modifier = Modifier
-                    .align(badgeAlignment)
-                    .padding(badgePadding)
-            ) {
-                ZoomResetPill(
-                    scale = scale,
-                    onClick = resetZoomSmooth
-                )
-            }
+            ZoomBadgeOverlay(
+                scaleProvider = { scale },
+                badgeAlignment = badgeAlignment,
+                badgePadding = badgePadding,
+                onReset = resetZoomSmooth
+            )
         }
+    }
+}
+
+@Composable
+private fun BoxScope.ZoomOverlayHost(
+    scaleProvider: () -> Float,
+    resetZoom: () -> Unit,
+    overlay: @Composable BoxScope.(scale: Float, resetZoom: () -> Unit) -> Unit
+) {
+    overlay(scaleProvider(), resetZoom)
+}
+
+@Composable
+private fun BoxScope.ZoomBadgeOverlay(
+    scaleProvider: () -> Float,
+    badgeAlignment: Alignment,
+    badgePadding: PaddingValues,
+    onReset: () -> Unit
+) {
+    val isVisible by remember {
+        derivedStateOf { scaleProvider() > ZOOM_BADGE_THRESHOLD }
+    }
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = fadeIn(animationSpec = tween(160)),
+        exit = fadeOut(animationSpec = tween(160)),
+        modifier = Modifier
+            .align(badgeAlignment)
+            .padding(badgePadding)
+    ) {
+        ZoomResetPill(
+            scale = scaleProvider(),
+            onClick = onReset
+        )
     }
 }
 

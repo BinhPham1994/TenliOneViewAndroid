@@ -44,7 +44,7 @@ object LoginAuthClient {
     private const val IMAGE_TIMEOUT_SEC = 15L
     private const val FAST_PROBE_TIMEOUT_MS = 2_500L
     private const val FAST_PROBE_CALL_TIMEOUT_MS = 3_000L
-    private const val WS_PING_INTERVAL_SEC = 25L
+    private const val WS_PING_INTERVAL_SEC = 60L
     private const val MAX_REQUESTS = 64
     private const val MAX_REQUESTS_PER_HOST = 16
     private const val MAX_IDLE_CONNECTIONS = 10

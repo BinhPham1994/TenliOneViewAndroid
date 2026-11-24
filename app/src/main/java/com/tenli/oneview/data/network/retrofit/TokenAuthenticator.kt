@@ -1,5 +1,6 @@
 package com.tenli.oneview.data.network.retrofit
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.edit
 import com.tenli.oneview.data.local.GlobalData
@@ -31,7 +32,10 @@ class TokenAuthenticator : Authenticator {
         private val lock = Any()
 
         private const val LOGIN_TIMEOUT_SEC = 15L
+        private const val REFRESH_FAILURE_COOLDOWN_MS = 8_000L
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private var lastFailedRefreshAtMs: Long = 0L
+        private var lastFailedToken: String = ""
 
         // Client re-login (không có Authenticator để tránh vòng lặp), dùng chung pool/thread với LoginAuthClient
         private val loginClient: OkHttpClient by lazy {
@@ -47,16 +51,13 @@ class TokenAuthenticator : Authenticator {
          * WebSocket reconnect và ExoPlayer khi gặp lỗi 401/403 do token ngắn hạn (vd. 15 phút).
          */
         fun refreshAccessToken(failedToken: String = UserSession.accessToken): String? {
-            if (!UserSession.hasSavedCredentials()) {
-                Log.w(TAG, "Không có credentials đã lưu → không thể tự re-login")
-                if (UserSession.accessToken.isNotEmpty()) {
-                    EventBus.emitUnauthorized()
-                }
-                return null
-            }
-
             synchronized(lock) {
-                val currentToken = UserSession.accessToken
+                val currentToken: String
+                val hasSavedCredentials: Boolean
+                synchronized(UserSession) {
+                    currentToken = UserSession.accessToken
+                    hasSavedCredentials = UserSession.hasSavedCredentials()
+                }
                 if (currentToken.isEmpty()) {
                     return null
                 }
@@ -64,14 +65,37 @@ class TokenAuthenticator : Authenticator {
                     Log.d(TAG, "Token đã được cập nhật bởi thread khác → dùng token mới")
                     return currentToken
                 }
+                if (!hasSavedCredentials) {
+                    Log.w(TAG, "Không có credentials đã lưu → không thể tự re-login")
+                    EventBus.emitUnauthorized()
+                    return null
+                }
+
+                val effectiveFailedToken = failedToken.ifEmpty { currentToken }
+                val nowMs = SystemClock.elapsedRealtime()
+                if (lastFailedToken == effectiveFailedToken &&
+                    lastFailedRefreshAtMs > 0L &&
+                    nowMs - lastFailedRefreshAtMs < REFRESH_FAILURE_COOLDOWN_MS
+                ) {
+                    Log.d(TAG, "Đang trong thời gian cooldown re-login → bỏ qua gọi trùng")
+                    return null
+                }
 
                 Log.d(TAG, "Đang thực hiện re-login...")
-                return try {
+                val newToken = try {
                     performSyncLogin()
                 } catch (e: Exception) {
                     Log.e(TAG, "Lỗi khi re-login: ${e.message}")
                     null
                 }
+                if (newToken != null) {
+                    lastFailedRefreshAtMs = 0L
+                    lastFailedToken = ""
+                } else {
+                    lastFailedRefreshAtMs = SystemClock.elapsedRealtime()
+                    lastFailedToken = effectiveFailedToken
+                }
+                return newToken
             }
         }
 
@@ -80,9 +104,14 @@ class TokenAuthenticator : Authenticator {
          * Dùng OkHttpClient riêng (không có Authenticator) để tránh vòng lặp.
          */
         private fun performSyncLogin(): String? {
-            val domain = UserSession.domain
-            val username = UserSession.savedUsername
-            val password = UserSession.savedPassword
+            val domain: String
+            val username: String
+            val password: String
+            synchronized(UserSession) {
+                domain = UserSession.domain
+                username = UserSession.savedUsername
+                password = UserSession.savedPassword
+            }
 
             if (domain.isEmpty() || username.isEmpty() || password.isEmpty()) {
                 return null
@@ -105,7 +134,14 @@ class TokenAuthenticator : Authenticator {
                 if (!response.isSuccessful) {
                     Log.w(TAG, "Re-login HTTP ${response.code}")
                     if (response.code == 400 || response.code == 401 || response.code == 403) {
-                        EventBus.emitUnauthorized()
+                        val stillSameSession = synchronized(UserSession) {
+                            UserSession.accessToken.isNotEmpty() &&
+                                UserSession.domain == domain &&
+                                UserSession.savedUsername == username
+                        }
+                        if (stillSameSession) {
+                            EventBus.emitUnauthorized()
+                        }
                     }
                     return null
                 }
@@ -122,29 +158,31 @@ class TokenAuthenticator : Authenticator {
                     return null
                 }
 
-                // Chống ghi đè "zombie token" nếu người dùng đã bấm Đăng xuất hoặc đổi tài khoản/domain trong lúc chờ HTTP re-login
-                if (UserSession.accessToken.isEmpty() ||
-                    UserSession.domain != domain ||
-                    UserSession.savedUsername != username
-                ) {
+                // Kiểm tra phiên + cập nhật UserSession & SharedPreferences nguyên tử dưới lock của UserSession
+                // để không ghi đè "zombie token" nếu người dùng bấm Đăng xuất hoặc đổi tài khoản trong lúc chờ HTTP re-login
+                val committed = synchronized(UserSession) {
+                    if (UserSession.accessToken.isEmpty() ||
+                        UserSession.domain != domain ||
+                        UserSession.savedUsername != username
+                    ) {
+                        false
+                    } else {
+                        UserSession.accessToken = tokenModel.token
+                        UserSession.refreshToken = tokenModel.token
+                        try {
+                            GlobalData.preferences.edit {
+                                putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
+                                putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
+                        }
+                        true
+                    }
+                }
+                if (!committed) {
                     Log.w(TAG, "Phiên đăng nhập đã thay đổi hoặc đăng xuất trong lúc re-login → huỷ cập nhật token")
                     return null
-                }
-
-                // Cập nhật UserSession
-                synchronized(UserSession) {
-                    UserSession.accessToken = tokenModel.token
-                    UserSession.refreshToken = tokenModel.token
-                }
-
-                // Cập nhật SharedPreferences
-                try {
-                    GlobalData.preferences.edit {
-                        putString(AppKeys.ACCESS_TOKEN_KEY, tokenModel.token)
-                        putString(AppKeys.REFRESH_TOKEN_KEY, tokenModel.token)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Lưu token vào SharedPreferences lỗi: ${e.message}")
                 }
 
                 EventBus.emitTokenRefreshed(tokenModel.token)

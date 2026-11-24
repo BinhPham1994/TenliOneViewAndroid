@@ -35,16 +35,24 @@ object EventCacheManager {
     private const val EVENT_CACHE_PREFIX = "event_cache_"
     private const val PROFILES_CACHE_FILE = "bs_profiles_cache.json"
 
-    // Giới hạn kích thước cache RAM (LRU) để bộ nhớ không phình mãi khi dùng app lâu
+    // Giới hạn kích thước cache RAM (LRU) & số file đĩa để bộ nhớ và thời gian quét không phình mãi
     private const val MAX_EVENTS_IN_MEMORY = 2_000
     private const val MAX_DATASETS_IN_MEMORY = 40
     private const val MAX_RELATED_IN_MEMORY = 60
+    private const val MAX_DISK_CACHE_FILES = 20
+    private const val MAX_REPORTED_FALSE_IDS = 200
 
     // ==================== In-Memory Instant Cache (0ms lookup when tapping an event or tab) ====================
     // android.util.LruCache là thread-safe và tự loại bỏ phần tử ít dùng nhất khi vượt giới hạn
     private val inMemoryEvents = LruCache<Int, EventData>(MAX_EVENTS_IN_MEMORY)
     private val inMemoryDatasetCache = LruCache<String, CachedEventData>(MAX_DATASETS_IN_MEMORY)
     private val inMemoryRelatedEvents = LruCache<String, List<EventData>>(MAX_RELATED_IN_MEMORY)
+
+    private val reportedFalseLock = Any()
+    private val reportedFalseEventIds = object : LinkedHashMap<Int, Boolean>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>?): Boolean =
+            size > MAX_REPORTED_FALSE_IDS
+    }
 
     @Volatile
     private var lastClickedEvent: EventData? = null
@@ -53,10 +61,7 @@ object EventCacheManager {
     private var inMemoryCameras: List<CameraModel> = emptyList()
 
     @Volatile
-    private var cameraNameMapSource: List<CameraModel> = emptyList()
-
-    @Volatile
-    private var inMemoryCameraNameMap: Map<String, String> = emptyMap()
+    private var cameraNameMapCache: Pair<List<CameraModel>, Map<String, String>>? = null
 
     @Volatile
     private var inMemoryAiServices: List<AIServiceModel> = emptyList()
@@ -71,6 +76,34 @@ object EventCacheManager {
     private var sessionMetadataUpdatedAtMs: Long = 0L
 
     private val diskReadMutex = Mutex()
+
+    private fun isCustomTimeFilter(filter: TimeFilter): Boolean =
+        filter == TimeFilter.CUSTOM_DATE || filter == TimeFilter.CUSTOM_RANGE
+
+    internal fun markEventReportedFalse(eventId: Int) {
+        if (eventId <= 0) return
+        synchronized(reportedFalseLock) {
+            reportedFalseEventIds[eventId] = java.lang.Boolean.TRUE
+        }
+    }
+
+    internal fun isEventReportedFalse(eventId: Int): Boolean =
+        synchronized(reportedFalseLock) { reportedFalseEventIds.containsKey(eventId) }
+
+    internal fun snapshotReportedFalseIds(): Set<Int> =
+        synchronized(reportedFalseLock) {
+            if (reportedFalseEventIds.isEmpty()) emptySet() else HashSet(reportedFalseEventIds.keys)
+        }
+
+    private fun filterReportedFalseEvents(events: List<EventData>): List<EventData> {
+        val falseIds = snapshotReportedFalseIds()
+        if (falseIds.isEmpty() || events.isEmpty()) return events
+        return if (events.any { it.id in falseIds }) {
+            events.filter { it.id !in falseIds }
+        } else {
+            events
+        }
+    }
 
     private fun datasetCacheKey(
         filter: TimeFilter,
@@ -91,8 +124,9 @@ object EventCacheManager {
         fromNetwork: Boolean = false
     ) {
         if (UserSession.accessToken.isEmpty()) return
+        val falseIds = snapshotReportedFalseIds()
         events.forEach { ev ->
-            if (ev.id > 0) {
+            if (ev.id > 0 && ev.id !in falseIds) {
                 inMemoryEvents.put(ev.id, ev)
             }
         }
@@ -162,8 +196,9 @@ object EventCacheManager {
 
     fun cacheRelatedEventsInMemory(eventId: Int, periodCode: String, events: List<EventData>) {
         if (eventId > 0) {
-            inMemoryRelatedEvents.put("${eventId}_${periodCode}", events)
-            cacheInMemory(events = events)
+            val cleaned = filterReportedFalseEvents(events)
+            inMemoryRelatedEvents.put("${eventId}_${periodCode}", cleaned)
+            cacheInMemory(events = cleaned)
         }
     }
 
@@ -172,6 +207,7 @@ object EventCacheManager {
     }
 
     fun getEventInMemory(eventId: Int): EventData? {
+        if (isEventReportedFalse(eventId)) return null
         val clicked = lastClickedEvent
         if (clicked != null && clicked.id == eventId) {
             return clicked
@@ -184,8 +220,9 @@ object EventCacheManager {
     fun getCameraNameMapInMemory(): Map<String, String> {
         val cameras = inMemoryCameras
         if (cameras.isEmpty()) return emptyMap()
-        if (cameras === cameraNameMapSource && inMemoryCameraNameMap.isNotEmpty()) {
-            return inMemoryCameraNameMap
+        val cached = cameraNameMapCache
+        if (cached != null && cached.first === cameras) {
+            return cached.second
         }
         val map = HashMap<String, String>(cameras.size)
         for (cam in cameras) {
@@ -194,8 +231,7 @@ object EventCacheManager {
                 map[uuid] = cam.name
             }
         }
-        cameraNameMapSource = cameras
-        inMemoryCameraNameMap = map
+        cameraNameMapCache = Pair(cameras, map)
         return map
     }
 
@@ -247,9 +283,13 @@ object EventCacheManager {
         val stamped = if (data.updatedAt > 0L) data else data.copy(updatedAt = System.currentTimeMillis())
         inMemoryDatasetCache.put(datasetCacheKey(filter, serviceId, aiType, cameraUuid), stamped)
         cacheInMemory(stamped.events, stamped.cameraList, stamped.aiServices)
+        if (isCustomTimeFilter(filter)) return
         withContext(Dispatchers.IO) {
             if (UserSession.accessToken.isEmpty()) return@withContext
             JsonFileStore.write(gson, getCacheFile(context, filter, serviceId, aiType, cameraUuid), stamped)
+            JsonFileStore.pruneOldestMatching(context.cacheDir, MAX_DISK_CACHE_FILES) {
+                it.startsWith(EVENT_CACHE_PREFIX)
+            }
         }
     }
 
@@ -257,6 +297,7 @@ object EventCacheManager {
      * Xoá một sự kiện đã bị báo sai khỏi toàn bộ RAM cache và Disk cache của màn Sự kiện.
      */
     suspend fun removeEvent(context: Context, eventId: Int) {
+        markEventReportedFalse(eventId)
         if (lastClickedEvent?.id == eventId) {
             lastClickedEvent = null
         }
@@ -277,14 +318,21 @@ object EventCacheManager {
             if (cached.events.any { it.id == eventId }) {
                 val updated = cached.copy(events = cached.events.filter { it.id != eventId })
                 inMemoryDatasetCache.put(key, updated)
-                updatedDatasets.add(key to updated)
+                if (!key.startsWith("${TimeFilter.CUSTOM_DATE.name}_") &&
+                    !key.startsWith("${TimeFilter.CUSTOM_RANGE.name}_")
+                ) {
+                    updatedDatasets.add(key to updated)
+                }
             }
         }
         if (updatedDatasets.isNotEmpty()) {
             withContext(Dispatchers.IO) {
+                if (UserSession.accessToken.isEmpty()) return@withContext
                 for ((key, updated) in updatedDatasets) {
                     val file = File(context.cacheDir, "$EVENT_CACHE_PREFIX$key.json")
-                    JsonFileStore.write(gson, file, updated)
+                    if (file.exists()) {
+                        JsonFileStore.write(gson, file, updated)
+                    }
                 }
             }
         }
@@ -299,6 +347,7 @@ object EventCacheManager {
     ): CachedEventData? {
         val key = datasetCacheKey(filter, serviceId, aiType, cameraUuid)
         inMemoryDatasetCache.get(key)?.let { return it }
+        if (isCustomTimeFilter(filter)) return null
 
         return withContext(Dispatchers.IO) {
             diskReadMutex.withLock {
@@ -313,47 +362,68 @@ object EventCacheManager {
                     file
                 }
 
-                JsonFileStore.read(gson, targetFile, CachedEventData::class.java)?.also { parsed ->
-                    inMemoryDatasetCache.put(key, parsed)
-                    cacheInMemory(parsed.events.orEmpty(), parsed.cameraList.orEmpty(), parsed.aiServices.orEmpty())
+                JsonFileStore.read(gson, targetFile, CachedEventData::class.java)?.let { parsed ->
+                    val rawEvents = parsed.events.orEmpty()
+                    val filteredEvents = filterReportedFalseEvents(rawEvents)
+                    val cleaned = if (filteredEvents === rawEvents) parsed else parsed.copy(events = filteredEvents)
+                    inMemoryDatasetCache.put(key, cleaned)
+                    cacheInMemory(filteredEvents, cleaned.cameraList.orEmpty(), cleaned.aiServices.orEmpty())
+                    cleaned
                 }
             }
         }
     }
 
-    fun clearCache(context: Context) {
+    fun trimMemory() {
+        inMemoryEvents.evictAll()
+        inMemoryDatasetCache.evictAll()
+        inMemoryRelatedEvents.evictAll()
+        lastClickedEvent = null
+    }
+
+    fun clearInMemorySync() {
         inMemoryEvents.evictAll()
         inMemoryDatasetCache.evictAll()
         inMemoryRelatedEvents.evictAll()
         inMemoryCameras = emptyList()
-        cameraNameMapSource = emptyList()
-        inMemoryCameraNameMap = emptyMap()
+        cameraNameMapCache = null
         inMemoryAiServices = emptyList()
         inMemoryProfiles = emptyList()
         inMemoryProfileGroups = emptyList()
         sessionMetadataUpdatedAtMs = 0L
         lastClickedEvent = null
+        synchronized(reportedFalseLock) {
+            reportedFalseEventIds.clear()
+        }
+    }
+
+    fun clearCache(context: Context) {
+        clearInMemorySync()
         JsonFileStore.deleteMatching(context.cacheDir) { it.startsWith(EVENT_CACHE_PREFIX) || it == PROFILES_CACHE_FILE }
     }
 
     suspend fun findEventById(context: Context, eventId: Int): Pair<EventData, List<CameraModel>>? {
+        if (isEventReportedFalse(eventId)) return null
         getEventInMemory(eventId)?.let { memEvent ->
             return Pair(memEvent, inMemoryCameras)
         }
         return withContext(Dispatchers.IO) {
             val files = context.cacheDir.listFiles() ?: return@withContext null
             for (file in files) {
+                if (file.name.endsWith(".tmp")) continue
                 when {
                     file.name.startsWith(EVENT_CACHE_PREFIX) -> {
                         val data = JsonFileStore.read(gson, file, CachedEventData::class.java) ?: continue
-                        val event = data.events.orEmpty().find { it.id == eventId } ?: continue
-                        cacheInMemory(data.events.orEmpty(), data.cameraList.orEmpty(), data.aiServices.orEmpty())
+                        val events = filterReportedFalseEvents(data.events.orEmpty())
+                        val event = events.find { it.id == eventId } ?: continue
+                        cacheInMemory(events, data.cameraList.orEmpty(), data.aiServices.orEmpty())
                         return@withContext Pair(event, data.cameraList.orEmpty())
                     }
                     file.name.startsWith(HomeCacheManager.HOME_CACHE_PREFIX) -> {
                         val data = JsonFileStore.read(gson, file, CachedHomeData::class.java) ?: continue
-                        val event = data.recentEvents.orEmpty().find { it.id == eventId } ?: continue
-                        cacheInMemory(data.recentEvents.orEmpty(), data.cameraList.orEmpty(), data.aiServices.orEmpty())
+                        val events = filterReportedFalseEvents(data.recentEvents.orEmpty())
+                        val event = events.find { it.id == eventId } ?: continue
+                        cacheInMemory(events, data.cameraList.orEmpty(), data.aiServices.orEmpty())
                         return@withContext Pair(event, data.cameraList.orEmpty())
                     }
                 }

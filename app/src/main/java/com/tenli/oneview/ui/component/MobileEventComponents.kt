@@ -19,7 +19,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.IndicationNodeFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,6 +50,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,6 +83,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -133,6 +134,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.data.local.UserPermissionManager
+import com.tenli.oneview.data.local.UserPermissionState
 import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.model.network.AIServiceModel
 import com.tenli.oneview.model.network.CameraModel
@@ -165,6 +167,7 @@ import java.time.format.TextStyle as JavaTextStyle
 import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -215,6 +218,10 @@ private const val GRID_IMAGE_HEIGHT_PX = 450
 
 /** Độ dày khung bounding box (px) vẽ trên ảnh Grid */
 private const val BOUNDING_BOX_STROKE_PX = 3.5f
+private val BoundingBoxStroke = Stroke(width = BOUNDING_BOX_STROKE_PX)
+
+/** Chuỗi số 2 chữ số (00..59) tính sẵn cho bộ chọn giờ/phút (tránh String.format khi cuộn) */
+private val TwoDigitNumbers = Array(60) { it.toString().padStart(2, '0') }
 
 /** Số dòng tối đa hiển thị trong dropdown trước khi phải cuộn */
 private const val DROPDOWN_MAX_VISIBLE_ITEMS = 6
@@ -407,7 +414,7 @@ fun MobileTopPopupHost(
 private fun MobileTopPopupCard(msg: MobileTopPopupMessage) {
     val spacing = MaterialTheme.spacing
     val contentColor = MaterialTheme.appColors.onAccent
-    val shape = RoundedCornerShape(spacing.radiusCompact)
+    val shape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
     Row(
         modifier = Modifier
             .widthIn(max = spacing.dialogMaxWidth)
@@ -450,85 +457,114 @@ private fun MobileTopPopupFilledIcon(
     circleColor: Color,
     cutoutColor: Color
 ) {
-    Canvas(modifier = Modifier.size(MaterialTheme.spacing.iconSmall)) {
-        val w = size.width
-        val h = size.height
-        val radius = minOf(w, h) / 2f
-        val strokeW = w * 0.12f
-
-        // Solid white circle matching `.ant-message-custom-content .anticon svg { fill: #ffffff }`
-        drawCircle(
-            color = circleColor,
-            radius = radius,
-            center = Offset(w / 2f, h / 2f)
-        )
-
-        when (type) {
-            MobileTopPopupType.SUCCESS -> {
-                val checkPath = Path().apply {
-                    moveTo(w * 0.29f, h * 0.52f)
-                    lineTo(w * 0.44f, h * 0.67f)
-                    lineTo(w * 0.72f, h * 0.36f)
+    Spacer(
+        modifier = Modifier
+            .size(MaterialTheme.spacing.iconSmall)
+            .drawWithCache {
+                val w = size.width
+                val h = size.height
+                val radius = minOf(w, h) / 2f
+                val strokeW = w * 0.12f
+                val center = Offset(w / 2f, h / 2f)
+                val checkPath = if (type == MobileTopPopupType.SUCCESS) {
+                    Path().apply {
+                        moveTo(w * 0.29f, h * 0.52f)
+                        lineTo(w * 0.44f, h * 0.67f)
+                        lineTo(w * 0.72f, h * 0.36f)
+                    }
+                } else {
+                    null
                 }
-                drawPath(
-                    path = checkPath,
-                    color = cutoutColor,
-                    style = Stroke(
+                val checkStroke = if (type == MobileTopPopupType.SUCCESS) {
+                    Stroke(
                         width = strokeW,
                         cap = StrokeCap.Round,
                         join = StrokeJoin.Round
                     )
-                )
-            }
+                } else {
+                    null
+                }
+                val dotRadius = strokeW * 0.58f
+                val warnStart = Offset(w * 0.5f, h * 0.28f)
+                val warnEnd = Offset(w * 0.5f, h * 0.55f)
+                val warnDot = Offset(w * 0.5f, h * 0.72f)
+                val errTopLeft = Offset(w * 0.35f, h * 0.35f)
+                val errBottomRight = Offset(w * 0.65f, h * 0.65f)
+                val errTopRight = Offset(w * 0.65f, h * 0.35f)
+                val errBottomLeft = Offset(w * 0.35f, h * 0.65f)
+                val infoDot = Offset(w * 0.5f, h * 0.30f)
+                val infoStart = Offset(w * 0.5f, h * 0.47f)
+                val infoEnd = Offset(w * 0.5f, h * 0.72f)
 
-            MobileTopPopupType.WARNING -> {
-                drawLine(
-                    color = cutoutColor,
-                    start = Offset(w * 0.5f, h * 0.28f),
-                    end = Offset(w * 0.5f, h * 0.55f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round
-                )
-                drawCircle(
-                    color = cutoutColor,
-                    radius = strokeW * 0.58f,
-                    center = Offset(w * 0.5f, h * 0.72f)
-                )
-            }
+                onDrawBehind {
+                    // Solid white circle matching `.ant-message-custom-content .anticon svg { fill: #ffffff }`
+                    drawCircle(
+                        color = circleColor,
+                        radius = radius,
+                        center = center
+                    )
 
-            MobileTopPopupType.ERROR -> {
-                drawLine(
-                    color = cutoutColor,
-                    start = Offset(w * 0.35f, h * 0.35f),
-                    end = Offset(w * 0.65f, h * 0.65f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round
-                )
-                drawLine(
-                    color = cutoutColor,
-                    start = Offset(w * 0.65f, h * 0.35f),
-                    end = Offset(w * 0.35f, h * 0.65f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round
-                )
-            }
+                    when (type) {
+                        MobileTopPopupType.SUCCESS -> {
+                            if (checkPath != null && checkStroke != null) {
+                                drawPath(
+                                    path = checkPath,
+                                    color = cutoutColor,
+                                    style = checkStroke
+                                )
+                            }
+                        }
 
-            MobileTopPopupType.INFO -> {
-                drawCircle(
-                    color = cutoutColor,
-                    radius = strokeW * 0.58f,
-                    center = Offset(w * 0.5f, h * 0.30f)
-                )
-                drawLine(
-                    color = cutoutColor,
-                    start = Offset(w * 0.5f, h * 0.47f),
-                    end = Offset(w * 0.5f, h * 0.72f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round
-                )
+                        MobileTopPopupType.WARNING -> {
+                            drawLine(
+                                color = cutoutColor,
+                                start = warnStart,
+                                end = warnEnd,
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                            drawCircle(
+                                color = cutoutColor,
+                                radius = dotRadius,
+                                center = warnDot
+                            )
+                        }
+
+                        MobileTopPopupType.ERROR -> {
+                            drawLine(
+                                color = cutoutColor,
+                                start = errTopLeft,
+                                end = errBottomRight,
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                            drawLine(
+                                color = cutoutColor,
+                                start = errTopRight,
+                                end = errBottomLeft,
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                        }
+
+                        MobileTopPopupType.INFO -> {
+                            drawCircle(
+                                color = cutoutColor,
+                                radius = dotRadius,
+                                center = infoDot
+                            )
+                            drawLine(
+                                color = cutoutColor,
+                                start = infoStart,
+                                end = infoEnd,
+                                strokeWidth = strokeW,
+                                cap = StrokeCap.Round
+                            )
+                        }
+                    }
+                }
             }
-        }
-    }
+    )
 }
 
 // =====================================================================================
@@ -635,6 +671,17 @@ private fun OverlayLayers(
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
     var isDismissedBySwipe by remember { mutableStateOf(false) }
+    var reboundJob by remember { mutableStateOf<Job?>(null) }
+
+    LaunchedEffect(isSheetVisible) {
+        if (isSheetVisible) {
+            reboundJob?.cancel()
+            reboundJob = null
+            dragOffsetY = 0f
+            isDragging = false
+            isDismissedBySwipe = false
+        }
+    }
 
     val finishDrag: (Float) -> Unit = remember(scope, dismissThresholdPx, dismissVelocityPx) {
         { velocityY ->
@@ -643,11 +690,14 @@ private fun OverlayLayers(
                 dragOffsetY >= dismissThresholdPx ||
                     (dragOffsetY > 12f && velocityY >= dismissVelocityPx)
             if (shouldDismiss && !isDismissedBySwipe) {
+                reboundJob?.cancel()
+                reboundJob = null
                 isDismissedBySwipe = true
                 currentOnDismiss()
             } else if (dragOffsetY > 0f && !isDismissedBySwipe) {
                 val startOffset = dragOffsetY
-                scope.launch {
+                reboundJob?.cancel()
+                reboundJob = scope.launch {
                     animate(
                         initialValue = startOffset,
                         targetValue = 0f,
@@ -666,6 +716,7 @@ private fun OverlayLayers(
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source == NestedScrollSource.UserInput && dragOffsetY > 0f && available.y < 0f) {
+                    reboundJob?.cancel()
                     val consumedY = maxOf(available.y, -dragOffsetY)
                     dragOffsetY = (dragOffsetY + consumedY).coerceAtLeast(0f)
                     return Offset(0f, consumedY)
@@ -679,6 +730,7 @@ private fun OverlayLayers(
                 source: NestedScrollSource
             ): Offset {
                 if (source == NestedScrollSource.UserInput && available.y > 0f && !isDismissedBySwipe) {
+                    reboundJob?.cancel()
                     isDragging = true
                     dragOffsetY = (dragOffsetY + available.y).coerceAtLeast(0f)
                     return Offset(0f, available.y)
@@ -701,12 +753,12 @@ private fun OverlayLayers(
         enter = ScrimEnterTransition,
         exit = ScrimExitTransition
     ) {
-        val dragScrimAlpha =
-            (1f - (dragOffsetY / (dismissThresholdPx * 3.5f))).coerceIn(0.25f, 1f)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer { alpha = dragScrimAlpha }
+                .graphicsLayer {
+                    alpha = (1f - (dragOffsetY / (dismissThresholdPx * 3.5f))).coerceIn(0.25f, 1f)
+                }
                 .background(scrimColor)
         )
     }
@@ -726,6 +778,7 @@ private fun OverlayLayers(
                                 val velocityTracker = VelocityTracker()
                                 detectVerticalDragGestures(
                                     onDragStart = {
+                                        reboundJob?.cancel()
                                         velocityTracker.resetTracking()
                                         isDragging = true
                                     },
@@ -1461,7 +1514,6 @@ private fun EventListCard(
                 .width(thumbWidth)
                 .aspectRatio(THUMBNAIL_ASPECT_RATIO)
                 .clip(thumbShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .eventImageSharedElement(enableSharedElement, event.id),
             contentScale = ContentScale.Crop,
             targetWidthPx = LIST_THUMB_WIDTH_PX,
@@ -1575,7 +1627,6 @@ private fun EventGridCard(
                 onClick = onClick
             )
             .clip(cardShape)
-            .background(colors.surface)
             .eventImageSharedElement(enableSharedElement, event.id)
     ) {
         VideoFrameImage(
@@ -1599,7 +1650,7 @@ private fun EventGridCard(
                     .allowHardware(true)
                     .crossfade(false)
                     .memoryCacheKey("${faceCropUrl}_${FACE_CROP_REQUEST_WIDTH_PX}x${FACE_CROP_REQUEST_HEIGHT_PX}")
-                    .diskCacheKey(faceCropUrl)
+                    .diskCacheKey(faceCropUrl.substringBefore('?'))
                     .build()
             }
             AsyncImage(
@@ -1703,7 +1754,7 @@ private fun Modifier.boundingBoxes(boxes: List<List<Float>>): Modifier = drawWit
                 color = ErrorRed,
                 topLeft = Offset(minX * size.width, minY * size.height),
                 size = Size((maxX - minX) * size.width, (maxY - minY) * size.height),
-                style = Stroke(width = BOUNDING_BOX_STROKE_PX)
+                style = BoundingBoxStroke
             )
         }
     }
@@ -1751,7 +1802,8 @@ fun MobileFilterBottomSheet(
     cameras: List<CameraModel> = emptyList(),
     selectedCameraUuid: String? = null,
     showEventType: Boolean = false,
-    activeModules: List<AiModuleOption> = UserPermissionManager.permissionState.collectAsStateWithLifecycle().value.activeAiModules,
+    activeModules: List<AiModuleOption>? = null,
+    permissionState: UserPermissionState? = null,
     selectedAiType: String? = null,
     onDismiss: () -> Unit,
     onApply: (serviceId: Int?, timeFilter: TimeFilter, cameraUuid: String?, aiType: String?) -> Unit = { _, _, _, _ -> },
@@ -1761,6 +1813,15 @@ fun MobileFilterBottomSheet(
     val isDark = rememberIsDarkTheme()
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    val resolvedActiveModules: List<AiModuleOption> = activeModules ?: if (showEventType) {
+        (permissionState ?: UserPermissionManager.permissionState.collectAsStateWithLifecycle().value).activeAiModules
+    } else {
+        emptyList()
+    }
+    val sheetShape = remember(spacing.radiusLarge) {
+        RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge)
+    }
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
 
     var draftServiceId by remember(selectedServiceId) { mutableStateOf(selectedServiceId) }
     var draftTimeFilter by remember(selectedTimeFilter) { mutableStateOf(selectedTimeFilter) }
@@ -1822,7 +1883,7 @@ fun MobileFilterBottomSheet(
                         indication = null,
                         onClick = { activePicker = null }
                     ),
-                shape = RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge),
+                shape = sheetShape,
                 color = colors.surfaceGrouped
             ) {
                 Column(
@@ -1887,16 +1948,19 @@ fun MobileFilterBottomSheet(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(spacing.radiusMedium))
+                            .clip(cardShape)
                             .background(colors.surfaceRaised)
                             .padding(vertical = spacing.space4)
                     ) {
                         // 1. Scope / Chi nhánh
                         if (showScope && aiServices.isNotEmpty()) {
+                            val scopeLabel = remember(aiServices, draftServiceId, allSystemsLabel) {
+                                aiServices.find { it.id == draftServiceId }?.name ?: allSystemsLabel
+                            }
                             FilterCellRow(
                                 icon = LucideIcons.MapPin,
                                 badgeColor = BrandAccent,
-                                label = aiServices.find { it.id == draftServiceId }?.name ?: allSystemsLabel,
+                                label = scopeLabel,
                                 textColor = textColor,
                                 secondaryColor = secondaryColor,
                                 isExpanded = activePicker == FilterPicker.SCOPE,
@@ -1960,11 +2024,13 @@ fun MobileFilterBottomSheet(
 
                         // 4. AI Event Type
                         if (showEventType) {
-                            val moduleLabel = draftAiType?.let { selected ->
-                                activeModules.find { it.sensorType == selected }?.let {
-                                    if (isEn) it.labelEn else it.labelVi
-                                } ?: AiTypeHelper.getTypeName(selected, isEn)
-                            } ?: allEventsLabel
+                            val moduleLabel = remember(resolvedActiveModules, draftAiType, isEn, allEventsLabel) {
+                                draftAiType?.let { selected ->
+                                    resolvedActiveModules.find { it.sensorType == selected }?.let {
+                                        if (isEn) it.labelEn else it.labelVi
+                                    } ?: AiTypeHelper.getTypeName(selected, isEn)
+                                } ?: allEventsLabel
+                            }
                             FilterCellRow(
                                 icon = LucideIcons.ListFilter,
                                 badgeColor = VioletAccent,
@@ -2095,18 +2161,18 @@ fun MobileFilterBottomSheet(
                         )
                     }
                     FilterPicker.EVENT -> {
-                        val options = remember(activeModules, draftAiType, isEn) {
+                        val options = remember(resolvedActiveModules, draftAiType, isEn) {
                             buildList<Pair<String?, String>> {
                                 val addedKeys = HashSet<String>()
                                 add(null to allEventsLabel)
-                                activeModules.forEach { mod ->
+                                resolvedActiveModules.forEach { mod ->
                                     if (addedKeys.add(mod.sensorType.lowercase())) {
                                         add(mod.sensorType to (if (isEn) mod.labelEn else mod.labelVi))
                                     }
                                 }
                                 // Bổ sung các eventType riêng bật theo cấu hình dự án (vd. sensor-absence-tracking-camera, sensor-person-in, sensor-person-out, sensor-gesture-camera),
                                 // loại trừ các type chỉ là bài AI chứ không phải type sự kiện (vd. sensor-person-in-out)
-                                val coveredEventTypes = activeModules.flatMap { it.eventTypes }.map { it.lowercase() }.toSet()
+                                val coveredEventTypes = resolvedActiveModules.flatMap { it.eventTypes }.map { it.lowercase() }.toSet()
                                 AiTypeHelper.currentModulesConfig?.enabledSensorTypes?.forEach { rawType ->
                                     val clean = rawType.trim()
                                     val lower = clean.lowercase()
@@ -2304,8 +2370,8 @@ internal fun <K> AnchoredFilterDropdownMenu(
     val accent = colors.accent
     val itemTextColor = colors.textTitle
     val selectedItemBg = accent.copy(alpha = if (colors.isDark) 0.16f else 0.09f)
-    val menuShape = RoundedCornerShape(spacing.radiusCompact)
-    val itemShape = RoundedCornerShape(spacing.radiusSmall)
+    val menuShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
+    val itemShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
 
     val itemHeightDp = spacing.buttonHeightSmall
     val verticalPaddingDp = spacing.space8
@@ -2361,7 +2427,10 @@ internal fun <K> AnchoredFilterDropdownMenu(
                 .fillMaxWidth()
                 .padding(spacing.space4)
         ) {
-            items(options) { (key, label) ->
+            itemsIndexed(
+                items = options,
+                key = { index, (optionKey, _) -> "${optionKey ?: "__all__"}#$index" }
+            ) { _, (key, label) ->
                 val isSelected = key == selectedKey
                 Row(
                     modifier = Modifier
@@ -2718,6 +2787,7 @@ private fun AppTimePickerPopup(
     )
     val hours = remember { (0..23).toList() }
     val minutes = remember { (0..59).toList() }
+    val timeItemShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -2781,7 +2851,7 @@ private fun AppTimePickerPopup(
                                     maxLines = 1
                                 )
                                 Text(
-                                    text = String.format(Locale.US, "%02d:%02d", selectedHour, selectedMinute),
+                                    text = "${TwoDigitNumbers[selectedHour.coerceIn(0, 23)]}:${TwoDigitNumbers[selectedMinute.coerceIn(0, 59)]}",
                                     style = typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = colors.activeContent,
@@ -2828,13 +2898,13 @@ private fun AppTimePickerPopup(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                                            .clip(timeItemShape)
                                             .background(if (isSelected) BrandPrimary else Color.Transparent)
                                             .clickable { selectedHour = hour },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = String.format(Locale.US, "%02d", hour),
+                                            text = TwoDigitNumbers[hour],
                                             style = typography.bodyMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isSelected) Color.White else colors.textStrong
@@ -2875,13 +2945,13 @@ private fun AppTimePickerPopup(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(spacing.buttonHeightSmall)
-                                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                                            .clip(timeItemShape)
                                             .background(if (isSelected) BrandPrimary else Color.Transparent)
                                             .clickable { selectedMinute = minute },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
-                                            text = String.format(Locale.US, "%02d", minute),
+                                            text = TwoDigitNumbers[minute],
                                             style = typography.bodyMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                             color = if (isSelected) Color.White else colors.textStrong

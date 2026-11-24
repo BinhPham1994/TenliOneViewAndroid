@@ -2,12 +2,12 @@ package com.tenli.oneview.data.repository
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Looper
 import androidx.core.content.edit
 import com.tenli.oneview.data.local.CachedMonitorData
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.MonitorCacheManager
-import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.ApiProvider
 import com.tenli.oneview.data.network.api.EventApi
 import com.tenli.oneview.data.network.api.VmsApi
@@ -20,7 +20,9 @@ import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.model.network.LiveStreamModel
 import com.tenli.oneview.model.network.VMSServiceModel
 import com.tenli.oneview.model.network.VideoModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.withContext
 import retrofit2.Response
 
 /**
@@ -62,22 +64,11 @@ class MonitorRepository(
         }
     }
 
-    private fun favoritePrefKey(): String {
-        val domainKey = UserSession.domain.trim().lowercase().ifEmpty { "default" }
-        return "$PREF_FAVORITE_CAMERAS_PREFIX$domainKey"
-    }
-
-    fun getFavoriteCameraIds(): Set<Int> {
-        val raw = GlobalData.preferences.getStringSet(favoritePrefKey(), emptySet()) ?: emptySet()
-        val parsed = if (raw.isEmpty()) emptySet() else raw.mapNotNull { it.toIntOrNull() }.toSet()
-        MonitorCacheManager.notifyFavoritesUpdated(parsed)
-        return parsed
-    }
+    fun getFavoriteCameraIds(): Set<Int> =
+        MonitorCacheManager.readFavoriteCameraIds()
 
     fun saveFavoriteCameraIds(ids: Set<Int>) {
-        val strSet = ids.mapTo(HashSet(ids.size)) { it.toString() }
-        GlobalData.preferences.edit { putStringSet(favoritePrefKey(), strSet) }
-        MonitorCacheManager.notifyFavoritesUpdated(ids)
+        MonitorCacheManager.writeFavoriteCameraIds(ids)
     }
 
     fun getMonitorDataInMemory(): CachedMonitorData? =
@@ -96,17 +87,36 @@ class MonitorRepository(
     fun getCachedCameraImageLinkInMemory(cameraId: Int): String? =
         MonitorCacheManager.getCachedCameraImageLinkInMemory(cameraId)
 
-    fun getCachedCameraImageLink(cameraId: Int): String? =
-        MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+    fun getCachedCameraImageLink(cameraId: Int): String? {
+        if (!MonitorCacheManager.isSnapshotsLoadedInMemory() && Looper.myLooper() == Looper.getMainLooper()) {
+            MonitorCacheManager.preloadSnapshotsAsync(appContext)
+            return MonitorCacheManager.getCachedCameraImageLinkInMemory(cameraId)
+        }
+        return MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+    }
 
-    fun isSnapshotCacheFresh(cameraId: Int): Boolean =
-        MonitorCacheManager.isSnapshotCacheFresh(appContext, cameraId)
+    suspend fun getCachedCameraImageLinkAsync(cameraId: Int): String? =
+        withContext(Dispatchers.IO) {
+            MonitorCacheManager.getCachedCameraImageLink(appContext, cameraId)
+        }
+
+    fun isSnapshotCacheFresh(cameraId: Int): Boolean {
+        if (!MonitorCacheManager.isSnapshotsLoadedInMemory() && Looper.myLooper() == Looper.getMainLooper()) {
+            MonitorCacheManager.preloadSnapshotsAsync(appContext)
+            return MonitorCacheManager.isSnapshotCacheFreshInMemory(cameraId)
+        }
+        return MonitorCacheManager.isSnapshotCacheFresh(appContext, cameraId)
+    }
 
     fun markSnapshotCheckedInSession(cameraId: Int) {
         MonitorCacheManager.markSnapshotCheckedInSession(cameraId)
     }
 
     fun setCachedCameraImageLink(cameraId: Int, link: String) {
+        if (!MonitorCacheManager.isSnapshotsLoadedInMemory() && Looper.myLooper() == Looper.getMainLooper()) {
+            MonitorCacheManager.setCachedCameraImageLinkAsync(appContext, cameraId, link)
+            return
+        }
         MonitorCacheManager.setCachedCameraImageLink(appContext, cameraId, link)
     }
 
@@ -210,6 +220,5 @@ class MonitorRepository(
         private const val PREF_GRID_SIZE = "saved_monitor_grid_size"
         private const val PREF_GRID_CAMERA_IDS = "saved_monitor_grid_camera_ids"
         private const val PREF_CAMERA_ID = "saved_monitor_camera_id"
-        private const val PREF_FAVORITE_CAMERAS_PREFIX = "saved_favorite_cameras_"
     }
 }

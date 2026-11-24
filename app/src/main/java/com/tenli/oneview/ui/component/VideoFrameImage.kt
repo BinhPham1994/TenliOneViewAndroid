@@ -32,16 +32,25 @@ import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.util.NetworkMonitor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
+import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resumeWithException
 import android.graphics.Color as AndroidColor
 
 object VideoFrameCache {
@@ -267,6 +276,79 @@ private fun decodeThumbnailFrame(
     }.getOrNull()
 }
 
+private const val MAX_RANGE_DOWNLOAD_BYTES = 2L * 1024L * 1024L
+private const val MAX_VIDEO_THUMB_FILES = 150
+private const val VIDEO_THUMB_MAX_AGE_MS = 7L * 24L * 60L * 60L * 1000L
+private const val ORPHAN_TMP_MAX_AGE_MS = 5L * 60L * 1000L
+private val HEX_CHARS = charArrayOf('0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f')
+private val thumbPruneInProgress = AtomicBoolean(false)
+
+private fun sha256Hex(input: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(input.toByteArray(Charsets.UTF_8))
+    val chars = CharArray(digest.size * 2)
+    for (i in digest.indices) {
+        val v = digest[i].toInt() and 0xFF
+        chars[i * 2] = HEX_CHARS[v ushr 4]
+        chars[i * 2 + 1] = HEX_CHARS[v and 0x0F]
+    }
+    return String(chars)
+}
+
+private suspend fun Call.awaitResponse(): Response = suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation {
+        runCatching { cancel() }
+    }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) {
+            if (cont.isCancelled) return
+            cont.resumeWithException(e)
+        }
+
+        override fun onResponse(call: Call, response: Response) {
+            if (cont.isCancelled) {
+                runCatching { response.close() }
+                return
+            }
+            cont.resume(response) { _, value, _ ->
+                runCatching { value.close() }
+            }
+        }
+    })
+}
+
+private fun pruneVideoThumbDirIfNeeded(thumbDir: File) {
+    if (!thumbPruneInProgress.compareAndSet(false, true)) return
+    try {
+        val files = thumbDir.listFiles() ?: return
+        val now = System.currentTimeMillis()
+        val liveThumbs = ArrayList<File>(files.size)
+        for (file in files) {
+            if (!file.isFile) continue
+            val ageMs = now - file.lastModified()
+            if (file.name.endsWith(".tmp")) {
+                if (ageMs > ORPHAN_TMP_MAX_AGE_MS) {
+                    runCatching { file.delete() }
+                }
+                continue
+            }
+            if (ageMs > VIDEO_THUMB_MAX_AGE_MS) {
+                runCatching { file.delete() }
+            } else {
+                liveThumbs.add(file)
+            }
+        }
+        if (liveThumbs.size > MAX_VIDEO_THUMB_FILES) {
+            liveThumbs.sortBy { it.lastModified() }
+            val excessCount = liveThumbs.size - MAX_VIDEO_THUMB_FILES
+            for (i in 0 until excessCount) {
+                runCatching { liveThumbs[i].delete() }
+            }
+        }
+    } finally {
+        thumbPruneInProgress.set(false)
+    }
+}
+
 private suspend fun extractVideoFrameWithRange(
     context: Context,
     url: String,
@@ -276,7 +358,7 @@ private suspend fun extractVideoFrameWithRange(
 
     // 1. Kiểm tra disk cache trước để không phải tải lại 2MB và chạy MediaMetadataRetriever
     val thumbDir = File(context.cacheDir, "video_thumbs").apply { if (!exists()) mkdirs() }
-    val diskCacheFile = File(thumbDir, "vf_${cacheKey.hashCode().toUInt()}.jpg")
+    val diskCacheFile = File(thumbDir, "vf_${sha256Hex(cacheKey)}.jpg")
     if (diskCacheFile.exists() && diskCacheFile.length() > 0L) {
         runCatching { BitmapFactory.decodeFile(diskCacheFile.absolutePath) }.getOrNull()?.let {
             return@withContext it
@@ -289,18 +371,20 @@ private suspend fun extractVideoFrameWithRange(
 
         var tempFile: File? = null
         var retriever: MediaMetadataRetriever? = null
+        var activeCall: Call? = null
         try {
             val token = com.tenli.oneview.data.local.UserSession.accessToken
             val client = VideoFrameCache.rangeHttpClient
             val requestBuilder = Request.Builder()
                 .url(url)
-                .header("Range", "bytes=0-2097152") // First 2MB
+                .header("Range", "bytes=0-${MAX_RANGE_DOWNLOAD_BYTES - 1L}") // First 2MB
             if (token.isNotEmpty() && !VideoFrameCache.isPresignedUrl(url)) {
                 requestBuilder.header("Authorization", "Bearer $token")
             }
             val request = requestBuilder.build()
 
-            client.newCall(request).execute().use { response ->
+            val call = client.newCall(request).also { activeCall = it }
+            call.awaitResponse().use { response ->
                 if (!response.isSuccessful && response.code != 206) {
                     return@withPermit null
                 }
@@ -310,12 +394,30 @@ private suspend fun extractVideoFrameWithRange(
                 }
 
                 val body = response.body ?: return@withPermit null
-                tempFile = File.createTempFile("video_frame_", ".mp4", context.cacheDir)
-                FileOutputStream(tempFile).use { fos ->
-                    body.byteStream().copyTo(fos)
+                val tmpVideo = File.createTempFile("video_frame_", ".mp4", context.cacheDir).also {
+                    tempFile = it
+                }
+                var totalRead = 0L
+                val buffer = ByteArray(16 * 1024)
+                body.byteStream().use { input ->
+                    FileOutputStream(tmpVideo).use { fos ->
+                        while (totalRead < MAX_RANGE_DOWNLOAD_BYTES) {
+                            ensureActive()
+                            val toRead = minOf(buffer.size.toLong(), MAX_RANGE_DOWNLOAD_BYTES - totalRead).toInt()
+                            val read = input.read(buffer, 0, toRead)
+                            if (read == -1) break
+                            fos.write(buffer, 0, read)
+                            totalRead += read
+                        }
+                    }
+                }
+                // Nếu server bỏ qua header Range và trả 200 OK file lớn, hủy call ngay để OkHttp không hút nốt phần còn lại khi close()
+                if (totalRead >= MAX_RANGE_DOWNLOAD_BYTES && response.code != 206) {
+                    runCatching { call.cancel() }
                 }
             }
 
+            ensureActive()
             val videoFile = tempFile ?: return@withPermit null
             val mediaRetriever = MediaMetadataRetriever().also { retriever = it }
             mediaRetriever.setDataSource(videoFile.absolutePath)
@@ -325,6 +427,7 @@ private suspend fun extractVideoFrameWithRange(
             var fallbackFrame: Bitmap? = null
 
             for (timeUs in tryPoints) {
+                ensureActive()
                 val frame = decodeThumbnailFrame(mediaRetriever, timeUs) ?: continue
                 if (getBrightness(frame) > 20f) {
                     bestFrame = frame
@@ -353,16 +456,28 @@ private suspend fun extractVideoFrameWithRange(
                         bestFrame = scaledFrame
                     }
                 }
-                // Lưu xuống disk cache dưới dạng JPEG nhẹ để lần sau mở lên trong 0ms
+                // Lưu xuống disk cache nguyên tử (.tmp + rename) dưới dạng JPEG nhẹ để lần sau mở lên trong 0ms
+                val tmpThumb = File(thumbDir, "${diskCacheFile.name}.${System.nanoTime()}.tmp")
                 runCatching {
-                    FileOutputStream(diskCacheFile).use { out ->
+                    FileOutputStream(tmpThumb).use { out ->
                         bestFrame.compress(Bitmap.CompressFormat.JPEG, 82, out)
+                        out.flush()
                     }
+                    if (!tmpThumb.renameTo(diskCacheFile)) {
+                        diskCacheFile.delete()
+                        if (!tmpThumb.renameTo(diskCacheFile)) {
+                            tmpThumb.delete()
+                        }
+                    }
+                    pruneVideoThumbDirIfNeeded(thumbDir)
+                }.onFailure {
+                    runCatching { tmpThumb.delete() }
                 }
             }
 
             bestFrame
         } catch (e: CancellationException) {
+            runCatching { activeCall?.cancel() }
             throw e
         } catch (_: Exception) {
             null

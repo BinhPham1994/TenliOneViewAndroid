@@ -61,6 +61,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -75,6 +77,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,7 +106,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -157,6 +162,7 @@ import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.MediaActionHelper
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -231,7 +237,7 @@ private val PlateLetterSpacing = 0.8.sp
 private class GestureBounds {
     var rootTopY = 0f
     var pinnedTopBottomY = 0f
-    var dataBoardBottomY = 0f
+    var dataBoardCoords: LayoutCoordinates? = null
     var lastTabSwipeTimeMs = 0L
     var inlineMediaSlotRect: Rect? = null
     var lastRootWidthPx = 0
@@ -302,6 +308,7 @@ fun EventDetailScreen(
 
     val currentIsMediaFullscreen by rememberUpdatedState(isVideoOverlayActive || isImageOverlayActive)
     val currentIsMediaZoomed by rememberUpdatedState(isMediaZoomed)
+    val currentOnSwipeDismissed by rememberUpdatedState(onSwipeDismissed)
 
     LaunchedEffect(selectedTab, uiState.event?.id) {
         isMediaZoomed = false
@@ -387,6 +394,9 @@ fun EventDetailScreen(
 
     // Drag-to-dismiss vertical offset (matching PWA bottom-sheet swipe down to dismiss)
     val sheetOffsetY = remember(eventId) { Animatable(0f) }
+    var activeDragOffsetY by remember(eventId) { mutableFloatStateOf(0f) }
+    var isDraggingSheet by remember(eventId) { mutableStateOf(false) }
+    val settleJobHolder = remember(eventId) { arrayOfNulls<Job>(1) }
     val screenHeightPx = remember(density) { with(density) { DismissTravelDistance.toPx() } }
     val horizontalLockSlopPx = remember(density) { with(density) { HorizontalLockSlop.toPx() } }
     val preConsumeVerticalSlopPx = remember(density) { with(density) { PreConsumeVerticalSlop.toPx() } }
@@ -426,30 +436,38 @@ fun EventDetailScreen(
         closeImageFullscreen()
     }
 
-    fun triggerSmoothDismiss() {
+    fun triggerSmoothDismiss(startOffsetY: Float? = null) {
         if (isDismissing) return
         isDismissing = true
         isImageFullscreenOpen = false
         isVideoFullscreenOpen = false
         viewModel.stopLiveStream()
-        scope.launch {
+        settleJobHolder[0]?.cancel()
+        settleJobHolder[0] = scope.launch {
+            if (startOffsetY != null) {
+                sheetOffsetY.snapTo(startOffsetY)
+                isDraggingSheet = false
+                activeDragOffsetY = 0f
+            }
             sheetOffsetY.animateTo(
                 targetValue = screenHeightPx,
                 animationSpec = tween(durationMillis = 300, easing = StandardEasing)
             )
-            onSwipeDismissed()
+            currentOnSwipeDismissed()
         }
     }
 
     // Chỉ đổi shape khi sheet bắt đầu/kết thúc bị kéo – không recompose theo từng pixel kéo
-    val isSheetDragged by remember(sheetOffsetY) {
-        derivedStateOf { sheetOffsetY.value > SHEET_DRAGGED_THRESHOLD_PX }
+    val isSheetDragged by remember(eventId, sheetOffsetY) {
+        derivedStateOf {
+            val offset = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+            offset > SHEET_DRAGGED_THRESHOLD_PX
+        }
     }
-    val sheetShape = if (isSheetDragged) {
+    val draggedSheetShape = remember(spacing.radiusLarge) {
         RoundedCornerShape(topStart = spacing.radiusLarge, topEnd = spacing.radiusLarge)
-    } else {
-        RectangleShape
     }
+    val sheetShape = if (isSheetDragged) draggedSheetShape else RectangleShape
 
     /** Chuyển sang xem 1 sự kiện khác: về tab ảnh & đóng popup ảnh minh chứng */
     fun resetMediaState() {
@@ -465,7 +483,8 @@ fun EventDetailScreen(
             .fillMaxSize()
             .drawBehind {
                 // Đọc offset trong pha draw → kéo sheet chỉ vẽ lại lớp scrim, không recompose
-                val dragProgress = (sheetOffsetY.value / screenHeightPx).coerceIn(0f, 1f)
+                val effectiveOffsetY = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                val dragProgress = (effectiveOffsetY / screenHeightPx).coerceIn(0f, 1f)
                 drawRect(DismissScrimColor, alpha = DISMISS_SCRIM_MAX_ALPHA * (1f - dragProgress))
             }
     ) {
@@ -473,7 +492,8 @@ fun EventDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    translationY = if (isVideoOverlayActive || isImageOverlayActive) 0f else sheetOffsetY.value
+                    val effectiveOffsetY = if (isDraggingSheet) activeDragOffsetY else sheetOffsetY.value
+                    translationY = if (isVideoOverlayActive || isImageOverlayActive) 0f else effectiveOffsetY
                 }
                 .clip(if (isVideoOverlayActive || isImageOverlayActive) RectangleShape else sheetShape)
                 .background(colors.pageBg),
@@ -489,7 +509,7 @@ fun EventDetailScreen(
                     CommonEmptyState(text = uiState.error ?: if (isEn) "Event not found" else "Không tìm thấy sự kiện")
                     // Close button even on error state
                     SheetCloseButton(
-                        onClick = onBack,
+                        onClick = handleBack,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .statusBarsPadding()
@@ -534,6 +554,10 @@ fun EventDetailScreen(
                                 val downRootY = bounds.rootTopY + startY
                                 val startTimeMs = SystemClock.uptimeMillis()
                                 val pinnedBottomY = bounds.pinnedTopBottomY
+                                val dataBoardBottomY = bounds.dataBoardCoords
+                                    ?.takeIf { it.isAttached }
+                                    ?.let { it.positionInRoot().y + it.size.height }
+                                    ?: 0f
 
                                 val isInsidePinnedTop =
                                     pinnedBottomY > 0f && downRootY <= pinnedBottomY
@@ -550,9 +574,9 @@ fun EventDetailScreen(
                                 val isInsideDataBoard =
                                     isDataBoardVisible &&
                                         pinnedBottomY > 0f &&
-                                        bounds.dataBoardBottomY > pinnedBottomY &&
+                                        dataBoardBottomY > pinnedBottomY &&
                                         downRootY > pinnedBottomY &&
-                                        downRootY <= bounds.dataBoardBottomY
+                                        downRootY <= dataBoardBottomY
 
                                 val isBlockedByMediaZoom = currentIsMediaZoomed && isInsidePinnedTop
 
@@ -578,10 +602,25 @@ fun EventDetailScreen(
                                     val ptrEvent = awaitPointerEvent(PointerEventPass.Initial)
                                     // Ngay khi người dùng chạm ngón thứ 2 (Pinch-to-Zoom), hủy ngay cử chỉ 1 ngón
                                     if (ptrEvent.changes.count { it.pressed } > 1 || currentIsMediaFullscreen) {
+                                        val wasDragging = isDraggingSheet
+                                        val finalDrag = activeDragOffsetY
                                         lockedMode = 0
-                                        if (sheetOffsetY.value > 0f) {
-                                            scope.launch {
+                                        if (wasDragging && finalDrag > 0f) {
+                                            settleJobHolder[0]?.cancel()
+                                            settleJobHolder[0] = scope.launch {
+                                                sheetOffsetY.snapTo(finalDrag)
+                                                isDraggingSheet = false
+                                                activeDragOffsetY = 0f
                                                 sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                            }
+                                        } else {
+                                            isDraggingSheet = false
+                                            activeDragOffsetY = 0f
+                                            if (sheetOffsetY.value > 0f) {
+                                                settleJobHolder[0]?.cancel()
+                                                settleJobHolder[0] = scope.launch {
+                                                    sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
+                                                }
                                             }
                                         }
                                         break
@@ -615,8 +654,10 @@ fun EventDetailScreen(
                                             lockedMode = 2 // VERTICAL_DISMISS
                                             canSwipeTab = false
                                             change.consume()
+                                            settleJobHolder[0]?.cancel()
                                             val dragOffset = ((dy - verticalLockSlopPx) * SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
-                                            scope.launch { sheetOffsetY.snapTo(dragOffset) }
+                                            isDraggingSheet = true
+                                            activeDragOffsetY = dragOffset
                                         } else if (canSwipeDismiss && dy > preConsumeVerticalSlopPx && dy > absX * 1.25f) {
                                             // Pre-consume downward drag in Initial pass before LazyColumn's 8dp touchSlop
                                             // on Main pass can intercept the gesture inside THÔNG TIN SỰ KIỆN
@@ -627,7 +668,7 @@ fun EventDetailScreen(
                                     } else if (lockedMode == 2) {
                                         change.consume()
                                         val dragOffset = ((dy - verticalLockSlopPx) * SHEET_DRAG_RESISTANCE).coerceAtLeast(0f)
-                                        scope.launch { sheetOffsetY.snapTo(dragOffset) }
+                                        activeDragOffsetY = dragOffset
                                     }
                                 }
 
@@ -652,7 +693,8 @@ fun EventDetailScreen(
                                         }
                                     }
                                 } else if (lockedMode == 2) {
-                                    val pulledDp = sheetOffsetY.value.toDp().value
+                                    val finalDrag = activeDragOffsetY
+                                    val pulledDp = finalDrag.toDp().value
                                     val totalDyDp = lastDy.toDp().value
                                     val velocityDpPerMs = totalDyDp / elapsedMs.toFloat()
                                     val shouldDismiss = pulledDp >= DISMISS_DISTANCE_DP ||
@@ -660,14 +702,26 @@ fun EventDetailScreen(
                                             velocityDpPerMs >= DISMISS_FLICK_VELOCITY_DP_PER_MS &&
                                             elapsedMs < DISMISS_FLICK_MAX_MS)
                                     if (shouldDismiss) {
-                                        triggerSmoothDismiss()
+                                        triggerSmoothDismiss(startOffsetY = finalDrag)
                                     } else {
-                                        scope.launch {
+                                        settleJobHolder[0]?.cancel()
+                                        settleJobHolder[0] = scope.launch {
+                                            sheetOffsetY.snapTo(finalDrag)
+                                            isDraggingSheet = false
+                                            activeDragOffsetY = 0f
                                             sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
                                         }
                                     }
-                                } else if (sheetOffsetY.value > 0f) {
-                                    scope.launch {
+                                } else if (isDraggingSheet || sheetOffsetY.value > 0f) {
+                                    val wasDragging = isDraggingSheet
+                                    val finalDrag = activeDragOffsetY
+                                    settleJobHolder[0]?.cancel()
+                                    settleJobHolder[0] = scope.launch {
+                                        if (wasDragging) {
+                                            sheetOffsetY.snapTo(finalDrag)
+                                            isDraggingSheet = false
+                                            activeDragOffsetY = 0f
+                                        }
                                         sheetOffsetY.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
                                     }
                                 }
@@ -675,12 +729,12 @@ fun EventDetailScreen(
                         }
                 ) {
                     val liveStatusBarTopPx = WindowInsets.statusBars.getTop(density)
-                    var lockedStatusBarTopPx by remember { mutableIntStateOf(liveStatusBarTopPx) }
+                    val lockedStatusBarTopPxHolder = remember { intArrayOf(liveStatusBarTopPx) }
                     if (!isVideoOverlayActive && !isImageOverlayActive && liveStatusBarTopPx > 0) {
-                        lockedStatusBarTopPx = liveStatusBarTopPx
+                        lockedStatusBarTopPxHolder[0] = liveStatusBarTopPx
                     }
                     val effectiveStatusBarTopDp = with(density) {
-                        (if (isVideoOverlayActive || isImageOverlayActive) lockedStatusBarTopPx else liveStatusBarTopPx)
+                        (if (isVideoOverlayActive || isImageOverlayActive) lockedStatusBarTopPxHolder[0] else liveStatusBarTopPx)
                             .coerceAtLeast(0)
                             .toDp()
                     }
@@ -757,8 +811,8 @@ fun EventDetailScreen(
                         // Card: .event-data-board
                         item(key = KEY_DATA_BOARD) {
                             SectionCard(
-                                modifier = Modifier.onGloballyPositioned { coords ->
-                                    bounds.dataBoardBottomY = coords.positionInRoot().y + coords.size.height
+                                modifier = Modifier.onPlaced { coords ->
+                                    bounds.dataBoardCoords = coords
                                 }
                             ) {
                                 EventInfoBoard(
@@ -898,7 +952,7 @@ fun EventDetailScreen(
                         MobileTopPopupManager.success(
                             if (isEn) "Reported false event successfully" else "Đã báo cáo sự kiện sai"
                         )
-                        onBack()
+                        handleBack()
                     },
                     onError = { errMsg -> MobileTopPopupManager.error(errMsg) }
                 )
@@ -928,6 +982,7 @@ private fun DetailHeader(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    val backPillShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -950,7 +1005,7 @@ private fun DetailHeader(
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 modifier = Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE,
+                    iterations = 2,
                     initialDelayMillis = 1200,
                     repeatDelayMillis = 1600,
                     velocity = 28.dp
@@ -960,7 +1015,7 @@ private fun DetailHeader(
             if (showBackToOriginal) {
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                        .clip(backPillShape)
                         .background(BrandPrimary)
                         .clickable(onClick = onBackToOriginal)
                         .padding(horizontal = spacing.space8, vertical = spacing.space3),
@@ -1157,7 +1212,7 @@ private fun EventDetailBodyLayout(
         }
     }
 
-    val animatedLandscapeAngle by animateFloatAsState(
+    val animatedLandscapeAngleState = animateFloatAsState(
         targetValue = targetLandscapeAngle,
         animationSpec = tween(durationMillis = 260, easing = StandardEasing),
         label = "heroVideoLandscapeAngle"
@@ -1198,7 +1253,7 @@ private fun EventDetailBodyLayout(
 
                             scaleX = startScaleX + (1f - startScaleX) * p
                             scaleY = startScaleY + (1f - startScaleY) * p
-                            rotationZ = animatedLandscapeAngle * p
+                            rotationZ = animatedLandscapeAngleState.value * p
                             translationX = startTx * (1f - p)
                             translationY = startTy * (1f - p)
                         }
@@ -1259,8 +1314,11 @@ private fun EventDetailBodyLayout(
         }
 
         layout(rootW, rootH) {
-            headerPlaceable.place(contentLeft, 0)
-            bottomPlaceable.place(contentLeft, slotTop + slotH)
+            val hideBehindFullscreenVideo = isVideoFullscreenOpen && videoProgressProvider() >= 0.999f
+            if (!hideBehindFullscreenVideo) {
+                headerPlaceable.place(contentLeft, 0)
+                bottomPlaceable.place(contentLeft, slotTop + slotH)
+            }
             if (isVideoOverlayActive) {
                 scrimPlaceable.place(0, 0)
                 mediaPlaceable.place((rootW - fittedWidthPx) / 2, (rootH - fittedHeightPx) / 2)
@@ -1368,13 +1426,16 @@ private fun MediaViewport(
                     val noVideoText = if (isEn) "No event video" else "Không có video sự kiện"
                     val videoUrl = display.videoUrl
                     if (videoUrl != null) {
+                        var userWantsVideoPlay by remember(eventId, videoUrl) { mutableStateOf(true) }
                         VideoPlayer(
                             videoUrl = videoUrl,
                             thumbnailUrl = display.imageUrl,
                             deviceKey = UserSession.accessToken,
                             isOriginalRatio = isOverlayExpandingOrOpen,
                             isFullscreen = isFullscreen,
-                            playWhenReady = isTabActive,
+                            playWhenReady = userWantsVideoPlay,
+                            isActive = isTabActive,
+                            onPlayWhenReadyChange = { wantPlay -> userWantsVideoPlay = wantPlay },
                             errorText = noVideoText,
                             onFullscreenToggle = { currentOnToggleFullscreen() },
                             enableZoom = true,
@@ -1432,6 +1493,7 @@ private fun LiveCameraPane(
         if (isActive) {
             onLoad(false)
         } else {
+            isPlaying = false
             onStop()
         }
     }
@@ -1441,6 +1503,7 @@ private fun LiveCameraPane(
             when (event) {
                 androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
                     stoppedInBackground = true
+                    isPlaying = false
                     currentOnStop()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_START -> {
@@ -1529,6 +1592,8 @@ private fun LiveCameraPane(
                 val actionBtnSize = spacing.iconMedium
                 val actionIconSize = spacing.iconSmall
                 val textStyle = MaterialTheme.typography.labelMedium
+                val pillShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
+                val tinyShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
 
                 val currentStreamLabel = if (channel == 1) {
                     if (isEn) "Sub Stream" else "Luồng phụ"
@@ -1558,9 +1623,9 @@ private fun LiveCameraPane(
                                     .weight(1f, fill = false)
                                     .padding(end = spacing.space8)
                                     .height(pillHeight)
-                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .clip(pillShape)
                                     .background(overlayPillBg)
-                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .border(spacing.borderMedium, overlayPillBorder, pillShape)
                                     .padding(horizontal = spacing.space8),
                                 contentAlignment = Alignment.CenterStart
                             ) {
@@ -1582,9 +1647,9 @@ private fun LiveCameraPane(
                             Row(
                                 modifier = Modifier
                                     .height(pillHeight)
-                                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                                    .clip(pillShape)
                                     .background(overlayPillBg)
-                                    .border(spacing.borderMedium, overlayPillBorder, RoundedCornerShape(spacing.radiusSmall))
+                                    .border(spacing.borderMedium, overlayPillBorder, pillShape)
                                     .padding(horizontal = spacing.space2),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(spacing.space2)
@@ -1593,7 +1658,7 @@ private fun LiveCameraPane(
                                 Row(
                                     modifier = Modifier
                                         .height(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clip(tinyShape)
                                         .background(
                                             if (showChannelDropdown && hasSubStream) {
                                                 colors.onMedia.copy(alpha = 0.2f)
@@ -1637,7 +1702,7 @@ private fun LiveCameraPane(
                                 Box(
                                     modifier = Modifier
                                         .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clip(tinyShape)
                                         .background(
                                             if (isOriginalRatio) {
                                                 BrandActiveNavDark.copy(alpha = 0.35f)
@@ -1668,7 +1733,7 @@ private fun LiveCameraPane(
                                 Box(
                                     modifier = Modifier
                                         .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clip(tinyShape)
                                         .clickable {
                                             showChannelDropdown = false
                                             autoHideToken++
@@ -1688,7 +1753,7 @@ private fun LiveCameraPane(
                                 Box(
                                     modifier = Modifier
                                         .size(actionBtnSize)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clip(tinyShape)
                                         .clickable {
                                             showChannelDropdown = false
                                             autoHideToken++
@@ -1714,12 +1779,12 @@ private fun LiveCameraPane(
                                 Box(
                                     modifier = Modifier
                                         .padding(start = spacing.space3)
-                                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                                        .clip(tinyShape)
                                         .background(colors.mediaOverlay.copy(alpha = 0.95f))
                                         .border(
                                             spacing.borderMedium,
                                             colors.onMedia.copy(alpha = 0.15f),
-                                            RoundedCornerShape(spacing.radiusTiny)
+                                            tinyShape
                                         )
                                         .clickable {
                                             showChannelDropdown = false
@@ -1825,7 +1890,7 @@ private fun MediaFullscreenFloatingButton(
 ) {
     val colors = MaterialTheme.appColors
     val spacing = MaterialTheme.spacing
-    val btnShape = RoundedCornerShape(spacing.radiusSmall)
+    val btnShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     Box(
         modifier = modifier
             .size(spacing.iconButtonSmall)
@@ -2060,7 +2125,7 @@ private fun FullscreenEventImageOverlay(
         }
     }
 
-    val animatedLandscapeAngle by animateFloatAsState(
+    val animatedLandscapeAngleState = animateFloatAsState(
         targetValue = targetLandscapeAngle,
         animationSpec = tween(durationMillis = 260, easing = StandardEasing),
         label = "fullscreenImageLandscapeAngle"
@@ -2129,7 +2194,7 @@ private fun FullscreenEventImageOverlay(
 
                                 scaleX = startScaleX + (1f - startScaleX) * p
                                 scaleY = startScaleY + (1f - startScaleY) * p
-                                rotationZ = animatedLandscapeAngle * p
+                                rotationZ = animatedLandscapeAngleState.value * p
                                 translationX = startTx * (1f - p)
                                 translationY = startTy * (1f - p)
                             },
@@ -2276,10 +2341,11 @@ private fun EventInfoBoard(
                     horizontalArrangement = Arrangement.spacedBy(spacing.space8)
                 ) {
                     PlateBadgePill(plate = display.plateNumber, isBlacklist = display.isPlateBlacklist)
+                    val copyBtnShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
                     Box(
                         modifier = Modifier
                             .size(spacing.space24 + spacing.space2)
-                            .clip(RoundedCornerShape(spacing.radiusTiny))
+                            .clip(copyBtnShape)
                             .background(colors.controlBg)
                             .clickable {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -2516,7 +2582,7 @@ private fun EvidenceCropThumbnail(
     val density = LocalDensity.current
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val thumbShape = RoundedCornerShape(spacing.radiusSmall)
+    val thumbShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     val thumbSize = spacing.space48
 
     // Không giải mã ảnh gốc: giới hạn theo kích thước popup lớn nhất, chỉ thu nhỏ (không phóng to ảnh nhỏ)
@@ -2563,7 +2629,7 @@ private fun EvidenceCropThumbnail(
             )
 
             if (keepPopupMounted) {
-                val popupScale by animateFloatAsState(
+                val popupScaleState = animateFloatAsState(
                     targetValue = if (animateIn) 1f else 0.65f,
                     animationSpec = tween(
                         durationMillis = if (animateIn) 240 else 170,
@@ -2571,13 +2637,13 @@ private fun EvidenceCropThumbnail(
                     ),
                     label = "cropZoomScale"
                 )
-                val popupAlpha by animateFloatAsState(
+                val popupAlphaState = animateFloatAsState(
                     targetValue = if (animateIn) 1f else 0f,
                     animationSpec = tween(durationMillis = if (animateIn) 200 else 160),
                     label = "cropZoomAlpha"
                 )
                 val shadowPadPx = with(density) { spacing.space10.roundToPx() }
-                val popupShape = RoundedCornerShape(spacing.radiusCompact)
+                val popupShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
 
                 Popup(
                     alignment = Alignment.CenterEnd,
@@ -2599,9 +2665,10 @@ private fun EvidenceCropThumbnail(
                         modifier = Modifier
                             .padding(spacing.space10)
                             .graphicsLayer {
-                                scaleX = popupScale
-                                scaleY = popupScale
-                                alpha = popupAlpha
+                                val scale = popupScaleState.value
+                                scaleX = scale
+                                scaleY = scale
+                                alpha = popupAlphaState.value
                                 transformOrigin = TransformOrigin(1f, 0.5f)
                             }
                     ) {
@@ -2644,6 +2711,7 @@ private fun RelatedPlatesSection(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    val closeBtnShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2655,7 +2723,7 @@ private fun RelatedPlatesSection(
                 Box(
                     modifier = Modifier
                         .size(spacing.space24)
-                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                        .clip(closeBtnShape)
                         .clickable(onClick = onClose),
                     contentAlignment = Alignment.Center
                 ) {
@@ -2691,14 +2759,16 @@ private fun RelatedPlatesSection(
                     )
                 }
 
-                else -> Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(spacing.space12),
+                else -> LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(spacing.space12),
                     horizontalArrangement = Arrangement.spacedBy(spacing.space10)
                 ) {
-                    plates.forEach { plateEv ->
+                    items(
+                        items = plates,
+                        key = { it.id },
+                        contentType = { "related_plate_card" }
+                    ) { plateEv ->
                         RelatedPlateCard(
                             plateEvent = plateEv,
                             isActive = plateEv.id == activeEventId,
@@ -2715,7 +2785,8 @@ private fun RelatedPlatesSection(
 private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: () -> Unit) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val cardShape = RoundedCornerShape(spacing.radiusCompact)
+    val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
+    val thumbShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     val plateText = remember(plateEvent) { plateEvent.data?.plate?.plate ?: plateEvent.data?.plate?.number ?: "---" }
     val timeText = remember(plateEvent) { formatEventTimeOnly(plateEvent.time) }
     val snapshotUrl = remember(plateEvent) {
@@ -2746,8 +2817,10 @@ private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: 
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
-                .clip(RoundedCornerShape(spacing.radiusSmall)),
-            contentScale = ContentScale.Crop
+                .clip(thumbShape),
+            contentScale = ContentScale.Crop,
+            targetWidthPx = 360,
+            targetHeightPx = 202
         )
         PlateBadgePill(plate = plateText, isBlacklist = plateEvent.isPlateBlacklisted)
         Text(
@@ -2770,13 +2843,14 @@ private fun SectionCard(
     content: @Composable () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = spacing.space10)
             .padding(bottom = spacing.space20),
         color = MaterialTheme.appColors.surface,
-        shape = RoundedCornerShape(spacing.radiusMedium),
+        shape = cardShape,
         content = content
     )
 }
@@ -2847,9 +2921,10 @@ private fun InfoValueText(
 @Composable
 private fun ColoredLabelBadge(text: String, color: Color) {
     val spacing = MaterialTheme.spacing
+    val badgeShape = remember(spacing.radiusXSmall) { RoundedCornerShape(spacing.radiusXSmall) }
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(spacing.radiusXSmall))
+            .clip(badgeShape)
             .background(color)
             .padding(horizontal = spacing.space8, vertical = spacing.space3)
     ) {
@@ -2871,10 +2946,11 @@ private fun PwaActionButton(
     onClick: () -> Unit
 ) {
     val spacing = MaterialTheme.spacing
+    val btnShape = remember(spacing.radiusSmall) { RoundedCornerShape(spacing.radiusSmall) }
     Box(
         modifier = Modifier
             .size(spacing.space32 + spacing.space2)
-            .clip(RoundedCornerShape(spacing.radiusSmall))
+            .clip(btnShape)
             .background(bgColor)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
@@ -2895,9 +2971,10 @@ private fun PlateBadgePill(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
+    val pillShape = remember(spacing.radiusTiny) { RoundedCornerShape(spacing.radiusTiny) }
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(spacing.radiusTiny))
+            .clip(pillShape)
             .background(if (isBlacklist) colors.error else OrangeDeep)
             .padding(horizontal = spacing.space8, vertical = spacing.space3),
         contentAlignment = Alignment.Center

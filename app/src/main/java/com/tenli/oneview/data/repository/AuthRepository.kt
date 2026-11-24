@@ -3,6 +3,7 @@ package com.tenli.oneview.data.repository
 import android.content.Context
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import androidx.work.WorkManager
 import com.tenli.oneview.data.local.EventCacheManager
 import com.tenli.oneview.data.local.GlobalData
 import com.tenli.oneview.data.local.HomeCacheManager
@@ -22,8 +23,11 @@ import com.tenli.oneview.model.network.UserNotificationSettingsModel
 import com.tenli.oneview.ui.utils.AiTypeHelper
 import com.tenli.oneview.ui.utils.AppKeys
 import com.tenli.oneview.ui.utils.PermissionUtils
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -122,19 +126,24 @@ class AuthRepository(
         password: String,
         isDomainFromQr: Boolean = false
     ) {
+        // Đợi tác vụ dọn cache / huỷ FCM của phiên đăng xuất trước kết thúc hoàn toàn trước khi mở phiên mới
+        pendingLogoutCleanupJob.get()?.join()
+
         val appContext = context.applicationContext
         withContext(Dispatchers.IO) {
             HomeCacheManager.clearCache(appContext)
             EventCacheManager.clearCache(appContext)
             MonitorCacheManager.clearCache(appContext)
         }
-        UserSession.apply {
-            userData = loginData.target
-            accessToken = loginData.credential.accessToken
-            refreshToken = loginData.credential.refreshToken
-            this.domain = formattedDomain
-            savedUsername = username
-            savedPassword = password
+        synchronized(UserSession) {
+            UserSession.setSession(
+                userData = loginData.target,
+                accessToken = loginData.credential.accessToken,
+                refreshToken = loginData.credential.refreshToken,
+                domain = formattedDomain,
+                savedUsername = username,
+                savedPassword = password
+            )
         }
         PermissionUtils.resetCallPermissionRequirement()
         UserPermissionManager.syncFromUserSession()
@@ -165,23 +174,31 @@ class AuthRepository(
     )
 
     /**
-     * Bước 1 (đồng bộ, < 0.2ms): chụp lại token/domain cũ để huỷ FCM dưới nền, xoá ngay [UserSession] trên RAM,
-     * đóng thông báo hệ thống và gỡ các khoá phiên trong [SharedPreferences] để điều hướng về Login tức thì.
+     * Bước 1 (đồng bộ, < 0.2ms): chụp lại token/domain cũ để huỷ FCM dưới nền, xoá ngay [UserSession] và RAM caches,
+     * huỷ worker keep-alive, đóng thông báo hệ thống và gỡ các khoá phiên trong [SharedPreferences] để điều hướng về Login tức thì.
      */
     fun clearSessionMemoryAndPrefs(): SessionSnapshot {
         val appContext = context.applicationContext
-        val snapshot = SessionSnapshot(
-            domain = UserSession.domain,
-            accessToken = UserSession.accessToken
-        )
-        val prefs = GlobalData.preferences
-        val wasDomainFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
-
-        // Xoá ngay UserSession trên RAM trước khi await bất kỳ I/O hay mạng nào để mọi interceptor,
-        // TokenAuthenticator, WebSocket và tác vụ ghi cache đang chạy dừng dùng token cũ ngay lập tức.
-        UserSession.clear()
+        val snapshot = synchronized(UserSession) {
+            val snap = SessionSnapshot(
+                domain = UserSession.domain,
+                accessToken = UserSession.accessToken
+            )
+            // Xoá ngay UserSession trên RAM trước khi await bất kỳ I/O hay mạng nào để mọi interceptor,
+            // TokenAuthenticator, WebSocket và tác vụ ghi cache đang chạy dừng dùng token cũ ngay lập tức.
+            UserSession.clear()
+            snap
+        }
+        HomeCacheManager.clearInMemorySync()
+        EventCacheManager.clearInMemorySync()
+        MonitorCacheManager.clearInMemorySync()
         PermissionUtils.resetCallPermissionRequirement()
         runCatching { NotificationManagerCompat.from(appContext).cancelAll() }
+        runCatching { WorkManager.getInstance(appContext).cancelUniqueWork(KEEP_ALIVE_WORK_NAME) }
+
+        val prefs = GlobalData.preferences
+        val wasDomainFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
+        val rawDomainKey = snapshot.domain.trim().lowercase()
 
         prefs.edit {
             remove(AppKeys.ACCESS_TOKEN_KEY)
@@ -192,6 +209,9 @@ class AuthRepository(
             remove(AppKeys.DOMAIN_FROM_QR_KEY)
             if (wasDomainFromQr) {
                 remove(PREF_DOMAIN_KEY)
+            }
+            if (rawDomainKey.isNotEmpty()) {
+                remove("saved_favorite_cameras_$rawDomainKey")
             }
             remove(AppKeys.GROUP_ID)
             remove(AppKeys.GROUP_ID_CAMERA)
@@ -213,18 +233,26 @@ class AuthRepository(
      */
     suspend fun clearSessionCachesAndPushToken(snapshot: SessionSnapshot) {
         val appContext = context.applicationContext
-        withContext(NonCancellable + Dispatchers.IO) {
-            if (UserSession.accessToken.isEmpty()) {
-                HomeCacheManager.clearCache(appContext)
-                EventCacheManager.clearCache(appContext)
-                MonitorCacheManager.clearCache(appContext)
-            }
+        val cleanupDone = CompletableDeferred<Unit>()
+        val previousCleanup = pendingLogoutCleanupJob.getAndSet(cleanupDone)
+        previousCleanup?.join()
+        try {
+            withContext(NonCancellable + Dispatchers.IO) {
+                if (UserSession.accessToken.isEmpty()) {
+                    HomeCacheManager.clearCache(appContext)
+                    EventCacheManager.clearCache(appContext)
+                    MonitorCacheManager.clearCache(appContext)
+                }
 
-            FcmTokenManager.unregisterDevicePushToken(
-                deleteLocalToken = true,
-                explicitDomain = snapshot.domain,
-                explicitAccessToken = snapshot.accessToken
-            )
+                FcmTokenManager.unregisterDevicePushToken(
+                    deleteLocalToken = true,
+                    explicitDomain = snapshot.domain,
+                    explicitAccessToken = snapshot.accessToken
+                )
+            }
+        } finally {
+            cleanupDone.complete(Unit)
+            pendingLogoutCleanupJob.compareAndSet(cleanupDone, null)
         }
     }
 
@@ -277,9 +305,11 @@ class AuthRepository(
     companion object {
         const val PREF_DOMAIN_KEY = "DOMAIN_KEY"
         const val PREF_PUSH_NOTIFICATIONS_ENABLED = "push_notifications_enabled"
+        private const val KEEP_ALIVE_WORK_NAME = "ping_firebase"
         private const val PREF_EXPANDED_NODES = "saved_expanded_nodes"
         private const val PREF_MONITOR_GRID_SIZE = "saved_monitor_grid_size"
         private const val PREF_MONITOR_GRID_CAMERA_IDS = "saved_monitor_grid_camera_ids"
         private const val PREF_MONITOR_CAMERA_ID = "saved_monitor_camera_id"
+        private val pendingLogoutCleanupJob = AtomicReference<Job?>(null)
     }
 }

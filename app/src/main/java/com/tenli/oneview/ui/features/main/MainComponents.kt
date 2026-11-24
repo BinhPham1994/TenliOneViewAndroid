@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,9 +32,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -56,6 +57,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageBitmapConfig
 import androidx.compose.ui.graphics.Path
@@ -68,13 +70,19 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.tenli.oneview.R
@@ -91,6 +99,7 @@ import com.tenli.oneview.ui.theme.Slate900
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
 import com.tenli.oneview.ui.theme.spacing
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.ceil
 import kotlin.math.pow
@@ -481,10 +490,12 @@ private fun Modifier.iosLiquidGlassDock(isDark: Boolean): Modifier = this.drawWi
  * Custom modifier vẽ viên nang kính lỏng cho Tab đang chọn (Sliding Active Liquid Glass Capsule):
  * - Nổi khối 3D rõ rệt trên nền kính trắng của Dock với vầng lóa viền sáng (Optical Rim Glare).
  * - Có bóng đổ dịu bên ngoài viên nang, mặt kính cong phản quang phía trên và viền sáng 3D.
+ * - Pre-render sẵn cả 2 bitmap (idle & dragging) 1 lần duy nhất theo `(size, isDark)` trong `drawWithCache`
+ *   => chuyển trạng thái kéo/thả 0ms BlurMaskFilter trên Main Thread.
  */
 private fun Modifier.iosLiquidGlassActivePill(
     isDark: Boolean,
-    isDragging: Boolean
+    isDraggingProvider: () -> Boolean
 ): Modifier = this.drawWithCache {
     val cornerRadiusPx = size.height / 2f
     val cornerRadius = CornerRadius(cornerRadiusPx, cornerRadiusPx)
@@ -498,55 +509,13 @@ private fun Modifier.iosLiquidGlassActivePill(
         )
     }
 
-    val shadowBlurPx = (if (isDragging) PillShadowBlurDragging else PillShadowBlur).toPx()
-    val shadowDyPx = (if (isDragging) PillShadowOffsetYDragging else PillShadowOffsetY).toPx()
     val shadowInsetPx = PillShadowInset.toPx()
-    val pillShadowColor = if (isDark) {
-        if (isDragging) BrandPrimary.copy(alpha = 0.42f) else Color.Black.copy(alpha = 0.48f)
-    } else {
-        if (isDragging) BrandPrimary.copy(alpha = 0.22f) else BrandContainerDark.copy(alpha = 0.14f)
-    }
-    val pillShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
-        color = pillShadowColor.toArgb()
-        maskFilter = BlurMaskFilter(shadowBlurPx, BlurMaskFilter.Blur.NORMAL)
-    }
-
     val pillRimBloomPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
         style = FrameworkPaint.Style.STROKE
         strokeWidth = PillRimBloomStroke.toPx()
         color = (if (isDark) Color.White.copy(alpha = 0.25f) else Color.White).toArgb()
         maskFilter = BlurMaskFilter(PillRimBloomBlur.toPx(), BlurMaskFilter.Blur.NORMAL)
     }
-
-    val pillBodyBrush = if (isDark) {
-        Brush.verticalGradient(
-            0.0f to BrandActiveNavDark.copy(alpha = if (isDragging) 0.44f else 0.32f),
-            0.50f to BrandPrimary.copy(alpha = if (isDragging) 0.28f else 0.18f),
-            1.0f to PillBlueDeep.copy(alpha = if (isDragging) 0.36f else 0.25f)
-        )
-    } else {
-        Brush.verticalGradient(
-            0.0f to Color.White,
-            0.52f to PillLightMid,
-            1.0f to if (isDragging) PillLightBottomDragging else PillLightBottom
-        )
-    }
-
-    val pillTopSheenBrush = Brush.verticalGradient(
-        colors = if (isDark) {
-            listOf(
-                Color.White.copy(alpha = if (isDragging) 0.28f else 0.20f),
-                Color.Transparent
-            )
-        } else {
-            listOf(
-                Color.White,
-                Color.White.copy(alpha = 0.0f)
-            )
-        },
-        startY = 0f,
-        endY = size.height * 0.50f
-    )
 
     val innerSpecularStrokePx = PillInnerSpecularStroke.toPx()
     val innerSpecularInsetPx = PillInnerSpecularInset.toPx()
@@ -569,11 +538,6 @@ private fun Modifier.iosLiquidGlassActivePill(
     )
 
     val outerPillContourPx = PillOuterContourStroke.toPx()
-    val outerPillContourColor = if (isDark) {
-        BrandActiveNavDark.copy(alpha = if (isDragging) 0.55f else 0.35f)
-    } else {
-        BrandPrimary.copy(alpha = if (isDragging) 0.26f else 0.15f)
-    }
 
     // Hình học tính sẵn (không cấp phát trong onDrawBehind)
     val topSheenSize = Size(size.width, size.height * 0.50f)
@@ -585,15 +549,66 @@ private fun Modifier.iosLiquidGlassActivePill(
     val contourSize = Size(size.width - outerPillContourPx, size.height - outerPillContourPx)
     val contourStroke = Stroke(width = outerPillContourPx)
 
-    // Render sẵn viên nang đang chọn ra ImageBitmap 1 lần trong drawWithCache -> trượt/cuộn 0ms BlurMaskFilter
-    val padX = ceil(shadowBlurPx * 2f).toInt()
-    val padTop = ceil(shadowBlurPx * 2f).toInt()
-    val padBottom = ceil(shadowBlurPx * 2f + shadowDyPx).toInt()
+    val maxShadowBlurPx = PillShadowBlurDragging.toPx()
+    val maxShadowDyPx = PillShadowOffsetYDragging.toPx()
+    val padX = ceil(maxShadowBlurPx * 2f).toInt()
+    val padTop = ceil(maxShadowBlurPx * 2f).toInt()
+    val padBottom = ceil(maxShadowBlurPx * 2f + maxShadowDyPx).toInt()
     val bmpWidth = ceil(size.width).toInt() + padX * 2
     val bmpHeight = ceil(size.height).toInt() + padTop + padBottom
 
-    val cachedBitmap = if (bmpWidth > 0 && bmpHeight > 0 && size.width > 0f && size.height > 0f) {
-        ImageBitmap(bmpWidth, bmpHeight, ImageBitmapConfig.Argb8888).also { bitmap ->
+    fun renderPillBitmap(dragging: Boolean): ImageBitmap? {
+        if (bmpWidth <= 0 || bmpHeight <= 0 || size.width <= 0f || size.height <= 0f) return null
+
+        val shadowBlurPx = (if (dragging) PillShadowBlurDragging else PillShadowBlur).toPx()
+        val shadowDyPx = (if (dragging) PillShadowOffsetYDragging else PillShadowOffsetY).toPx()
+        val pillShadowColor = if (isDark) {
+            if (dragging) BrandPrimary.copy(alpha = 0.42f) else Color.Black.copy(alpha = 0.48f)
+        } else {
+            if (dragging) BrandPrimary.copy(alpha = 0.22f) else BrandContainerDark.copy(alpha = 0.14f)
+        }
+        val pillShadowPaint = FrameworkPaint(FrameworkPaint.ANTI_ALIAS_FLAG).apply {
+            color = pillShadowColor.toArgb()
+            maskFilter = BlurMaskFilter(shadowBlurPx, BlurMaskFilter.Blur.NORMAL)
+        }
+
+        val pillBodyBrush = if (isDark) {
+            Brush.verticalGradient(
+                0.0f to BrandActiveNavDark.copy(alpha = if (dragging) 0.44f else 0.32f),
+                0.50f to BrandPrimary.copy(alpha = if (dragging) 0.28f else 0.18f),
+                1.0f to PillBlueDeep.copy(alpha = if (dragging) 0.36f else 0.25f)
+            )
+        } else {
+            Brush.verticalGradient(
+                0.0f to Color.White,
+                0.52f to PillLightMid,
+                1.0f to if (dragging) PillLightBottomDragging else PillLightBottom
+            )
+        }
+
+        val pillTopSheenBrush = Brush.verticalGradient(
+            colors = if (isDark) {
+                listOf(
+                    Color.White.copy(alpha = if (dragging) 0.28f else 0.20f),
+                    Color.Transparent
+                )
+            } else {
+                listOf(
+                    Color.White,
+                    Color.White.copy(alpha = 0.0f)
+                )
+            },
+            startY = 0f,
+            endY = size.height * 0.50f
+        )
+
+        val outerPillContourColor = if (isDark) {
+            BrandActiveNavDark.copy(alpha = if (dragging) 0.55f else 0.35f)
+        } else {
+            BrandPrimary.copy(alpha = if (dragging) 0.26f else 0.15f)
+        }
+
+        return ImageBitmap(bmpWidth, bmpHeight, ImageBitmapConfig.Argb8888).also { bitmap ->
             CanvasDrawScope().draw(
                 density = this,
                 layoutDirection = layoutDirection,
@@ -657,15 +672,18 @@ private fun Modifier.iosLiquidGlassActivePill(
                 }
             }
         }
-    } else {
-        null
     }
 
+    val idleBitmap = renderPillBitmap(dragging = false)
+    val draggingBitmap = renderPillBitmap(dragging = true)
+    val drawTopLeft = Offset(-padX.toFloat(), -padTop.toFloat())
+
     onDrawBehind {
-        if (cachedBitmap != null) {
+        val activeBitmap = if (isDraggingProvider()) draggingBitmap else idleBitmap
+        if (activeBitmap != null) {
             drawImage(
-                image = cachedBitmap,
-                topLeft = Offset(-padX.toFloat(), -padTop.toFloat())
+                image = activeBitmap,
+                topLeft = drawTopLeft
             )
         }
     }
@@ -744,12 +762,22 @@ private fun <T> LiquidGlassBottomNavigation(
     // Đọc giá trị mới nhất trong gesture detector mà không phải khởi động lại pointerInput
     val itemsState by rememberUpdatedState(items)
     val currentTabState by rememberUpdatedState(currentTab)
+    val selectedIndexState by rememberUpdatedState(selectedIndex)
     val onTabClickState by rememberUpdatedState(onTabClick)
     val onScrollToTopState by rememberUpdatedState(onScrollToTop)
 
     var isDraggingNav by remember { mutableStateOf(false) }
-    var rawDragLeftPx by remember { mutableFloatStateOf(0f) }
+    var activeDragLeftPx by remember { mutableFloatStateOf(Float.NaN) }
     var dragHoverIndex by remember { mutableStateOf<Int?>(null) }
+    val isDraggingProvider = remember { { isDraggingNav } }
+    val dockGlassModifier = remember(isDark) { Modifier.iosLiquidGlassDock(isDark = isDark) }
+    val activePillGlassModifier = remember(isDark, isDraggingProvider) {
+        Modifier.iosLiquidGlassActivePill(
+            isDark = isDark,
+            isDraggingProvider = isDraggingProvider
+        )
+    }
+    val tabShape = remember(spacing.radiusExtraLarge) { RoundedCornerShape(spacing.radiusExtraLarge) }
 
     val iconSize = spacing.iconRegular + spacing.space2
     val selectedIconOffset = -spacing.space1
@@ -768,7 +796,7 @@ private fun <T> LiquidGlassBottomNavigation(
                 .widthIn(max = spacing.contentMaxWidth)
                 .fillMaxWidth()
                 .height(spacing.bottomNavHeight)
-                .iosLiquidGlassDock(isDark = isDark)
+                .then(dockGlassModifier)
                 .padding(spacing.space5)
         ) {
             val tabWidth = maxWidth / items.size
@@ -779,8 +807,13 @@ private fun <T> LiquidGlassBottomNavigation(
             // transition: transform 0.32s cubic-bezier(0.18, 0.9, 0.3, 1)
             val indicatorLeftAnim = remember { Animatable(selectedIndex * tabWidthPx) }
 
-            LaunchedEffect(selectedIndex, tabWidthPx, isDraggingNav) {
+            LaunchedEffect(selectedIndex, tabWidthPx) {
                 if (!isDraggingNav && tabWidthPx > 0f) {
+                    val pendingDrag = activeDragLeftPx
+                    if (!pendingDrag.isNaN()) {
+                        indicatorLeftAnim.snapTo(pendingDrag)
+                        activeDragLeftPx = Float.NaN
+                    }
                     indicatorLeftAnim.animateTo(
                         targetValue = selectedIndex * tabWidthPx,
                         animationSpec = tween(
@@ -791,7 +824,7 @@ private fun <T> LiquidGlassBottomNavigation(
                 }
             }
 
-            val pillScale by animateFloatAsState(
+            val pillScaleState = animateFloatAsState(
                 targetValue = if (isDraggingNav) NAV_PILL_DRAG_SCALE else 1f,
                 animationSpec = tween(durationMillis = NAV_PILL_SCALE_DURATION_MS),
                 label = "pillScale"
@@ -802,17 +835,18 @@ private fun <T> LiquidGlassBottomNavigation(
             // và giá trị animation chỉ được đọc ở pha layout/draw (không recompose mỗi frame).
             Box(
                 modifier = Modifier
-                    .offset { IntOffset(indicatorLeftAnim.value.roundToInt(), 0) }
+                    .offset {
+                        val xPx = if (!activeDragLeftPx.isNaN()) activeDragLeftPx else indicatorLeftAnim.value
+                        IntOffset(xPx.roundToInt(), 0)
+                    }
                     .width(tabWidth)
                     .fillMaxHeight()
                     .graphicsLayer {
-                        scaleX = pillScale
-                        scaleY = pillScale
+                        val s = pillScaleState.value
+                        scaleX = s
+                        scaleY = s
                     }
-                    .iosLiquidGlassActivePill(
-                        isDark = isDark,
-                        isDragging = isDraggingNav
-                    )
+                    .then(activePillGlassModifier)
             )
 
             Row(
@@ -821,13 +855,17 @@ private fun <T> LiquidGlassBottomNavigation(
                     // Layer riêng cho icon/nhãn: animation màu/scale của tab không làm vẽ lại Dock
                     .graphicsLayer()
                     .pointerInput(tabWidthPx, items.size) {
+                        var rawDragLeftPx = 0f
+                        var settleJob: Job? = null
                         detectHorizontalDragGestures(
                             onDragStart = { startOffset ->
+                                settleJob?.cancel()
+                                settleJob = null
                                 isDraggingNav = true
                                 val initialLeft = startOffset.x - tabWidthPx / 2f
                                 rawDragLeftPx = initialLeft
                                 val dampedLeft = rubberBand(initialLeft, maxLeftPx)
-                                scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
+                                activeDragLeftPx = dampedLeft
                                 dragHoverIndex = hoverIndexOf(dampedLeft, tabWidthPx, items.size)
                             },
                             onHorizontalDrag = { change, dragAmount ->
@@ -835,7 +873,7 @@ private fun <T> LiquidGlassBottomNavigation(
                                 val nextRaw = rawDragLeftPx + dragAmount
                                 rawDragLeftPx = nextRaw
                                 val dampedLeft = rubberBand(nextRaw, maxLeftPx)
-                                scope.launch { indicatorLeftAnim.snapTo(dampedLeft) }
+                                activeDragLeftPx = dampedLeft
                                 val idx = hoverIndexOf(dampedLeft, tabWidthPx, items.size)
                                 if (dragHoverIndex != idx) {
                                     dragHoverIndex = idx
@@ -847,21 +885,58 @@ private fun <T> LiquidGlassBottomNavigation(
                             },
                             onDragEnd = {
                                 val targetIdx = dragHoverIndex
+                                val finalDragLeft = activeDragLeftPx
                                 isDraggingNav = false
                                 dragHoverIndex = null
                                 val currentItems = itemsState
-                                if (targetIdx != null && targetIdx in currentItems.indices) {
+                                val resolvedTargetIdx = if (targetIdx != null && targetIdx in currentItems.indices) {
                                     val targetTab = currentItems[targetIdx].tab
                                     if (targetTab == currentTabState) {
                                         onScrollToTopState(targetTab)
                                     } else {
                                         onTabClickState(targetTab)
                                     }
+                                    targetIdx
+                                } else {
+                                    selectedIndexState
+                                }
+                                settleJob?.cancel()
+                                settleJob = scope.launch {
+                                    if (!finalDragLeft.isNaN()) {
+                                        indicatorLeftAnim.snapTo(finalDragLeft)
+                                    }
+                                    activeDragLeftPx = Float.NaN
+                                    if (tabWidthPx > 0f) {
+                                        indicatorLeftAnim.animateTo(
+                                            targetValue = resolvedTargetIdx * tabWidthPx,
+                                            animationSpec = tween(
+                                                durationMillis = NAV_CAPSULE_GLIDE_DURATION_MS,
+                                                easing = NavCapsuleGlideEasing
+                                            )
+                                        )
+                                    }
                                 }
                             },
                             onDragCancel = {
+                                val finalDragLeft = activeDragLeftPx
                                 isDraggingNav = false
                                 dragHoverIndex = null
+                                settleJob?.cancel()
+                                settleJob = scope.launch {
+                                    if (!finalDragLeft.isNaN()) {
+                                        indicatorLeftAnim.snapTo(finalDragLeft)
+                                    }
+                                    activeDragLeftPx = Float.NaN
+                                    if (tabWidthPx > 0f) {
+                                        indicatorLeftAnim.animateTo(
+                                            targetValue = selectedIndexState * tabWidthPx,
+                                            animationSpec = tween(
+                                                durationMillis = NAV_CAPSULE_GLIDE_DURATION_MS,
+                                                easing = NavCapsuleGlideEasing
+                                            )
+                                        )
+                                    }
+                                }
                             }
                         )
                     },
@@ -875,81 +950,127 @@ private fun <T> LiquidGlassBottomNavigation(
                         currentTab == item.tab
                     }
                     val isDragTarget = isDraggingNav && dragHoverIndex == index
-                    val contentColor by animateColorAsState(
-                        targetValue = if (isSelected) activeContentColor else inactiveContentColor,
-                        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
-                        label = "tabColor"
+                    LiquidGlassNavTabItem(
+                        item = item,
+                        isSelected = isSelected,
+                        isDragTarget = isDragTarget,
+                        isCurrentTab = currentTab == item.tab,
+                        activeContentColor = activeContentColor,
+                        inactiveContentColor = inactiveContentColor,
+                        iconSize = iconSize,
+                        selectedIconOffset = selectedIconOffset,
+                        dragIconOffset = dragIconOffset,
+                        tabShape = tabShape,
+                        onTabClick = onTabClick,
+                        onScrollToTop = onScrollToTop
                     )
-                    val iconScale by animateFloatAsState(
-                        targetValue = when {
-                            isDragTarget -> NAV_ICON_DRAG_SCALE
-                            isSelected -> NAV_ICON_SELECTED_SCALE
-                            else -> 1f
-                        },
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessMedium
-                        ),
-                        label = "iconScale"
-                    )
-                    val iconOffsetY by animateDpAsState(
-                        targetValue = when {
-                            isDragTarget -> dragIconOffset
-                            isSelected -> selectedIconOffset
-                            else -> 0.dp
-                        },
-                        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
-                        label = "iconOffsetY"
-                    )
-                    val label = stringResource(id = item.labelRes)
+                }
+            }
+        }
+    }
+}
 
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(spacing.radiusExtraLarge))
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                if (currentTab == item.tab) {
-                                    onScrollToTop(item.tab)
-                                } else {
-                                    onTabClick(item.tab)
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = label,
-                                tint = contentColor,
-                                modifier = Modifier
-                                    // Đọc animation trong graphicsLayer => chỉ vẽ lại, không recompose
-                                    .graphicsLayer {
-                                        translationY = iconOffsetY.toPx()
-                                        scaleX = iconScale
-                                        scaleY = iconScale
-                                    }
-                                    .size(iconSize)
-                            )
-                            Spacer(modifier = Modifier.height(spacing.space2))
-                            Text(
-                                text = label,
-                                color = contentColor,
-                                style = MaterialTheme.typography.caption,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+@Composable
+private fun <T> RowScope.LiquidGlassNavTabItem(
+    item: NavItem<T>,
+    isSelected: Boolean,
+    isDragTarget: Boolean,
+    isCurrentTab: Boolean,
+    activeContentColor: Color,
+    inactiveContentColor: Color,
+    iconSize: Dp,
+    selectedIconOffset: Dp,
+    dragIconOffset: Dp,
+    tabShape: RoundedCornerShape,
+    onTabClick: (T) -> Unit,
+    onScrollToTop: (T) -> Unit
+) {
+    val spacing = MaterialTheme.spacing
+    val contentColorState = animateColorAsState(
+        targetValue = if (isSelected) activeContentColor else inactiveContentColor,
+        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
+        label = "tabColor"
+    )
+    val iconScaleState = animateFloatAsState(
+        targetValue = when {
+            isDragTarget -> NAV_ICON_DRAG_SCALE
+            isSelected -> NAV_ICON_SELECTED_SCALE
+            else -> 1f
+        },
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "iconScale"
+    )
+    val iconOffsetYState = animateDpAsState(
+        targetValue = when {
+            isDragTarget -> dragIconOffset
+            isSelected -> selectedIconOffset
+            else -> 0.dp
+        },
+        animationSpec = tween(durationMillis = NAV_CONTENT_ANIM_DURATION_MS),
+        label = "iconOffsetY"
+    )
+    val label = stringResource(id = item.labelRes)
+    val painter = rememberVectorPainter(image = item.icon)
+    val baseCaptionStyle = MaterialTheme.typography.caption
+    val labelStyle = remember(baseCaptionStyle, isSelected) {
+        baseCaptionStyle.copy(fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
+    }
+
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clip(tabShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                if (isCurrentTab) {
+                    onScrollToTop(item.tab)
+                } else {
+                    onTabClick(item.tab)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .semantics {
+                        contentDescription = label
+                        role = Role.Image
+                    }
+                    // Đọc toàn bộ animation (offset, scale, tint color) trong graphicsLayer/drawBehind => 0 recomposition mỗi frame
+                    .graphicsLayer {
+                        translationY = iconOffsetYState.value.toPx()
+                        val s = iconScaleState.value
+                        scaleX = s
+                        scaleY = s
+                    }
+                    .size(iconSize)
+                    .drawBehind {
+                        with(painter) {
+                            draw(
+                                size = this@drawBehind.size,
+                                colorFilter = ColorFilter.tint(contentColorState.value)
                             )
                         }
                     }
-                }
-            }
+            )
+            Spacer(modifier = Modifier.height(spacing.space2))
+            BasicText(
+                text = label,
+                style = labelStyle,
+                color = { contentColorState.value },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
