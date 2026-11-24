@@ -160,6 +160,7 @@ import com.tenli.oneview.ui.component.LiveStreamPlayer
 import com.tenli.oneview.ui.component.MobileEventCard
 import com.tenli.oneview.ui.component.MobileFilterBottomSheet
 import com.tenli.oneview.ui.component.MobileFullScreenOverlay
+import com.tenli.oneview.ui.component.MobileSectionHeader
 import com.tenli.oneview.ui.component.MobileTopActionButton
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
@@ -1559,7 +1560,10 @@ private fun MobileLiveCameraScreen(
                     MobileTopBar(
                         title = selectedCamera.camera.name,
                         leftAction = {
-                            com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackClick)
+                            com.tenli.oneview.ui.component.SheetBackButton(
+                                onClick = onBackClick,
+                                icon = LucideIcons.ChevronDown
+                            )
                         },
                         rightAction = {
                             when (activeDetailTab) {
@@ -2088,10 +2092,10 @@ private fun CameraPlaybackTabContent(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(
-                                    start = spacing.space2,
-                                    end = spacing.space2,
+                                    start = spacing.space4,
+                                    end = spacing.space4,
                                     top = spacing.space6,
-                                    bottom = spacing.space8
+                                    bottom = spacing.space6
                                 ),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(spacing.space6)
@@ -2105,8 +2109,8 @@ private fun CameraPlaybackTabContent(
                             Text(
                                 text = dayLabel,
                                 color = colors.textMuted,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Medium,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -2539,7 +2543,7 @@ private fun CameraLiveTabInfoContent(
         modifier = modifier
             .verticalScroll(scrollState)
             .padding(top = spacing.space12, bottom = bottomClearance),
-        verticalArrangement = Arrangement.spacedBy(spacing.space14)
+        verticalArrangement = Arrangement.spacedBy(spacing.space18)
     ) {
         // 1. Thẻ trạng thái camera & thanh thao tác nhanh (lấp đầy hợp lý khoảng trống bên dưới luồng trực tiếp)
         Column(
@@ -2616,10 +2620,19 @@ private fun CameraLiveTabInfoContent(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                val qualityBadgeBg by animateColorAsState(
+                    targetValue = if (isHdStream) {
+                        colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.11f)
+                    } else {
+                        colors.controlBg
+                    },
+                    animationSpec = tween(durationMillis = 180),
+                    label = "liveQualityBadgeBg"
+                )
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(spacing.radiusTiny))
-                        .background(colors.controlBg)
+                        .background(qualityBadgeBg)
                         .padding(horizontal = spacing.space8, vertical = spacing.space4),
                     contentAlignment = Alignment.Center
                 ) {
@@ -2649,7 +2662,7 @@ private fun CameraLiveTabInfoContent(
                         } else {
                             if (isEn) "Quality: SD" else "Luồng SD"
                         },
-                        tint = colors.activeContent,
+                        isSelected = isHdStream,
                         onClick = {
                             try {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -2706,51 +2719,16 @@ private fun CameraLiveTabInfoContent(
 
         // 2. Danh sách sự kiện gần đây của camera này (tận dụng dữ liệu đã pre-warm sẵn 0ms)
         if (canAccessEvents) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(spacing.space8)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = spacing.space12, end = spacing.space6),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isTodayEventFilter) {
-                            if (isEn) "Today's events" else "Sự kiện hôm nay"
-                        } else {
-                            if (isEn) "Recent events" else "Sự kiện gần đây"
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onBackground
-                    )
-
-                    Row(
-                        modifier = Modifier
-                            .heightIn(min = spacing.space32)
-                            .clip(RoundedCornerShape(spacing.radiusSmall))
-                            .clickable(onClick = onOpenEventsTab)
-                            .padding(start = spacing.space6, top = spacing.space4, bottom = spacing.space4),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-                    ) {
-                        Text(
-                            text = if (isEn) "View all" else "Xem tất cả",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = colors.activeContent
-                        )
-                        Icon(
-                            imageVector = LucideIcons.ChevronRight,
-                            contentDescription = null,
-                            tint = colors.activeContent,
-                            modifier = Modifier.size(spacing.iconXSmall)
-                        )
-                    }
-                }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                MobileSectionHeader(
+                    title = if (isTodayEventFilter) {
+                        if (isEn) "Today's events" else "Sự kiện hôm nay"
+                    } else {
+                        if (isEn) "Recent events" else "Sự kiện gần đây"
+                    },
+                    actionText = if (isEn) "View all" else "Xem tất cả",
+                    onActionClick = onOpenEventsTab
+                )
 
                 if (uiState.isLoadingCameraEvents && recentCameraEvents.isEmpty()) {
                     EventCardSkeletonList(
@@ -2832,7 +2810,8 @@ private fun CameraLiveTabInfoContent(
 private fun CameraLiveQuickActionTile(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    tint: Color,
+    tint: Color = MaterialTheme.appColors.iconDefault,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -2840,11 +2819,35 @@ private fun CameraLiveQuickActionTile(
     val spacing = MaterialTheme.spacing
     val shape = remember(spacing.radiusSmallMedium) { RoundedCornerShape(spacing.radiusSmallMedium) }
 
+    val targetBg = if (isSelected) {
+        colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.11f)
+    } else {
+        colors.controlBg
+    }
+    val targetIconTint = if (isSelected) colors.activeContent else tint
+    val targetLabelColor = if (isSelected) colors.activeContent else colors.textTitle
+
+    val bgColor by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = 180),
+        label = "liveQuickActionTileBg"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = targetIconTint,
+        animationSpec = tween(durationMillis = 180),
+        label = "liveQuickActionTileIconTint"
+    )
+    val labelColor by animateColorAsState(
+        targetValue = targetLabelColor,
+        animationSpec = tween(durationMillis = 180),
+        label = "liveQuickActionTileLabelColor"
+    )
+
     Column(
         modifier = modifier
             .heightIn(min = spacing.space56)
             .clip(shape)
-            .background(colors.controlBg)
+            .background(bgColor)
             .clickable(onClick = onClick)
             .padding(horizontal = spacing.space6, vertical = spacing.space8),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -2853,15 +2856,15 @@ private fun CameraLiveQuickActionTile(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = tint,
+            tint = iconTint,
             modifier = Modifier.size(spacing.iconSmallMedium)
         )
         Spacer(modifier = Modifier.height(spacing.space5))
         Text(
             text = label,
             style = MaterialTheme.typography.caption,
-            fontWeight = FontWeight.Medium,
-            color = colors.textTitle,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            color = labelColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )

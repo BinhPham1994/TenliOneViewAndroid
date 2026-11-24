@@ -141,6 +141,7 @@ import com.tenli.oneview.ui.component.IconBadge
 import com.tenli.oneview.ui.component.LocalMobileOverlayHost
 import com.tenli.oneview.ui.component.MobileNativeBottomSheet
 import com.tenli.oneview.ui.component.MobileOverlayHostState
+import com.tenli.oneview.ui.component.MobileSectionHeader
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.SheetActionButtons
 import com.tenli.oneview.ui.component.WaveDotsLoading
@@ -1353,17 +1354,16 @@ private fun SettingTopCard(
     }
 }
 
-/** Tiêu đề nhóm cài đặt (chữ phụ, đậm vừa) */
+/** Tiêu đề nhóm cài đặt (dùng chung [MobileSectionHeader] để đồng bộ 100% với các màn khác) */
 @Composable
 private fun SettingsSectionHeader(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
+    MobileSectionHeader(
+        title = text,
         modifier = modifier,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.appColors.textMuted,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis
+        horizontalStartPadding = 0.dp,
+        horizontalEndPadding = 0.dp,
+        bottomPadding = 0.dp,
+        maxLines = 2
     )
 }
 

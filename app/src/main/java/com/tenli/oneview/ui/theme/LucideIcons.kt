@@ -1794,5 +1794,60 @@ object LucideIcons {
             }
         }
     }
+
+    val Image: ImageVector by lazy {
+        lucideVector("LucideImage") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // rect width="18" height="18" x="3" y="3" rx="2" ry="2"
+                moveTo(5f, 3f)
+                horizontalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, true, 21f, 5f)
+                verticalLineTo(19f)
+                arcTo(2f, 2f, 0f, false, true, 19f, 21f)
+                horizontalLineTo(5f)
+                arcTo(2f, 2f, 0f, false, true, 3f, 19f)
+                verticalLineTo(5f)
+                arcTo(2f, 2f, 0f, false, true, 5f, 3f)
+                close()
+                // circle cx="9" cy="9" r="2"
+                moveTo(11f, 9f)
+                arcTo(2f, 2f, 0f, true, true, 7f, 9f)
+                arcTo(2f, 2f, 0f, true, true, 11f, 9f)
+                close()
+                // m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21
+                moveTo(21f, 15f)
+                lineTo(17.914f, 11.914f)
+                arcTo(2f, 2f, 0f, false, false, 15.086f, 11.914f)
+                lineTo(6f, 21f)
+            }
+        }
+    }
+
+    val PlayCircle: ImageVector by lazy {
+        lucideVector("LucidePlayCircle") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // circle cx="12" cy="12" r="10"
+                moveTo(22f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 2f, 12f)
+                arcTo(10f, 10f, 0f, true, true, 22f, 12f)
+                close()
+                // polygon points="10 8 16 12 10 16 10 8"
+                moveTo(10f, 8f)
+                lineTo(16f, 12f)
+                lineTo(10f, 16f)
+                close()
+            }
+        }
+    }
 }
 

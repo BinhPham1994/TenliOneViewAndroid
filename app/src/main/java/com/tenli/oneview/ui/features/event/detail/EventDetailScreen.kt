@@ -135,6 +135,7 @@ import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.LiveStreamPlayer
+import com.tenli.oneview.ui.component.MobileSectionHeader
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.SheetCloseButton
 import com.tenli.oneview.ui.component.VideoFrameImage
@@ -149,10 +150,7 @@ import com.tenli.oneview.ui.theme.BrandLight
 import com.tenli.oneview.ui.theme.BrandPrimary
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.OrangeDeep
-import com.tenli.oneview.ui.theme.Slate500
 import com.tenli.oneview.ui.theme.Slate900
-import com.tenli.oneview.ui.theme.SurfaceVariant
-import com.tenli.oneview.ui.theme.SurfaceVariantDark
 import com.tenli.oneview.ui.theme.WarningAmberDeep
 import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.caption
@@ -200,7 +198,6 @@ private val DismissScrimColor = Color.Black
 // Animation specs (khởi tạo 1 lần)
 // ---------------------------------------------------------------------------------------------
 private val StandardEasing = CubicBezierEasing(0.4f, 0f, 0.2f, 1f)
-private val SegmentEasing = CubicBezierEasing(0.18f, 0.9f, 0.3f, 1f)
 private val SlideEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
 private val PopupInEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
@@ -217,7 +214,6 @@ private val BoundingBoxPalette = listOf(
     Color(0xFFEB2F96)
 )
 private val BoundingBoxStroke = Stroke(width = 4f)
-private val PillShadowColor = Color.Black.copy(alpha = 0.12f)
 
 private val LocationMaxWidth = 230.dp
 private val CropPopupMaxWidth = 280.dp
@@ -226,12 +222,7 @@ private val CropPopupFallbackSize = 156.dp
 private val RelatedPlateCardWidth = 148.dp
 private val PlatesLoadingHeight = 110.dp
 
-private val SectionLetterSpacing = 0.6.sp
 private val PlateLetterSpacing = 0.8.sp
-
-/** Chiều cao thanh chọn tab media / bộ chọn khoảng thời gian (42dp) */
-@Composable
-private fun segmentControlHeight(): Dp = MaterialTheme.spacing.space40 + MaterialTheme.spacing.space2
 
 /**
  * Tọa độ các vùng trên màn hình – chỉ đọc trong bộ xử lý cử chỉ nên dùng biến thường
@@ -554,7 +545,7 @@ fun EventDetailScreen(
                                         downRootY in (pinnedBottomY - videoControllerZoneHeightPx)..pinnedBottomY
                                 val isDataBoardVisible =
                                     listState.layoutInfo.visibleItemsInfo.any {
-                                        it.key == KEY_DATA_BOARD || it.key == KEY_INFO_HEADER
+                                        it.key == KEY_MEDIA_TABS || it.key == KEY_DATA_BOARD || it.key == KEY_INFO_HEADER
                                     }
                                 val isInsideDataBoard =
                                     isDataBoardVisible &&
@@ -719,13 +710,6 @@ fun EventDetailScreen(
                                     },
                                     onClose = handleBack
                                 )
-
-                                // 3-Segment Media Tabs (.custom-tabs .ant-tabs-nav-list) with Smooth Sliding Pill Indicator
-                                MediaTabSelector(
-                                    selectedTab = selectedTab,
-                                    isEn = isEn,
-                                    onSelect = { selectedTab = it }
-                                )
                             }
                         },
                         bottomContent = {
@@ -734,8 +718,6 @@ fun EventDetailScreen(
                                     .fillMaxSize()
                                     .background(colors.pageBg)
                             ) {
-                                Spacer(modifier = Modifier.height(spacing.space6))
-
                                 // =========================================================================
                                 // 2. SCROLLABLE BOTTOM CONTAINER (.event-info-scroll-container in PWA)
                                 // =========================================================================
@@ -744,18 +726,31 @@ fun EventDetailScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .weight(1f),
-                                    contentPadding = PaddingValues(bottom = spacing.space32 + spacing.space4)
+                                    contentPadding = PaddingValues(
+                                        top = spacing.space12,
+                                        bottom = spacing.space32 + spacing.space4
+                                    )
                                 ) {
-                        // Section Title: THÔNG TIN SỰ KIỆN
+                        // Cụm 3 nút chọn chế độ xem (Live Camera / Ảnh sự kiện / Video sự kiện) ngay dưới khung 16:9
+                        // đồng bộ phong cách cụm nút thao tác nhanh trên màn hình Trực tiếp
+                        item(key = KEY_MEDIA_TABS) {
+                            EventMediaTabCard(
+                                selectedTab = selectedTab,
+                                isEn = isEn,
+                                onSelect = { tab ->
+                                    if (selectedTab != tab) {
+                                        runCatching { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+                                        selectedTab = tab
+                                    }
+                                }
+                            )
+                        }
+
+                        // Section Title: Thông tin sự kiện (chuẩn hóa giống tiêu đề cụm Cài đặt)
                         item(key = KEY_INFO_HEADER, contentType = CONTENT_TYPE_SECTION_HEADER) {
-                            SectionHeaderText(
-                                text = stringResource(id = R.string.detail_header_info).uppercase(),
-                                modifier = Modifier.padding(
-                                    start = spacing.space24,
-                                    end = spacing.space14,
-                                    top = spacing.space16,
-                                    bottom = spacing.space8
-                                )
+                            MobileSectionHeader(
+                                title = stringResource(id = R.string.detail_header_info),
+                                modifier = Modifier.padding(top = spacing.space18)
                             )
                         }
 
@@ -913,6 +908,7 @@ fun EventDetailScreen(
 }
 
 // LazyColumn keys & content types
+private const val KEY_MEDIA_TABS = "section_event_media_tabs"
 private const val KEY_INFO_HEADER = "section_event_info_header"
 private const val KEY_DATA_BOARD = "section_event_data_board"
 private const val KEY_RELATED_PLATES = "section_related_plates"
@@ -935,7 +931,7 @@ private fun DetailHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = spacing.space12, bottom = spacing.space6, start = spacing.space14, end = spacing.space14)
+            .padding(top = spacing.space12, bottom = spacing.space10, start = spacing.space14, end = spacing.space14)
     ) {
         Column(
             modifier = Modifier
@@ -993,96 +989,116 @@ private fun DetailHeader(
     }
 }
 
+/**
+ * Cụm 3 nút chọn chế độ xem (Live Camera / Ảnh sự kiện / Video sự kiện) nằm ngay dưới khung 16:9,
+ * đồng bộ trực quan với cụm nút thao tác nhanh (icon + nhãn trong ô bo góc) của màn hình Trực tiếp.
+ */
 @Composable
-private fun MediaTabSelector(
+private fun EventMediaTabCard(
     selectedTab: EventMediaTab,
     isEn: Boolean,
     onSelect: (EventMediaTab) -> Unit
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    val tabsTrackBg = if (colors.isDark) colors.controlBg else colors.surface
-    val activePillBg = if (colors.isDark) SurfaceVariantDark else SurfaceVariant
-    val pillShape = RoundedCornerShape(spacing.radiusSmall)
-    val selectedTabIndex = MediaTabs.indexOf(selectedTab).coerceAtLeast(0)
-
-    val pillIndex by animateFloatAsState(
-        targetValue = selectedTabIndex.toFloat(),
-        animationSpec = tween(durationMillis = 260, easing = SegmentEasing),
-        label = "mediaSegmentIndicator"
-    )
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = spacing.space10, end = spacing.space10, top = spacing.space6, bottom = spacing.space12)
-            .height(segmentControlHeight())
-            .clip(RoundedCornerShape(spacing.radiusCompact))
-            .background(tabsTrackBg)
-            .padding(spacing.space3)
-    ) {
-        // Sliding Active Pill – dịch chuyển trực tiếp trên GPU RenderThread, không dùng BoxWithConstraints (SubcomposeLayout)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(1f / MediaTabs.size)
-                .fillMaxHeight()
-                .graphicsLayer {
-                    translationX = pillIndex * size.width
-                }
-                .shadow(
-                    elevation = spacing.space2,
-                    shape = pillShape,
-                    ambientColor = PillShadowColor,
-                    spotColor = PillShadowColor
-                )
-                .clip(pillShape)
-                .background(activePillBg)
+    val cardShape = remember(spacing.radiusMedium) { RoundedCornerShape(spacing.radiusMedium) }
+    val currentDensity = LocalDensity.current
+    val clampedDensity = remember(currentDensity) {
+        Density(
+            density = currentDensity.density,
+            fontScale = currentDensity.fontScale.coerceAtMost(1.05f)
         )
+    }
 
-        val currentDensity = LocalDensity.current
-        val clampedDensity = remember(currentDensity) {
-            Density(
-                density = currentDensity.density,
-                fontScale = currentDensity.fontScale.coerceAtMost(1.05f)
-            )
-        }
-
-        CompositionLocalProvider(LocalDensity provides clampedDensity) {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MediaTabs.forEach { tab ->
-                    val isSelected = selectedTab == tab
-                    val tabTextColor by animateColorAsState(
-                        targetValue = if (isSelected) colors.accent else Slate500,
-                        animationSpec = tween(durationMillis = 180),
-                        label = "mediaTabTextColor"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(pillShape)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                            ) { onSelect(tab) }
-                            .padding(horizontal = spacing.space4),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (isEn) tab.titleEn else tab.titleVi,
-                            color = tabTextColor,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+    CompositionLocalProvider(LocalDensity provides clampedDensity) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = spacing.space10)
+                .clip(cardShape)
+                .background(colors.surface)
+                .padding(spacing.space12),
+            horizontalArrangement = Arrangement.spacedBy(spacing.space8)
+        ) {
+            MediaTabs.forEach { tab ->
+                val icon = when (tab) {
+                    EventMediaTab.LIVE_CAMERA -> LucideIcons.Video
+                    EventMediaTab.EVENT_IMAGE -> LucideIcons.Image
+                    EventMediaTab.EVENT_VIDEO -> LucideIcons.PlayCircle
                 }
+                EventMediaTabTile(
+                    icon = icon,
+                    label = if (isEn) tab.titleEn else tab.titleVi,
+                    isSelected = selectedTab == tab,
+                    onClick = { onSelect(tab) },
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun EventMediaTabTile(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val tileShape = remember(spacing.radiusSmallMedium) { RoundedCornerShape(spacing.radiusSmallMedium) }
+
+    val targetBg = if (isSelected) {
+        colors.accent.copy(alpha = if (colors.isDark) 0.22f else 0.11f)
+    } else {
+        colors.controlBg
+    }
+    val targetIconTint = if (isSelected) colors.activeContent else colors.iconDefault
+    val targetLabelColor = if (isSelected) colors.activeContent else colors.textTitle
+
+    val bgColor by animateColorAsState(
+        targetValue = targetBg,
+        animationSpec = tween(durationMillis = 180),
+        label = "eventMediaTileBg"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = targetIconTint,
+        animationSpec = tween(durationMillis = 180),
+        label = "eventMediaTileIconTint"
+    )
+    val labelColor by animateColorAsState(
+        targetValue = targetLabelColor,
+        animationSpec = tween(durationMillis = 180),
+        label = "eventMediaTileLabelColor"
+    )
+
+    Column(
+        modifier = modifier
+            .heightIn(min = spacing.space56)
+            .clip(tileShape)
+            .background(bgColor)
+            .clickable(onClick = onClick)
+            .padding(horizontal = spacing.space6, vertical = spacing.space8),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = iconTint,
+            modifier = Modifier.size(spacing.iconSmallMedium)
+        )
+        Spacer(modifier = Modifier.height(spacing.space5))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.caption,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -2628,33 +2644,30 @@ private fun RelatedPlatesSection(
 ) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = spacing.space24, end = spacing.space14, top = spacing.space6, bottom = spacing.space8),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SectionHeaderText(
-                text = if (isEn) "RELATED LICENSE PLATES" else "BIỂN SỐ LIÊN QUAN",
-                modifier = Modifier.weight(1f, fill = false)
-            )
-            Box(
-                modifier = Modifier
-                    .size(spacing.space24)
-                    .clip(RoundedCornerShape(spacing.radiusTiny))
-                    .clickable(onClick = onClose),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = LucideIcons.X,
-                    contentDescription = "Close related plates",
-                    tint = colors.textMuted,
-                    modifier = Modifier.size(spacing.iconXSmall)
-                )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = spacing.space18)
+    ) {
+        MobileSectionHeader(
+            title = if (isEn) "Related license plates" else "Biển số liên quan",
+            trailingContent = {
+                Box(
+                    modifier = Modifier
+                        .size(spacing.space24)
+                        .clip(RoundedCornerShape(spacing.radiusTiny))
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = LucideIcons.X,
+                        contentDescription = "Close related plates",
+                        tint = colors.textMuted,
+                        modifier = Modifier.size(spacing.iconXSmall)
+                    )
+                }
             }
-        }
+        )
 
         SectionCard {
             when {
@@ -2749,21 +2762,6 @@ private fun RelatedPlateCard(plateEvent: EventData, isActive: Boolean, onClick: 
 // =============================================================================================
 // Building blocks dùng chung trong màn
 // =============================================================================================
-
-/** Tiêu đề mục in hoa (THÔNG TIN SỰ KIỆN / BIỂN SỐ LIÊN QUAN) */
-@Composable
-private fun SectionHeaderText(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = SectionLetterSpacing,
-        color = MaterialTheme.appColors.textMuted,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = modifier
-    )
-}
 
 /** Thẻ nền surface bo 16dp, cách lề ngang 10dp (khung .event-data-board / biển số liên quan) */
 @Composable

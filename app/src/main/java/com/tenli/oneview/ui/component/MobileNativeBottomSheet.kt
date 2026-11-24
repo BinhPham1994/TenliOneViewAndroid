@@ -170,9 +170,13 @@ fun SheetCloseButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** Nút quay lại tròn (mũi tên trái) đồng bộ nền & kích thước với [SheetCloseButton]. */
+/** Nút quay lại tròn đồng bộ nền & kích thước với [SheetCloseButton] (mặc định mũi tên trái, có thể truyền [LucideIcons.ChevronDown] cho sheet kéo xuống). */
 @Composable
-fun SheetBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun SheetBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector = LucideIcons.ChevronLeft
+) {
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
     Box(
@@ -184,7 +188,7 @@ fun SheetBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            imageVector = LucideIcons.ChevronLeft,
+            imageVector = icon,
             contentDescription = stringResource(id = R.string.common_back),
             tint = colors.textSubtle,
             modifier = Modifier.size(spacing.iconSmall)

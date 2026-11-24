@@ -111,9 +111,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -197,8 +199,11 @@ private val GridBottomScrimBrush = Brush.verticalGradient(
 private val ListThumbnailBaseWidth = 156.dp
 private const val THUMBNAIL_ASPECT_RATIO = 16f / 9f
 
-/** Ảnh crop khuôn mặt trên thẻ Grid: 72x90dp (tỉ lệ 4:5) */
-private const val FACE_CROP_ASPECT_RATIO = 72f / 90f
+/** Ảnh crop khuôn mặt trên thẻ Grid: tỉ lệ 4:5, co giãn cân đối theo chiều cao thẻ (~42% chiều cao khả dụng, giới hạn 44..80dp). */
+private const val FACE_CROP_ASPECT_RATIO = 4f / 5f
+private const val FACE_CROP_HEIGHT_FRACTION = 0.42f
+private val FaceCropMinHeight = 44.dp
+private val FaceCropMaxHeight = 80.dp
 private const val FACE_CROP_REQUEST_WIDTH_PX = 160
 private const val FACE_CROP_REQUEST_HEIGHT_PX = 200
 
@@ -914,6 +919,90 @@ fun MobileTopBar(
     }
 }
 
+/**
+ * Tiêu đề cụm chuẩn hóa toàn ứng dụng theo chuẩn màn Cài đặt:
+ * - Chữ `bodyMedium` (SemiBold), màu `textMuted`
+ * - Lề trái `14dp` (lùi `4dp` so với mép thẻ `10dp`), cách nội dung bên dưới `6dp`
+ * - Hỗ trợ nút hành động bên phải (vd. "Xem tất cả >") với chiều cao khớp dòng chữ để giữ đúng khoảng cách `6dp`.
+ */
+@Composable
+fun MobileSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    actionText: String? = null,
+    onTitleClick: (() -> Unit)? = null,
+    onActionClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
+    horizontalStartPadding: Dp = MaterialTheme.spacing.space14,
+    horizontalEndPadding: Dp = MaterialTheme.spacing.space10,
+    bottomPadding: Dp = MaterialTheme.spacing.space6,
+    maxLines: Int = 1
+) {
+    val colors = MaterialTheme.appColors
+    val spacing = MaterialTheme.spacing
+    val hasAction = !actionText.isNullOrEmpty() && onActionClick != null
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(
+                start = horizontalStartPadding,
+                end = if (hasAction) spacing.space6 else horizontalEndPadding,
+                bottom = bottomPadding
+            ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textMuted,
+            maxLines = maxLines,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (onTitleClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(spacing.radiusSmall))
+                            .clickable(onClick = onTitleClick)
+                    } else {
+                        Modifier
+                    }
+                )
+        )
+
+        if (hasAction) {
+            Spacer(modifier = Modifier.width(spacing.space6))
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(spacing.radiusSmall))
+                    .clickable(onClick = onActionClick!!)
+                    .padding(start = spacing.space6, top = spacing.space2, bottom = spacing.space2),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
+            ) {
+                Text(
+                    text = actionText!!,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.activeContent
+                )
+                Icon(
+                    imageVector = LucideIcons.ChevronRight,
+                    contentDescription = null,
+                    tint = colors.activeContent,
+                    modifier = Modifier.size(spacing.iconXSmall)
+                )
+            }
+        } else if (trailingContent != null) {
+            Spacer(modifier = Modifier.width(spacing.space6))
+            trailingContent()
+        }
+    }
+}
+
 @Composable
 fun MobileTopActionButton(
     icon: ImageVector,
@@ -1466,7 +1555,7 @@ private fun EventGridCard(
     val boxes = remember(eventKey) { findAllBoxes(event) }
 
     val cardShape = remember(spacing) { RoundedCornerShape(spacing.radiusCompact) }
-    val faceShape = remember(spacing) { RoundedCornerShape(spacing.radiusSmall) }
+    val faceShape = remember(spacing) { RoundedCornerShape(spacing.radiusTiny) }
     val pillShape = remember(spacing) { RoundedCornerShape(spacing.radiusXSmall) }
     val pressIndication = remember(spacing.radiusCompact) {
         CardPressIndication(
@@ -1499,7 +1588,7 @@ private fun EventGridCard(
             targetHeightPx = imageHeightPx
         )
 
-        // Face crop overlay on TopEnd (72x90dp)
+        // Face crop overlay on TopEnd: co giãn tỉ lệ theo kích thước thẻ (tránh quá khổ trên thẻ cuộn ngang Trang chủ)
         val faceCropUrl = images.faceCropUrl
         if (faceCropUrl != null) {
             val faceCropRequest = remember(faceCropUrl) {
@@ -1519,12 +1608,24 @@ private fun EventGridCard(
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(spacing.space5)
-                    .width(spacing.avatarExtraLarge)
-                    .aspectRatio(FACE_CROP_ASPECT_RATIO)
+                    .padding(spacing.space6)
+                    .layout { measurable, constraints ->
+                        val maxAllowedH = minOf(FaceCropMaxHeight.roundToPx(), constraints.maxHeight)
+                        val minAllowedH = minOf(FaceCropMinHeight.roundToPx(), maxAllowedH)
+                        val targetH = (constraints.maxHeight * FACE_CROP_HEIGHT_FRACTION)
+                            .roundToInt()
+                            .coerceIn(minAllowedH, maxAllowedH)
+                        val targetW = (targetH * FACE_CROP_ASPECT_RATIO)
+                            .roundToInt()
+                            .coerceIn(0, constraints.maxWidth)
+                        val placeable = measurable.measure(Constraints.fixed(targetW, targetH))
+                        layout(placeable.width, placeable.height) {
+                            placeable.placeRelative(0, 0)
+                        }
+                    }
                     .clip(faceShape)
                     .background(colors.mediaOverlay)
-                    .border(spacing.borderMedium, onMedia.copy(alpha = 0.25f), faceShape)
+                    .border(spacing.borderMedium, onMedia.copy(alpha = 0.45f), faceShape)
             )
         }
 

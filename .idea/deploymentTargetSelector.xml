@@ -18,7 +18,7 @@
         <DialogSelection />
       </SelectionState>
       <SelectionState runConfigName="main">
-        <option name="selectionMode" value="DIALOG" />
+        <option name="selectionMode" value="DROPDOWN" />
         <DropdownSelection timestamp="2026-11-24T06:35:29.620498Z">
           <Target type="DEFAULT_BOOT">
             <handle>
@@ -30,12 +30,12 @@
           <targets>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="LocalEmulator" identifier="path=/Users/vung/.android/avd/Pixel_10_Pro_XL_2.avd" />
+                <DeviceId pluginId="PhysicalDevice" identifier="serial=WKMZZHOFH6J74PTO" />
               </handle>
             </Target>
             <Target type="DEFAULT_BOOT">
               <handle>
-                <DeviceId pluginId="PhysicalDevice" identifier="serial=WKMZZHOFH6J74PTO" />
+                <DeviceId pluginId="LocalEmulator" identifier="path=/Users/vung/.android/avd/Pixel_10_Pro_XL_2.avd" />
               </handle>
             </Target>
           </targets>

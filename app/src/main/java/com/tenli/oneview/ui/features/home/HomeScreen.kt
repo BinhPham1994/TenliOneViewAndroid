@@ -1,15 +1,14 @@
 package com.tenli.oneview.ui.features.home
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.FlingBehavior
+import androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,7 +41,6 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,7 +51,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
@@ -61,7 +58,9 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -85,6 +84,7 @@ import com.tenli.oneview.model.network.CameraModel
 import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.CardPressIndication
 import com.tenli.oneview.ui.component.MobileEventCard
+import com.tenli.oneview.ui.component.MobileSectionHeader
 import com.tenli.oneview.ui.component.MobileTopBar
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.rememberIsEnglish
@@ -92,7 +92,6 @@ import com.tenli.oneview.ui.component.rememberShimmerProgressState
 import com.tenli.oneview.ui.component.shimmerBackground
 import com.tenli.oneview.ui.features.event.buildCameraNameMap
 import com.tenli.oneview.ui.features.event.cameraUuidOrNull
-import com.tenli.oneview.ui.features.event.eventTimeToSeconds
 import com.tenli.oneview.ui.features.monitor.CameraQuickFilter
 import com.tenli.oneview.ui.theme.BrandAccent
 import com.tenli.oneview.ui.theme.InfoSkyDeep
@@ -105,6 +104,7 @@ import com.tenli.oneview.ui.theme.appColors
 import com.tenli.oneview.ui.theme.micro
 import com.tenli.oneview.ui.theme.spacing
 import com.tenli.oneview.ui.utils.AiTypeHelper
+import kotlin.math.abs
 
 // Gradient stops của 4 thẻ thống kê (đồng bộ với MobileHomePage.vue)
 private val StatBlueGradientStart = Color(0xFF0D8BF2)
@@ -120,7 +120,6 @@ private val HomeBottomContentPadding = 130.dp
 private const val HOME_CAROUSEL_ASPECT_RATIO = 16f / 9f
 private const val HOME_SHELF_IMAGE_WIDTH_PX = 540
 private const val HOME_SHELF_IMAGE_HEIGHT_PX = 304
-private const val FRESH_EVENT_WINDOW_SEC = 300L
 private val StatLabelLetterSpacing = 0.sp
 private val FavoriteStarColor = Color(0xFFFBBF24)
 
@@ -142,6 +141,11 @@ fun HomeScreen(
     val spacing = MaterialTheme.spacing
     val colors = MaterialTheme.appColors
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val density = LocalDensity.current
+    val containerWidthPx = LocalWindowInfo.current.containerSize.width
+    val containerWidthDp = remember(containerWidthPx, screenWidthDp, density) {
+        if (containerWidthPx > 0) with(density) { containerWidthPx.toDp() } else screenWidthDp.dp
+    }
     val shelfCardWidth = remember(screenWidthDp) {
         ((screenWidthDp * 0.64f).coerceIn(216f, 268f)).dp
     }
@@ -231,7 +235,7 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = spacing.space10, bottom = HomeBottomContentPadding)
+                contentPadding = PaddingValues(top = spacing.space8, bottom = HomeBottomContentPadding)
             ) {
                 // 1. Khối "Sự kiện gần đây" dạng Hero Carousel 16:9 cuộn ngang đặt nổi bật trên cùng
                 if (permissionState.canAccessEvents) {
@@ -247,7 +251,7 @@ fun HomeScreen(
                             zoneKey = "home_recent_carousel",
                             onHorizontalSwipeZoneChanged = handleSwipeZoneChanged
                         )
-                        Spacer(modifier = Modifier.height(spacing.space24))
+                        Spacer(modifier = Modifier.height(spacing.space18))
                     }
                 }
 
@@ -257,7 +261,7 @@ fun HomeScreen(
                     val hasOfflineCameras = totalCameras > 0 && uiState.onlineCamerasCount < totalCameras
 
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        HomeSectionHeader(
+                        MobileSectionHeader(
                             title = if (isEn) "Today's overview" else "Tổng quan hôm nay"
                         )
 
@@ -361,6 +365,7 @@ fun HomeScreen(
                             isTabActive = isTabActive,
                             cameraMap = cameraMap,
                             cardWidth = shelfCardWidth,
+                            containerWidth = containerWidthDp,
                             isEn = isEn,
                             onSelectModule = handleSelectAiModule,
                             onEventClick = handleEventCardClick,
@@ -375,83 +380,8 @@ fun HomeScreen(
 }
 
 /**
- * Tiêu đề mục thống nhất cho Trang chủ (chữ đậm rõ neo thị giác + nút "Xem tất cả >" căn sát mép phải nội dung).
- */
-@Composable
-private fun HomeSectionHeader(
-    title: String,
-    actionText: String? = null,
-    onTitleClick: (() -> Unit)? = null,
-    onActionClick: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.appColors
-    val spacing = MaterialTheme.spacing
-
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(
-                start = spacing.space12,
-                end = spacing.space6,
-                bottom = spacing.space8
-            ),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = colors.textStrong,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .then(
-                    if (onTitleClick != null) {
-                        Modifier
-                            .clip(RoundedCornerShape(spacing.radiusSmall))
-                            .clickable(onClick = onTitleClick)
-                            .padding(vertical = spacing.space2)
-                    } else {
-                        Modifier
-                    }
-                )
-        )
-
-        if (!actionText.isNullOrEmpty() && onActionClick != null) {
-            Spacer(modifier = Modifier.width(spacing.space6))
-            Row(
-                modifier = Modifier
-                    .heightIn(min = spacing.space28)
-                    .clip(RoundedCornerShape(spacing.radiusSmall))
-                    .clickable(onClick = onActionClick)
-                    .padding(start = spacing.space6, top = spacing.space2, bottom = spacing.space2),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(spacing.space2)
-            ) {
-                Text(
-                    text = actionText,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = colors.activeContent
-                )
-                Icon(
-                    imageVector = LucideIcons.ChevronRight,
-                    contentDescription = null,
-                    tint = colors.activeContent,
-                    modifier = Modifier.size(spacing.iconXSmall)
-                )
-            }
-        }
-    }
-}
-
-/**
- * Khối "Sự kiện gần đây" dạng Hero Carousel 16:9 cuộn ngang ở đầu Trang chủ:
+ * Khối "Sự kiện mới nhất" dạng Hero Carousel 16:9 cuộn ngang ở đầu Trang chủ:
  * - Vuốt ngang snap mượt qua tối đa 5 sự kiện mới nhất, hé nhẹ mép thẻ tiếp theo.
- * - Thẻ đầu tiên gắn badge "Mới nhất" (có chấm xanh nhịp thở với sự kiện vừa xảy ra < 5 phút).
  */
 @Composable
 private fun HomeRecentEventsCarouselSection(
@@ -481,8 +411,8 @@ private fun HomeRecentEventsCarouselSection(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        HomeSectionHeader(
-            title = if (isEn) "Recent events" else "Sự kiện gần đây",
+        MobileSectionHeader(
+            title = if (isEn) "Latest events" else "Sự kiện mới nhất",
             actionText = if (isEn) "View all" else "Xem tất cả",
             onActionClick = onViewAllClick
         )
@@ -590,30 +520,13 @@ private fun HomeRecentEventsCarouselSection(
                     ) { page ->
                         val event = events[page]
                         val cameraName = event.cameraUuidOrNull?.let { cameraMap[it] }.orEmpty()
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            MobileEventCard(
-                                event = event,
-                                cameraName = cameraName,
-                                isListView = false,
-                                enableSharedElement = false,
-                                onClick = { onEventClick(event) }
-                            )
-                            if (page == 0) {
-                                val isFresh = remember(event.id, event.time) {
-                                    val nowSec = System.currentTimeMillis() / 1000L
-                                    val diffSec = nowSec - eventTimeToSeconds(event.time)
-                                    diffSec in 0L..FRESH_EVENT_WINDOW_SEC
-                                }
-                                HomeLatestEventPill(
-                                    isFresh = isFresh,
-                                    animatePulse = isTabActive && isFresh,
-                                    isEn = isEn,
-                                    modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(spacing.space8)
-                                )
-                            }
-                        }
+                        MobileEventCard(
+                            event = event,
+                            cameraName = cameraName,
+                            isListView = false,
+                            enableSharedElement = false,
+                            onClick = { onEventClick(event) }
+                        )
                     }
                 }
 
@@ -661,57 +574,6 @@ private fun HomeCarouselDots(
                     .background(dotColor)
             )
         }
-    }
-}
-
-@Composable
-private fun HomeLatestEventPill(
-    isFresh: Boolean,
-    animatePulse: Boolean,
-    isEn: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val colors = MaterialTheme.appColors
-    val spacing = MaterialTheme.spacing
-    // Đọc giá trị alpha chỉ bên trong graphicsLayer để giữ 0 recomposition trên mỗi frame
-    val dotAlphaState: State<Float>? = if (animatePulse) {
-        val transition = rememberInfiniteTransition(label = "latestDotPulse")
-        transition.animateFloat(
-            initialValue = 1f,
-            targetValue = 0.35f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 900),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "latestDotAlpha"
-        )
-    } else {
-        null
-    }
-
-    Row(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(Color.Black.copy(alpha = 0.56f))
-            .border(spacing.borderHairline, Color.White.copy(alpha = 0.20f), CircleShape)
-            .padding(horizontal = spacing.space8, vertical = spacing.space3),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(spacing.space5)
-    ) {
-        Box(
-            modifier = Modifier
-                .size(6.dp)
-                .graphicsLayer { alpha = dotAlphaState?.value ?: 1f }
-                .clip(CircleShape)
-                .background(if (isFresh) colors.success else colors.accent)
-        )
-        Text(
-            text = if (isEn) "Latest" else "Mới nhất",
-            style = MaterialTheme.typography.micro,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White,
-            maxLines = 1
-        )
     }
 }
 
@@ -863,9 +725,9 @@ private fun HomeFavoriteCamerasSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = spacing.space24)
+            .padding(top = spacing.space18)
     ) {
-        HomeSectionHeader(
+        MobileSectionHeader(
             title = if (isEn) "Favorite cameras" else "Camera yêu thích",
             actionText = if (isEn) "View all" else "Xem tất cả",
             onActionClick = onViewAllClick
@@ -1050,6 +912,7 @@ private fun HomeAiModuleEventsShelf(
     isTabActive: Boolean,
     cameraMap: Map<String, String>,
     cardWidth: Dp,
+    containerWidth: Dp,
     isEn: Boolean,
     onSelectModule: (String) -> Unit,
     onEventClick: (EventData) -> Unit,
@@ -1070,8 +933,38 @@ private fun HomeAiModuleEventsShelf(
     }
     val cardHeight = cardWidth / HOME_CAROUSEL_ASPECT_RATIO
     val cardShape = remember(spacing.radiusCompact) { RoundedCornerShape(spacing.radiusCompact) }
-    val showViewMoreTile = events.isNotEmpty() && item.count > events.size.toLong()
-    val hasHorizontalScrollableItems = events.size > 1 || showViewMoreTile || (isLoading && events.isEmpty())
+    // Luôn hiển thị thẻ "Xem tất cả" ở cuối khi có từ 2 sự kiện trở lên hoặc còn nhiều sự kiện hơn 5 thẻ,
+    // đồng thời canh độ rộng vừa khít phần còn lại của màn hình để sự kiện cuối cùng snap thẳng mép trái.
+    val showViewMoreTile = events.isNotEmpty() && (item.count > events.size.toLong() || events.size > 1)
+    val viewMoreTileWidth = remember(containerWidth, cardWidth, spacing.space10) {
+        (containerWidth - spacing.space10 * 3 - cardWidth).coerceIn(96.dp, 148.dp)
+    }
+    val naturalContentWidth = remember(events.size, showViewMoreTile, cardWidth, viewMoreTileWidth, spacing.space10) {
+        if (events.isEmpty()) {
+            0.dp
+        } else {
+            val eventsSpan = cardWidth * events.size + spacing.space10 * (events.size - 1)
+            val viewMoreSpan = if (showViewMoreTile) spacing.space10 + viewMoreTileWidth else 0.dp
+            eventsSpan + viewMoreSpan + spacing.space10 * 2
+        }
+    }
+    val isHorizontallyScrollable = events.size > 1 && naturalContentWidth > containerWidth
+    val endContentPadding = remember(
+        isHorizontallyScrollable,
+        showViewMoreTile,
+        containerWidth,
+        cardWidth,
+        viewMoreTileWidth,
+        spacing.space10
+    ) {
+        if (!isHorizontallyScrollable) {
+            spacing.space10
+        } else {
+            val trailingAnchorSpan = cardWidth + if (showViewMoreTile) spacing.space10 + viewMoreTileWidth else 0.dp
+            (containerWidth - spacing.space10 - trailingAnchorSpan).coerceAtLeast(spacing.space10)
+        }
+    }
+    val hasHorizontalScrollableItems = isHorizontallyScrollable || (isLoading && events.isEmpty())
 
     val openModuleEvents: () -> Unit = remember(item.filterSensorType) {
         {
@@ -1096,9 +989,9 @@ private fun HomeAiModuleEventsShelf(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = spacing.space24)
+            .padding(top = spacing.space18)
     ) {
-        HomeSectionHeader(
+        MobileSectionHeader(
             title = if (isEn) item.labelEn else item.labelVi,
             actionText = if (isEn) "View all" else "Xem tất cả",
             onTitleClick = openModuleEvents,
@@ -1161,8 +1054,25 @@ private fun HomeAiModuleEventsShelf(
                     )
                 }
             } else {
+                val rowState = rememberLazyListState()
+                val snapFlingBehavior = rememberSingleEventSnapFlingBehavior(
+                    lazyListState = rowState,
+                    maxSnapIndex = events.lastIndex
+                )
+
+                LaunchedEffect(events.size) {
+                    if (events.isNotEmpty() && rowState.firstVisibleItemIndex >= events.size) {
+                        rowState.scrollToItem(0)
+                    }
+                }
+
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = spacing.space10),
+                    state = rowState,
+                    flingBehavior = snapFlingBehavior,
+                    contentPadding = PaddingValues(
+                        start = spacing.space10,
+                        end = endContentPadding
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(spacing.space10),
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1196,7 +1106,7 @@ private fun HomeAiModuleEventsShelf(
                         ) {
                             Column(
                                 modifier = Modifier
-                                    .width(96.dp)
+                                    .width(viewMoreTileWidth)
                                     .height(cardHeight)
                                     .clip(cardShape)
                                     .background(colors.surface)
@@ -1236,6 +1146,62 @@ private fun HomeAiModuleEventsShelf(
             }
         }
     }
+}
+
+/**
+ * SnapFlingBehavior chuyển từng sự kiện một theo mép trái (SnapPosition.Start),
+ * không bao giờ dừng nửa vời giữa 2 thẻ sự kiện và không snap riêng vào ô "Xem tất cả".
+ */
+@Composable
+private fun rememberSingleEventSnapFlingBehavior(
+    lazyListState: LazyListState,
+    maxSnapIndex: Int
+): FlingBehavior {
+    val density = LocalDensity.current
+    val snapLayoutInfoProvider = remember(lazyListState, maxSnapIndex, density) {
+        val minFlingVelocityPx = with(density) { 280.dp.toPx() }
+        object : SnapLayoutInfoProvider {
+            override fun calculateApproachOffset(velocity: Float, decayOffset: Float): Float = 0f
+
+            override fun calculateSnapOffset(velocity: Float): Float {
+                val visibleItems = lazyListState.layoutInfo.visibleItemsInfo
+                if (visibleItems.isEmpty()) return 0f
+
+                var lowerBoundOffset = Float.NEGATIVE_INFINITY
+                var upperBoundOffset = Float.POSITIVE_INFINITY
+
+                for (i in visibleItems.indices) {
+                    val item = visibleItems[i]
+                    if (item.index > maxSnapIndex) continue
+                    val distance = item.offset.toFloat()
+                    if (distance <= 0f && distance > lowerBoundOffset) {
+                        lowerBoundOffset = distance
+                    }
+                    if (distance >= 0f && distance < upperBoundOffset) {
+                        upperBoundOffset = distance
+                    }
+                }
+
+                if (lowerBoundOffset == Float.NEGATIVE_INFINITY && upperBoundOffset == Float.POSITIVE_INFINITY) {
+                    return 0f
+                }
+                if (lowerBoundOffset == Float.NEGATIVE_INFINITY) return upperBoundOffset
+                if (upperBoundOffset == Float.POSITIVE_INFINITY) return lowerBoundOffset
+
+                return when {
+                    velocity > minFlingVelocityPx -> upperBoundOffset
+                    velocity < -minFlingVelocityPx -> lowerBoundOffset
+                    else -> if (abs(lowerBoundOffset) <= abs(upperBoundOffset)) {
+                        lowerBoundOffset
+                    } else {
+                        upperBoundOffset
+                    }
+                }
+            }
+        }
+    }
+
+    return rememberSnapFlingBehavior(snapLayoutInfoProvider = snapLayoutInfoProvider)
 }
 
 /**
