@@ -884,7 +884,7 @@ private fun HomeFavoriteCameraCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(HOME_CAROUSEL_ASPECT_RATIO)
-                .background(colors.thumbnailBg),
+                .background(colors.surface),
             contentAlignment = Alignment.Center
         ) {
             if (imageRequest != null) {
@@ -943,16 +943,9 @@ private fun HomeFavoriteCameraCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = spacing.space8, vertical = spacing.space6),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(spacing.space6)
+                .padding(horizontal = spacing.space10, vertical = spacing.space6),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(if (isOffline) colors.error else colors.success)
-            )
             Text(
                 text = camera.name,
                 style = MaterialTheme.typography.labelSmall,

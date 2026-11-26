@@ -59,7 +59,9 @@ import coil.request.ImageRequest
 import coil.size.Precision
 import com.tenli.oneview.R
 import com.tenli.oneview.data.local.MonitorCacheManager
+import com.tenli.oneview.data.local.UserSession
 import com.tenli.oneview.data.network.retrofit.TokenAuthenticator
+import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.appColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -118,7 +120,7 @@ fun VideoPlayer(
     val suppressPlayWhenReadyCallback = remember(videoUrl) { booleanArrayOf(false) }
     val suppressFullscreenCallback = remember(videoUrl) { booleanArrayOf(false) }
     val colors = MaterialTheme.appColors
-    val containerBg = colors.surface
+    val containerBg = colors.mediaBg
     val stageBg = when {
         isVideoReady && !isError -> colors.mediaBg
         showLoadingOverlay -> containerBg
@@ -838,22 +840,38 @@ fun VideoPlayer(
 
         if (isError) {
             val isEn = rememberIsEnglish()
-            val resolvedErrorText = if (isEn && errorText == "Không có video sự kiện") {
-                "No event video"
-            } else {
-                errorText
+            val resolvedErrorText = when {
+                isEn && errorText == "Không có video sự kiện" -> "Unable to load video"
+                !isEn && errorText == "Không có video sự kiện" -> "Không thể tải video"
+                else -> errorText
             }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(containerBg),
-                contentAlignment = Alignment.Center
-            ) {
-                CommonEmptyState(
-                    text = resolvedErrorText,
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            MediaStageEmptyState(
+                icon = LucideIcons.VideoOff,
+                text = resolvedErrorText,
+                actionLabel = if (isEn) "Retry" else "Thử lại",
+                forceDark = isFullscreen,
+                onAction = {
+                    val activePlayer = exoPlayerHolder[0]
+                    if (activePlayer != null) {
+                        hasRetriedAuth[0] = false
+                        isError = false
+                        isVideoReady = false
+                        currentOnErrorChange(false)
+                        val latestToken = UserSession.accessToken.ifEmpty { currentTokenHolder[0] }
+                        currentTokenHolder[0] = latestToken
+                        activePlayer.setMediaSource(createAuthenticatedMediaSource(latestToken))
+                        suppressPlayWhenReadyCallback[0] = true
+                        try {
+                            activePlayer.playWhenReady = true
+                        } finally {
+                            suppressPlayWhenReadyCallback[0] = false
+                        }
+                        currentOnPlayWhenReadyChange(true)
+                        activePlayer.prepare()
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
         } else if (!isVideoReady && showLoadingOverlay) {
             Box(
                 modifier = Modifier

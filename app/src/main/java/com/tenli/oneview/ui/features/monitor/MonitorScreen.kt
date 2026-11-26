@@ -3384,7 +3384,7 @@ private fun MobileCameraSnapshotCard(
             cornerRadius = spacing.radiusCompact
         )
     }
-    val noImageTint = colors.textPlaceholder.copy(alpha = 0.45f)
+    val noImageTint = remember(colors.textMuted) { colors.textMuted.copy(alpha = 0.72f) }
     val nameColor = colors.textTitle
 
     // Giữ cache key của ảnh đã tải thành công trước đó trong holder không gây recompose để tránh tạo lại ImageRequest 2 lần
@@ -3416,6 +3416,10 @@ private fun MobileCameraSnapshotCard(
         }
     }
 
+    val isSnapshotLoading = !hasLoadedAnyImage &&
+        (!hasSnapKey || (imageRequest != null && isImageLoading && !isImageError))
+    val hasVisiblePhoto = imageRequest != null && !isImageError && hasLoadedAnyImage
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -3427,7 +3431,7 @@ private fun MobileCameraSnapshotCard(
             .clip(cardShape)
             .background(colors.surface)
     ) {
-        // .cam-card-thumb (16:9) - Dùng nền thẻ (colors.surface = trắng ở Light mode) vì danh sách camera đã nằm trực tiếp trên nền trang
+        // .cam-card-thumb (16:9) - Giữ đồng bộ nền thẻ colors.surface (trắng ở Light mode, tối ở Dark mode) khi đang tải hoặc lỗi ảnh
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3435,13 +3439,6 @@ private fun MobileCameraSnapshotCard(
             contentAlignment = Alignment.Center
         ) {
             if (imageRequest != null && !isImageError) {
-                if (isImageLoading && !hasLoadedAnyImage) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(colors.thumbnailBg)
-                    )
-                }
                 AsyncImage(
                     model = imageRequest,
                     contentDescription = camera.name,
@@ -3461,22 +3458,51 @@ private fun MobileCameraSnapshotCard(
                         currentOnSnapshotError(currentCamera)
                     }
                 )
-            } else if (!hasSnapKey) {
-                Box(
+            } else if (hasSnapKey) {
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(colors.thumbnailBg)
-                )
-            } else {
-                Icon(
-                    imageVector = LucideIcons.ImageOff,
-                    contentDescription = null,
-                    tint = noImageTint,
-                    modifier = Modifier.size(spacing.iconMedium)
+                        .padding(horizontal = spacing.space8),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(spacing.iconButton)
+                            .clip(CircleShape)
+                            .background(colors.controlBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isOffline) LucideIcons.VideoOff else LucideIcons.ImageOff,
+                            contentDescription = null,
+                            tint = noImageTint,
+                            modifier = Modifier.size(spacing.iconSmallMedium)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(spacing.space5))
+                    Text(
+                        text = if (isEn) "No preview" else "Chưa có ảnh",
+                        style = MaterialTheme.typography.micro,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            if (!hasVisiblePhoto && !isSnapshotLoading) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(spacing.borderHairline)
+                        .background(colors.divider)
                 )
             }
 
-            if (isOffline) {
+            if (isOffline && !isSnapshotLoading) {
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -3503,55 +3529,58 @@ private fun MobileCameraSnapshotCard(
                 }
             }
 
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(end = spacing.space6, top = spacing.space6)
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = if (isFavorite) 0.48f else 0.32f))
-                    .clickable(
-                        interactionSource = null,
-                        indication = null,
-                        onClick = {
-                            try {
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            } catch (_: Exception) {
+            if (!isSnapshotLoading) {
+                val starContainerBg = if (hasVisiblePhoto) {
+                    Color.Black.copy(alpha = if (isFavorite) 0.48f else 0.34f)
+                } else {
+                    colors.controlBg
+                }
+                val starIconTint = when {
+                    isFavorite -> Color(0xFFF59E0B)
+                    hasVisiblePhoto -> Color.White.copy(alpha = 0.88f)
+                    else -> colors.textMuted.copy(alpha = 0.72f)
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = spacing.space6, top = spacing.space6)
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(starContainerBg)
+                        .clickable(
+                            interactionSource = null,
+                            indication = null,
+                            onClick = {
+                                try {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                } catch (_: Exception) {
+                                }
+                                currentOnToggleFavorite(currentCamera)
                             }
-                            currentOnToggleFavorite(currentCamera)
-                        }
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = if (isFavorite) LucideIcons.StarFilled else LucideIcons.Star,
-                    contentDescription = if (isEn) "Favorite" else "Yêu thích",
-                    tint = if (isFavorite) Color(0xFFFBBF24) else Color.White.copy(alpha = 0.88f),
-                    modifier = Modifier.size(14.dp)
-                )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isFavorite) LucideIcons.StarFilled else LucideIcons.Star,
+                        contentDescription = if (isEn) "Favorite" else "Yêu thích",
+                        tint = starIconTint,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 
         // .cam-card-footer: ẩn tên camera trong lúc đang loading ảnh snapshot, chỉ hiển thị sau khi tải xong
-        val isSnapshotLoading = !hasLoadedAnyImage &&
-            (!hasSnapKey || (imageRequest != null && isImageLoading && !isImageError))
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = spacing.avatarSmall)
-                .padding(horizontal = spacing.space8, vertical = spacing.space6)
+                .padding(horizontal = spacing.space10, vertical = spacing.space6)
                 .graphicsLayer {
                     alpha = if (isSnapshotLoading) 0f else 1f
                 },
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(if (isOffline) Color(0xFFEF4444) else Color(0xFF10B981))
-            )
-            Spacer(modifier = Modifier.width(spacing.space6))
             Text(
                 text = camera.name,
                 color = nameColor,

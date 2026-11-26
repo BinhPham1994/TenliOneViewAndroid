@@ -197,19 +197,16 @@ class AuthRepository(
         runCatching { WorkManager.getInstance(appContext).cancelUniqueWork(KEEP_ALIVE_WORK_NAME) }
 
         val prefs = GlobalData.preferences
-        val wasDomainFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
         val rawDomainKey = snapshot.domain.trim().lowercase()
 
+        // Giữ lại PREF_DOMAIN_KEY & DOMAIN_FROM_QR_KEY khi đăng xuất để mở thẳng form đăng nhập
+        // (không bắt nhập lại domain; người dùng chủ động bấm nút Back nếu muốn đổi domain).
         prefs.edit {
             remove(AppKeys.ACCESS_TOKEN_KEY)
             remove(AppKeys.REFRESH_TOKEN_KEY)
             remove(AppKeys.USER_DATA_KEY)
             remove(AppKeys.USERNAME_KEY)
             remove(AppKeys.PASSWORD_KEY)
-            remove(AppKeys.DOMAIN_FROM_QR_KEY)
-            if (wasDomainFromQr) {
-                remove(PREF_DOMAIN_KEY)
-            }
             if (rawDomainKey.isNotEmpty()) {
                 remove("saved_favorite_cameras_$rawDomainKey")
             }

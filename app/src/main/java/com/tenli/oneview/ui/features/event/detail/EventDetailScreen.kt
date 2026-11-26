@@ -140,6 +140,7 @@ import com.tenli.oneview.model.network.EventData
 import com.tenli.oneview.ui.component.AppConfirmDialog
 import com.tenli.oneview.ui.component.CommonEmptyState
 import com.tenli.oneview.ui.component.LiveStreamPlayer
+import com.tenli.oneview.ui.component.MediaStageEmptyState
 import com.tenli.oneview.ui.component.MobileSectionHeader
 import com.tenli.oneview.ui.component.MobileTopPopupManager
 import com.tenli.oneview.ui.component.SheetCloseButton
@@ -1359,7 +1360,7 @@ private fun MediaViewport(
 ) {
     val currentOnToggleFullscreen by rememberUpdatedState(onToggleFullscreen)
     val currentOnZoomChanged by rememberUpdatedState(onZoomChanged)
-    val viewportBg = if (isOverlayExpandingOrOpen) Color.Black else MaterialTheme.appColors.surface
+    val viewportBg = MaterialTheme.appColors.mediaBg
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -1424,6 +1425,7 @@ private fun MediaViewport(
 
                 EventMediaTab.EVENT_VIDEO -> {
                     val noVideoText = if (isEn) "No event video" else "Không có video sự kiện"
+                    val videoErrorText = if (isEn) "Unable to load video" else "Không thể tải video"
                     val videoUrl = display.videoUrl
                     if (videoUrl != null) {
                         var userWantsVideoPlay by remember(eventId, videoUrl) { mutableStateOf(true) }
@@ -1436,7 +1438,7 @@ private fun MediaViewport(
                             playWhenReady = userWantsVideoPlay,
                             isActive = isTabActive,
                             onPlayWhenReadyChange = { wantPlay -> userWantsVideoPlay = wantPlay },
-                            errorText = noVideoText,
+                            errorText = videoErrorText,
                             onFullscreenToggle = { currentOnToggleFullscreen() },
                             enableZoom = true,
                             smoothResetTrigger = inlineMediaResetTrigger,
@@ -1444,7 +1446,17 @@ private fun MediaViewport(
                             onZoomChanged = { currentOnZoomChanged(it) }
                         )
                     } else {
-                        CommonEmptyState(text = noVideoText, modifier = Modifier.fillMaxSize())
+                        MediaStageEmptyState(
+                            icon = LucideIcons.VideoOff,
+                            text = noVideoText,
+                            subtitle = if (isEn) {
+                                "No video clip recorded for this event"
+                            } else {
+                                "Sự kiện này không có bản ghi video"
+                            },
+                            forceDark = isFullscreen,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
                 }
             }
@@ -1536,7 +1548,7 @@ private fun LiveCameraPane(
     ZoomableMediaBox(
         modifier = Modifier
             .fillMaxSize()
-            .background(if (isFullscreen) Color.Black else colors.surface),
+            .background(if (isFullscreen) Color.Black else colors.mediaBg),
         zoomResetKey = "$eventId-$cameraId-$channel",
         smoothResetTrigger = smoothResetTrigger,
         enableDoubleTapZoom = true,
@@ -1558,15 +1570,14 @@ private fun LiveCameraPane(
         },
         overlay = { _, _ ->
             if (error != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(if (isFullscreen) Color.Black else colors.surface)
-                        .clickable { onLoad(true) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    CommonEmptyState(text = error, modifier = Modifier.fillMaxSize())
-                }
+                MediaStageEmptyState(
+                    icon = LucideIcons.VideoOff,
+                    text = error,
+                    actionLabel = if (isEn) "Retry" else "Thử lại",
+                    onAction = { onLoad(true) },
+                    forceDark = isFullscreen,
+                    modifier = Modifier.fillMaxSize()
+                )
                 if (isFullscreen) {
                     MediaFullscreenFloatingButton(
                         isFullscreen = true,
@@ -1854,7 +1865,7 @@ private fun LiveCameraPane(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(if (isFullscreen) Color.Black else colors.surface),
+                    .background(if (isFullscreen) Color.Black else colors.mediaBg),
                 contentAlignment = Alignment.Center
             ) {
                 if (!snapshotUrl.isNullOrEmpty()) {
@@ -2019,7 +2030,7 @@ private fun EventImageWithBoxes(
         ZoomableMediaBox(
             modifier = Modifier
                 .fillMaxSize()
-                .background(if (isFullscreen) Color.Black else MaterialTheme.appColors.surface)
+                .background(if (isFullscreen) Color.Black else MaterialTheme.appColors.mediaBg)
                 .graphicsLayer { alpha = if (isHiddenForOverlay) 0f else 1f },
             zoomResetKey = imageUrl,
             smoothResetTrigger = smoothResetTrigger,
@@ -2053,8 +2064,10 @@ private fun EventImageWithBoxes(
         }
     } else {
         Box(modifier = Modifier.fillMaxSize()) {
-            CommonEmptyState(
-                text = if (isEn) "No image" else "Không có ảnh",
+            MediaStageEmptyState(
+                icon = LucideIcons.ImageOff,
+                text = if (isEn) "No event photo" else "Không có ảnh sự kiện",
+                forceDark = isFullscreen,
                 modifier = Modifier.fillMaxSize()
             )
             if (isFullscreen) {

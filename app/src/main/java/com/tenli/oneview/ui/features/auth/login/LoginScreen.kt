@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -46,11 +47,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -77,8 +76,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -87,6 +88,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.tenli.oneview.R
 import com.tenli.oneview.ui.component.MobileTopPopupHost
 import com.tenli.oneview.ui.component.MobileTopPopupManager
+import com.tenli.oneview.ui.component.SheetBackButton
 import com.tenli.oneview.ui.component.rememberIsEnglish
 import com.tenli.oneview.ui.theme.LucideIcons
 import com.tenli.oneview.ui.theme.ThemeManager
@@ -96,9 +98,6 @@ import com.tenli.oneview.ui.utils.LocaleManager
 import com.tenli.oneview.util.NetworkMonitor
 import com.tenli.oneview.util.noNetworkMessage
 import kotlinx.coroutines.delay
-
-private const val STEP_DOMAIN = 1
-private const val STEP_CREDENTIALS = 2
 
 /** Chờ hiển thị rõ giao diện (và hoàn tất hiệu ứng chuyển bước) rồi mới focus + bật bàn phím */
 private const val FOCUS_DELAY_MS = 700L
@@ -153,8 +152,8 @@ fun LoginScreen(
     }
 
     LaunchedEffect(viewModel) {
-        // Nạp lại thông tin đã lưu mỗi lần màn đăng nhập hiển thị (vd. sau khi đăng xuất – ViewModel sống theo Activity)
-        viewModel.loadSavedCredentials()
+        // Nạp lại thông tin đã lưu sau khi đăng xuất (tránh ghi đè bước đang nhập khi Activity recreate do đổi ngôn ngữ)
+        viewModel.reloadSavedCredentialsIfNeeded()
         viewModel.event.collect { event ->
             when (event) {
                 LoginEvent.LoginSuccess -> currentOnLoginSuccess()
@@ -198,7 +197,7 @@ private fun LoginContent(
     val keyboardController = LocalSoftwareKeyboardController.current
     val domainFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
-    var currentStep by rememberSaveable { mutableIntStateOf(STEP_DOMAIN) }
+    val currentStep = uiState.step
     var showQrScanner by remember { mutableStateOf(false) }
     var cardTopInRootPx by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     val isVietnamese = !rememberIsEnglish()
@@ -213,10 +212,9 @@ private fun LoginContent(
         focusManager.clearFocus()
         keyboardController?.hide()
         onBackFromCredentialsStep()
-        currentStep = STEP_DOMAIN
     }
 
-    BackHandler(enabled = currentStep == STEP_CREDENTIALS) {
+    BackHandler(enabled = currentStep == LoginStep.CREDENTIALS) {
         onBackToDomainStep()
     }
 
@@ -225,7 +223,7 @@ private fun LoginContent(
         delay(FOCUS_DELAY_MS)
         if (showQrScanner) return@LaunchedEffect
         try {
-            if (currentStep == STEP_DOMAIN) {
+            if (currentStep == LoginStep.DOMAIN) {
                 domainFocusRequester.requestFocus()
             } else {
                 emailFocusRequester.requestFocus()
@@ -258,7 +256,6 @@ private fun LoginContent(
             onProceedToCredentialsStep()
             focusManager.clearFocus()
             keyboardController?.hide()
-            currentStep = STEP_CREDENTIALS
         }
     }
     val isCredentialsReady = uiState.email.isNotBlank() &&
@@ -312,6 +309,14 @@ private fun LoginContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
+                val hasManualDomainHeader = currentStep == LoginStep.CREDENTIALS &&
+                    !uiState.isDomainFromQr &&
+                    uiState.domain.isNotBlank()
+                val cardTopPadding by animateDpAsState(
+                    targetValue = if (hasManualDomainHeader) spacing.space48 else spacing.space32,
+                    animationSpec = tween(SLIDE_DURATION_MS),
+                    label = "LoginCardTopPadding"
+                )
                 LoginCard(
                     modifier = Modifier
                         .widthIn(max = spacing.dialogMaxWidth)
@@ -321,13 +326,36 @@ private fun LoginContent(
                                 cardTopInRootPx = topY
                             }
                         },
+                    contentTopPadding = cardTopPadding,
                     topStartAction = {
                         AnimatedVisibility(
-                            visible = currentStep == STEP_CREDENTIALS,
+                            visible = currentStep == LoginStep.CREDENTIALS,
                             enter = fadeIn(animationSpec = tween(FADE_IN_DURATION_MS)),
                             exit = fadeOut(animationSpec = tween(FADE_OUT_DURATION_MS))
                         ) {
-                            com.tenli.oneview.ui.component.SheetBackButton(onClick = onBackToDomainStep)
+                            val showManualDomain = !uiState.isDomainFromQr && uiState.domain.isNotBlank()
+                            Row(
+                                modifier = Modifier.clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = onBackToDomainStep
+                                ),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SheetBackButton(onClick = onBackToDomainStep)
+                                if (showManualDomain) {
+                                    Spacer(modifier = Modifier.width(spacing.space8))
+                                    Text(
+                                        text = uiState.domain,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        color = colors.textSubtle,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                }
+                            }
                         }
                     }
                 ) {
@@ -336,14 +364,14 @@ private fun LoginContent(
 
                     AnimatedContent(
                         targetState = currentStep,
-                        transitionSpec = { loginStepTransition(forward = targetState > initialState) },
+                        transitionSpec = { loginStepTransition(forward = targetState.ordinal > initialState.ordinal) },
                         label = "LoginStepTransition"
                     ) { step ->
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            if (step == STEP_DOMAIN) {
+                            if (step == LoginStep.DOMAIN) {
                                 // BƯỚC 1: Nhập Domain dự án hoặc Quét mã QR + Nút Tiếp tục
                                 LoginInputField(
                                     value = uiState.domain,
@@ -372,7 +400,7 @@ private fun LoginContent(
                                     }
                                 )
                             } else {
-                                // BƯỚC 2: Nhập Tài khoản & Mật khẩu (không hiển thị lại dòng domain)
+                                // BƯỚC 2: Nhập Tài khoản & Mật khẩu (hiển thị domain cạnh nút quay lại nếu nhập tay, ẩn nếu quét QR)
                                 CredentialsStep(
                                     uiState = uiState,
                                     isVietnamese = isVietnamese,
@@ -437,7 +465,6 @@ private fun LoginContent(
                         onQrDomainScanned(scannedDomain)
                         focusManager.clearFocus()
                         keyboardController?.hide()
-                        currentStep = STEP_CREDENTIALS
                     }
                 )
             }
@@ -573,6 +600,7 @@ private fun themeLabel(mode: Int, isVietnamese: Boolean) = when (mode) {
 @Composable
 private fun LoginCard(
     modifier: Modifier = Modifier,
+    contentTopPadding: Dp = MaterialTheme.spacing.space32,
     topStartAction: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -596,7 +624,12 @@ private fun LoginCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = spacing.space24, vertical = spacing.space32),
+                    .padding(
+                        start = spacing.space24,
+                        end = spacing.space24,
+                        top = contentTopPadding,
+                        bottom = spacing.space32
+                    ),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 content()
@@ -606,7 +639,11 @@ private fun LoginCard(
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
-                        .padding(top = spacing.space16, start = spacing.space16)
+                        .padding(
+                            top = spacing.space16,
+                            start = spacing.space16,
+                            end = spacing.space16
+                        )
                 ) {
                     topStartAction()
                 }

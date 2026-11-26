@@ -2,8 +2,14 @@ package com.tenli.oneview.ui.features.auth.login
 
 import androidx.compose.runtime.Immutable
 
+enum class LoginStep {
+    DOMAIN,
+    CREDENTIALS
+}
+
 @Immutable
 data class LoginUiState(
+    val step: LoginStep = LoginStep.DOMAIN,
     val domain: String = "",
     val isDomainFromQr: Boolean = false,
     val email: String = "",

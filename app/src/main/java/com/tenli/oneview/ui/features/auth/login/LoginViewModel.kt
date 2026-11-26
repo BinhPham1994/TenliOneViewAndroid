@@ -1,6 +1,7 @@
 package com.tenli.oneview.ui.features.auth.login
 
 import android.app.Application
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
@@ -47,30 +48,36 @@ class LoginViewModel(
     val event = _event.receiveAsFlow()
 
     private var loginJob: Job? = null
+    private var needsReloadFromPrefs: Boolean = true
 
     init {
         loadSavedCredentials()
     }
 
+    fun reloadSavedCredentialsIfNeeded() {
+        if (needsReloadFromPrefs) {
+            loadSavedCredentials()
+        }
+    }
+
     fun loadSavedCredentials() {
         val prefs = GlobalData.preferences
         val isFromQr = prefs.getBoolean(AppKeys.DOMAIN_FROM_QR_KEY, false)
-        val savedDomain = if (isFromQr) {
-            ""
-        } else {
-            stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
-        }
+        val savedDomain = stripDomainScheme(prefs.getString(DOMAIN_KEY, "").orEmpty())
+        val hasValidSavedDomain = isValidProjectDomain(savedDomain)
         val termsAccepted = prefs.getBoolean(AppKeys.TERMS_ACCEPTED_KEY, false)
         _uiState.update {
             it.copy(
-                domain = savedDomain,
-                isDomainFromQr = false,
+                step = if (hasValidSavedDomain) LoginStep.CREDENTIALS else LoginStep.DOMAIN,
+                domain = if (hasValidSavedDomain) savedDomain else "",
+                isDomainFromQr = hasValidSavedDomain && isFromQr,
                 email = "",
                 password = "",
                 termsAccepted = termsAccepted,
                 showPassword = false
             )
         }
+        needsReloadFromPrefs = false
     }
 
     private fun stripDomainScheme(raw: String): String = normalizeDomainInput(raw)
@@ -87,6 +94,7 @@ class LoginViewModel(
     fun onQrDomainScanned(scannedDomain: String) {
         _uiState.update {
             it.copy(
+                step = LoginStep.CREDENTIALS,
                 domain = normalizeDomainInput(scannedDomain),
                 isDomainFromQr = true,
                 email = "",
@@ -99,6 +107,7 @@ class LoginViewModel(
     fun onProceedToCredentialsStep() {
         _uiState.update {
             it.copy(
+                step = LoginStep.CREDENTIALS,
                 domain = normalizeDomainInput(it.domain),
                 isDomainFromQr = false,
                 email = "",
@@ -109,9 +118,17 @@ class LoginViewModel(
     }
 
     fun onBackToDomainStep() {
+        val wasFromQr = _uiState.value.isDomainFromQr
+        if (wasFromQr) {
+            GlobalData.preferences.edit {
+                remove(DOMAIN_KEY)
+                remove(AppKeys.DOMAIN_FROM_QR_KEY)
+            }
+        }
         _uiState.update {
             it.copy(
-                domain = if (it.isDomainFromQr) "" else it.domain,
+                step = LoginStep.DOMAIN,
+                domain = if (wasFromQr) "" else it.domain,
                 isDomainFromQr = false,
                 email = "",
                 password = "",
@@ -287,18 +304,20 @@ class LoginViewModel(
             )
         }
         // Chuẩn bị sẵn trạng thái sạch cho lần quay lại màn hình Login tiếp theo (sau khi đăng xuất):
-        // - Quét QR: xoá trống ô domain; Nhập tay: giữ domain đã nhập
+        // - Mở thẳng form đăng nhập (giữ domain & cờ QR để đăng nhập lại nhanh; bấm Back nếu muốn đổi domain)
         // - Luôn xoá trống tài khoản & mật khẩu để nhập mới
         _uiState.update {
             it.copy(
-                domain = if (isDomainFromQr) "" else cleanHost,
-                isDomainFromQr = false,
+                step = LoginStep.CREDENTIALS,
+                domain = cleanHost,
+                isDomainFromQr = isDomainFromQr,
                 email = "",
                 password = "",
                 termsAccepted = true,
                 showPassword = false
             )
         }
+        needsReloadFromPrefs = true
     }
 
     companion object {

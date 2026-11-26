@@ -104,7 +104,7 @@ data class AppColors(
     val closeButtonBg: Color,
     /** Nền ô nhập liệu (#F3F4F7 | White 4%) */
     val inputBg: Color,
-    /** Nền placeholder ảnh / thumbnail (Slate200 | Slate900 45%) */
+    /** Nền placeholder ảnh / thumbnail (SurfaceVariant #F2F2F7 | #263449) */
     val thumbnailBg: Color,
     /** Lớp phủ tối phía sau dialog / overlay */
     val scrim: Color,
@@ -168,7 +168,7 @@ val LightAppColors = AppColors(
     buttonSecondaryBg = SurfaceLight,
     closeButtonBg = Color.Black.copy(alpha = 0.07f),
     inputBg = InputFieldLight,
-    thumbnailBg = Slate200,
+    thumbnailBg = SurfaceVariant,
     scrim = Slate900.copy(alpha = 0.45f),
     textStrong = Slate900,
     textTitle = Slate800,
@@ -209,7 +209,7 @@ val DarkAppColors = AppColors(
     buttonSecondaryBg = SurfaceVariantDark,
     closeButtonBg = SurfaceVariantDark,
     inputBg = Color.White.copy(alpha = 0.04f),
-    thumbnailBg = Slate900.copy(alpha = 0.45f),
+    thumbnailBg = SurfaceVariantDark,
     scrim = Color.Black.copy(alpha = 0.6f),
     textStrong = Slate50,
     textTitle = Slate50,

@@ -1849,5 +1849,36 @@ object LucideIcons {
             }
         }
     }
+
+    val VideoOff: ImageVector by lazy {
+        lucideVector("LucideVideoOff") {
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                // M10.66 6H14a2 2 0 0 1 2 2v2.5l5.248-3.062A.5.5 0 0 1 22 7.87v8.196
+                moveTo(10.66f, 6f)
+                horizontalLineTo(14f)
+                arcTo(2f, 2f, 0f, false, true, 16f, 8f)
+                verticalLineTo(10.5f)
+                lineTo(21.248f, 7.438f)
+                arcTo(0.5f, 0.5f, 0f, false, true, 22f, 7.87f)
+                verticalLineTo(16.066f)
+                // M16 16a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2
+                moveTo(16f, 16f)
+                arcTo(2f, 2f, 0f, false, true, 14f, 18f)
+                horizontalLineTo(4f)
+                arcTo(2f, 2f, 0f, false, true, 2f, 16f)
+                verticalLineTo(8f)
+                arcTo(2f, 2f, 0f, false, true, 4f, 6f)
+                horizontalLineTo(6f)
+                // m2 2 20 20
+                moveTo(2f, 2f)
+                lineTo(22f, 22f)
+            }
+        }
+    }
 }
 
